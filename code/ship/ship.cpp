@@ -5141,6 +5141,53 @@ static void parse_shiptbl(const char *filename)
 		read_file_text(filename, CF_TYPE_TABLES);
 		reset_parse();
 
+		SCP_string ship_name;
+		gamesnd_id snd_id;
+		game_snd* snd;
+
+		mprintf(("Ship,EngineSnd\n"));
+
+		// brutal hacks
+		skip_to_start_of_string("#Ship Classes");
+		required_string("#Ship Classes");
+
+		while (optional_string("$Name:"))
+		{
+			stuff_string(ship_name, F_NAME);
+
+			skip_to_start_of_string_either("$Name:", "$EngineSnd:");
+			if (!check_for_string("$EngineSnd:"))
+				continue;
+			parse_game_sound("$EngineSnd:", &snd_id);
+
+			if (snd_id.isValid())
+			{
+				snd = gamesnd_get_game_sound(snd_id);
+				mprintf(("%s,%s\n", ship_name.c_str(), snd->sound_entries.back().filename));
+			}
+
+			skip_to_start_of_string("$Name:");
+		}
+
+		extern void game_shutdown();
+		game_shutdown();
+		if(true)
+			exit(1);
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 		// parse default ship
 		//Override default player ship
 		if (optional_string("#Default Player Ship"))

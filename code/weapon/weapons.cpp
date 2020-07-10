@@ -2898,6 +2898,9 @@ static char Default_cmeasure_name[NAME_LENGTH] = "";
 
 void parse_weaponstbl(const char *filename)
 {
+	if (true)
+		return;
+
 	try
 	{
 		read_file_text(filename, CF_TYPE_TABLES);
