@@ -5421,6 +5421,59 @@ void ship_init()
 			Ships_inited = true;
 		}
 
+		SCP_vector<SCP_string> missions;
+		cf_get_file_list(missions, CF_TYPE_MISSIONS, NOX("*.fs2"));
+
+		// retain only sa_*.fs2 mission filenames
+		missions.erase(
+			std::remove_if(missions.begin(), missions.end(),
+				[](const SCP_string &str)->bool { return str.rfind("sa_", 0) == SCP_string::npos; }),
+			missions.end()
+		);
+
+		// check to see which ships are used in which missions
+		SCP_vector<ship_info*> not_found;
+		for (auto &si : Ship_info)
+		{
+			SCP_string str1("\"");
+			str1.append(si.name);
+			str1.append("\"");
+
+			SCP_string str2("$Class: ");
+			str2.append(si.name);
+
+			bool found = false;
+
+			for (const auto& filename : missions)
+			{
+				read_file_text((filename + ".fs2").c_str(), CF_TYPE_MISSIONS);
+
+				reset_parse();
+				if (skip_to_string(str1.c_str()) == 1)
+				{
+					found = true;
+					break;
+				}
+
+				reset_parse();
+				if (skip_to_string(str2.c_str()) == 1)
+				{
+					found = true;
+					break;
+				}
+			}
+
+			if (!found)
+				not_found.push_back(&si);
+		}
+
+		mprintf(("The following ship classes were not found:\n"));
+		for (auto sip : not_found)
+		{
+			mprintf((sip->name));
+			mprintf(("\n"));
+		}
+
 		// We shouldn't already have any subsystem pointers at this point.
 		Assertion(Ship_subsystems.empty(), "Some pre-allocated subsystems didn't get cleared out: " SIZE_T_ARG " batches present during ship_init(); get a coder!\n", Ship_subsystems.size());
 	}
