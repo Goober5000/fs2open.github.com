@@ -68,27 +68,33 @@ const auto OnDebrisCreatedHook = scripting::Hook::Factory(
  */
 static void debris_start_death_roll(object *debris_obj, debris *debris_p)
 {
-	if (debris_p->is_hull)	{
-		// tell everyone else to blow up the piece of debris
-		if( MULTIPLAYER_MASTER )
-			send_debris_update_packet(debris_obj,DEBRIS_UPDATE_NUKE);
+	Script_system.SetHookObject("Self", debris_obj);
+	if (!Script_system.IsConditionOverride(CHA_DEATH, debris_obj))
+	{
+		if (debris_p->is_hull)	{
+			// tell everyone else to blow up the piece of debris
+			if( MULTIPLAYER_MASTER )
+				send_debris_update_packet(debris_obj,DEBRIS_UPDATE_NUKE);
 
-		int fireball_type = fireball_ship_explosion_type(&Ship_info[debris_p->ship_info_index]);
-		if(fireball_type < 0) {
-			fireball_type = FIREBALL_EXPLOSION_LARGE1 + rand()%FIREBALL_NUM_LARGE_EXPLOSIONS;
-		}
-		fireball_create( &debris_obj->pos, fireball_type, FIREBALL_LARGE_EXPLOSION, OBJ_INDEX(debris_obj), debris_obj->radius*1.75f);
+			int fireball_type = fireball_ship_explosion_type(&Ship_info[debris_p->ship_info_index]);
+			if(fireball_type < 0) {
+				fireball_type = FIREBALL_EXPLOSION_LARGE1 + rand()%FIREBALL_NUM_LARGE_EXPLOSIONS;
+			}
+			fireball_create( &debris_obj->pos, fireball_type, FIREBALL_LARGE_EXPLOSION, OBJ_INDEX(debris_obj), debris_obj->radius*1.75f);
 
-		// only play debris destroy sound if hull piece and it has been around for at least 2 seconds
-		if ( Missiontime > debris_p->time_started + 2*F1_0 ) {
-			auto snd_id = Ship_info[debris_p->ship_info_index].debris_explosion_sound;
-			if (snd_id.isValid()) {
-				snd_play_3d( gamesnd_get_game_sound(snd_id), &debris_obj->pos, &View_position, debris_obj->radius );
+			// only play debris destroy sound if hull piece and it has been around for at least 2 seconds
+			if ( Missiontime > debris_p->time_started + 2*F1_0 ) {
+				auto snd_id = Ship_info[debris_p->ship_info_index].debris_explosion_sound;
+				if (snd_id.isValid()) {
+					snd_play_3d( gamesnd_get_game_sound(snd_id), &debris_obj->pos, &View_position, debris_obj->radius );
+				}
 			}
 		}
-	}
 
-    debris_obj->flags.set(Object::Object_Flags::Should_be_dead);
+	    debris_obj->flags.set(Object::Object_Flags::Should_be_dead);
+	}
+	Script_system.RunCondition(CHA_DEATH, debris_obj);
+	Script_system.RemHookVar("Self");
 }
 
 /**
