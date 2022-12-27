@@ -735,6 +735,8 @@ int create_object(vec3d *pos, int waypoint_instance)
 
 int create_player(int num, vec3d *pos, matrix *orient, int type, int init)
 {
+	Assertion(Locked_sexp_true >= 0 && Locked_sexp_false >= 0, "SEXPs are not yet initialized!");
+
 	int obj;
 
 	if (type == -1){
