@@ -43,6 +43,9 @@
 #include "mission/missionlog.h"
 #include "mission/missionmessage.h"
 #include "mission/missionparse.h"
+#include "mission/import/xwingbrflib.h"
+#include "mission/import/xwinglib.h"
+#include "mission/import/xwingmissionparse.h"
 #include "missionui/fictionviewer.h"
 #include "missionui/missioncmdbrief.h"
 #include "missionui/redalert.h"
@@ -6001,7 +6004,7 @@ void parse_sexp_containers()
 	}
 }
 
-bool parse_mission(mission *pm, int flags)
+bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 {
 	int saved_warning_count = Global_warning_count;
 	int saved_error_count = Global_error_count;
@@ -6016,33 +6019,43 @@ bool parse_mission(mission *pm, int flags)
 	reset_parse();
 	mission_init(pm);
 
-	parse_mission_info(pm);
+	if (flags & MPF_IMPORT_XWI)
+		parse_xwi_mission_info(pm, xwim);
+	else
+		parse_mission_info(pm);
 
 	Current_file_checksum = netmisc_calc_checksum(pm,MISSION_CHECKSUM_SIZE);
 
 	if (flags & MPF_ONLY_MISSION_INFO)
 		return true;
 
-	parse_plot_info(pm);
-	parse_variables();
-	parse_sexp_containers();
-	parse_briefing_info(pm);	// TODO: obsolete code, keeping so we don't obsolete existing mission files
-	parse_cutscenes(pm);
-	parse_fiction(pm);
-	parse_cmd_briefs(pm);
-	parse_briefing(pm, flags);
-	parse_debriefing_new(pm);
-	parse_player_info(pm);
-	parse_objects(pm, flags);
-	parse_wings(pm);
-	parse_events(pm);
-	parse_goals(pm);
-	parse_waypoints_and_jumpnodes(pm);
-	parse_messages(pm, flags);
-	parse_reinforcements(pm);
-	parse_bitmaps(pm);
-	parse_asteroid_fields(pm);
-	parse_music(pm, flags);
+	if (flags & MPF_IMPORT_XWI)
+	{
+		parse_xwi_mission(pm, xwim);
+	}
+	else
+	{
+		parse_plot_info(pm);
+		parse_variables();
+		parse_sexp_containers();
+		parse_briefing_info(pm);	// TODO: obsolete code, keeping so we don't obsolete existing mission files
+		parse_cutscenes(pm);
+		parse_fiction(pm);
+		parse_cmd_briefs(pm);
+		parse_briefing(pm, flags);
+		parse_debriefing_new(pm);
+		parse_player_info(pm);
+		parse_objects(pm, flags);
+		parse_wings(pm);
+		parse_events(pm);
+		parse_goals(pm);
+		parse_waypoints_and_jumpnodes(pm);
+		parse_messages(pm, flags);
+		parse_reinforcements(pm);
+		parse_bitmaps(pm);
+		parse_asteroid_fields(pm);
+		parse_music(pm, flags);
+	}
 
 	// if we couldn't load some mod data
 	if ((Num_unknown_ship_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
@@ -6099,6 +6112,8 @@ bool parse_mission(mission *pm, int flags)
 
 	if (!post_process_mission(pm))
 		return false;
+	if (flags & MPF_IMPORT_XWI)
+		post_process_xwi_mission(pm, xwim);
 
 	if ((saved_warning_count - Global_warning_count) > 10 || (saved_error_count - Global_error_count) > 0) {
 		char text[512];
@@ -6634,7 +6649,7 @@ bool parse_main(const char *mission_name, int flags)
 	
 	do {
 		// don't do this for imports
-		if (!(flags & MPF_IMPORT_FSM)) {
+		if (!(flags & MPF_IMPORT_FSM) && !(flags & MPF_IMPORT_XWI)) {
 			CFILE *ftemp = cfopen(mission_name, "rt", CFILE_NORMAL, CF_TYPE_MISSIONS);
 
 			// fail situation.
@@ -6659,12 +6674,41 @@ bool parse_main(const char *mission_name, int flags)
 			if (flags & MPF_IMPORT_FSM) {
 				read_file_text(mission_name, CF_TYPE_ANY);
 				convertFSMtoFS2();
-				rval = parse_mission(&The_mission, flags);
+				rval = parse_mission(&The_mission, nullptr, flags);
+			}
+			// import XWI mission from binary file
+			else if (flags & MPF_IMPORT_XWI) {
+				char temp_filename[MAX_PATH];
+				strcpy_s(temp_filename, mission_name);
+				auto ch = strrchr(temp_filename, '.');
+				if (!ch)
+					throw parse::ParseException("Couldn't find file extension");
+
+				if (stricmp(ch, ".BRF") == 0)
+					strcpy(ch, ".XWI");
+				else if (stricmp(ch, ".XWI") != 0)
+					throw parse::ParseException("Filename does not have an .xwi or .brf extension");
+
+				// import the mission proper, followed by the briefing
+				read_file_bytes(temp_filename, CF_TYPE_ANY);
+				XWingMission xwim;
+				if (!XWingMission::load(&xwim, Parse_text_raw))
+					throw parse::ParseException("Could not parse XWI mission!");
+				rval = parse_mission(&The_mission, &xwim, flags);
+
+				if (rval)
+				{
+					strcpy(ch, ".BRF");
+					read_file_bytes(temp_filename, CF_TYPE_ANY);
+					XWingBriefing xwib;
+					XWingBriefing::load(&xwib, Parse_text_raw);
+					parse_xwi_briefing(&The_mission, &xwib);
+				}
 			}
 			// regular mission load
 			else {
 				read_file_text(mission_name, CF_TYPE_MISSIONS);
-				rval = parse_mission(&The_mission, flags);
+				rval = parse_mission(&The_mission, nullptr, flags);
 			}
 
 			display_parse_diagnostics();

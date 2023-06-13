@@ -1520,6 +1520,7 @@
 #define ID_MISC_POINTUSINGUVEC          33101
 #define ID_MUSIC_PLAYER                 33102
 #define ID_EDITORS_VOLUMETRICS          33103
+#define ID_IMPORT_XWIMISSION            33104
 #define ID_INDICATOR_MODE               59142
 #define ID_INDICATOR_LEFT               59143
 #define ID_INDICATOR_RIGHT              59144
@@ -1531,7 +1532,7 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
 #define _APS_NEXT_RESOURCE_VALUE        335
-#define _APS_NEXT_COMMAND_VALUE         33104
+#define _APS_NEXT_COMMAND_VALUE         33105
 #define _APS_NEXT_CONTROL_VALUE         1705
 #define _APS_NEXT_SYMED_VALUE           105
 #endif
