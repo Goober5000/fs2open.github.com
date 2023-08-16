@@ -2259,6 +2259,7 @@ int CFred_mission_save::save_messages()
 int CFred_mission_save::save_campaign_file(const char *pathname)
 {
 	reset_parse();
+	raw_ptr = Parse_text_raw;
 	fred_parse_flag = 0;
 
 	pathname = cf_add_ext(pathname, FS_CAMPAIGN_FILE_EXT);
@@ -2339,10 +2340,13 @@ int CFred_mission_save::save_campaign_file(const char *pathname)
 		required_string_fred("+Flags:", "$Mission:");
 		parse_comments();
 
+		// don't save any internal flags
+		auto flags_to_save = cm.flags & CMISSION_EXTERNAL_FLAG_MASK;
+
 		// Goober5000
 		if (save_format != MissionFormat::RETAIL) {
 			// don't save Bastion flag
-			fout(" %d", cm.flags & ~CMISSION_FLAG_BASTION);
+			fout(" %d", flags_to_save & ~CMISSION_FLAG_BASTION);
 
 			// new main hall stuff
 			if (optional_string_fred("+Main Hall:", "$Mission:")) {
@@ -2354,7 +2358,7 @@ int CFred_mission_save::save_campaign_file(const char *pathname)
 			fout(" %s", cm.main_hall.c_str());
 		} else {
 			// save Bastion flag properly
-			fout(" %d", cm.flags | ((! cm.main_hall.empty()) ? CMISSION_FLAG_BASTION : 0));
+			fout(" %d", flags_to_save | ((! cm.main_hall.empty()) ? CMISSION_FLAG_BASTION : 0));
 		}
 
 		if (cm.debrief_persona_index > 0) {
@@ -2494,8 +2498,13 @@ int CFred_mission_save::save_mission_info()
 
 	required_string_fred("$Version:");
 	parse_comments(2);
-	// Since previous versions of FreeSpace interpret this as a float, this can only have one decimal point
-	fout(" %d.%d", The_mission.required_fso_version.major, The_mission.required_fso_version.minor);
+	if (save_format == MissionFormat::RETAIL) {
+		// All retail missions, both FS1 and FS2, have the same version
+		fout(" %d.%d", LEGACY_MISSION_VERSION.major, LEGACY_MISSION_VERSION.minor);
+	} else {
+		// Since previous versions of FreeSpace interpret this as a float, this can only have one decimal point
+		fout(" %d.%d", The_mission.required_fso_version.major, The_mission.required_fso_version.minor);
+	}
 
 	// XSTR
 	required_string_fred("$Name:");
@@ -2993,7 +3002,9 @@ void CFred_mission_save::save_mission_internal(const char* pathname)
 	The_mission.required_fso_version = MISSION_VERSION;
 
 	reset_parse();
+	raw_ptr = Parse_text_raw;
 	fred_parse_flag = 0;
+
 	fp = cfopen(pathname, "wt", CFILE_NORMAL, CF_TYPE_MISSIONS);
 	if (!fp) {
 		nprintf(("Error", "Can't open mission file to save.\n"));
