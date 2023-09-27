@@ -4338,6 +4338,7 @@ int get_sexp()
 	bool prune_extra_args = false;
 
 	Assert(*(Mp-1) == '(');
+	auto starting_Mp = Mp;
 
 	// start - the node allocated in first instance of function
 	// node - the node allocated in current instance of function
@@ -4350,7 +4351,8 @@ int get_sexp()
 	while (*Mp != ')') {
 		// end of string or end of file
 		if (*Mp == '\0') {
-			error_display(0, "Unexpected end of sexp!");
+			char buf[512];
+			error_display(0, "Unexpected end of sexp!\n%s", three_dot_truncate(buf, starting_Mp, 512));
 			return Locked_sexp_false;
 		}
 
@@ -4366,7 +4368,8 @@ int get_sexp()
 			auto len = strcspn(Mp + 1, "\"");
 			// was closing quote not found?
 			if (*(Mp + 1 + len) != '\"') {
-				error_display(0, "Unexpected end of quoted string embedded in sexp!");
+				char buf[512];
+				error_display(0, "Unexpected end of quoted string embedded in sexp!\n%s", three_dot_truncate(buf, starting_Mp, 512));
 				skip_sexp(true);	// this will have the effect of skipping to the end of the file or string
 				return Locked_sexp_false;
 			}
@@ -4399,16 +4402,11 @@ int get_sexp()
 		else if (*Mp == sexp_container::DELIM) {
 			auto startp = Mp;
 			size_t len = 0;
-			while (*Mp != ')' && !is_white_space(*Mp)) {
+			while (!is_parenthesis(*Mp) && !is_white_space(*Mp)) {
 				// end of string or end of file
 				if (*Mp == '\0') {
-					error_display(0, "Unexpected end of sexp!");
-					return Locked_sexp_false;
-				}
-				// bad format
-				if (*Mp == '(') {
 					char buf[512];
-					error_display(1, "Mismatched parentheses while parsing SEXP!  Current parse position:\n%s", three_dot_truncate(buf, Mp, 512));
+					error_display(0, "Unexpected end of sexp!\n%s", three_dot_truncate(buf, starting_Mp, 512));
 					return Locked_sexp_false;
 				}
 				Mp++;
@@ -4471,16 +4469,11 @@ int get_sexp()
 		else {
 			auto startp = Mp;
 			size_t len = 0;
-			while (*Mp != ')' && !is_white_space(*Mp)) {
+			while (!is_parenthesis(*Mp) && !is_white_space(*Mp)) {
 				// end of string or end of file
 				if (*Mp == '\0') {
-					error_display(0, "Unexpected end of sexp!");
-					return Locked_sexp_false;
-				}
-				// bad format
-				if (*Mp == '(') {
 					char buf[512];
-					error_display(1, "Mismatched parentheses while parsing SEXP!  Current parse position:\n%s", three_dot_truncate(buf, Mp, 512));
+					error_display(0, "Unexpected end of sexp!\n%s", three_dot_truncate(buf, starting_Mp, 512));
 					return Locked_sexp_false;
 				}
 				Mp++;
@@ -16488,6 +16481,14 @@ void sexp_alter_ship_flag_helper(object_ship_wing_point_team &oswpt, bool future
 				}
 			}
 
+			// special case: the "no_collide" parse object flag is the same, but opposite, as the "collides" object flag
+			if (parse_obj_flag == Mission::Parse_Object_Flags::OF_No_collide)
+			{
+				auto tmp_flagset = oswpt.objp->flags;
+				tmp_flagset.set(Object::Object_Flags::Collides, !set_flag);
+				obj_set_flags(oswpt.objp, tmp_flagset);
+			}
+
 			// see if we have an ai flag to set
 			if (ai_flag != AI::AI_Flags::NUM_VALUES)
 			{
@@ -16501,6 +16502,12 @@ void sexp_alter_ship_flag_helper(object_ship_wing_point_team &oswpt, bool future
 		case OSWPT_TYPE_PARSE_OBJECT:
 			if (!future_ships) {
 				return;
+			}
+
+			// special case: the "collides" object flag is the same, but opposite, as the "no_collide" parse object flag
+			if (object_flag == Object::Object_Flags::Collides)
+			{
+				oswpt.ship_entry->p_objp->flags.set(Mission::Parse_Object_Flags::OF_No_collide, !set_flag);
 			}
 
 			// see if we have a p_object flag to set
@@ -16626,7 +16633,11 @@ int sexp_are_ship_flags_set(int node)
 				return SEXP_FALSE;
 		}
 
-		// we don't check parse flags
+		// we don't check parse flags, except for one that can be an object flag in reverse
+		if (parse_obj_flag == Mission::Parse_Object_Flags::OF_No_collide) {
+			if (objp->flags[Object::Object_Flags::Collides])
+				return SEXP_FALSE;
+		}
 
 		if (ai_flag != AI::AI_Flags::NUM_VALUES) {
 			if (!(aip->ai_flags[ai_flag]))
