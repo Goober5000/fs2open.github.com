@@ -186,6 +186,11 @@ int ship_registry_get_index(const char *name)
 	return -1;
 }
 
+bool ship_registry_exists(const char *name)
+{
+	return Ship_registry_map.find(name) != Ship_registry_map.end();
+}
+
 const ship_registry_entry *ship_registry_get(const char *name)
 {
 	auto ship_it = Ship_registry_map.find(name);
@@ -548,6 +553,7 @@ ship_flag_name Ship_flag_names[] = {
 	{ Ship_Flags::Always_death_scream,			"always-death-scream"},
 	{ Ship_Flags::No_builtin_messages,			"no-builtin-messages"},
 	{ Ship_Flags::Scramble_messages,			"scramble-messages"},
+	{ Ship_Flags::Maneuver_despite_engines,		"maneuver-despite-engines" },
 };
 
 ship_flag_description Ship_flag_descriptions[] = {
@@ -584,6 +590,7 @@ ship_flag_description Ship_flag_descriptions[] = {
 	{ Ship_Flags::Always_death_scream,			"Ship will always send a death message when destroyed."},
 	{ Ship_Flags::No_builtin_messages,			"Ship will not send any persona messages."},
 	{ Ship_Flags::Scramble_messages,			"All messages sent from this ship will appear scrambled, as if the ship had been hit by an EMP."},
+	{ Ship_Flags::Maneuver_despite_engines,		"Ship can maneuver even if its engines are disabled or disrupted" },
 };
 
 extern const size_t Num_ship_flag_names = sizeof(Ship_flag_names) / sizeof(ship_flag_name);
@@ -2641,7 +2648,7 @@ static int parse_and_add_briefing_icon_info()
  *
  * If we are creating a ship, we want to inherit the parameters of the ship class, then override on a field-by-field basis.
  */
-int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, const char *info_type_name, const char *info_name)
+int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, const char *info_type_name, const char *info_name, bool set_special_warp_physics)
 {
 	Assert(info_type_name != nullptr);
 	Assert(info_name != nullptr);
@@ -2672,7 +2679,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 				params.warp_type = j | WT_DEFAULT_WITH_FIREBALL;
 			}
 			else {
-				Warning(LOCATION, "Invalid %s '%s' specified for %s '%s'", str, buf, info_type_name, info_name);
+				error_display(0, "Invalid %s '%s' specified for %s '%s'", str, buf, info_type_name, info_name);
 				params.warp_type = WT_DEFAULT;
 			}
 		}
@@ -2694,7 +2701,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 			if (t_time > 0.0f)
 				params.warpout_engage_time = fl2i(t_time*1000.0f);
 			else
-				Warning(LOCATION, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
+				error_display(0, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
 		}
 	}
 
@@ -2706,7 +2713,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 		if (speed > 0.0f)
 			params.speed = speed;
 		else
-			Warning(LOCATION, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
+			error_display(0, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
 	}
 
 	sprintf(str, "%s time:", prefix);
@@ -2717,7 +2724,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 		if (t_time > 0.0f)
 			params.time = fl2i(t_time*1000.0f);
 		else
-			Warning(LOCATION, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
+			error_display(0, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
 	}
 
 	sprintf(str, "%s %s exp:", prefix, direction == WarpDirection::WARP_IN ? "decel" : "accel");
@@ -2728,7 +2735,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 		if (accel_exp >= 0.0f)
 			params.accel_exp = accel_exp;
 		else
-			Warning(LOCATION, "%s specified as less than 0 on %s '%s'; value ignored", str, info_type_name, info_name);
+			error_display(0, "%s specified as less than 0 on %s '%s'; value ignored", str, info_type_name, info_name);
 	}
 
 	sprintf(str, "%s radius:", prefix);
@@ -2739,13 +2746,23 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 		if (rad > 0.0f)
 			params.radius = rad;
 		else
-			Warning(LOCATION, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
+			error_display(0, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
 	}
 
 	sprintf(str, "%s animation:", prefix);
 	if (optional_string(str))
 	{
 		stuff_string(params.anim, F_NAME, MAX_FILENAME_LEN);
+	}
+
+	// we might need to explicitly set this flag; but if so, the modder has the option of unsetting it
+	if (set_special_warp_physics)
+		params.special_warp_physics = true;
+
+	sprintf(str, "$Special warp%s physics:", (direction == WarpDirection::WARP_IN) ? "in" : "out");
+	if (optional_string(str))
+	{
+		stuff_boolean(&params.special_warp_physics);
 	}
 
 	if (direction == WarpDirection::WARP_OUT)
@@ -2758,7 +2775,7 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 			if (speed > 0.0f)
 				params.warpout_player_speed = speed;
 			else
-				Warning(LOCATION, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
+				error_display(0, "%s specified as 0 or less on %s '%s'; value ignored", str, info_type_name, info_name);
 		}
 	}
 
@@ -3502,17 +3519,43 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 		}
 	}
 
-	// the first time we get to this point, initialize to the species parameter indexes (which may be -1)
+	bool is_supercap_for_warp_params = false;
 	if (first_time) {
+		// the first time we get to this point, initialize to the species parameter indexes (which may be -1)
 		sip->warpin_params_index = Species_info[sip->species].warpin_params_index;
 		sip->warpout_params_index = Species_info[sip->species].warpout_params_index;
+
+		// figure out whether this is a supercap by doing some parse gymnastics
+		// (flags are parsed several lines later, so we need to skip ahead, peek at the flags, and jump back)
+		pause_parse();
+		if (skip_to_string("$Flags:", "$Name:") == 1) {
+			// cache the flag definition so we don't have to keep looking it up
+			static auto supercap_flag_def = std::find_if(std::begin(Ship_flags), std::end(Ship_flags), [](const flag_def_list_new<Info_Flags> &item) {
+				return item.def == Ship::Info_Flags::Supercap;
+			});
+
+			// look up the flag in this flag list
+			if (supercap_flag_def != std::end(Ship_flags)) {
+				SCP_vector<SCP_string> flags;
+				stuff_string_list(flags);
+				auto supercap_string = std::find_if(flags.begin(), flags.end(), [](const SCP_string& item) {
+					return lcase_equal(item, supercap_flag_def->name);
+				});
+				if (supercap_string != flags.end()) {
+					is_supercap_for_warp_params = true;
+				}
+			}
+		}
+		unpause_parse();
 	}
 
 	// get ship parameters for warpin and warpout
 	// Note: if the index is not -1, we must have already assigned warp parameters, probably because we are now
 	// parsing a TBM.  In that case, inherit from ourselves.
-	sip->warpin_params_index = parse_warp_params(sip->warpin_params_index >= 0 ? &Warp_params[sip->warpin_params_index] : nullptr, WarpDirection::WARP_IN, info_type_name, sip->name);
-	sip->warpout_params_index = parse_warp_params(sip->warpout_params_index >= 0 ? &Warp_params[sip->warpout_params_index] : nullptr, WarpDirection::WARP_OUT, info_type_name, sip->name);
+	// Note2: In retail, supercaps have the PF_SPECIAL_WARP_IN applied by default (but not PF_SPECIAL_WARP_OUT).  So,
+	// if we are parsing a supercap for the first time, and this is a warpin, set the flag.
+	sip->warpin_params_index = parse_warp_params(sip->warpin_params_index >= 0 ? &Warp_params[sip->warpin_params_index] : nullptr, WarpDirection::WARP_IN, info_type_name, sip->name, first_time && is_supercap_for_warp_params);
+	sip->warpout_params_index = parse_warp_params(sip->warpout_params_index >= 0 ? &Warp_params[sip->warpout_params_index] : nullptr, WarpDirection::WARP_OUT, info_type_name, sip->name, false);
 
 	// get ship explosion info
 	shockwave_create_info *sci = &sip->shockwave;
@@ -5593,6 +5636,10 @@ static void parse_ship_type(const char *filename, const bool replace)
 		stuff_float(&stp->emp_multiplier);
 	}
 
+	if(optional_string("$Warp Sound Range Multiplier:")) {
+		stuff_float(&stp->warp_sound_range_multiplier);
+	}
+
 	if(optional_string("$Beams Easily Hit:")) {
 		stuff_boolean_flag(stp->flags, Ship::Type_Info_Flags::Beams_easily_hit);
 	}
@@ -6237,10 +6284,14 @@ void ship_add_exited_ship( ship *sp, Ship::Exit_Flags reason )
 	entry.obj_signature = Objects[sp->objnum].signature;
 	entry.ship_class = sp->ship_info_index;
 	entry.team = sp->team;
+	entry.wingnum = sp->wingnum;
 	entry.flags += reason;
-	// if ship is red alert, flag as such
+	// copy some flags
 	if (sp->flags[Ship_Flags::Red_alert_store_status]) {
         entry.flags.set(Ship::Exit_Flags::Red_alert_carry);
+	}
+	if (sp->flags[Ship_Flags::From_player_wing]) {
+		entry.flags.set(Ship::Exit_Flags::From_player_wing);
 	}
 	entry.time = Missiontime;
 	entry.hull_strength = int(Objects[sp->objnum].hull_strength);
@@ -6473,7 +6524,6 @@ vec3d get_submodel_offset(int model, int submodel){
 // Reset all ship values to empty/unused.
 void ship::clear()
 {
-
 	objnum = -1;
 	ai_index = -1;
 	ship_info_index = -1;
@@ -7763,7 +7813,7 @@ void ship_render_player_ship(object* objp) {
 	ship_get_eye_local(&eye_pos, &eye_orient, objp);
 	vm_vec_copy_scale(&eye_offset, &eye_pos, -1.0f);
 
-	float fov_backup = Proj_fov;
+	fov_t fov_backup = Proj_fov;
 	g3_set_fov(Sexp_fov <= 0.0f ? COCKPIT_ZOOM_DEFAULT : Sexp_fov);
 
 	if (prerenderShipModel) {
@@ -16147,11 +16197,15 @@ int ship_secondary_bank_has_ammo(int shipnum)
 // returns 1 if ship is able to warp, otherwise return 0
 int ship_engine_ok_to_warp(ship *sp)
 {
-	// disabled ships can't warp
-	if (sp->flags[Ship_Flags::Disabled])
+	if (sp->flags[Ship_Flags::Warp_broken] || sp->flags[Ship_Flags::Warp_never])
 		return 0;
 
-	if (sp->flags[Ship_Flags::Warp_broken] || sp->flags[Ship_Flags::Warp_never])
+	// ships which can maneuver can also warp
+	if (sp->flags[Ship_Flags::Maneuver_despite_engines])
+		return 1;
+
+	// disabled ships can't warp
+	if (sp->flags[Ship_Flags::Disabled])
 		return 0;
 
 	float engine_strength = ship_get_subsystem_strength(sp, SUBSYSTEM_ENGINE);
