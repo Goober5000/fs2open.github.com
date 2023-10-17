@@ -138,6 +138,51 @@ enum class XWMObjective : short
 	o_Arrive
 };
 
+enum class XWMObjectType : short 
+{
+	oj_Mine1,
+	oj_Mine2,
+	oj_Mine3,
+	oj_Mine4,
+	oj_Satellite,
+	oj_Nav_Buoy,
+	oj_Probe,
+	oj_Platform, // guessing it's a (training) platform here - ??
+	oj_Asteroid1,
+	oj_Asteroid2,
+	oj_Asteroid3,
+	oj_Asteroid4,
+	oj_Asteroid5,
+	oj_Asteroid6,
+	oj_Asteroid7,
+	oj_Asteroid8,
+	oj_Rock_World,
+	oj_Gray_Ring_World,
+	oj_Gray_World,
+	oj_Brown_World,
+	oj_Gray_World2,
+	oj_Planet_and_Moon,
+	oj_Gray_Crescent,
+	oj_Orange_Crescent1,
+	oj_Orange_Crescent2,
+	oj_Orange_Crescent3,
+	oj_Orange_Crescent4,
+	oj_Orange_Crescent5,
+	oj_Orange_Crescent6,
+	oj_Orange_Crescent7,
+	oj_Orange_Crescent8,
+	oj_Death_Star
+};
+
+enum class XWMObjectFormation : short
+{
+	ojf_Flat,
+	ojf_Edge,
+	ojf_Broadside,
+	ojf_Scattered,
+	ojf_Destroy
+};
+
 
 class XWMFlightGroup
 {
@@ -210,6 +255,22 @@ class XWMObject
 {
 public:
 
+	std::string designation;
+	std::string cargo;
+	std::string specialCargo;
+
+	int specialObjectNumber;
+
+	XWMObjectType objectType;
+
+	XWMCraftIFF objectIFF; // shares with FlightGroup
+
+	XWMObjectFormation formation;
+
+	int numberOfObjects;
+
+	float object_x, object_y, object_z;
+	float object_yaw, object_pitch, object_roll;
 };
 
 
