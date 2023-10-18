@@ -72,16 +72,12 @@ struct xwi_flightgroup {
 	short primary_target;
 	short secondary_target;
 };
-#pragma pack(pop)
 
 struct xwi_objectgroup {
-	char designation[16];      // ignored?
-	char cargo[16];            // ignored?
-	char special_cargo[16];    // ignored?
-	short special_object_number; // ignored?
 	short object_type;
 	short object_iff;
 	short object_formation;
+	short object_goal;
 	short number_of_objects;
 	short object_x;
 	short object_y;
@@ -90,6 +86,7 @@ struct xwi_objectgroup {
 	short object_pitch;
 	short object_roll;
 };
+#pragma pack(pop)
 
 int XWingMission::arrival_delay_to_seconds(int delay)
 {
@@ -601,146 +598,171 @@ bool XWingMission::load(XWingMission *m, const char *data)
 
 	for (int n = 0; n < h->number_of_objects; n++) {
 		xwi_objectgroup *oj =
-			(xwi_objectgroup*)(data + sizeof(xwi_header) + sizeof(xwi_flightgroup) + sizeof(xwi_objectgroup) * n);
+			(xwi_objectgroup *)(data + sizeof(xwi_header) + (sizeof(xwi_flightgroup) * h->number_of_flight_groups) +
+							   sizeof(xwi_objectgroup) * n);
 		XWMObject noj_buf;
 		XWMObject *noj = &noj_buf;
 
-		noj->designation = oj->designation;
-		noj->cargo = oj->cargo;
-		noj->specialCargo = oj->special_cargo;
-		noj->specialObjectNumber = oj->special_object_number;
-
 		switch (oj->object_type) {
-			case 0:
+			case 18:
 				noj->objectType = XWMObjectType::oj_Mine1;
 				break;
-			case 1:
+			case 19:
 				noj->objectType = XWMObjectType::oj_Mine2;
 				break;
-			case 2:
+			case 20:
 				noj->objectType = XWMObjectType::oj_Mine3;
 				break;
-			case 3:
+			case 21:
 				noj->objectType = XWMObjectType::oj_Mine4;
 				break;
-			case 4:
+			case 22:
 				noj->objectType = XWMObjectType::oj_Satellite;
 				break;
-			case 5:
+			case 23:
 				noj->objectType = XWMObjectType::oj_Nav_Buoy;
 				break;
-			case 6:
+			case 24:
 				noj->objectType = XWMObjectType::oj_Probe;
 				break;
-			case 7:
-				noj->objectType = XWMObjectType::oj_Platform;
-				break;
-			case 8:
+			case 26:
 				noj->objectType = XWMObjectType::oj_Asteroid1;
 				break;
-			case 9:
+			case 27:
 				noj->objectType = XWMObjectType::oj_Asteroid2;
 				break;
-			case 10:
+			case 28:
 				noj->objectType = XWMObjectType::oj_Asteroid3;
 				break;
-			case 11:
+			case 29:
 				noj->objectType = XWMObjectType::oj_Asteroid4;
 				break;
-			case 12:
+			case 30:
 				noj->objectType = XWMObjectType::oj_Asteroid5;
 				break;
-			case 13:
+			case 31:
 				noj->objectType = XWMObjectType::oj_Asteroid6;
 				break;
-			case 14:
+			case 32:
 				noj->objectType = XWMObjectType::oj_Asteroid7;
 				break;
-			case 15:
+			case 33:
 				noj->objectType = XWMObjectType::oj_Asteroid8;
 				break;
-			case 16:
+			case 34:
 				noj->objectType = XWMObjectType::oj_Rock_World;
 				break;
-			case 17:
+			case 35:
 				noj->objectType = XWMObjectType::oj_Gray_Ring_World;
 				break;
-			case 18:
+			case 36:
 				noj->objectType = XWMObjectType::oj_Gray_World;
 				break;
-			case 19:
+			case 37:
 				noj->objectType = XWMObjectType::oj_Brown_World;
 				break;
-			case 20:
+			case 38:
 				noj->objectType = XWMObjectType::oj_Gray_World2;
 				break;
-			case 21:
+			case 39:
 				noj->objectType = XWMObjectType::oj_Planet_and_Moon;
 				break;
-			case 22:
+			case 40:
 				noj->objectType = XWMObjectType::oj_Gray_Crescent;
 				break;
-			case 23:
+			case 41:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent1;
 				break;
-			case 24:
+			case 42:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent2;
 				break;
-			case 25:
+			case 43:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent3;
 				break;
-			case 26:
+			case 44:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent4;
 				break;
-			case 27:
+			case 45:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent5;
 				break;
-			case 28:
+			case 46:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent6;
 				break;
-			case 29:
+			case 47:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent7;
 				break;
-			case 30:
+			case 48:
 				noj->objectType = XWMObjectType::oj_Orange_Crescent8;
 				break;
-			case 31:
+			case 49:
 				noj->objectType = XWMObjectType::oj_Death_Star;
+				break;
+			case 58:
+				noj->objectType = XWMObjectType::oj_Training_Platform1;
+				break;
+			case 59:
+				noj->objectType = XWMObjectType::oj_Training_Platform2;
+				break;
+			case 60:
+				noj->objectType = XWMObjectType::oj_Training_Platform3;
+				break;
+			case 61:
+				noj->objectType = XWMObjectType::oj_Training_Platform4;
+				break;
+			case 62:
+				noj->objectType = XWMObjectType::oj_Training_Platform5;
+				break;
+			case 63:
+				noj->objectType = XWMObjectType::oj_Training_Platform6;
+				break;
+			case 64:
+				noj->objectType = XWMObjectType::oj_Training_Platform7;
+				break;
+			case 65:
+				noj->objectType = XWMObjectType::oj_Training_Platform8;
+				break;
+			case 66:
+				noj->objectType = XWMObjectType::oj_Training_Platform9;
+				break;
+			case 67:
+				noj->objectType = XWMObjectType::oj_Training_Platform10;
+				break;
+			case 68:
+				noj->objectType = XWMObjectType::oj_Training_Platform11;
+				break;
+			case 69:
+				noj->objectType = XWMObjectType::oj_Training_Platform12;
 				break;
 			default:
 				return false;
 		}
 
-		switch (oj->object_iff) { // seemingly not used
-			case 0:
-				noj->objectIFF = XWMCraftIFF::iff_default;
-				break;
-			case 1:
-				noj->objectIFF = XWMCraftIFF::iff_rebel;
-				break;
-			case 2:
-				noj->objectIFF = XWMCraftIFF::iff_imperial;
-				break;
-			case 3:
-				noj->objectIFF = XWMCraftIFF::iff_neutral;
-				break;
-		}
-
 		switch (oj->object_formation) {
 			case 0:
-				noj->formation = XWMObjectFormation::ojf_Flat;
+				noj->formation = XWMObjectFormation::ojf_FloorXY;
 				break;
 			case 1:
-				noj->formation = XWMObjectFormation::ojf_Edge;
+				noj->formation = XWMObjectFormation::ojf_SideYZ;
 				break;
 			case 2:
-				noj->formation = XWMObjectFormation::ojf_Broadside;
+				noj->formation = XWMObjectFormation::ojf_FrontXZ;
 				break;
 			case 3:
 				noj->formation = XWMObjectFormation::ojf_Scattered;
 				break;
-			case 4:
-				noj->formation = XWMObjectFormation::ojf_Destroy;
+			default:
+				return false;
+		}
+
+		switch (oj->object_goal) {
+			case 0:
+				noj->objectGoal = XWMObjectGoal::ojg_Neither;
+				break;
+			case 1:
+				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
+				break;
+			case 2:
+				noj->objectGoal = XWMObjectGoal::ojg_Survive;
 				break;
 			default:
 				return false;
@@ -751,9 +773,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		noj->object_x = oj->object_x / 160.0f;
 		noj->object_y = oj->object_y / 160.0f;
 		noj->object_z = oj->object_z / 160.0f;
-		noj->object_yaw = oj->object_yaw / 160.0f;
-		noj->object_pitch = oj->object_pitch / 160.0f;
-		noj->object_roll = oj->object_roll / 160.0f;
+		noj->object_yaw = oj->object_yaw;
+		noj->object_pitch = oj->object_pitch;
+		noj->object_roll = oj->object_roll - 90.0f;
 	}
 	return true;
 }

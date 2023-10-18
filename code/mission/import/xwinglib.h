@@ -147,7 +147,6 @@ enum class XWMObjectType : short
 	oj_Satellite,
 	oj_Nav_Buoy,
 	oj_Probe,
-	oj_Platform, // guessing it's a (training) platform here - ??
 	oj_Asteroid1,
 	oj_Asteroid2,
 	oj_Asteroid3,
@@ -171,18 +170,35 @@ enum class XWMObjectType : short
 	oj_Orange_Crescent6,
 	oj_Orange_Crescent7,
 	oj_Orange_Crescent8,
-	oj_Death_Star
+	oj_Death_Star,
+	oj_Training_Platform1,
+	oj_Training_Platform2,
+	oj_Training_Platform3,
+	oj_Training_Platform4,
+	oj_Training_Platform5,
+	oj_Training_Platform6,
+	oj_Training_Platform7,
+	oj_Training_Platform8,
+	oj_Training_Platform9,
+	oj_Training_Platform10,
+	oj_Training_Platform11,
+	oj_Training_Platform12
 };
 
 enum class XWMObjectFormation : short
 {
-	ojf_Flat,
-	ojf_Edge,
-	ojf_Broadside,
-	ojf_Scattered,
-	ojf_Destroy
+	ojf_FloorXY,
+	ojf_SideYZ,
+	ojf_FrontXZ,
+	ojf_Scattered // may be buggy - undefined locations
 };
 
+enum class XWMObjectGoal : short
+{
+	ojg_Survive,
+	ojg_Destroyed,
+	ojg_Neither
+};
 
 class XWMFlightGroup
 {
@@ -255,17 +271,11 @@ class XWMObject
 {
 public:
 
-	std::string designation;
-	std::string cargo;
-	std::string specialCargo;
-
-	int specialObjectNumber;
-
 	XWMObjectType objectType;
 
-	XWMCraftIFF objectIFF; // shares with FlightGroup
-
 	XWMObjectFormation formation;
+
+	XWMObjectGoal objectGoal;
 
 	int numberOfObjects;
 
