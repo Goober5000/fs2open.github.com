@@ -74,10 +74,13 @@ struct xwi_flightgroup {
 };
 
 struct xwi_objectgroup {
+	char designation[16];   // ignored?
+	char cargo[16];         // ignored?
+	char special_cargo[16]; // ignored?
+	short special_object_number;
 	short object_type;
 	short object_iff;
 	short object_formation;
-	short object_goal;
 	short number_of_objects;
 	short object_x;
 	short object_y;
@@ -737,7 +740,15 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				return false;
 		}
 
-		switch (oj->object_formation) {
+		if (oj->object_formation & 0x4) {
+				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
+		} else if (oj->object_formation & 0x8) {
+				noj->objectGoal = XWMObjectGoal::ojg_Survive;
+		} else {
+			noj->objectGoal = XWMObjectGoal::ojg_Neither;
+		}
+
+		switch (oj->object_formation & ~(0x4 | 0x8)) {
 			case 0:
 				noj->formation = XWMObjectFormation::ojf_FloorXY;
 				break;
@@ -749,20 +760,6 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				break;
 			case 3:
 				noj->formation = XWMObjectFormation::ojf_Scattered;
-				break;
-			default:
-				return false;
-		}
-
-		switch (oj->object_goal) {
-			case 0:
-				noj->objectGoal = XWMObjectGoal::ojg_Neither;
-				break;
-			case 1:
-				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
-				break;
-			case 2:
-				noj->objectGoal = XWMObjectGoal::ojg_Survive;
 				break;
 			default:
 				return false;

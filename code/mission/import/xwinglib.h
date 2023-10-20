@@ -195,9 +195,9 @@ enum class XWMObjectFormation : short
 
 enum class XWMObjectGoal : short
 {
-	ojg_Survive,
+	ojg_Neither = 0,
 	ojg_Destroyed,
-	ojg_Neither
+	ojg_Survive
 };
 
 class XWMFlightGroup
