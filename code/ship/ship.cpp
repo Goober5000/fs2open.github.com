@@ -512,6 +512,7 @@ flag_def_list_new<Weapon::Info_Flags> ai_tgt_weapon_flags[] = {
 	{ "no impact spew",				Weapon::Info_Flags::No_impact_spew,						true, false },
 	{ "require exact los",			Weapon::Info_Flags::Require_exact_los,					true, false },
 	{ "multilock target dead subsys", Weapon::Info_Flags::Multilock_target_dead_subsys,		true, false },
+	{ "ignores countermeasures",	Weapon::Info_Flags::Ignores_countermeasures,			true, false },
 };
 
 const int num_ai_tgt_weapon_info_flags = sizeof(ai_tgt_weapon_flags) / sizeof(flag_def_list_new<Weapon::Info_Flags>);
@@ -7447,7 +7448,10 @@ static int subsys_set(int objnum, int ignore_subsys_info)
 	{
 		model_system = &(sinfo->subsystems[i]);
 		if (model_system->model_num < 0) {
-			Warning (LOCATION, "Invalid subobj_num or model_num in subsystem '%s' on ship type '%s'.\nNot linking into ship!\n\n(This warning means that a subsystem was present in the table entry and not present in the model\nit should probably be removed from the table or added to the model.)\n", model_system->subobj_name, sinfo->name );
+			Error(LOCATION, "Invalid subobj_num or model_num in subsystem '%s' on ship type '%s'.\nNot linking into ship!\n\n"
+				"This warning means that a subsystem was present in the table entry and not present in the model."
+				"It should be removed from the table or added to the model.\n"
+				"Ensure subsystem names are spelled correctly, and that submodels or special points intended to be subsystems have '$special=subsystem' in their properties.", model_system->subobj_name, sinfo->name );
 			continue;
 		}
 
@@ -7819,7 +7823,7 @@ void ship_render_player_ship(object* objp) {
 	if (prerenderShipModel) {
 		gr_post_process_save_zbuffer();
 
-		gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, 0.05f, Max_draw_distance);
+		gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, Min_draw_distance_cockpit, Max_draw_distance);
 		gr_set_view_matrix(&leaning_position, &eye_orient);
 
 		model_render_params render_info;
@@ -7891,7 +7895,7 @@ void ship_render_player_ship(object* objp) {
 		gr_clear_states();
 	}
 
-	gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, 0.02f, Max_draw_distance);
+	gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, Min_draw_distance_cockpit, Max_draw_distance);
 	gr_set_view_matrix(&leaning_position, &eye_orient);
 
 	Shadow_view_matrix_render = gr_view_matrix;
@@ -7939,7 +7943,7 @@ void ship_render_player_ship(object* objp) {
 		gr_end_view_matrix();
 		gr_end_proj_matrix();
 
-		gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, Min_draw_distance, Max_draw_distance);
+		gr_set_proj_matrix(Proj_fov, gr_screen.clip_aspect, Min_draw_distance_cockpit, Max_draw_distance);
 		gr_set_view_matrix(&Eye_position, &Eye_matrix);
 
 		gr_deferred_lighting_msaa();
@@ -16587,7 +16591,9 @@ static const char* ship_get_ai_target_display_name(int goal, const char* name)
 	case AI_GOAL_UNDOCK:
 	case AI_GOAL_GUARD:
 	case AI_GOAL_DISABLE_SHIP:
+	case AI_GOAL_DISABLE_SHIP_TACTICAL:
 	case AI_GOAL_DISARM_SHIP:
+	case AI_GOAL_DISARM_SHIP_TACTICAL:
 	case AI_GOAL_EVADE_SHIP:
 	case AI_GOAL_REARM_REPAIR:
 	case AI_GOAL_FLY_TO_SHIP:
@@ -16675,7 +16681,9 @@ SCP_string ship_return_orders(ship* sp)
 	case AI_GOAL_UNDOCK:
 	case AI_GOAL_GUARD:
 	case AI_GOAL_DISABLE_SHIP:
+	case AI_GOAL_DISABLE_SHIP_TACTICAL:
 	case AI_GOAL_DISARM_SHIP:
+	case AI_GOAL_DISARM_SHIP_TACTICAL:
 	case AI_GOAL_EVADE_SHIP:
 	case AI_GOAL_REARM_REPAIR:
 	case AI_GOAL_FLY_TO_SHIP:

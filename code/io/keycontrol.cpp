@@ -166,6 +166,8 @@ void factor_table::resize(size_t size)
 	}
 }
 
+// Cyborg -- You may see a linter or coverity complain about this function, since it basically discards a lot of the result of the float division.
+// But using modulo division instead is actually about 60% slower based on some quick testing I did, and it gives the same results.
 bool factor_table::isNaturalNumberFactor(size_t factor, size_t n)
 {
 	return ((float)n / (float)factor) == n / factor;
@@ -873,13 +875,17 @@ void process_debug_keys(int k)
 
 					do_subobj_hit_stuff(objp, Player_obj, &g_subobj_pos, Player_ai->targeted_subsys->system_info->subobj_num, (float) -Player_ai->targeted_subsys->system_info->type, NULL); //100.0f);
 
-					if ( sp->subsys_info[SUBSYSTEM_ENGINE].aggregate_current_hits <= 0.0f ) {
-						mission_log_add_entry(LOG_SHIP_DISABLED, sp->ship_name, NULL );
-						sp->flags.set(Ship::Ship_Flags::Disabled);				// add the disabled flag
+					if ( Player_ai->targeted_subsys->system_info->type == SUBSYSTEM_ENGINE ) {
+						if ( sp->subsys_info[SUBSYSTEM_ENGINE].aggregate_current_hits <= 0.0f ) {
+							mission_log_add_entry(LOG_SHIP_DISABLED, sp->ship_name, NULL );
+							sp->flags.set(Ship::Ship_Flags::Disabled);				// add the disabled flag
+						}
 					}
 
-					if ( sp->subsys_info[SUBSYSTEM_TURRET].aggregate_current_hits <= 0.0f ) {
-						mission_log_add_entry(LOG_SHIP_DISARMED, sp->ship_name, NULL );
+					if ( Player_ai->targeted_subsys->system_info->type == SUBSYSTEM_TURRET ) {
+						if ( sp->subsys_info[SUBSYSTEM_TURRET].aggregate_current_hits <= 0.0f ) {
+							mission_log_add_entry(LOG_SHIP_DISARMED, sp->ship_name, NULL );
+						}
 					}
 				}
 			}

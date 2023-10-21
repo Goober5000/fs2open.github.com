@@ -57,7 +57,7 @@ void opengl_clear_deferred_buffers()
 
 void gr_opengl_deferred_lighting_begin(bool clearNonColorBufs)
 {
-	if ( Cmdline_no_deferred_lighting)
+	if (!light_deferred_enabled())
 		return;
 
 	static const float black[] = {0, 0, 0, 1.0f};
@@ -181,7 +181,7 @@ void gr_opengl_deferred_lighting_finish()
 	GR_DEBUG_SCOPE("Deferred lighting finish");
 	TRACE_SCOPE(tracing::ApplyLights);
 
-	if (Cmdline_no_deferred_lighting) {
+	if (!light_deferred_enabled()) {
 		return;
 	}
 
@@ -254,6 +254,7 @@ void gr_opengl_deferred_lighting_finish()
 
 		header->invScreenWidth = 1.0f / gr_screen.max_w;
 		header->invScreenHeight = 1.0f / gr_screen.max_h;
+		header->nearPlane = gr_near_plane;
 
 		// Only the first directional light uses shaders so we need to know when we already saw that light
 		bool first_directional = true;
