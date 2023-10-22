@@ -740,29 +740,36 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				return false;
 		}
 
-		if (oj->object_formation & 0x4) {
-				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
-		} else if (oj->object_formation & 0x8) {
-				noj->objectGoal = XWMObjectGoal::ojg_Survive;
-		} else {
+		if (oj->object_formation >= 58) {
 			noj->objectGoal = XWMObjectGoal::ojg_Neither;
-		}
+			noj->formation = XWMObjectFormation::ojf_FloorXY;
+			// TODO : If the object is a Training Platform then the object_formation determines
+			// which guns are present and also how many seconds on the clock for the missions.
+		} else {
+			if (oj->object_formation & 0x4) {
+				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
+			} else if (oj->object_formation & 0x8) {
+				noj->objectGoal = XWMObjectGoal::ojg_Survive;
+			} else {
+				noj->objectGoal = XWMObjectGoal::ojg_Neither;
+			}
 
-		switch (oj->object_formation & ~(0x4 | 0x8)) {
-			case 0:
-				noj->formation = XWMObjectFormation::ojf_FloorXY;
-				break;
-			case 1:
-				noj->formation = XWMObjectFormation::ojf_SideYZ;
-				break;
-			case 2:
-				noj->formation = XWMObjectFormation::ojf_FrontXZ;
-				break;
-			case 3:
-				noj->formation = XWMObjectFormation::ojf_Scattered;
-				break;
-			default:
-				return false;
+			switch (oj->object_formation & ~(0x4 | 0x8)) {
+				case 0:
+					noj->formation = XWMObjectFormation::ojf_FloorXY;
+					break;
+				case 1:
+					noj->formation = XWMObjectFormation::ojf_SideYZ;
+					break;
+				case 2:
+					noj->formation = XWMObjectFormation::ojf_FrontXZ;
+					break;
+				case 3:
+					noj->formation = XWMObjectFormation::ojf_Scattered;
+					break;
+				default:
+					return false;
+			}
 		}
 
 		noj->numberOfObjects = oj->number_of_objects;
