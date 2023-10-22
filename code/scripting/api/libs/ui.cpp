@@ -782,7 +782,7 @@ ADE_FUNC(renderBriefingModel,
 		thisType = TECH_JUMP_NODE;
 	}
 
-	return ade_set_args(L, "b", render_tech_model(thisType, x1, y1, x2, y2, zoom, lighting, -1, &orient, pof, closeup_zoom, closeup_pos));
+	return ade_set_args(L, "b", render_tech_model(thisType, x1, y1, x2, y2, zoom, lighting, -1, &orient, pof, closeup_zoom, &closeup_pos));
 }
 
 ADE_FUNC(drawBriefingMap,
@@ -2379,6 +2379,7 @@ ADE_FUNC(initPause, l_UserInterface_PauseScreen, nullptr, "Makes sure everything
 
 	weapon_pause_sounds();
 	audiostream_pause_all();
+	message_pause_all();
 
 	Paused = true;
 
@@ -2391,6 +2392,7 @@ ADE_FUNC(closePause, l_UserInterface_PauseScreen, nullptr, "Makes sure everythin
 
 	weapon_unpause_sounds();
 	audiostream_unpause_all();
+	message_resume_all();
 
 	// FSO can run pause_init() before the actual games state change when the game loses focus
 	// so this is required to make sure that the saved screen is cleared if SCPUI takes over

@@ -2649,7 +2649,7 @@ static int parse_and_add_briefing_icon_info()
  *
  * If we are creating a ship, we want to inherit the parameters of the ship class, then override on a field-by-field basis.
  */
-int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, const char *info_type_name, const char *info_name, bool set_special_warp_physics)
+int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, const char *info_type_name, const char *info_name, bool set_supercap_warp_physics)
 {
 	Assert(info_type_name != nullptr);
 	Assert(info_name != nullptr);
@@ -2757,13 +2757,13 @@ int parse_warp_params(const WarpParams *inherit_from, WarpDirection direction, c
 	}
 
 	// we might need to explicitly set this flag; but if so, the modder has the option of unsetting it
-	if (set_special_warp_physics)
-		params.special_warp_physics = true;
+	if (set_supercap_warp_physics)
+		params.supercap_warp_physics = true;
 
-	sprintf(str, "$Special warp%s physics:", (direction == WarpDirection::WARP_IN) ? "in" : "out");
+	sprintf(str, "$Supercap warp%s physics:", (direction == WarpDirection::WARP_IN) ? "in" : "out");
 	if (optional_string(str))
 	{
-		stuff_boolean(&params.special_warp_physics);
+		stuff_boolean(&params.supercap_warp_physics);
 	}
 
 	if (direction == WarpDirection::WARP_OUT)
@@ -5041,13 +5041,6 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 		subsystems[i].reset();
 	}
 	
-	float	hull_percentage_of_hits = 100.0f;
-	//If the ship already has subsystem entries (ie this is a modular table)
-	//make sure hull_percentage_of_hits is set properly
-	for(auto i=0; i < sip->n_subsystems; i++) {
-		hull_percentage_of_hits -= sip->subsystems[i].max_subsys_strength / sip->max_hull_strength;
-	}
-
 	while (cont_flag) {
 		int r = required_string_one_of(3, "#End", "$Subsystem:", type_name);
 		switch (r) {
@@ -5140,8 +5133,11 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 			sfo_return = stuff_float_optional(&percentage_of_hits);
 			if(sfo_return==2)
 			{
-				hull_percentage_of_hits -= percentage_of_hits;
-				sp->max_subsys_strength = sip->max_hull_strength * (percentage_of_hits / 100.0f);
+				if (Calculate_subsystem_hitpoints_after_parsing)
+					sp->max_subsys_strength = percentage_of_hits;
+				else
+					sp->max_subsys_strength = sip->max_hull_strength * (percentage_of_hits / 100.0f);
+
 				sp->type = SUBSYSTEM_UNKNOWN;
 			}
 			if(sfo_return > 0)
@@ -5429,13 +5425,6 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 		}
 	}	
 
-	// must be > 0//no it doesn't :P -Bobboau
-	// yes it does! - Goober5000
-	// (we don't want a div-0 error)
-	if (hull_percentage_of_hits <= 0.0f )
-	{
-		//Warning(LOCATION, "The subsystems defined for the %s can take more (or the same) combined damage than the ship itself. Adjust the tables so that the percentages add up to less than 100", sip->name);
-	}
 	// when done reading subsystems, malloc and copy the subsystem data to the ship info structure
 	int orig_n_subsystems = sip->n_subsystems;
 	if ( n_subsystems > 0 ) {
@@ -6022,6 +6011,16 @@ static void ship_parse_post_cleanup()
 			error_display(0, "$Player Minimum Velocity Z-value (%f) is negative or greater than max velocity Z-value (%f), setting to zero\nFix for ship '%s'\n",
 					sip->min_vel.xyz.z, sip->max_vel.xyz.z, sip->name);
 			sip->min_vel.xyz.z = 0.0f;
+		}
+
+		// we might need to calculate subsystem strength
+		if (Calculate_subsystem_hitpoints_after_parsing)
+		{
+			for (int i = 0; i < sip->n_subsystems; ++i)
+			{
+				auto sp = &sip->subsystems[i];
+				sp->max_subsys_strength = sip->max_hull_strength * (sp->max_subsys_strength / 100.0f);
+			}
 		}
 	}
 
@@ -20828,7 +20827,7 @@ ship_subsys* ship_get_subsys_for_submodel(ship* shipp, int submodel)
  *
  * @return is the ship arriving, bool
  */
-bool ship::is_arriving(ship::warpstage stage, bool dock_leader_or_single)
+bool ship::is_arriving(ship::warpstage stage, bool dock_leader_or_single) const
 {
 	if (stage == ship::warpstage::BOTH) {
 		if (!dock_leader_or_single) {
