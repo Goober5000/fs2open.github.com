@@ -72,6 +72,23 @@ struct xwi_flightgroup {
 	short primary_target;
 	short secondary_target;
 };
+
+struct xwi_objectgroup {
+	char designation[16];   // ignored?
+	char cargo[16];         // ignored?
+	char special_cargo[16]; // ignored?
+	short special_object_number;
+	short object_type;
+	short object_iff;
+	short object_formation;
+	short number_of_objects;
+	short object_x;
+	short object_y;
+	short object_z;
+	short object_yaw;
+	short object_pitch;
+	short object_roll;
+};
 #pragma pack(pop)
 
 int XWingMission::arrival_delay_to_seconds(int delay)
@@ -582,5 +599,187 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		m->flightgroups.push_back(*nfg);
 	}
 
+	for (int n = 0; n < h->number_of_objects; n++) {
+		xwi_objectgroup *oj =
+			(xwi_objectgroup *)(data + sizeof(xwi_header) + (sizeof(xwi_flightgroup) * h->number_of_flight_groups) +
+							   sizeof(xwi_objectgroup) * n);
+		XWMObject noj_buf;
+		XWMObject *noj = &noj_buf;
+
+		switch (oj->object_type) {
+			case 18:
+				noj->objectType = XWMObjectType::oj_Mine1;
+				break;
+			case 19:
+				noj->objectType = XWMObjectType::oj_Mine2;
+				break;
+			case 20:
+				noj->objectType = XWMObjectType::oj_Mine3;
+				break;
+			case 21:
+				noj->objectType = XWMObjectType::oj_Mine4;
+				break;
+			case 22:
+				noj->objectType = XWMObjectType::oj_Satellite;
+				break;
+			case 23:
+				noj->objectType = XWMObjectType::oj_Nav_Buoy;
+				break;
+			case 24:
+				noj->objectType = XWMObjectType::oj_Probe;
+				break;
+			case 26:
+				noj->objectType = XWMObjectType::oj_Asteroid1;
+				break;
+			case 27:
+				noj->objectType = XWMObjectType::oj_Asteroid2;
+				break;
+			case 28:
+				noj->objectType = XWMObjectType::oj_Asteroid3;
+				break;
+			case 29:
+				noj->objectType = XWMObjectType::oj_Asteroid4;
+				break;
+			case 30:
+				noj->objectType = XWMObjectType::oj_Asteroid5;
+				break;
+			case 31:
+				noj->objectType = XWMObjectType::oj_Asteroid6;
+				break;
+			case 32:
+				noj->objectType = XWMObjectType::oj_Asteroid7;
+				break;
+			case 33:
+				noj->objectType = XWMObjectType::oj_Asteroid8;
+				break;
+			case 34:
+				noj->objectType = XWMObjectType::oj_Rock_World;
+				break;
+			case 35:
+				noj->objectType = XWMObjectType::oj_Gray_Ring_World;
+				break;
+			case 36:
+				noj->objectType = XWMObjectType::oj_Gray_World;
+				break;
+			case 37:
+				noj->objectType = XWMObjectType::oj_Brown_World;
+				break;
+			case 38:
+				noj->objectType = XWMObjectType::oj_Gray_World2;
+				break;
+			case 39:
+				noj->objectType = XWMObjectType::oj_Planet_and_Moon;
+				break;
+			case 40:
+				noj->objectType = XWMObjectType::oj_Gray_Crescent;
+				break;
+			case 41:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent1;
+				break;
+			case 42:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent2;
+				break;
+			case 43:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent3;
+				break;
+			case 44:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent4;
+				break;
+			case 45:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent5;
+				break;
+			case 46:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent6;
+				break;
+			case 47:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent7;
+				break;
+			case 48:
+				noj->objectType = XWMObjectType::oj_Orange_Crescent8;
+				break;
+			case 49:
+				noj->objectType = XWMObjectType::oj_Death_Star;
+				break;
+			case 58:
+				noj->objectType = XWMObjectType::oj_Training_Platform1;
+				break;
+			case 59:
+				noj->objectType = XWMObjectType::oj_Training_Platform2;
+				break;
+			case 60:
+				noj->objectType = XWMObjectType::oj_Training_Platform3;
+				break;
+			case 61:
+				noj->objectType = XWMObjectType::oj_Training_Platform4;
+				break;
+			case 62:
+				noj->objectType = XWMObjectType::oj_Training_Platform5;
+				break;
+			case 63:
+				noj->objectType = XWMObjectType::oj_Training_Platform6;
+				break;
+			case 64:
+				noj->objectType = XWMObjectType::oj_Training_Platform7;
+				break;
+			case 65:
+				noj->objectType = XWMObjectType::oj_Training_Platform8;
+				break;
+			case 66:
+				noj->objectType = XWMObjectType::oj_Training_Platform9;
+				break;
+			case 67:
+				noj->objectType = XWMObjectType::oj_Training_Platform10;
+				break;
+			case 68:
+				noj->objectType = XWMObjectType::oj_Training_Platform11;
+				break;
+			case 69:
+				noj->objectType = XWMObjectType::oj_Training_Platform12;
+				break;
+			default:
+				return false;
+		}
+
+		if (oj->object_formation >= 58) {
+			noj->objectGoal = XWMObjectGoal::ojg_Neither;
+			noj->formation = XWMObjectFormation::ojf_FloorXY;
+			// TODO : If the object is a Training Platform then the object_formation determines
+			// which guns are present and also how many seconds on the clock for the missions.
+		} else {
+			if (oj->object_formation & 0x4) {
+				noj->objectGoal = XWMObjectGoal::ojg_Destroyed;
+			} else if (oj->object_formation & 0x8) {
+				noj->objectGoal = XWMObjectGoal::ojg_Survive;
+			} else {
+				noj->objectGoal = XWMObjectGoal::ojg_Neither;
+			}
+
+			switch (oj->object_formation & ~(0x4 | 0x8)) {
+				case 0:
+					noj->formation = XWMObjectFormation::ojf_FloorXY;
+					break;
+				case 1:
+					noj->formation = XWMObjectFormation::ojf_SideYZ;
+					break;
+				case 2:
+					noj->formation = XWMObjectFormation::ojf_FrontXZ;
+					break;
+				case 3:
+					noj->formation = XWMObjectFormation::ojf_Scattered;
+					break;
+				default:
+					return false;
+			}
+		}
+
+		noj->numberOfObjects = oj->number_of_objects;
+
+		noj->object_x = oj->object_x / 160.0f;
+		noj->object_y = oj->object_y / 160.0f;
+		noj->object_z = oj->object_z / 160.0f;
+		noj->object_yaw = oj->object_yaw;
+		noj->object_pitch = oj->object_pitch;
+		noj->object_roll = oj->object_roll - 90.0f;
+	}
 	return true;
 }

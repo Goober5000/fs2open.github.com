@@ -138,6 +138,67 @@ enum class XWMObjective : short
 	o_Arrive
 };
 
+enum class XWMObjectType : short 
+{
+	oj_Mine1,
+	oj_Mine2,
+	oj_Mine3,
+	oj_Mine4,
+	oj_Satellite,
+	oj_Nav_Buoy,
+	oj_Probe,
+	oj_Asteroid1,
+	oj_Asteroid2,
+	oj_Asteroid3,
+	oj_Asteroid4,
+	oj_Asteroid5,
+	oj_Asteroid6,
+	oj_Asteroid7,
+	oj_Asteroid8,
+	oj_Rock_World,
+	oj_Gray_Ring_World,
+	oj_Gray_World,
+	oj_Brown_World,
+	oj_Gray_World2,
+	oj_Planet_and_Moon,
+	oj_Gray_Crescent,
+	oj_Orange_Crescent1,
+	oj_Orange_Crescent2,
+	oj_Orange_Crescent3,
+	oj_Orange_Crescent4,
+	oj_Orange_Crescent5,
+	oj_Orange_Crescent6,
+	oj_Orange_Crescent7,
+	oj_Orange_Crescent8,
+	oj_Death_Star,
+	oj_Training_Platform1,
+	oj_Training_Platform2,
+	oj_Training_Platform3,
+	oj_Training_Platform4,
+	oj_Training_Platform5,
+	oj_Training_Platform6,
+	oj_Training_Platform7,
+	oj_Training_Platform8,
+	oj_Training_Platform9,
+	oj_Training_Platform10,
+	oj_Training_Platform11,
+	oj_Training_Platform12
+};
+
+enum class XWMObjectFormation : short
+{
+	ojf_FloorXY,
+	ojf_SideYZ,
+	ojf_FrontXZ,
+	ojf_Scattered // may be buggy - undefined locations
+};
+
+enum class XWMObjectGoal : short
+{
+	ojg_Neither = 0,
+	ojg_Destroyed,
+	ojg_Survive
+};
 
 class XWMFlightGroup
 {
@@ -210,6 +271,16 @@ class XWMObject
 {
 public:
 
+	XWMObjectType objectType;
+
+	XWMObjectFormation formation;
+
+	XWMObjectGoal objectGoal;
+
+	int numberOfObjects;
+
+	float object_x, object_y, object_z;
+	float object_yaw, object_pitch, object_roll;
 };
 
 
