@@ -770,8 +770,10 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 		float objectPosY = oj->object_y;
 		float objectPosZ = oj->object_z;
 
-		float objectPosA;  // These are the two planes of the 2d minefield grid
-		float objectPosB;
+		int mine_dist = 100; // change this to change the distance between the mines
+		/** The minefield is a square 2d along two planes (a,b) centred on the given position **/
+		float objectPosA = 0 -(mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+		float objectPosB = 0 -(mine_dist / 2 * (number_of_objects - 1));
 		
 		matrix orient;
 		xwi_determine_object_pbh(&orient, oj);
@@ -780,12 +782,13 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 		// now configure each object in the group (mines multiple)
 				
 		std::string suffix; // for naming
-		int mine_dist = 100; // change this to change the distance between the mines
-		for (int i = 0; i < number_of_objects; i++) { // make an a-b 2d grid from the mines along one plane a
-			objectPosA += (mine_dist * i) - (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+
+		for (int i = 0; i < number_of_objects; i++) { // make an a-b 2d grid from the mines
+			objectPosA += (mine_dist * i); // add a new row to the grid
 			for (int m = 0; m < number_of_objects; m++) { // for each increment along the a plane, add mines along b plane
-				objectPosB += (mine_dist * m) - (mine_dist / 2 * (number_of_objects - 1)); 
+				objectPosB += (mine_dist * m);  // for each new row populate the column
 				
+				/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
 				auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, objectPosA, objectPosB);
 				vm_vec_scale(&ojxyz, 1000); // units are in kilometers (after processing by xwinglib which handles the
 											// factor of 160), so scale them up
