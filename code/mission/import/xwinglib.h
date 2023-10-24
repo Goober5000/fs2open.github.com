@@ -171,7 +171,7 @@ enum class XWMObjectType : short
 	oj_Orange_Crescent7,
 	oj_Orange_Crescent8,
 	oj_Death_Star,
-	oj_Training_Platform1,
+	oj_Training_Platform1, // = 58; ?
 	oj_Training_Platform2,
 	oj_Training_Platform3,
 	oj_Training_Platform4,
