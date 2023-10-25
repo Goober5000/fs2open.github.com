@@ -110,6 +110,9 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 	else
 		return Locked_sexp_true;
 
+	if (fg->arrivalEvent == XWMArrivalEvent::ae_mission_start)
+		return Locked_sexp_true;
+
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_arrived)
 	{
 		sprintf(sexp_buf, "( has-arrived-delay 0 \"%s\" )", arrival_fg_name);
