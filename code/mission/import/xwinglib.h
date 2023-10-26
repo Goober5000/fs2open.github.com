@@ -140,14 +140,14 @@ enum class XWMObjective : short
 
 enum class XWMObjectType : short 
 {
-	oj_Mine1,
+	oj_Mine1 = 0x12,
 	oj_Mine2,
 	oj_Mine3,
 	oj_Mine4,
 	oj_Satellite,
 	oj_Nav_Buoy,
 	oj_Probe,
-	oj_Asteroid1,
+	oj_Asteroid1 = 0x1A,
 	oj_Asteroid2,
 	oj_Asteroid3,
 	oj_Asteroid4,
@@ -171,7 +171,7 @@ enum class XWMObjectType : short
 	oj_Orange_Crescent7,
 	oj_Orange_Crescent8,
 	oj_Death_Star,
-	oj_Training_Platform1, // = 58; ?
+	oj_Training_Platform1 = 0x3A,
 	oj_Training_Platform2,
 	oj_Training_Platform3,
 	oj_Training_Platform4,
@@ -187,7 +187,7 @@ enum class XWMObjectType : short
 
 enum class XWMObjectFormation : short
 {
-	ojf_FloorXY,
+	ojf_FloorXY = 0,
 	ojf_SideYZ,
 	ojf_FrontXZ,
 	ojf_Scattered // may be buggy - undefined locations

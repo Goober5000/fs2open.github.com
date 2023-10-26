@@ -109,6 +109,9 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 	}
 	else
 		return Locked_sexp_true;
+	
+	if (fg->arrivalEvent == XWMArrivalEvent::ae_mission_start)
+		return Locked_sexp_true;
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_arrived)
 	{
@@ -623,72 +626,39 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 	}
 }
 
-bool space_object = true; // true for objects, false for backgrounds - needs to be checked
 const char *xwi_determine_object_type(const XWMObject *oj)
 {
 	switch (oj->objectType) {
 	case XWMObjectType::oj_Mine1:
-		return "Defense_Mine#Ion";
+		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine2:
-		return "Defense_Mine#Ion";
+		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine3:
-		return "Defense_Mine#Ion";
+		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine4:
-		return "Defense_Mine#Ion";
+		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Satellite:
-		return "Sensor_Satellite#Imp";
+		return "Sensor Satellite#Imp";
 	case XWMObjectType::oj_Nav_Buoy:
-		return "Nav_Buoy#real";
+		return "Nav Buoy#real";
 	case XWMObjectType::oj_Probe:
-		return "Sensor_Probe";
+		return "Sensor Probe";
 	case XWMObjectType::oj_Asteroid1:
-		return " ";
+		return "Asteroid#Small01";
 	case XWMObjectType::oj_Asteroid2:
-		return " ";
+		return "Asteroid#Small02";
 	case XWMObjectType::oj_Asteroid3:
-		return " ";
+		return "Asteroid#Medium01";
 	case XWMObjectType::oj_Asteroid4:
-		return " ";
+		return "Asteroid#Medium02";
 	case XWMObjectType::oj_Asteroid5:
-		return " ";
+		return "Asteroid#Medium03";
 	case XWMObjectType::oj_Asteroid6:
-		return " ";
+		return "Asteroid#Big01";
 	case XWMObjectType::oj_Asteroid7:
-		return " ";
+		return "Asteroid#Big02";
 	case XWMObjectType::oj_Asteroid8:
-		return " ";
-	case XWMObjectType::oj_Rock_World:    // should I just remove these cases for the backgrounds?
-		return "Planet_Bespin";
-	case XWMObjectType::oj_Gray_Ring_World:
-		return "Planet_Gas";
-	case XWMObjectType::oj_Gray_World:
-		return "Planet_Moon01";
-	case XWMObjectType::oj_Brown_World:
-		return "Planet_HosnianPrime";
-	case XWMObjectType::oj_Gray_World2:
-		return "Planet_Moon02";
-	case XWMObjectType::oj_Planet_and_Moon:
-		return "Planet_Generic02";
-	case XWMObjectType::oj_Gray_Crescent:
-		return "Planet_Ice";
-	case XWMObjectType::oj_Orange_Crescent1:
-		return "Planet_Ryloth";
-	case XWMObjectType::oj_Orange_Crescent2:
-		return "Planet_Swamp";
-	case XWMObjectType::oj_Orange_Crescent3:
-		return "Planet_Desert";
-	case XWMObjectType::oj_Orange_Crescent4:
-		return "Planet_Mud";
-	case XWMObjectType::oj_Orange_Crescent5:
-		return "Planet_Utapau";
-	case XWMObjectType::oj_Orange_Crescent6:
-		return "Planet_RhenVar";
-	case XWMObjectType::oj_Orange_Crescent7:
-		return "Planet_Malastare";
-	case XWMObjectType::oj_Orange_Crescent8:
-		return "Planet_Generic02";
-	case XWMObjectType::oj_Death_Star:
-		return "Planet_Moon02";
+		return "Asteroid#Big03";
 	case XWMObjectType::oj_Training_Platform1:
 		return nullptr;
 	case XWMObjectType::oj_Training_Platform2:
@@ -720,15 +690,15 @@ const char *xwi_determine_object_type(const XWMObject *oj)
 }
 
 vec3d xwi_determine_mine_formation_position(const XWMObject* oj, float objectPosX, float objectPosY, float objectPosZ, 
-	float objectPosA, float objectPosB)
+	float offsetAxisA, float offsetAxisB)
 {
 	switch (oj->formation) {  // Y and Z axes must be switched for FSO
 	case XWMObjectFormation::ojf_FloorXY:
-		return vm_vec_new((objectPosX + objectPosA), objectPosZ, (objectPosY + objectPosB));
+		return vm_vec_new((objectPosX + offsetAxisA), objectPosZ, (objectPosY + offsetAxisB));
 	case XWMObjectFormation::ojf_SideYZ:
-		return vm_vec_new(objectPosX, (objectPosZ + objectPosB), (objectPosY + objectPosA));
+		return vm_vec_new(objectPosX, (objectPosZ + offsetAxisA), (objectPosY + offsetAxisB));
 	case XWMObjectFormation::ojf_FrontXZ:
-		return vm_vec_new((objectPosX + objectPosA), (objectPosZ + objectPosB), objectPosY);
+		return vm_vec_new((objectPosX + offsetAxisA), (objectPosZ + offsetAxisB), objectPosY);
 	case XWMObjectFormation::ojf_Scattered:
 		return vm_vec_new(objectPosX, objectPosZ, objectPosY);
 	default:
@@ -737,7 +707,7 @@ vec3d xwi_determine_mine_formation_position(const XWMObject* oj, float objectPos
 	return vm_vec_new(objectPosX, objectPosZ, objectPosY);
 }
 
-void xwi_determine_object_pbh(matrix* orient, const XWMObject* oj)
+void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 {
 	angles a;
 	a.p = oj->object_pitch;
@@ -747,107 +717,143 @@ void xwi_determine_object_pbh(matrix* orient, const XWMObject* oj)
 	return;
 }
 
-
 void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
 {
-	if (space_object) { // For parsing objects not backgrounds
+	SCP_UNUSED(pm);
+	auto object_type = xwi_determine_object_type(oj);
+	if (object_type == nullptr)
+		return;
 
-		SCP_UNUSED(pm);
+	int number_of_objects = oj->numberOfObjects;
+	if (number_of_objects < 1)
+		return;
 
-		int number_of_objects = oj->numberOfObjects;
-		/**
-		NumberOfCraft Holds various parameter values depending on object types.For mines,
-		this determines how wide the minefield is.Minefields are always a square formation,
-		centered over their starting point.For example,
-		a value of 3 will create a 3x3 grid of mines.**/
+	/**
+	NumberOfCraft Holds various parameter values depending on object types.For mines,
+	this determines how wide the minefield is.Minefields are always a square formation,
+	centered over their starting point.For example,
+	a value of 3 will create a 3x3 grid of mines.**/
 
-		SCP_string object_type = xwi_determine_object_type(oj);
-
-		// object position and orientation
-		// NOTE: Y and Z are swapped
-
-		float objectPosX = oj->object_x;
-		float objectPosY = oj->object_y;
-		float objectPosZ = oj->object_z;
-
-		int mine_dist = 100; // change this to change the distance between the mines
-		/** The minefield is a square 2d along two planes (a,b) centred on the given position **/
-		float objectPosA = 0 -(mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
-		float objectPosB = 0 -(mine_dist / 2 * (number_of_objects - 1));
 		
-		matrix orient;
-		xwi_determine_object_pbh(&orient, oj);
-		p_object pobj;
 
-		// now configure each object in the group (mines multiple)
-				
-		std::string suffix; // for naming
+	// object position and orientation
+	// NOTE: Y and Z are swapped after all operartions are perfomed
 
-		for (int i = 0; i < number_of_objects; i++) { // make an a-b 2d grid from the mines
-			objectPosA += (mine_dist * i); // add a new row to the grid
-			for (int m = 0; m < number_of_objects; m++) { // for each increment along the a plane, add mines along b plane
-				objectPosB += (mine_dist * m);  // for each new row populate the column
-				
-				/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
-				auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, objectPosA, objectPosB);
-				vm_vec_scale(&ojxyz, 1000); // units are in kilometers (after processing by xwinglib which handles the
-											// factor of 160), so scale them up
+	float objectPosX = oj->object_x;
+	float objectPosY = oj->object_y;
+	float objectPosZ = oj->object_z;
 
-				suffix = object_type.c_str() + (i * m); // ok so not sure how to name them... add suffix?
-				strcpy_s(pobj.name, suffix.c_str());    // add a suffix to the name...??
-				SCP_totitle(pobj.name);
+	int mine_dist = 400; // change this to change the distance between the mines
+	/** The minefield is a square 2d along two planes (a,b) centred on the given position **/
+	float offsetAxisA = 0 -(mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+	float offsetAxisB = 0 -(mine_dist / 2 * (number_of_objects - 1));
+		
+	matrix orient;
+	xwi_determine_object_orient(&orient, oj);
+	p_object pobj;
 
-				pobj.orient = orient;
-				pobj.pos = ojxyz;
+	// Copy objects in Parse_objects to set for name checking below
+	// This only needs to be done fully once per object group then can be added to after each new object
+	SCP_set<char[32]> objectSet;
+	for (int n = 0; n < Parse_objects.size(); n++) {
+		objectSet.insert(Parse_objects[n].name);
+	}
 
-				/** Not sure if all these fields are needed?
-				pobj.ship_class = 1;
+	// now being to configure each object in the group (mines multiple)
 
-			{
-				pobj.ship_class = 0;
+	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
+		offsetAxisA += (mine_dist * a); // add a new row to the grid
+		for (int b = 0; b < number_of_objects; b++) { // for each increment along the a plane, add mines along b plane
+			offsetAxisB += (mine_dist * b);  // for each new row populate the column
+			
+			/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
+			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
+			vm_vec_scale(&ojxyz, 1000); // units are in kilometers (after processing by xwinglib which handles the
+										// factor of 160), so scale them up
+
+			pobj.orient = orient;
+			pobj.pos = ojxyz;
+
+			// regular name, regular suffix
+
+			char base_name[NAME_LENGTH];
+			char suffix[NAME_LENGTH];
+			char *newArray = new char[std::strlen(base_name) + std::strlen(suffix) + 1];
+			strcpy_s(base_name, object_type);
+
+			end_string_at_first_hash_symbol(base_name);
+
+			// find lowest unique n for the suffix
+			int n = 1;
+			sprintf(suffix, NOX(" %d"), n);
+
+			// objects don't have designations so they are limited to the name from the object_type and suffix
+			// names will be hidden in game so to avoid iterating multiple times, allow for suffix 999 (+4)
+			int char_overflow = static_cast<int>(strlen(base_name) + 4) - (NAME_LENGTH - 1);
+			if (char_overflow > 0) {
+				base_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
 			}
-			for (int wing_index = 0; wing_index < number_in_wave; wing_index++) {
-				p_object pobj;
+			char croppedName[NAME_LENGTH];
+			strcpy_s(croppedName, base_name); // save base_name incase suffix needs changed
 
-				if (wingp) {
-					wing_bash_ship_name(pobj.name, wingp->name, wing_index + 1, nullptr);
-					pobj.wingnum = wingnum;
-					pobj.pos_in_wing = wing_index;
-					pobj.arrival_cue = Locked_sexp_false;
-				} else {
-					strcpy_s(pobj.name, fg->designation.c_str());
-					SCP_totitle(pobj.name);
-
-					// if a ship doesn't have an anchor, make sure it is at-location
-					// (flight groups present at mission start will have arriveByHyperspace set to false)
-					if (pobj.arrival_anchor < 0)
-						pobj.arrival_location = ARRIVE_AT_LOCATION;
-					if (pobj.departure_anchor < 0)
-						pobj.departure_location = DEPART_AT_LOCATION;
-				}
-				pobj.ai_class = ai_index;
-				pobj.warpin_params_index = sip->warpin_params_index;
-				pobj.warpout_params_index = sip->warpout_params_index;
-				pobj.ship_max_shield_strength = sip->max_shield_strength;
-				pobj.ship_max_hull_strength = sip->max_hull_strength;
-				Assert(pobj.ship_max_hull_strength >
-					   0.0f); // Goober5000: div-0 check (not shield because we might not have one)
-				pobj.max_shield_recharge = sip->max_shield_recharge;
-				pobj.replacement_textures =
-					sip->replacement_textures; // initialize our set with the ship class set, which may be empty
-				pobj.score = sip->score;
-				pobj.team = team;
-
-				if (wingp && wing_index == fg->specialShipNumber)
-					pobj.cargo1 = (char)xwi_lookup_cargo(fg->specialCargo.c_str());
-				else
-					pobj.cargo1 = (char)xwi_lookup_cargo(fg->cargo.c_str()); **/
-
-				Parse_objects.push_back(pobj);
+			strcat_s(croppedName, suffix);
+			// Now check the name against the objectSet of names
+			auto fin = objectSet.end();
+			while (objectSet.find(croppedName) != fin) {
+				n++;
+				sprintf(suffix, NOX(" %d"), n);
+				strcpy_s(croppedName, base_name);
+				strcat_s(croppedName, suffix);
 			}
+
+			strcpy_s(pobj.name, croppedName);
+			
+			objectSet.insert(pobj.name);  // add the new name to the objectSet
+			SCP_totitle(pobj.name);
+			Parse_objects.push_back(pobj);
+
+			/** Is any of this needed below?
+
+			pobj.arrival_cue = arrival_cue;
+			pobj.arrival_delay = fg->arrivalDelay;
+			pobj.arrival_location = fg->arriveByHyperspace ? ARRIVE_AT_LOCATION : ARRIVE_FROM_DOCK_BAY;
+			pobj.arrival_anchor = xwi_determine_anchor(xwim, fg);
+			pobj.departure_location = fg->departByHyperspace ? DEPART_AT_LOCATION : DEPART_AT_DOCK_BAY;
+			pobj.departure_anchor = pobj.arrival_anchor;
+
+			// if a ship doesn't have an anchor, make sure it is at-location
+			// (flight groups present at mission start will have arriveByHyperspace set to false)
+			if (pobj.arrival_anchor < 0)
+				pobj.arrival_location = ARRIVE_AT_LOCATION;
+			if (pobj.departure_anchor < 0)
+				pobj.departure_location = DEPART_AT_LOCATION;
 		}
-	} else {
-		// now sort out the backgrounds and add them in game... or not...
+
+		// initialize class-specific fields
+		pobj.ai_class = ai_index;
+		pobj.warpin_params_index = sip->warpin_params_index;
+		pobj.warpout_params_index = sip->warpout_params_index;
+		pobj.ship_max_shield_strength = sip->max_shield_strength;
+		pobj.ship_max_hull_strength = sip->max_hull_strength;
+		Assert(pobj.ship_max_hull_strength >
+			   0.0f); // Goober5000: div-0 check (not shield because we might not have one)
+		pobj.max_shield_recharge = sip->max_shield_recharge;
+		pobj.replacement_textures =
+			sip->replacement_textures; // initialize our set with the ship class set, which may be empty
+		pobj.score = sip->score;
+
+		pobj.team = team;
+
+		pobj.cargo1 = (char)xwi_lookup_cargo(fg->specialCargo.c_str());
+		else
+			pobj.cargo1 = (char)xwi_lookup_cargo(fg->cargo.c_str());
+
+		if (fg->craftOrder != XWMCraftOrder::o_Hold_Steady &&
+			fg->craftOrder != XWMCraftOrder::o_Starship_Sit_And_Fire)
+		pobj.initial_velocity = 0; **/
+
+			
+		}
 	}
 }
 
