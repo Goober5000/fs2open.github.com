@@ -109,9 +109,6 @@ int xwi_determine_arrival_cue(const XWingMission *xwim, const XWMFlightGroup *fg
 	}
 	else
 		return Locked_sexp_true;
-	
-	if (fg->arrivalEvent == XWMArrivalEvent::ae_mission_start)
-		return Locked_sexp_true;
 
 	if (fg->arrivalEvent == XWMArrivalEvent::ae_afg_arrived)
 	{
@@ -659,30 +656,6 @@ const char *xwi_determine_object_type(const XWMObject *oj)
 		return "Asteroid#Big02";
 	case XWMObjectType::oj_Asteroid8:
 		return "Asteroid#Big03";
-	case XWMObjectType::oj_Training_Platform1:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform2:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform3:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform4:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform5:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform6:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform7:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform8:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform9:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform10:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform11:
-		return nullptr;
-	case XWMObjectType::oj_Training_Platform12:
-		return nullptr;
 	default:
 		break;
 	}
@@ -717,6 +690,24 @@ void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 	return;
 }
 
+// find lowest unique n for the suffix should return true when a unique name is found else false
+bool unique_object_suffix(SCP_set<SCP_string> objectNameSet, char base_name[NAME_LENGTH], char suffix[NAME_LENGTH])
+{
+	
+	// Check that the name including suffix is not longer than the allowed NAME_LENGTH
+	int char_overflow = static_cast<int>(strlen(base_name) + strlen(suffix)) - (NAME_LENGTH - 1);
+	if (char_overflow > 0) {
+		base_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
+	}
+	strcat(base_name, suffix);
+
+	// Now check the name against the objectSet of names
+	if (objectNameSet.count(base_name)) {
+		return true;
+	} else
+		return false;
+}
+
 void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
 {
 	SCP_UNUSED(pm);
@@ -727,6 +718,27 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	int number_of_objects = oj->numberOfObjects;
 	if (number_of_objects < 1)
 		return;
+
+	if (number_of_objects > 1) {
+		switch (oj->objectType) {
+			case XWMObjectType::oj_Mine1:
+			case XWMObjectType::oj_Mine2:
+			case XWMObjectType::oj_Mine3:
+			case XWMObjectType::oj_Mine4:
+				break;
+			default:
+				number_of_objects = 1;
+				Warning(LOCATION, "There should only be NumberOfCraft of %s", object_type);	
+			break;
+		}
+	}
+
+	int ship_class = ship_info_lookup(object_type);
+	if (ship_class < 0) {
+		Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", object_type);
+		ship_class = 0;
+	}
+	auto sip = &Ship_info[ship_class];
 
 	/**
 	NumberOfCraft Holds various parameter values depending on object types.For mines,
@@ -750,16 +762,15 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 		
 	matrix orient;
 	xwi_determine_object_orient(&orient, oj);
-	p_object pobj;
 
 	// Copy objects in Parse_objects to set for name checking below
 	// This only needs to be done fully once per object group then can be added to after each new object
-	SCP_set<char[32]> objectSet;
+	SCP_set<SCP_string> objectNameSet;
 	for (int n = 0; n < Parse_objects.size(); n++) {
-		objectSet.insert(Parse_objects[n].name);
+		objectNameSet.insert(Parse_objects[n].name);
 	}
 
-	// now being to configure each object in the group (mines multiple)
+	// now begin to configure each object in the group (mines multiple)
 
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
 		offsetAxisA += (mine_dist * a); // add a new row to the grid
@@ -771,91 +782,71 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			vm_vec_scale(&ojxyz, 1000); // units are in kilometers (after processing by xwinglib which handles the
 										// factor of 160), so scale them up
 
+			p_object pobj;
+			SCP_totitle(pobj.name);
 			pobj.orient = orient;
 			pobj.pos = ojxyz;
+			
+			int team = 0; //default civilian/team none
+			if (number_of_objects > 1)
+				team = 2; //mines are always hostile
+
+			int ship_class = ship_info_lookup(object_type);
+			if (ship_class < 0) {
+				Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", object_type);
+				ship_class = 0;
+			}
+			auto sip = &Ship_info[ship_class];
 
 			// regular name, regular suffix
-
 			char base_name[NAME_LENGTH];
 			char suffix[NAME_LENGTH];
-			char *newArray = new char[std::strlen(base_name) + std::strlen(suffix) + 1];
 			strcpy_s(base_name, object_type);
 
 			end_string_at_first_hash_symbol(base_name);
 
-			// find lowest unique n for the suffix
 			int n = 1;
+			char suffix[NAME_LENGTH];
 			sprintf(suffix, NOX(" %d"), n);
 
-			// objects don't have designations so they are limited to the name from the object_type and suffix
-			// names will be hidden in game so to avoid iterating multiple times, allow for suffix 999 (+4)
-			int char_overflow = static_cast<int>(strlen(base_name) + 4) - (NAME_LENGTH - 1);
-			if (char_overflow > 0) {
-				base_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
-			}
-			char croppedName[NAME_LENGTH];
-			strcpy_s(croppedName, base_name); // save base_name incase suffix needs changed
-
-			strcat_s(croppedName, suffix);
-			// Now check the name against the objectSet of names
-			auto fin = objectSet.end();
-			while (objectSet.find(croppedName) != fin) {
+			// Keep searching through the names until a unique one is discovered
+			while (!unique_object_suffix(objectNameSet, base_name, suffix))
+			{
 				n++;
 				sprintf(suffix, NOX(" %d"), n);
-				strcpy_s(croppedName, base_name);
-				strcat_s(croppedName, suffix);
+				if (n > objectNameSet.size()) { // if Size = all the elements + null then a name should be found
+					goto noNameError;
+				}
 			}
-
-			strcpy_s(pobj.name, croppedName);
 			
-			objectSet.insert(pobj.name);  // add the new name to the objectSet
-			SCP_totitle(pobj.name);
+			strcpy_s(pobj.name, base_name);
+
+			pobj.arrival_cue = Locked_sexp_true;
+			pobj.arrival_location = ARRIVE_AT_LOCATION;
+			pobj.departure_cue = Locked_sexp_false;
+			pobj.departure_location = DEPART_AT_LOCATION;
+			
+			pobj.ai_class = sip->ai_class;
+			pobj.warpin_params_index = sip->warpin_params_index;
+			pobj.warpout_params_index = sip->warpout_params_index;
+			pobj.ship_max_shield_strength = sip->max_shield_strength;
+			pobj.ship_max_hull_strength = sip->max_hull_strength;
+			Assert(pobj.ship_max_hull_strength > 0.0f); // Goober5000: div-0 check (not shield because we might not have one)
+			pobj.max_shield_recharge = sip->max_shield_recharge;
+			pobj.replacement_textures = sip->replacement_textures; // initialize our set with the ship class set, which may be empty
+			pobj.score = sip->score;
+
+			pobj.team = team;
+			pobj.initial_velocity = 0;
+
+			objectNameSet.insert(pobj.name); // add the new name to the objectSet
 			Parse_objects.push_back(pobj);
-
-			/** Is any of this needed below?
-
-			pobj.arrival_cue = arrival_cue;
-			pobj.arrival_delay = fg->arrivalDelay;
-			pobj.arrival_location = fg->arriveByHyperspace ? ARRIVE_AT_LOCATION : ARRIVE_FROM_DOCK_BAY;
-			pobj.arrival_anchor = xwi_determine_anchor(xwim, fg);
-			pobj.departure_location = fg->departByHyperspace ? DEPART_AT_LOCATION : DEPART_AT_DOCK_BAY;
-			pobj.departure_anchor = pobj.arrival_anchor;
-
-			// if a ship doesn't have an anchor, make sure it is at-location
-			// (flight groups present at mission start will have arriveByHyperspace set to false)
-			if (pobj.arrival_anchor < 0)
-				pobj.arrival_location = ARRIVE_AT_LOCATION;
-			if (pobj.departure_anchor < 0)
-				pobj.departure_location = DEPART_AT_LOCATION;
-		}
-
-		// initialize class-specific fields
-		pobj.ai_class = ai_index;
-		pobj.warpin_params_index = sip->warpin_params_index;
-		pobj.warpout_params_index = sip->warpout_params_index;
-		pobj.ship_max_shield_strength = sip->max_shield_strength;
-		pobj.ship_max_hull_strength = sip->max_hull_strength;
-		Assert(pobj.ship_max_hull_strength >
-			   0.0f); // Goober5000: div-0 check (not shield because we might not have one)
-		pobj.max_shield_recharge = sip->max_shield_recharge;
-		pobj.replacement_textures =
-			sip->replacement_textures; // initialize our set with the ship class set, which may be empty
-		pobj.score = sip->score;
-
-		pobj.team = team;
-
-		pobj.cargo1 = (char)xwi_lookup_cargo(fg->specialCargo.c_str());
-		else
-			pobj.cargo1 = (char)xwi_lookup_cargo(fg->cargo.c_str());
-
-		if (fg->craftOrder != XWMCraftOrder::o_Hold_Steady &&
-			fg->craftOrder != XWMCraftOrder::o_Starship_Sit_And_Fire)
-		pobj.initial_velocity = 0; **/
-
-			
 		}
 	}
-}
+noNameError:
+Warning(LOCATION, "Unable to find a suffix for %s", object_type);
+return;
+}	
 
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
