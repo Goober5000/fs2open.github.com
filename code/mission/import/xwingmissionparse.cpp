@@ -627,11 +627,8 @@ const char *xwi_determine_object_type(const XWMObject *oj)
 {
 	switch (oj->objectType) {
 	case XWMObjectType::oj_Mine1:
-		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine2:
-		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine3:
-		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Mine4:
 		return "Defense Mine#Ion";
 	case XWMObjectType::oj_Satellite:
@@ -691,21 +688,38 @@ void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 }
 
 // find lowest unique n for the suffix should return true when a unique name is found else false
-bool unique_object_suffix(SCP_set<SCP_string> objectNameSet, char base_name[NAME_LENGTH], char suffix[NAME_LENGTH])
+const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* object_type)
 {
-	
-	// Check that the name including suffix is not longer than the allowed NAME_LENGTH
-	int char_overflow = static_cast<int>(strlen(base_name) + strlen(suffix)) - (NAME_LENGTH - 1);
-	if (char_overflow > 0) {
-		base_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
-	}
-	strcat(base_name, suffix);
+	char base_name[NAME_LENGTH];
+	char suffix[NAME_LENGTH];
+	strcpy_s(base_name, object_type);
+	end_string_at_first_hash_symbol(base_name);
 
-	// Now check the name against the objectSet of names
-	if (objectNameSet.count(base_name)) {
-		return true;
-	} else
-		return false;
+	// we'll need to try suffixes starting at 1 and going until we find a unique name
+	int n = 1;
+	char object_name[NAME_LENGTH];
+	do {
+		sprintf(suffix, NOX(" %d"), n++);
+
+		// start building name
+		strcpy_s(object_name, base_name);
+
+		// if generated name will be longer than allowable name, truncate the class section of the name by the overflow
+		int char_overflow = static_cast<int>(strlen(base_name) + strlen(suffix)) - (NAME_LENGTH - 1);
+		if (char_overflow > 0) {
+			object_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
+		}
+
+		// complete building the name by adding suffix number and converting case
+		strcat_s(object_name, suffix);
+		SCP_totitle(object_name);
+
+		// continue as long as we find the name in our set
+	} while (objectNameSet.find(object_name) != objectNameSet.end());
+
+	// name does not yet exist in the set, so it's valid; add it and return
+	auto iter = objectNameSet.insert(object_name);
+	return iter.first->c_str();
 }
 
 void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
@@ -727,8 +741,8 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			case XWMObjectType::oj_Mine4:
 				break;
 			default:
+				Warning(LOCATION, "NumberOfCraft of %s", object_type, " was %d", number_of_objects, " but must be 1.");
 				number_of_objects = 1;
-				Warning(LOCATION, "There should only be NumberOfCraft of %s", object_type);	
 			break;
 		}
 	}
@@ -740,20 +754,12 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	}
 	auto sip = &Ship_info[ship_class];
 
-	/**
-	NumberOfCraft Holds various parameter values depending on object types.For mines,
-	this determines how wide the minefield is.Minefields are always a square formation,
-	centered over their starting point.For example,
-	a value of 3 will create a 3x3 grid of mines.**/
-
-		
-
 	// object position and orientation
 	// NOTE: Y and Z are swapped after all operartions are perfomed
-
-	float objectPosX = oj->object_x;
-	float objectPosY = oj->object_y;
-	float objectPosZ = oj->object_z;
+    // units are in kilometers (after processing by xwinglib which handles the factor of 160), so scale them up
+	float objectPosX = oj->object_x*1000;
+	float objectPosY = oj->object_y*1000;
+	float objectPosZ = oj->object_z*1000;
 
 	int mine_dist = 400; // change this to change the distance between the mines
 	/** The minefield is a square 2d along two planes (a,b) centred on the given position **/
@@ -775,51 +781,26 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
 		offsetAxisA += (mine_dist * a); // add a new row to the grid
 		for (int b = 0; b < number_of_objects; b++) { // for each increment along the a plane, add mines along b plane
-			offsetAxisB += (mine_dist * b);  // for each new row populate the column
-			
+			offsetAxisB += (mine_dist * b);           // for each new row populate the column
+
 			/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
-			vm_vec_scale(&ojxyz, 1000); // units are in kilometers (after processing by xwinglib which handles the
-										// factor of 160), so scale them up
 
 			p_object pobj;
-			SCP_totitle(pobj.name);
+			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, object_type));
 			pobj.orient = orient;
 			pobj.pos = ojxyz;
 			
-			int team = 0; //default civilian/team none
-			if (number_of_objects > 1)
-				team = 2; //mines are always hostile
+			int team = Species_info[sip->species].default_iff;
 
-			int ship_class = ship_info_lookup(object_type);
-			if (ship_class < 0) {
-				Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", object_type);
-				ship_class = 0;
+			if (number_of_objects > 1) {
+				auto team_name = "Hostile";
+				int index = iff_lookup(team_name);
+				if (index >= 0)
+					team = index;
+				else
+					Warning(LOCATION, "Could not find iff %s", team_name);
 			}
-			auto sip = &Ship_info[ship_class];
-
-			// regular name, regular suffix
-			char base_name[NAME_LENGTH];
-			char suffix[NAME_LENGTH];
-			strcpy_s(base_name, object_type);
-
-			end_string_at_first_hash_symbol(base_name);
-
-			int n = 1;
-			char suffix[NAME_LENGTH];
-			sprintf(suffix, NOX(" %d"), n);
-
-			// Keep searching through the names until a unique one is discovered
-			while (!unique_object_suffix(objectNameSet, base_name, suffix))
-			{
-				n++;
-				sprintf(suffix, NOX(" %d"), n);
-				if (n > objectNameSet.size()) { // if Size = all the elements + null then a name should be found
-					goto noNameError;
-				}
-			}
-			
-			strcpy_s(pobj.name, base_name);
 
 			pobj.arrival_cue = Locked_sexp_true;
 			pobj.arrival_location = ARRIVE_AT_LOCATION;
@@ -839,13 +820,9 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			pobj.team = team;
 			pobj.initial_velocity = 0;
 
-			objectNameSet.insert(pobj.name); // add the new name to the objectSet
 			Parse_objects.push_back(pobj);
 		}
 	}
-noNameError:
-Warning(LOCATION, "Unable to find a suffix for %s", object_type);
-return;
 }	
 
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
