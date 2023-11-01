@@ -7,6 +7,7 @@
 #include "ship/ship.h"
 #include "species_defs/species_defs.h"
 #include "starfield/starfield.h"
+#include "weapon/weapon.h"
 
 #include "xwingbrflib.h"
 #include "xwinglib.h"
@@ -687,7 +688,8 @@ void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 	return;
 }
 
-// find lowest unique n for the suffix should return true when a unique name is found else false
+// Determine the unique name from the object comprised of the object type and suffix. 
+// Add the new name to the objectNameSet and return it to parse_xwi_objectgroup
 const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* object_type)
 {
 	char base_name[NAME_LENGTH];
@@ -741,7 +743,8 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			case XWMObjectType::oj_Mine4:
 				break;
 			default:
-				Warning(LOCATION, "NumberOfCraft of %s", object_type, " was %d", number_of_objects, " but must be 1.");
+				Warning(LOCATION,
+					"NumberOfCraft of '%s' was %d but must be 1.", object_type, number_of_objects);
 				number_of_objects = 1;
 			break;
 		}
@@ -769,10 +772,25 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	matrix orient;
 	xwi_determine_object_orient(&orient, oj);
 
+	int team = Species_info[sip->species].default_iff;
+
+	switch (oj->objectType) {
+	case XWMObjectType::oj_Mine1:
+	case XWMObjectType::oj_Mine2:
+	case XWMObjectType::oj_Mine3:
+	case XWMObjectType::oj_Mine4:
+		auto team_name = "Hostile";
+		int index = iff_lookup(team_name);
+		if (index >= 0)
+			team = index;
+		else
+			Warning(LOCATION, "Could not find iff %s", team_name);
+	}
+
 	// Copy objects in Parse_objects to set for name checking below
 	// This only needs to be done fully once per object group then can be added to after each new object
 	SCP_set<SCP_string> objectNameSet;
-	for (int n = 0; n < Parse_objects.size(); n++) {
+	for (int n = 0; n < (int)Parse_objects.size(); n++) {
 		objectNameSet.insert(Parse_objects[n].name);
 	}
 
@@ -786,21 +804,13 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
 
+			// Defense Mine#Ion needs to have it's weapon changed from ion to laser
+			int mine_laser_index = weapon_info_lookup("T&B KX-5#imp");
+
 			p_object pobj;
 			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, object_type));
 			pobj.orient = orient;
 			pobj.pos = ojxyz;
-			
-			int team = Species_info[sip->species].default_iff;
-
-			if (number_of_objects > 1) {
-				auto team_name = "Hostile";
-				int index = iff_lookup(team_name);
-				if (index >= 0)
-					team = index;
-				else
-					Warning(LOCATION, "Could not find iff %s", team_name);
-			}
 
 			pobj.arrival_cue = Locked_sexp_true;
 			pobj.arrival_location = ARRIVE_AT_LOCATION;
@@ -814,6 +824,36 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			pobj.ship_max_hull_strength = sip->max_hull_strength;
 			Assert(pobj.ship_max_hull_strength > 0.0f); // Goober5000: div-0 check (not shield because we might not have one)
 			pobj.max_shield_recharge = sip->max_shield_recharge;
+
+			switch (oj->objectType) {
+			case XWMObjectType::oj_Mine1:
+			case XWMObjectType::oj_Mine2:
+			case XWMObjectType::oj_Mine3:
+			case XWMObjectType::oj_Mine4:
+				pobj.subsys_index = Subsys_index;
+				int this_subsys = allocate_subsys_status();
+				pobj.subsys_count++;
+				strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
+
+				for (int n = 0; n < sip->n_subsystems; n++) {
+					auto subsys = &sip->subsystems[n];
+					if (subsys->type == SUBSYSTEM_TURRET) {
+						this_subsys = allocate_subsys_status();
+						pobj.subsys_count++;
+						strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
+
+						for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++) {
+							if (subsys->primary_banks[bank] >= 0) {
+								Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
+							}
+						}
+					}
+				}
+				break;
+			default:
+				break;
+			}
+
 			pobj.replacement_textures = sip->replacement_textures; // initialize our set with the ship class set, which may be empty
 			pobj.score = sip->score;
 
