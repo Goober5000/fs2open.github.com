@@ -785,6 +785,9 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			team = index;
 		else
 			Warning(LOCATION, "Could not find iff %s", team_name);
+		break;
+	default:
+		break;
 	}
 
 	// Copy objects in Parse_objects to set for name checking below
