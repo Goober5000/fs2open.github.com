@@ -624,7 +624,7 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 	}
 }
 
-const char *xwi_determine_object_type(const XWMObject *oj)
+const char *xwi_determine_object_class(const XWMObject *oj)
 {
 	switch (oj->objectType) {
 	case XWMObjectType::oj_Mine1:
@@ -690,11 +690,11 @@ void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 
 // Determine the unique name from the object comprised of the object type and suffix. 
 // Add the new name to the objectNameSet and return it to parse_xwi_objectgroup
-const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* object_type)
+const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* class_name)
 {
 	char base_name[NAME_LENGTH];
 	char suffix[NAME_LENGTH];
-	strcpy_s(base_name, object_type);
+	strcpy_s(base_name, class_name);
 	end_string_at_first_hash_symbol(base_name);
 
 	// we'll need to try suffixes starting at 1 and going until we find a unique name
@@ -727,35 +727,13 @@ const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, 
 void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
 {
 	SCP_UNUSED(pm);
-	auto object_type = xwi_determine_object_type(oj);
-	if (object_type == nullptr)
+	auto class_name = xwi_determine_object_class(oj);
+	if (class_name == nullptr)
 		return;
 
 	int number_of_objects = oj->numberOfObjects;
 	if (number_of_objects < 1)
 		return;
-
-	if (number_of_objects > 1) {
-		switch (oj->objectType) {
-			case XWMObjectType::oj_Mine1:
-			case XWMObjectType::oj_Mine2:
-			case XWMObjectType::oj_Mine3:
-			case XWMObjectType::oj_Mine4:
-				break;
-			default:
-				Warning(LOCATION,
-					"NumberOfCraft of '%s' was %d but must be 1.", object_type, number_of_objects);
-				number_of_objects = 1;
-			break;
-		}
-	}
-
-	int ship_class = ship_info_lookup(object_type);
-	if (ship_class < 0) {
-		Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", object_type);
-		ship_class = 0;
-	}
-	auto sip = &Ship_info[ship_class];
 
 	// object position and orientation
 	// NOTE: Y and Z are swapped after all operartions are perfomed
@@ -763,14 +741,20 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	float objectPosX = oj->object_x*1000;
 	float objectPosY = oj->object_y*1000;
 	float objectPosZ = oj->object_z*1000;
+	float offsetAxisA = 0;
+	float offsetAxisB = 0;
 
 	int mine_dist = 400; // change this to change the distance between the mines
-	/** The minefield is a square 2d along two planes (a,b) centred on the given position **/
-	float offsetAxisA = 0 -(mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
-	float offsetAxisB = 0 -(mine_dist / 2 * (number_of_objects - 1));
-		
+	int mine_laser_index = weapon_info_lookup("T&B KX-5#imp"); // "Defense Mine#Ion" needs to have its weapon changed to laser
 	matrix orient;
 	xwi_determine_object_orient(&orient, oj);
+	
+	int ship_class = ship_info_lookup(class_name);
+	if (ship_class < 0) {
+		Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", class_name);
+		ship_class = 0;
+	}
+	auto sip = &Ship_info[ship_class];
 
 	int team = Species_info[sip->species].default_iff;
 
@@ -785,8 +769,16 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			team = index;
 		else
 			Warning(LOCATION, "Could not find iff %s", team_name);
+		if (number_of_objects > 1) {
+			offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
+		}
 		break;
 	default:
+		if (number_of_objects > 1) {
+			Warning(LOCATION, "NumberOfCraft of '%s' was %d but must be 1.", class_name, number_of_objects);
+			number_of_objects = 1;
+		}
 		break;
 	}
 
@@ -797,21 +789,17 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 		objectNameSet.insert(Parse_objects[n].name);
 	}
 
-	// now begin to configure each object in the group (mines multiple)
-
+	// Now begin to configure each object in the group (mines multiple)
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
 		offsetAxisA += (mine_dist * a); // add a new row to the grid
 		for (int b = 0; b < number_of_objects; b++) { // for each increment along the a plane, add mines along b plane
 			offsetAxisB += (mine_dist * b);           // for each new row populate the column
 
-			/** Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc **/
+			// Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
 
-			// Defense Mine#Ion needs to have it's weapon changed from ion to laser
-			int mine_laser_index = weapon_info_lookup("T&B KX-5#imp");
-
 			p_object pobj;
-			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, object_type));
+			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name));
 			pobj.orient = orient;
 			pobj.pos = ojxyz;
 
@@ -916,6 +904,10 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// load flight groups
 	for (const auto &fg : xwim->flightgroups)
 		parse_xwi_flightgroup(pm, xwim, &fg);
+
+	// load objects
+	for (const auto &obj : xwim->objects)
+		parse_xwi_objectgroup(pm, xwim, &obj);
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
