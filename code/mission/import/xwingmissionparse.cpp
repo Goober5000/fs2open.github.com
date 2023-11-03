@@ -746,6 +746,9 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 
 	int mine_dist = 400; // change this to change the distance between the mines
 	int mine_laser_index = weapon_info_lookup("T&B KX-5#imp"); // "Defense Mine#Ion" needs to have its weapon changed to laser
+	if (mine_laser_index < 1)
+		Warning(LOCATION, "Weapon 'T&B KX-5#imp' could not be found.");
+
 	matrix orient;
 	xwi_determine_object_orient(&orient, oj);
 	
@@ -769,6 +772,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			team = index;
 		else
 			Warning(LOCATION, "Could not find iff %s", team_name);
+
 		if (number_of_objects > 1) {
 			offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
 			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
@@ -826,19 +830,22 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 				pobj.subsys_count++;
 				strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
 
-				for (int n = 0; n < sip->n_subsystems; n++) {
-					auto subsys = &sip->subsystems[n];
-					if (subsys->type == SUBSYSTEM_TURRET) {
-						this_subsys = allocate_subsys_status();
-						pobj.subsys_count++;
-						strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
+				if (mine_laser_index > 0) {
+					for (int n = 0; n < sip->n_subsystems; n++) {
+						auto subsys = &sip->subsystems[n];
+						if (subsys->type == SUBSYSTEM_TURRET) {
+							this_subsys = allocate_subsys_status();
+							pobj.subsys_count++;
+							strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
 
-						for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++) {
-							if (subsys->primary_banks[bank] >= 0) {
-								Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
+							for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++) {
+								if (subsys->primary_banks[bank] >= 0) {
+									Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
+								}
 							}
 						}
 					}
+			
 				}
 				break;
 			default:
