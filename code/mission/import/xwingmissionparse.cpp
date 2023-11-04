@@ -745,9 +745,10 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	float offsetAxisB = 0;
 
 	int mine_dist = 400; // change this to change the distance between the mines
-	int mine_laser_index = weapon_info_lookup("T&B KX-5#imp"); // "Defense Mine#Ion" needs to have its weapon changed to laser
-	if (mine_laser_index < 1)
-		Warning(LOCATION, "Weapon 'T&B KX-5#imp' could not be found.");
+	auto weapon_name = "T&B KX-5#imp";
+	int mine_laser_index = weapon_info_lookup(weapon_name); // "Defense Mine#Ion" needs to have its weapon changed to laser
+	if (mine_laser_index < 0)
+		Warning(LOCATION, "Could not find weapon %s", weapon_name);
 
 	matrix orient;
 	xwi_determine_object_orient(&orient, oj);
@@ -830,7 +831,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 				pobj.subsys_count++;
 				strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
 
-				if (mine_laser_index > 0) {
+				if (mine_laser_index >= 0) {
 					for (int n = 0; n < sip->n_subsystems; n++) {
 						auto subsys = &sip->subsystems[n];
 						if (subsys->type == SUBSYSTEM_TURRET) {
