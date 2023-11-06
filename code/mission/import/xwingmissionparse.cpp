@@ -7,6 +7,7 @@
 #include "ship/ship.h"
 #include "species_defs/species_defs.h"
 #include "starfield/starfield.h"
+#include "weapon/weapon.h"
 
 #include "xwingbrflib.h"
 #include "xwinglib.h"
@@ -626,6 +627,247 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 	}
 }
 
+const char *xwi_determine_object_class(const XWMObject *oj)
+{
+	switch (oj->objectType) {
+	case XWMObjectType::oj_Mine1:
+	case XWMObjectType::oj_Mine2:
+	case XWMObjectType::oj_Mine3:
+	case XWMObjectType::oj_Mine4:
+		return "Defense Mine#Ion";
+	case XWMObjectType::oj_Satellite:
+		return "Sensor Satellite#Imp";
+	case XWMObjectType::oj_Nav_Buoy:
+		return "Nav Buoy#real";
+	case XWMObjectType::oj_Probe:
+		return "Sensor Probe";
+	case XWMObjectType::oj_Asteroid1:
+		return "Asteroid#Small01";
+	case XWMObjectType::oj_Asteroid2:
+		return "Asteroid#Small02";
+	case XWMObjectType::oj_Asteroid3:
+		return "Asteroid#Medium01";
+	case XWMObjectType::oj_Asteroid4:
+		return "Asteroid#Medium02";
+	case XWMObjectType::oj_Asteroid5:
+		return "Asteroid#Medium03";
+	case XWMObjectType::oj_Asteroid6:
+		return "Asteroid#Big01";
+	case XWMObjectType::oj_Asteroid7:
+		return "Asteroid#Big02";
+	case XWMObjectType::oj_Asteroid8:
+		return "Asteroid#Big03";
+	default:
+		break;
+	}
+	return nullptr;
+}
+
+vec3d xwi_determine_mine_formation_position(const XWMObject* oj, float objectPosX, float objectPosY, float objectPosZ, 
+	float offsetAxisA, float offsetAxisB)
+{
+	switch (oj->formation) {  // Y and Z axes must be switched for FSO
+	case XWMObjectFormation::ojf_FloorXY:
+		return vm_vec_new((objectPosX + offsetAxisA), objectPosZ, (objectPosY + offsetAxisB));
+	case XWMObjectFormation::ojf_SideYZ:
+		return vm_vec_new(objectPosX, (objectPosZ + offsetAxisA), (objectPosY + offsetAxisB));
+	case XWMObjectFormation::ojf_FrontXZ:
+		return vm_vec_new((objectPosX + offsetAxisA), (objectPosZ + offsetAxisB), objectPosY);
+	case XWMObjectFormation::ojf_Scattered:
+		return vm_vec_new(objectPosX, objectPosZ, objectPosY);
+	default:
+		break;
+	}
+	return vm_vec_new(objectPosX, objectPosZ, objectPosY);
+}
+
+void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
+{
+	angles a;
+	a.p = oj->object_pitch;
+	a.b = oj->object_roll;
+	a.h = oj->object_yaw;
+	vm_angles_2_matrix(orient, &a);
+	return;
+}
+
+// Determine the unique name from the object comprised of the object type and suffix. 
+// Add the new name to the objectNameSet and return it to parse_xwi_objectgroup
+const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* class_name)
+{
+	char base_name[NAME_LENGTH];
+	char suffix[NAME_LENGTH];
+	strcpy_s(base_name, class_name);
+	end_string_at_first_hash_symbol(base_name);
+
+	// we'll need to try suffixes starting at 1 and going until we find a unique name
+	int n = 1;
+	char object_name[NAME_LENGTH];
+	do {
+		sprintf(suffix, NOX(" %d"), n++);
+
+		// start building name
+		strcpy_s(object_name, base_name);
+
+		// if generated name will be longer than allowable name, truncate the class section of the name by the overflow
+		int char_overflow = static_cast<int>(strlen(base_name) + strlen(suffix)) - (NAME_LENGTH - 1);
+		if (char_overflow > 0) {
+			object_name[strlen(base_name) - static_cast<size_t>(char_overflow)] = '\0';
+		}
+
+		// complete building the name by adding suffix number and converting case
+		strcat_s(object_name, suffix);
+		SCP_totitle(object_name);
+
+		// continue as long as we find the name in our set
+	} while (objectNameSet.find(object_name) != objectNameSet.end());
+
+	// name does not yet exist in the set, so it's valid; add it and return
+	auto iter = objectNameSet.insert(object_name);
+	return iter.first->c_str();
+}
+
+void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
+{
+	SCP_UNUSED(pm);
+	auto class_name = xwi_determine_object_class(oj);
+	if (class_name == nullptr)
+		return;
+
+	int number_of_objects = oj->numberOfObjects;
+	if (number_of_objects < 1)
+		return;
+
+	// object position and orientation
+	// NOTE: Y and Z are swapped after all operartions are perfomed
+    // units are in kilometers (after processing by xwinglib which handles the factor of 160), so scale them up
+	float objectPosX = oj->object_x*1000;
+	float objectPosY = oj->object_y*1000;
+	float objectPosZ = oj->object_z*1000;
+	float offsetAxisA = 0;
+	float offsetAxisB = 0;
+
+	int mine_dist = 400; // change this to change the distance between the mines
+	auto weapon_name = "T&B KX-5#imp";
+	int mine_laser_index = weapon_info_lookup(weapon_name); // "Defense Mine#Ion" needs to have its weapon changed to laser
+	if (mine_laser_index < 0)
+		Warning(LOCATION, "Could not find weapon %s", weapon_name);
+
+	matrix orient;
+	xwi_determine_object_orient(&orient, oj);
+	
+	int ship_class = ship_info_lookup(class_name);
+	if (ship_class < 0) {
+		Warning(LOCATION, "Unable to determine ship class for Object Group with type %s", class_name);
+		ship_class = 0;
+	}
+	auto sip = &Ship_info[ship_class];
+
+	int team = Species_info[sip->species].default_iff;
+
+	switch (oj->objectType) {
+	case XWMObjectType::oj_Mine1:
+	case XWMObjectType::oj_Mine2:
+	case XWMObjectType::oj_Mine3:
+	case XWMObjectType::oj_Mine4: {
+		auto team_name = "Hostile";
+		int index = iff_lookup(team_name);
+		if (index >= 0)
+			team = index;
+		else
+			Warning(LOCATION, "Could not find iff %s", team_name);
+
+		if (number_of_objects > 1) {
+			offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
+		}
+		break;
+	}
+	default:
+		if (number_of_objects > 1) {
+			Warning(LOCATION, "NumberOfCraft of '%s' was %d but must be 1.", class_name, number_of_objects);
+			number_of_objects = 1;
+		}
+		break;
+	}
+
+	// Copy objects in Parse_objects to set for name checking below
+	// This only needs to be done fully once per object group then can be added to after each new object
+	SCP_set<SCP_string> objectNameSet;
+	for (int n = 0; n < (int)Parse_objects.size(); n++) {
+		objectNameSet.insert(Parse_objects[n].name);
+	}
+
+	// Now begin to configure each object in the group (mines multiple)
+	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
+		offsetAxisA += (mine_dist * a); // add a new row to the grid
+		for (int b = 0; b < number_of_objects; b++) { // for each increment along the a plane, add mines along b plane
+			offsetAxisB += (mine_dist * b);           // for each new row populate the column
+
+			// Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc
+			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
+
+			p_object pobj;
+			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name));
+			pobj.orient = orient;
+			pobj.pos = ojxyz;
+
+			pobj.arrival_cue = Locked_sexp_true;
+			pobj.arrival_location = ARRIVE_AT_LOCATION;
+			pobj.departure_cue = Locked_sexp_false;
+			pobj.departure_location = DEPART_AT_LOCATION;
+			
+			pobj.ai_class = sip->ai_class;
+			pobj.warpin_params_index = sip->warpin_params_index;
+			pobj.warpout_params_index = sip->warpout_params_index;
+			pobj.ship_max_shield_strength = sip->max_shield_strength;
+			pobj.ship_max_hull_strength = sip->max_hull_strength;
+			Assert(pobj.ship_max_hull_strength > 0.0f); // Goober5000: div-0 check (not shield because we might not have one)
+			pobj.max_shield_recharge = sip->max_shield_recharge;
+
+			switch (oj->objectType) {
+			case XWMObjectType::oj_Mine1:
+			case XWMObjectType::oj_Mine2:
+			case XWMObjectType::oj_Mine3:
+			case XWMObjectType::oj_Mine4: {
+				pobj.subsys_index = Subsys_index;
+				int this_subsys = allocate_subsys_status();
+				pobj.subsys_count++;
+				strcpy_s(Subsys_status[this_subsys].name, NOX("Pilot"));
+
+				if (mine_laser_index >= 0) {
+					for (int n = 0; n < sip->n_subsystems; n++) {
+						auto subsys = &sip->subsystems[n];
+						if (subsys->type == SUBSYSTEM_TURRET) {
+							this_subsys = allocate_subsys_status();
+							pobj.subsys_count++;
+							strcpy_s(Subsys_status[this_subsys].name, sip->subsystems[n].name);
+
+							for (int bank = 0; bank < MAX_SHIP_PRIMARY_BANKS; bank++) {
+								if (subsys->primary_banks[bank] >= 0) {
+									Subsys_status[this_subsys].primary_banks[bank] = mine_laser_index;
+								}
+							}
+						}
+					}
+				}
+				break;
+			}
+			default:
+				break;
+			}
+
+			pobj.replacement_textures = sip->replacement_textures; // initialize our set with the ship class set, which may be empty
+			pobj.score = sip->score;
+
+			pobj.team = team;
+			pobj.initial_velocity = 0;
+
+			Parse_objects.push_back(pobj);
+		}
+	}
+}	
+
 void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 {
 	int index = -1;
@@ -674,6 +916,10 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	// load flight groups
 	for (const auto &fg : xwim->flightgroups)
 		parse_xwi_flightgroup(pm, xwim, &fg);
+
+	// load objects
+	for (const auto &obj : xwim->objects)
+		parse_xwi_objectgroup(pm, xwim, &obj);
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)

@@ -740,7 +740,7 @@ bool XWingMission::load(XWingMission *m, const char *data)
 				return false;
 		}
 
-		if (oj->object_formation >= 58) {
+		if (oj->object_type >= 58) {
 			noj->objectGoal = XWMObjectGoal::ojg_Neither;
 			noj->formation = XWMObjectFormation::ojf_FloorXY;
 			// TODO : If the object is a Training Platform then the object_formation determines
