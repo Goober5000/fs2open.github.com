@@ -766,7 +766,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	case XWMObjectType::oj_Mine1:
 	case XWMObjectType::oj_Mine2:
 	case XWMObjectType::oj_Mine3:
-	case XWMObjectType::oj_Mine4:
+	case XWMObjectType::oj_Mine4: {
 		auto team_name = "Hostile";
 		int index = iff_lookup(team_name);
 		if (index >= 0)
@@ -779,6 +779,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
 		}
 		break;
+	}
 	default:
 		if (number_of_objects > 1) {
 			Warning(LOCATION, "NumberOfCraft of '%s' was %d but must be 1.", class_name, number_of_objects);
@@ -825,7 +826,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			case XWMObjectType::oj_Mine1:
 			case XWMObjectType::oj_Mine2:
 			case XWMObjectType::oj_Mine3:
-			case XWMObjectType::oj_Mine4:
+			case XWMObjectType::oj_Mine4: {
 				pobj.subsys_index = Subsys_index;
 				int this_subsys = allocate_subsys_status();
 				pobj.subsys_count++;
@@ -846,9 +847,9 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 							}
 						}
 					}
-			
 				}
 				break;
+			}
 			default:
 				break;
 			}
