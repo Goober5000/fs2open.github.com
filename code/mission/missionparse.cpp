@@ -6799,10 +6799,17 @@ bool parse_main(const char *mission_name, int flags)
 				if (rval)
 				{
 					strcpy(ch, ".BRF");
-					read_file_bytes(temp_filename, CF_TYPE_ANY);
-					XWingBriefing xwib;
-					XWingBriefing::load(&xwib, Parse_text_raw);
-					parse_xwi_briefing(&The_mission, &xwib);
+					try
+					{
+						read_file_bytes(temp_filename, CF_TYPE_ANY);
+						XWingBriefing xwib;
+						XWingBriefing::load(&xwib, Parse_text_raw);
+						parse_xwi_briefing(&The_mission, &xwib);
+					}
+					catch (const parse::ParseException& e)
+					{
+						mprintf(("MISSIONS: Unable to parse '%s' (the briefing file for '%s')!  Error message = %s.\n", temp_filename, mission_name, e.what()));
+					}
 				}
 			}
 			// regular mission load
