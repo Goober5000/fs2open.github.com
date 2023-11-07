@@ -6119,7 +6119,7 @@ void apply_default_custom_data(mission* pm)
 	}
 }
 
-bool parse_mission(mission *pm, int flags)
+bool parse_mission(mission *pm, XWingMission *xwim, int flags)
 {
 	int saved_warning_count = Global_warning_count;
 	int saved_error_count = Global_error_count;
@@ -6165,12 +6165,13 @@ bool parse_mission(mission *pm, int flags)
 		parse_events(pm);
 		parse_goals(pm);
 		parse_waypoints_and_jumpnodes(pm);
-	parse_messages(pm, flags);
-	parse_reinforcements(pm);
-	parse_bitmaps(pm);
-	parse_asteroid_fields(pm);
-	parse_music(pm, flags);
-	parse_custom_data(pm);
+		parse_messages(pm, flags);
+		parse_reinforcements(pm);
+		parse_bitmaps(pm);
+		parse_asteroid_fields(pm);
+		parse_music(pm, flags);
+		parse_custom_data(pm);
+	}
 
 	// if we couldn't load some mod data
 	if ((Num_unknown_ship_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
