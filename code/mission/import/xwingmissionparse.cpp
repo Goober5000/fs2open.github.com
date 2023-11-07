@@ -248,9 +248,9 @@ const char *xwi_determine_base_ship_class(const XWMFlightGroup *fg)
 		case XWMFlightGroupType::fg_Shuttle:
 			return "Lambda-class T-4a Shuttle";
 		case XWMFlightGroupType::fg_Tug:
-			return nullptr;
+			return "DV-3 Cargo Freighter";
 		case XWMFlightGroupType::fg_Container:
-			return nullptr;
+			return "BFF-1 Container";
 		case XWMFlightGroupType::fg_Freighter:
 			return "BFF-1 Bulk Freighter";
 		case XWMFlightGroupType::fg_Calamari_Cruiser:
