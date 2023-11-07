@@ -10,6 +10,7 @@
 #include <freespace.h>
 
 #include <ai/aigoals.h>
+#include <ai/ailua.h>
 #include <asteroid/asteroid.h>
 #include <cfile/cfile.h>
 #include <hud/hudsquadmsg.h>
@@ -2265,6 +2266,22 @@ int CFred_mission_save::save_messages()
 			fout(" %s", Messages[i].wave_info.name);
 		}
 
+		if (Messages[i].note != "") {
+			if (optional_string_fred("+Note:", "$Name:"))
+				parse_comments();
+			else
+				fout("\n+Note:");
+
+			auto copy = Messages[i].note;
+			lcl_fred_replace_stuff(copy);
+			fout(" %s", copy.c_str());
+
+			if (optional_string_fred("$end_multi_text", "$Name:"))
+				parse_comments();
+			else
+				fout_version("\n$end_multi_text");
+		}
+
 		fso_comment_pop();
 	}
 
@@ -3017,6 +3034,17 @@ void CFred_mission_save::save_mission_internal(const char* pathname)
 
 	// Migrate the version!
 	The_mission.required_fso_version = MISSION_VERSION;
+
+	// Additional incremental version update for some features
+	auto newer_version = gameversion::version(23, 3);
+	if (MISSION_VERSION >= newer_version)
+	{
+		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 23.3, the incremental version code can be removed");
+	}
+	else if (check_for_23_3_data())
+	{
+		The_mission.required_fso_version = newer_version;
+	}
 
 	reset_parse();
 	raw_ptr = Parse_text_raw;
@@ -4154,6 +4182,38 @@ int CFred_mission_save::save_players()
 	required_string_fred("#Players");
 	parse_comments(2);
 	fout("\t\t;! %d total\n", Player_starts);
+
+	SCP_vector<SCP_string> e_list = ai_lua_get_general_orders(true);
+
+	if (save_format != MissionFormat::RETAIL && (e_list.size() > 0)) {
+		if (optional_string_fred("+General Orders Enabled:", "#Players"))
+			parse_comments();
+		else
+			fout("\n+General Orders Enabled:");
+
+		fout(" (");
+
+		for (const SCP_string& order : e_list) {
+			fout(" \"%s\"", order.c_str());
+		}
+		fout(" )\n");
+	}
+
+	SCP_vector<SCP_string> v_list = ai_lua_get_general_orders(false, true);
+
+	if (save_format != MissionFormat::RETAIL && (v_list.size() > 0)) {
+		if (optional_string_fred("+General Orders Valid:", "#Players"))
+			parse_comments();
+		else
+			fout("\n+General Orders Valid:");
+
+		fout(" (");
+
+		for (const SCP_string& order : v_list) {
+			fout(" \"%s\"", order.c_str());
+		}
+		fout(" )\n");
+	}
 
 	for (i = 0; i < Num_teams; i++) {
 		required_string_fred("$Starting Shipname:");

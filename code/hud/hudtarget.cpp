@@ -2073,7 +2073,7 @@ bool evaluate_ship_as_closest_target(esct *esct_p)
 	}
 
 	// bail if harmless
-	if ( Ship_info[esct_p->shipp->ship_info_index].class_type > -1 && !(Ship_types[Ship_info[esct_p->shipp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Target_as_threat])) {
+	if ( Ship_info[esct_p->shipp->ship_info_index].class_type < 0 || !(Ship_types[Ship_info[esct_p->shipp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Target_as_threat])) {
 		return false;
 	}
 
@@ -3029,6 +3029,7 @@ void HudGaugeReticleTriangle::renderTriangle(vec3d *hostile_pos, int aspect_flag
 		}
 	}
 
+	// even if the screen position overflowed, it will still be pointing in the correct direction
 	unsize( &hostile_vertex.screen.xyw.x, &hostile_vertex.screen.xyw.y );
 
 	ang = atan2_safe(-(hostile_vertex.screen.xyw.y - tablePosY), hostile_vertex.screen.xyw.x - tablePosX);
@@ -3582,8 +3583,8 @@ void hud_show_hostile_triangle()
 			continue;
 		}
 
-		// always ignore cargo containers and navbuoys
-		if ( Ship_info[sp->ship_info_index].class_type > -1 && !(Ship_types[Ship_info[sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Show_attack_direction]) ) {
+		// always ignore cargo containers, navbouys, etc, and non-ships
+		if ( Ship_info[sp->ship_info_index].class_type < 0 || !(Ship_types[Ship_info[sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Show_attack_direction]) ) {
 			continue;
 		}
 
@@ -6521,11 +6522,9 @@ void HudGaugeOffscreen::calculatePosition(vertex* target_point, vec3d *tpos, vec
 	codes_or = (ubyte)(target_point->codes | eye_vertex->codes);
 	clip_line(&target_point,&eye_vertex,codes_or,0);
 
-	if (!(target_point->flags&PF_PROJECTED))
-		g3_project_vertex(target_point);
+	g3_project_vertex(target_point);
 
-	if (!(eye_vertex->flags&PF_PROJECTED))
-		g3_project_vertex(eye_vertex);
+	g3_project_vertex(eye_vertex);
 
 	if (eye_vertex->flags&PF_OVERFLOW) {
 		Int3();			//	This is unlikely to happen, but can if a clip goes through the player's eye.
@@ -7442,8 +7441,8 @@ void HudGaugeHardpoints::render(float  /*frametime*/)
 
 					//unsize(&xc, &yc);
 					//unsize(&draw_point.screen.xyw.x, &draw_point.screen.xyw.y);
-
-					renderCircle((int)draw_point.screen.xyw.x + position[0], (int)draw_point.screen.xyw.y + position[1], 10);
+					if (!(draw_point.flags & PF_OVERFLOW))
+						renderCircle((int)draw_point.screen.xyw.x + position[0], (int)draw_point.screen.xyw.y + position[1], 10);
 					//renderCircle(xc, yc, 25);
 				} else {
 					model_render_params weapon_render_info;
