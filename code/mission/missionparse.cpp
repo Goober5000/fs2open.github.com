@@ -123,6 +123,8 @@ ushort Current_file_checksum = 0;
 ushort Last_file_checksum = 0;
 int    Current_file_length   = 0;
 
+SCP_vector<mission_default_custom_data> Default_custom_data;
+
 // alternate ship type names
 char Mission_alt_types[MAX_ALT_TYPE_NAMES][NAME_LENGTH];
 int Mission_alt_type_count = 0;
@@ -6091,6 +6093,32 @@ void parse_sexp_containers()
 	}
 }
 
+void parse_custom_data(mission* pm)
+{
+	if (!optional_string("#Custom Data"))
+		return;
+
+	if (optional_string("$begin_data_map")) {
+
+		parse_string_map(pm->custom_data, "$end_data_map", "+Val:");
+	}
+}
+
+void apply_default_custom_data(mission* pm)
+{
+	for (const auto& def : Default_custom_data) {
+		size_t count = 0;
+		for (const auto& listed : pm->custom_data) {
+			if (listed.first != def.key) {
+				count++;
+			}
+		}
+		if (count == pm->custom_data.size()) {
+			pm->custom_data.emplace(def.key, def.value);
+		}
+	}
+}
+
 bool parse_mission(mission *pm, int flags)
 {
 	int saved_warning_count = Global_warning_count;
@@ -6142,6 +6170,7 @@ bool parse_mission(mission *pm, int flags)
 	parse_bitmaps(pm);
 	parse_asteroid_fields(pm);
 	parse_music(pm, flags);
+	parse_custom_data(pm);
 
 	// if we couldn't load some mod data
 	if ((Num_unknown_ship_classes > 0) || ( Num_unknown_loadout_classes > 0 )) {
@@ -6478,6 +6507,8 @@ bool post_process_mission(mission *pm)
 	if (pm->volumetrics)
 		pm->volumetrics->renderVolumeBitmap();
 
+	apply_default_custom_data(pm);
+
 	// success
 	return true;
 }
@@ -6606,6 +6637,8 @@ void mission::Reset()
 	gravity = vmd_zero_vector;
 	HUD_timer_padding = 0;
 	volumetrics.reset();
+
+	custom_data.clear();
 }
 
 /**
@@ -8841,6 +8874,10 @@ bool check_for_23_3_data()
 	{
 		if (!msg.note.empty())
 			return true;
+	}
+
+	if (The_mission.custom_data.size() > 0) {
+		return true;
 	}
 
 	for (const auto& so : list_range(&Ship_obj_list))
