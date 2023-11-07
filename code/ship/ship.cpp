@@ -461,6 +461,7 @@ flag_def_list_new<Weapon::Info_Flags> ai_tgt_weapon_flags[] = {
     { "thruster",					Weapon::Info_Flags::Thruster,							true, false },
     { "in tech database",			Weapon::Info_Flags::In_tech_database,					true, false },
     { "player allowed",				Weapon::Info_Flags::Player_allowed,						true, false },
+	{ "default player weapon",		Weapon::Info_Flags::Default_player_weapon,				true, false },
     { "corkscrew",					Weapon::Info_Flags::Corkscrew,							true, false },
     { "particle spew",				Weapon::Info_Flags::Particle_spew,						true, false },
     { "esuck",						Weapon::Info_Flags::Energy_suck,						true, false },
@@ -4805,7 +4806,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 			size_t seppos;
 			seppos = token->find_first_of(':');
 			if(seppos == SCP_string::npos) {
-				Warning(LOCATION, "Couldn't find ':' seperator in Glowpoint override for ship %s ignoring token", sip->name);
+				Warning(LOCATION, "Couldn't find ':' separator in Glowpoint override for ship %s ignoring token", sip->name);
 				continue;
 			}
 			name = token->substr(0, seppos);
@@ -6627,7 +6628,7 @@ void ship::clear()
 	weapon_recharge_index = INTIAL_WEAPON_RECHARGE_INDEX;
 	engine_recharge_index = INTIAL_ENGINE_RECHARGE_INDEX;
 	weapon_energy = 0;
-	prev_engine_aggregate_strength = 1.0f;
+	prev_engine_strength = 1.0f;
 	next_manage_ets = timestamp(0);
 
 	flags.reset();
@@ -6833,11 +6834,11 @@ void ship::apply_replacement_textures(SCP_vector<texture_replace> &replacements)
 			ship_replacement_textures[i] = -1;
 	}
 
-	// now fill them in
-	for (auto tr : replacements)
-	{
-		auto pm = model_get(Ship_info[ship_info_index].model_num);
+	auto pm = model_get(Ship_info[ship_info_index].model_num);
 
+	// now fill them in
+	for (const auto& tr : replacements)
+	{
 		// look for textures
 		for (auto j = 0; j < pm->n_textures; j++)
 		{
@@ -11711,7 +11712,13 @@ int ship_launch_countermeasure(object *objp, int rand_val)
 		return 0;
 	}
 
-	shipp->cmeasure_fire_stamp = timestamp(Weapon_info[shipp->current_cmeasure].cmeasure_firewait);	//	Can launch every cmeasure wait
+	// Cyborg: Coverity 1523546, check that we have a valid countermeasure before setting the delay. (Could help things work more intuitively if CM is changed mid-mission)
+	if (shipp->current_cmeasure > -1){
+		shipp->cmeasure_fire_stamp = timestamp(Weapon_info[shipp->current_cmeasure].cmeasure_firewait);	//	Can launch every cmeasure wait
+	} else {
+		shipp->cmeasure_fire_stamp = timestamp(0);
+	}
+
 #ifndef NDEBUG
 	if (Weapon_energy_cheat) {
 		shipp->cmeasure_count++;
@@ -14807,7 +14814,7 @@ int ship_find_subsys(ship *sp, const char *ss_name)
 // 0.0 and 1.0 which is the relative combined strength of the given subsystem type.  The number
 // calculated for the engines is slightly different.  Once an engine reaches < 15% of its hits, its
 // output drops to that %.  A dead engine has no output.
-float ship_get_subsystem_strength( ship *shipp, int type, bool skip_dying_check )
+float ship_get_subsystem_strength( ship *shipp, int type, bool skip_dying_check, bool no_minimum_engine_str )
 {
 	float strength;
 	ship_subsys *ssp;
@@ -14840,7 +14847,7 @@ float ship_get_subsystem_strength( ship *shipp, int type, bool skip_dying_check 
 				float ratio;
 
 				ratio = ssp->current_hits / ssp->max_hits;
-				if ( ratio < ENGINE_MIN_STR )
+				if ( ratio < ENGINE_MIN_STR && !no_minimum_engine_str)
 					ratio = ENGINE_MIN_STR;
 
 				percent += ratio;
@@ -17016,7 +17023,7 @@ void ship_maybe_praise_player(ship *deader_sp)
 	}
 
 	// don't praise the destruction of navbuoys, cargo or other non-flyable ship types
-    if ((Ship_info[deader_sp->ship_info_index].class_type > 0) && !(Ship_types[Ship_info[deader_sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Praise_destruction])) {
+    if ((Ship_info[deader_sp->ship_info_index].class_type >= 0) && !(Ship_types[Ship_info[deader_sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Praise_destruction])) {
 		return;
 	}
 
@@ -17068,7 +17075,7 @@ void ship_maybe_praise_self(ship *deader_sp, ship *killer_sp)
 	}
 
 	// don't praise the destruction of navbuoys, cargo or other non-flyable ship types
-	if ( (Ship_info[deader_sp->ship_info_index].class_type > 0) && !(Ship_types[Ship_info[deader_sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Praise_destruction]) ) {
+	if ( (Ship_info[deader_sp->ship_info_index].class_type >= 0) && !(Ship_types[Ship_info[deader_sp->ship_info_index].class_type].flags[Ship::Type_Info_Flags::Praise_destruction]) ) {
 		return;
 	}
 
@@ -17587,7 +17594,9 @@ ship_type_info *ship_get_type_info(object *objp)
 	Assert(objp->type == OBJ_SHIP);
 	Assert(objp->instance > -1);
 	Assert(Ships[objp->instance].ship_info_index > -1);
-	Assert(Ship_info[Ships[objp->instance].ship_info_index].class_type > -1);
+
+	if (Ship_info[Ships[objp->instance].ship_info_index].class_type < 0)
+		return nullptr;
 
 	return &Ship_types[Ship_info[Ships[objp->instance].ship_info_index].class_type];
 }

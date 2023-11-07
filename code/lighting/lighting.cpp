@@ -288,6 +288,8 @@ void light_add_tube(const vec3d *p0, const vec3d *p1, float r1, float r2, float 
 	l.instance = Num_lights-1;
 
 	l.source_radius = MAX(0.0f,source_radius);
+	l.local_vec = vmd_zero_vector;
+	l.local_vec2 = vmd_zero_vector;
 
 	Lights.push_back(l);
 }
@@ -376,7 +378,7 @@ void light_apply_rgb( ubyte *param_r, ubyte *param_g, ubyte *param_b, const vec3
 	vec3d to_light;
 	float dot, dist;
 	vec3d temp;
-	for (auto l : Lights) {
+	for (const auto& l : Lights) {
 
 		dist = -1.0f;
 		switch(l.type){
