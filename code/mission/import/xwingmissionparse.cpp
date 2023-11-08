@@ -280,37 +280,42 @@ int xwi_determine_ship_class(const XWMFlightGroup *fg)
 	if (class_name == nullptr)
 		return -1;
 
-	SCP_string variant_class = class_name;
-	bool variant = false;
+	// let's only look for variant classes on flyable ships
+	int base_class = ship_info_lookup(class_name);
+	if (base_class >= 0 && Ship_info[base_class].is_fighter_bomber())
+	{
+		SCP_string variant_name = class_name;
+		bool variant = false;
 
-	// now see if we have any variants
-	if (fg->craftColor == XWMCraftColor::c_Red)
-	{
-		variant_class += "#red";
-		variant = true;
-	}
-	else if (fg->craftColor == XWMCraftColor::c_Gold)
-	{
-		variant_class += "#gold";
-		variant = true;
-	}
-	else if (fg->craftColor == XWMCraftColor::c_Blue)
-	{
-		variant_class += "#blue";
-		variant = true;
-	}
+		// see if we have any variants
+		if (fg->craftColor == XWMCraftColor::c_Red)
+		{
+			variant_name += "#red";
+			variant = true;
+		}
+		else if (fg->craftColor == XWMCraftColor::c_Gold)
+		{
+			variant_name += "#gold";
+			variant = true;
+		}
+		else if (fg->craftColor == XWMCraftColor::c_Blue)
+		{
+			variant_name += "#blue";
+			variant = true;
+		}
 
-	if (variant)
-	{
-		int ship_class = ship_info_lookup(variant_class.c_str());
-		if (ship_class >= 0)
-			return ship_class;
+		if (variant)
+		{
+			int variant_class = ship_info_lookup(variant_name.c_str());
+			if (variant_class >= 0)
+				return variant_class;
 
-		Warning(LOCATION, "Could not find variant ship class %s for Flight Group %s.  Using base class instead.", variant_class.c_str(), fg->designation.c_str());
+			Warning(LOCATION, "Could not find variant ship class %s for Flight Group %s.  Using base class instead.", variant_name.c_str(), fg->designation.c_str());
+		}
 	}
 
 	// no variant, or we're just going with the base class
-	return ship_info_lookup(class_name);
+	return base_class;
 }
 
 const char *xwi_determine_team(const XWingMission *xwim, const XWMFlightGroup *fg, const ship_info *sip)
