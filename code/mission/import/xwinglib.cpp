@@ -780,6 +780,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 		noj->object_yaw = oj->object_yaw;
 		noj->object_pitch = oj->object_pitch;
 		noj->object_roll = oj->object_roll - 90.0f;
+
+		m->objects.push_back(*noj);
 	}
+
 	return true;
 }
