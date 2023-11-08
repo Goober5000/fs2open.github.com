@@ -836,10 +836,11 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 
 	// Now begin to configure each object in the group (mines multiple)
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
+		float initOffsetAxisB = offsetAxisB;
 		for (int b = 0; b < number_of_objects; b++) {  // populate the column with mines
 
 			// Convert the mine pos. (a,b) to the relavenat formation pos. ie. (x,y) or (z,y) etc
-			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
+			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA + (mine_dist * a), offsetAxisB + (mine_dist * b));
 
 			p_object pobj;
 			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name, og_index));
@@ -902,11 +903,7 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			pobj.flags.set(Mission::Parse_Object_Flags::SF_Hide_ship_name);	// space objects in X-Wing don't really have names
 
 			Parse_objects.push_back(pobj);
-
-			offsetAxisB += mine_dist; // increment distance from the start of the column
 		}
-		offsetAxisA += mine_dist; // start a new column on the grid
-		offsetAxisB -= (mine_dist * number_of_objects); // prepare to start a new column
 	}
 }	
 
