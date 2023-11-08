@@ -1,6 +1,7 @@
 #include "iff_defs/iff_defs.h"
 #include "mission/missionparse.h"
 #include "mission/missiongoals.h"
+#include "mission/missionmessage.h"
 #include "missionui/redalert.h"
 #include "nebula/neb.h"
 #include "parse/parselo.h"
@@ -279,37 +280,42 @@ int xwi_determine_ship_class(const XWMFlightGroup *fg)
 	if (class_name == nullptr)
 		return -1;
 
-	SCP_string variant_class = class_name;
-	bool variant = false;
+	// let's only look for variant classes on flyable ships
+	int base_class = ship_info_lookup(class_name);
+	if (base_class >= 0 && Ship_info[base_class].is_fighter_bomber())
+	{
+		SCP_string variant_name = class_name;
+		bool variant = false;
 
-	// now see if we have any variants
-	if (fg->craftColor == XWMCraftColor::c_Red)
-	{
-		variant_class += "#red";
-		variant = true;
-	}
-	else if (fg->craftColor == XWMCraftColor::c_Gold)
-	{
-		variant_class += "#gold";
-		variant = true;
-	}
-	else if (fg->craftColor == XWMCraftColor::c_Blue)
-	{
-		variant_class += "#blue";
-		variant = true;
-	}
+		// see if we have any variants
+		if (fg->craftColor == XWMCraftColor::c_Red)
+		{
+			variant_name += "#red";
+			variant = true;
+		}
+		else if (fg->craftColor == XWMCraftColor::c_Gold)
+		{
+			variant_name += "#gold";
+			variant = true;
+		}
+		else if (fg->craftColor == XWMCraftColor::c_Blue)
+		{
+			variant_name += "#blue";
+			variant = true;
+		}
 
-	if (variant)
-	{
-		int ship_class = ship_info_lookup(variant_class.c_str());
-		if (ship_class >= 0)
-			return ship_class;
+		if (variant)
+		{
+			int variant_class = ship_info_lookup(variant_name.c_str());
+			if (variant_class >= 0)
+				return variant_class;
 
-		Warning(LOCATION, "Could not find variant ship class %s for Flight Group %s.  Using base class instead.", variant_class.c_str(), fg->designation.c_str());
+			Warning(LOCATION, "Could not find variant ship class %s for Flight Group %s.  Using base class instead.", variant_name.c_str(), fg->designation.c_str());
+		}
 	}
 
 	// no variant, or we're just going with the base class
-	return ship_info_lookup(class_name);
+	return base_class;
 }
 
 const char *xwi_determine_team(const XWingMission *xwim, const XWMFlightGroup *fg, const ship_info *sip)
@@ -912,6 +918,20 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	sprintf(sexp_buf, "( when ( true ) ( do-nothing ) )");
 	Mp = sexp_buf;
 	config_event->formula = get_sexp_main();
+
+	// this seems like a sensible default
+	auto command_persona_name = "Flight Computer";
+	pm->command_persona = message_persona_name_lookup(command_persona_name);
+	if (pm->command_persona >= 0)
+	{
+		strcpy_s(pm->command_sender, command_persona_name);	// it works as a sender too!
+		pm->flags.set(Mission::Mission_Flags::Override_hashcommand);
+	}
+	else
+		Warning(LOCATION, "Unable to find the persona '%s'", command_persona_name);
+
+	// other mission flags
+	pm->support_ships.max_support_ships = 0;
 
 	// load flight groups
 	for (const auto &fg : xwim->flightgroups)
