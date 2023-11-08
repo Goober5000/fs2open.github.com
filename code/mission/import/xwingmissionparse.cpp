@@ -780,9 +780,6 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	float offsetAxisA = 0;
 	float offsetAxisB = 0;
 
-	// Warning(LOCATION, "Object %s : X %d, Y %d, Z %d", class_name, (int)objectPosX, (int)objectPosY, (int)objectPosZ);
-
-
 	int mine_dist = 400; // change this to change the distance between the mines
 	auto weapon_name = "T&B KX-5#imp";
 	int mine_laser_index = weapon_info_lookup(weapon_name); // "Defense Mine#Ion" needs to have its weapon changed to laser
@@ -836,7 +833,6 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 
 	// Now begin to configure each object in the group (mines multiple)
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
-		float initOffsetAxisB = offsetAxisB;
 		for (int b = 0; b < number_of_objects; b++) {  // populate the column with mines
 
 			// Convert the mine pos. (a,b) to the relavenat formation pos. ie. (x,y) or (z,y) etc
