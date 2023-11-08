@@ -114,7 +114,8 @@ enum class XWMCraftColor : short
 {
 	c_Red = 0,
 	c_Gold,
-	c_Blue
+	c_Blue,
+	c_Green
 };
 
 enum class XWMObjective : short
