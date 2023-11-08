@@ -777,10 +777,8 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 	float objectPosX = oj->object_x*1000;
 	float objectPosY = oj->object_y*1000;
 	float objectPosZ = oj->object_z*1000;
-	float initOffsetAxisA = 0;
-	float initOffsetAxisB = 0;
-	float offsetAxisA;
-	float offsetAxisB;
+	float offsetAxisA = 0;
+	float offsetAxisB = 0;
 
 	// Warning(LOCATION, "Object %s : X %d, Y %d, Z %d", class_name, (int)objectPosX, (int)objectPosY, (int)objectPosZ);
 
@@ -816,8 +814,8 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			Warning(LOCATION, "Could not find iff %s", team_name);
 
 		if (number_of_objects > 1) {
-			initOffsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
-			initOffsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
+			offsetAxisA -= (mine_dist / 2 * (number_of_objects - 1)); // (- the distance to centre the grid)
+			offsetAxisB -= (mine_dist / 2 * (number_of_objects - 1));
 		}
 		break;
 	}
@@ -838,9 +836,7 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 
 	// Now begin to configure each object in the group (mines multiple)
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
-		offsetAxisA = initOffsetAxisA + (mine_dist * a); // start a new column on the grid
 		for (int b = 0; b < number_of_objects; b++) {  // populate the column with mines
-			offsetAxisB = initOffsetAxisB + (mine_dist * b);  // increment distance from the start of the column
 
 			// Convert the mine pos. (a,b) to the relavenat formation pos. ie. (x,y) or (z,y) etc
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
@@ -906,7 +902,11 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			pobj.flags.set(Mission::Parse_Object_Flags::SF_Hide_ship_name);	// space objects in X-Wing don't really have names
 
 			Parse_objects.push_back(pobj);
+
+			offsetAxisB += mine_dist; // increment distance from the start of the column
 		}
+		offsetAxisA += mine_dist; // start a new column on the grid
+		offsetAxisB -= (mine_dist * number_of_objects); // prepare to start a new column
 	}
 }	
 
