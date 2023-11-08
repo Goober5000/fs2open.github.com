@@ -303,6 +303,11 @@ int xwi_determine_ship_class(const XWMFlightGroup *fg)
 			variant_name += "#blue";
 			variant = true;
 		}
+		else if (fg->craftColor == XWMCraftColor::c_Green)
+		{
+			variant_name += "#green";
+			variant = true;
+		}
 
 		if (variant)
 		{

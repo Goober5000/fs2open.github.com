@@ -522,6 +522,9 @@ bool XWingMission::load(XWingMission *m, const char *data)
 			case 2:
 				nfg->craftColor = XWMCraftColor::c_Blue;
 				break;
+			case 3:
+				nfg->craftColor = XWMCraftColor::c_Green;
+				break;
 			default:
 				return false;
 		}
