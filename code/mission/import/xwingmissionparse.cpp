@@ -702,12 +702,27 @@ void xwi_determine_object_orient(matrix* orient, const XWMObject* oj)
 
 // Determine the unique name from the object comprised of the object type and suffix. 
 // Add the new name to the objectNameSet and return it to parse_xwi_objectgroup
-const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, const char* class_name)
+const char *xwi_determine_space_object_name(SCP_set<SCP_string> &objectNameSet, const char *class_name, const int og_index)
 {
 	char base_name[NAME_LENGTH];
 	char suffix[NAME_LENGTH];
 	strcpy_s(base_name, class_name);
 	end_string_at_first_hash_symbol(base_name);
+
+	// try to make the object group index part of the name too
+	if ((strlen(base_name) < NAME_LENGTH - 7) && (og_index < 26*26)) {
+		strcat_s(base_name, " ");
+
+		int offset = og_index;
+		if (offset >= 26) {
+			sprintf(suffix, NOX("%c"), 'A' + (offset / 26) - 1);
+			strcat_s(base_name, suffix);
+			offset %= 26;
+		}
+
+		sprintf(suffix, NOX("%c"), 'A' + offset);
+		strcat_s(base_name, suffix);
+	}
 
 	// we'll need to try suffixes starting at 1 and going until we find a unique name
 	int n = 1;
@@ -736,9 +751,10 @@ const char* xwi_determine_space_object_name(SCP_set<SCP_string>& objectNameSet, 
 	return iter.first->c_str();
 }
 
-void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObject* oj)
+void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObject *oj)
 {
 	SCP_UNUSED(pm);
+
 	auto class_name = xwi_determine_object_class(oj);
 	if (class_name == nullptr)
 		return;
@@ -746,6 +762,9 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 	int number_of_objects = oj->numberOfObjects;
 	if (number_of_objects < 1)
 		return;
+
+	// determine which space object this is in our list
+	int og_index = static_cast<int>(std::distance(xwim->objects.data(), oj));
 
 	// object position and orientation
 	// NOTE: Y and Z are swapped after all operartions are perfomed
@@ -817,10 +836,8 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
 
 			p_object pobj;
-			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name));
+			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name, og_index));
 			pobj.ship_class = ship_class;
-			pobj.orient = orient;
-			pobj.pos = ojxyz;
 
 			pobj.arrival_cue = Locked_sexp_true;
 			pobj.arrival_location = ARRIVE_AT_LOCATION;
@@ -871,7 +888,12 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 			pobj.score = sip->score;
 
 			pobj.team = team;
+			pobj.pos = ojxyz;
+			pobj.orient = orient;
+
 			pobj.initial_velocity = 0;
+
+			pobj.flags.set(Mission::Parse_Object_Flags::SF_Hide_ship_name);	// space objects in X-Wing don't really have names
 
 			Parse_objects.push_back(pobj);
 		}
