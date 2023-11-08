@@ -815,6 +815,7 @@ void parse_xwi_objectgroup(mission* pm, const XWingMission* xwim, const XWMObjec
 
 			p_object pobj;
 			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name));
+			pobj.ship_class = ship_class;
 			pobj.orient = orient;
 			pobj.pos = ojxyz;
 
