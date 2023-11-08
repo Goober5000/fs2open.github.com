@@ -833,12 +833,10 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 
 	// Now begin to configure each object in the group (mines multiple)
 	for (int a = 0; a < number_of_objects; a++) { // make an a-b 2d grid from the mines
-		offsetAxisA += (mine_dist * a); // add a new row to the grid
-		for (int b = 0; b < number_of_objects; b++) { // for each increment along the a plane, add mines along b plane
-			offsetAxisB += (mine_dist * b);           // for each new row populate the column
+		for (int b = 0; b < number_of_objects; b++) {  // populate the column with mines
 
-			// Now convert the grid (a,b) to the relavenat formation ie. (x,y) or (z,y) etc
-			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA, offsetAxisB);
+			// Convert the mine pos. (a,b) to the relavenat formation pos. ie. (x,y) or (z,y) etc
+			auto ojxyz = xwi_determine_mine_formation_position(oj, objectPosX, objectPosY, objectPosZ, offsetAxisA + (mine_dist * a), offsetAxisB + (mine_dist * b));
 
 			p_object pobj;
 			strcpy_s(pobj.name, xwi_determine_space_object_name(objectNameSet, class_name, og_index));
