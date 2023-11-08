@@ -1,6 +1,7 @@
 #include "iff_defs/iff_defs.h"
 #include "mission/missionparse.h"
 #include "mission/missiongoals.h"
+#include "mission/missionmessage.h"
 #include "missionui/redalert.h"
 #include "nebula/neb.h"
 #include "parse/parselo.h"
@@ -912,6 +913,20 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	sprintf(sexp_buf, "( when ( true ) ( do-nothing ) )");
 	Mp = sexp_buf;
 	config_event->formula = get_sexp_main();
+
+	// this seems like a sensible default
+	auto command_persona_name = "Flight Computer";
+	pm->command_persona = message_persona_name_lookup(command_persona_name);
+	if (pm->command_persona >= 0)
+	{
+		strcpy_s(pm->command_sender, command_persona_name);	// it works as a sender too!
+		pm->flags.set(Mission::Mission_Flags::Override_hashcommand);
+	}
+	else
+		Warning(LOCATION, "Unable to find the persona '%s'", command_persona_name);
+
+	// other mission flags
+	pm->support_ships.max_support_ships = 0;
 
 	// load flight groups
 	for (const auto &fg : xwim->flightgroups)
