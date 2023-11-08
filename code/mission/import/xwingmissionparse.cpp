@@ -461,6 +461,7 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 		wingp->arrival_delay = fg->arrivalDelay;
 		wingp->arrival_location = fg->arriveByHyperspace ? ARRIVE_AT_LOCATION : ARRIVE_FROM_DOCK_BAY;
 		wingp->arrival_anchor = xwi_determine_anchor(xwim, fg);
+		wingp->departure_cue = Locked_sexp_false;
 		wingp->departure_location = fg->departByHyperspace ? DEPART_AT_LOCATION : DEPART_AT_DOCK_BAY;
 		wingp->departure_anchor = wingp->arrival_anchor;
 
@@ -540,6 +541,7 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 			pobj.wingnum = wingnum;
 			pobj.pos_in_wing = wing_index;
 			pobj.arrival_cue = Locked_sexp_false;
+			pobj.departure_cue = Locked_sexp_false;
 		}
 		else
 		{
@@ -550,6 +552,7 @@ void parse_xwi_flightgroup(mission *pm, const XWingMission *xwim, const XWMFligh
 			pobj.arrival_delay = fg->arrivalDelay;
 			pobj.arrival_location = fg->arriveByHyperspace ? ARRIVE_AT_LOCATION : ARRIVE_FROM_DOCK_BAY;
 			pobj.arrival_anchor = xwi_determine_anchor(xwim, fg);
+			pobj.departure_cue = Locked_sexp_false;
 			pobj.departure_location = fg->departByHyperspace ? DEPART_AT_LOCATION : DEPART_AT_DOCK_BAY;
 			pobj.departure_anchor = pobj.arrival_anchor;
 
