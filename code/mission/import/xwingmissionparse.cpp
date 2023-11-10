@@ -18,6 +18,8 @@ extern int allocate_subsys_status();
 
 static int Player_flight_group = 0;
 
+const int MAX_SPACE_OBJECTS = 64; // To match the XWing game engine limit
+
 // vazor222
 void parse_xwi_mission_info(mission *pm, const XWingMission *xwim)
 {
@@ -756,7 +758,7 @@ const char *xwi_determine_space_object_name(SCP_set<SCP_string> &objectNameSet, 
 	return iter.first->c_str();
 }
 
-void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObject *oj)
+void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObject *oj, int &object_count)
 {
 	SCP_UNUSED(pm);
 
@@ -899,6 +901,10 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			pobj.flags.set(Mission::Parse_Object_Flags::SF_Hide_ship_name);	// space objects in X-Wing don't really have names
 
 			Parse_objects.push_back(pobj);
+			
+			object_count++;
+			if (object_count >= MAX_SPACE_OBJECTS)
+				return;
 		}
 	}
 }	
@@ -966,9 +972,13 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	for (const auto &fg : xwim->flightgroups)
 		parse_xwi_flightgroup(pm, xwim, &fg);
 
-	// load objects
-	for (const auto &obj : xwim->objects)
-		parse_xwi_objectgroup(pm, xwim, &obj);
+	// load objects - up to the maximum number of objects allowed by the XWing engine
+	int object_count = 0;
+	for (const auto& obj : xwim->objects) {
+		if (object_count >= MAX_SPACE_OBJECTS)
+			break;
+		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
+	}
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
