@@ -826,6 +826,7 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 		break;
 	}
 
+	// Check that the Xwing game engine object limit is not exceeded with this object group
 	if (object_count + (number_of_objects * number_of_objects) > MAX_SPACE_OBJECTS) 
 		return;
 	object_count += (number_of_objects * number_of_objects);
@@ -972,11 +973,9 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	for (const auto &fg : xwim->flightgroups)
 		parse_xwi_flightgroup(pm, xwim, &fg);
 
-	// load objects - up to the maximum number of objects allowed by the XWing engine
+	// load object groups
 	int object_count = 0;
 	for (const auto& obj : xwim->objects) {
-		if (object_count >= MAX_SPACE_OBJECTS)
-			break;
 		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
 	}
 }
