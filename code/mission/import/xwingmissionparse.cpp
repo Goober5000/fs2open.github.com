@@ -826,6 +826,10 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 		break;
 	}
 
+	if (object_count + (number_of_objects * number_of_objects) > MAX_SPACE_OBJECTS) 
+		return;
+	object_count += (number_of_objects * number_of_objects);
+
 	// Copy objects in Parse_objects to set for name checking below
 	// This only needs to be done fully once per object group then can be added to after each new object
 	SCP_set<SCP_string> objectNameSet;
@@ -901,10 +905,6 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 			pobj.flags.set(Mission::Parse_Object_Flags::SF_Hide_ship_name);	// space objects in X-Wing don't really have names
 
 			Parse_objects.push_back(pobj);
-			
-			object_count++;
-			if (object_count >= MAX_SPACE_OBJECTS)
-				return;
 		}
 	}
 }	
