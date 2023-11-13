@@ -915,8 +915,7 @@ void sexp_tree::right_clicked(int mode)
 							// Replace Container Data submenu
 							// disallowed on variable-type SEXP args, to prevent FSO/FRED crashes
 							// also disallowed for special argument options (not supported for now)
-							if (op_type != OPF_VARIABLE_NAME && op_type != OPF_ANYTHING &&
-								op_type != OPF_DATA_OR_STR_CONTAINER) {
+							if (op_type != OPF_VARIABLE_NAME && !is_argument_provider_op(Operators[op].value)) {
 								int container_data_index = 0;
 								for (const auto &container : get_all_sexp_containers()) {
 									UINT flags = MF_STRING | MF_GRAYED;
@@ -3515,6 +3514,7 @@ int sexp_tree::query_default_argument_available(int op, int i)
 		case OPF_ANIMATION_NAME:
 		case OPF_CONTAINER_VALUE:
 		case OPF_WING_FORMATION:
+		case OPF_CHILD_LUA_ENUM:
 			return 1;
 
 		case OPF_SHIP:
@@ -5747,6 +5747,10 @@ sexp_list_item *sexp_tree::get_listing_opf(int opf, int parent_node, int arg_ind
 			list = get_listing_opf_lua_general_orders();
 			break;
 
+		case OPF_CHILD_LUA_ENUM:
+			list = get_listing_opf_lua_enum(parent_node, arg_index);
+			break;
+
 		default:
 			//We're at the end of the list so check for any dynamic enums
 			list = check_for_dynamic_sexp_enum(opf);
@@ -7542,6 +7546,45 @@ sexp_list_item* sexp_tree::get_listing_opf_traitor_overrides()
 	}
 
 	return head.next;
+}
+
+sexp_list_item* sexp_tree::get_listing_opf_lua_enum(int parent_node, int arg_index)
+{
+
+	// first child node
+	int child = tree_nodes[parent_node].child;
+	if (child < 0)
+		return nullptr;
+
+	int this_index = get_dynamic_parameter_index(tree_nodes[parent_node].text, arg_index);
+
+	if (this_index >= 0) {
+		for (int count = 0; count < this_index; count++) {
+			child = tree_nodes[child].next;
+		}
+	} else {
+		error_display(1,
+			"Expected to find an enum parent parameter for node %i in operator %s but found nothing!",
+			arg_index,
+			tree_nodes[parent_node].text);
+		return nullptr;
+	}
+
+	sexp_list_item head;
+
+	int item = get_dynamic_enum_position(tree_nodes[child].text);
+
+	if (item >= 0 && item < static_cast<int>(Dynamic_enums.size())) {
+
+		for (const SCP_string& enum_item : Dynamic_enums[item].list) {
+			head.add_data(enum_item.c_str());
+		}
+		return head.next;
+	} else {
+		// else if enum is invalid do this
+		error_display(1, "Could not find Lua Enum %s!", tree_nodes[child].text);
+		return nullptr;
+	}
 }
 
 sexp_list_item* sexp_tree::get_listing_opf_lua_general_orders()
