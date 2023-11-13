@@ -18,6 +18,8 @@ extern int allocate_subsys_status();
 
 static int Player_flight_group = 0;
 
+const int MAX_SPACE_OBJECTS = 64; // To match the XWing game engine limit
+
 // vazor222
 void parse_xwi_mission_info(mission *pm, const XWingMission *xwim)
 {
@@ -756,7 +758,7 @@ const char *xwi_determine_space_object_name(SCP_set<SCP_string> &objectNameSet, 
 	return iter.first->c_str();
 }
 
-void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObject *oj)
+void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObject *oj, int &object_count)
 {
 	SCP_UNUSED(pm);
 
@@ -823,6 +825,11 @@ void parse_xwi_objectgroup(mission *pm, const XWingMission *xwim, const XWMObjec
 		}
 		break;
 	}
+
+	// Check that the Xwing game engine object limit is not exceeded with this object group
+	if (object_count + (number_of_objects * number_of_objects) > MAX_SPACE_OBJECTS) 
+		return;
+	object_count += (number_of_objects * number_of_objects);
 
 	// Copy objects in Parse_objects to set for name checking below
 	// This only needs to be done fully once per object group then can be added to after each new object
@@ -966,9 +973,10 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 	for (const auto &fg : xwim->flightgroups)
 		parse_xwi_flightgroup(pm, xwim, &fg);
 
-	// load objects
-	for (const auto &obj : xwim->objects)
-		parse_xwi_objectgroup(pm, xwim, &obj);
+	// load object groups
+	int object_count = 0;
+	for (const auto& obj : xwim->objects) 
+		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
