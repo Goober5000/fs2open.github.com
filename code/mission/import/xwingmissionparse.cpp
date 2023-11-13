@@ -975,9 +975,8 @@ void parse_xwi_mission(mission *pm, const XWingMission *xwim)
 
 	// load object groups
 	int object_count = 0;
-	for (const auto& obj : xwim->objects) {
+	for (const auto& obj : xwim->objects) 
 		parse_xwi_objectgroup(pm, xwim, &obj, object_count); 
-	}
 }
 
 void post_process_xwi_mission(mission *pm, const XWingMission *xwim)
