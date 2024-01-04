@@ -20,6 +20,7 @@
 #include "gamesnd/eventmusic.h"
 #include "mission/missionparse.h"
 #include "mission/missionmessage.h"
+#include "scripting/global_hooks.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -153,6 +154,7 @@ BEGIN_MESSAGE_MAP(CMissionNotesDlg, CDialog)
 	ON_BN_CLICKED(IDC_CUSTOM_WING_NAMES, OnCustomWingNames)
 	ON_BN_CLICKED(IDC_SOUND_ENVIRONMENT_BUTTON, OnSoundEnvironment)
 	ON_BN_CLICKED(IDC_OPEN_CUSTOM_DATA, OnCustomData)
+	ON_BN_CLICKED(IDC_OPEN_CUSTOM_STRINGS, OnCustomStrings)
 	//}}AFX_MSG_MAP
 END_MESSAGE_MAP()
 
@@ -358,7 +360,15 @@ void CMissionNotesDlg::OnOK()
 		Num_teams = 2;
 	}
 
+	// This hook will allow for scripts to know when custom data or strings may be updated
+	// which will then allow them to update any LuaEnums that may be related to sexps
+	if (scripting::hooks::FredOnMissionSpecsSave->isActive()) {
+		scripting::hooks::FredOnMissionSpecsSave->run();
+	}
+
 	CDialog::OnOK();
+
+	FREDDoc_ptr->autosave("mission specs editor");
 }
 
 void CMissionNotesDlg::OnCancel()
@@ -716,6 +726,17 @@ void CMissionNotesDlg::OnCustomData()
 	UpdateData(TRUE);
 
 	CustomDataDlg dlg;
+	dlg.DoModal();
+
+	UpdateData(FALSE);
+}
+
+
+void CMissionNotesDlg::OnCustomStrings()
+{
+	UpdateData(TRUE);
+
+	CustomStringsDlg dlg;
 	dlg.DoModal();
 
 	UpdateData(FALSE);

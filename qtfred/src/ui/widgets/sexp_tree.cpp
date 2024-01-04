@@ -777,17 +777,23 @@ int sexp_tree::identify_arg_type(int node) {
 }
 
 // given a tree node, returns the argument type it should be.
+// OPF_NULL means no value (or a "void" value) is returned.  OPF_NONE means there shouldn't be any argument at this position at all.
 int sexp_tree::query_node_argument_type(int node) const {
 	int parent_node = tree_nodes[node].parent;
-	Assert(parent_node >= 0);
+	if (parent_node < 0) {		// parent nodes are -1 for a top-level operator like 'when'
+		return OPF_NULL;
+	}
+
 	int argnum = find_argument_number(parent_node, node);
 	if (argnum < 0) {
 		return OPF_NONE;
 	}
+
 	int op_num = get_operator_index(tree_nodes[parent_node].text);
 	if (op_num < 0) {
 		return OPF_NONE;
 	}
+
 	return query_operator_argument_type(op_num, argnum);
 }
 
@@ -5201,21 +5207,24 @@ sexp_list_item* sexp_tree::get_listing_opf_lua_enum(int parent_node, int arg_ind
 		return nullptr;
 	}
 
+	// Append the suffix if it exists
+	SCP_string enum_name = tree_nodes[child].text + get_child_enum_suffix(tree_nodes[parent_node].text, arg_index);
+
 	sexp_list_item head;
 
-	int item = get_dynamic_enum_position(tree_nodes[child].text);
+	int item = get_dynamic_enum_position(enum_name);
 
 	if (item >= 0 && item < static_cast<int>(Dynamic_enums.size())) {
 
 		for (const SCP_string& enum_item : Dynamic_enums[item].list) {
 			head.add_data(enum_item.c_str());
 		}
-		return head.next;
 	} else {
 		// else if enum is invalid do this
-		error_display(1, "Could not find Lua Enum %s!", tree_nodes[child].text);
-		return nullptr;
+		mprintf(("Could not find Lua Enum %s! Using <none> instead!", enum_name.c_str()));
+		head.add_data("<none>");
 	}
+	return head.next;
 }
 
 sexp_list_item* sexp_tree::get_listing_opf_game_snds() {

@@ -303,12 +303,14 @@ void briefing_editor_dlg::OnClose()
 	}
 
 	if (dup)
-		MessageBox("You have duplicate icons names.  You should resolve these.", "Warning");
+		MessageBox("You have duplicate icon names.  You should resolve these.", "Warning");
 
 	theApp.record_window_data(&Briefing_wnd_data, this);
-	ptr = Briefing_dialog;
+	ptr = Briefing_dialog;	// this juggling prevents a crash in certain situations
 	Briefing_dialog = NULL;
 	delete ptr;
+
+	FREDDoc_ptr->autosave("briefing editor");
 }
 
 void briefing_editor_dlg::reset_editor()
@@ -373,6 +375,8 @@ void briefing_editor_dlg::update_data(int update)
 
 		if (m_no_grid)
 			ptr->draw_grid = false;
+		else
+			ptr->draw_grid = true;
 
 		MODIFY(ptr->flags, i);
 		ptr->formula = m_tree.save_tree();

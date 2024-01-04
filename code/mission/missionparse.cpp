@@ -911,6 +911,12 @@ void parse_player_info2(mission *pm)
 		if ( optional_string("$Starting Shipname:") )
 			stuff_string( Player_start_shipname, F_NAME, NAME_LENGTH );
 
+		if (optional_string("+Do Not Validate Loadout")) {
+			ptr->do_not_validate = true;
+		} else {
+			ptr->do_not_validate = false;
+		}
+
 		required_string("$Ship Choices:");
 		stuff_loadout_list(list, MISSION_LOADOUT_SHIP_LIST);
 
@@ -2564,13 +2570,13 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 		if (entry->status == ShipStatus::INVALID) {
 			Warning(LOCATION, "Potential bug: ship registry status for %s is INVALID", shipp->ship_name);
 		}
-		if (entry->p_objp == nullptr) {
-			Warning(LOCATION, "Potential bug: ship registry parse object for %s is nullptr", shipp->ship_name);
-		} else if (entry->p_objp != p_objp) {
+		if (entry->pobj_num < 0) {
+			Warning(LOCATION, "Potential bug: ship registry parse object for %s is not assigned", shipp->ship_name);
+		} else if (entry->pobj_num != POBJ_INDEX(p_objp)) {
 			Warning(LOCATION, "Potential bug: ship registry parse object for %s is different from its expected value", shipp->ship_name);
 		}
 
-		entry->p_objp = p_objp;
+		entry->pobj_num = POBJ_INDEX(p_objp);
 	}
 
 	return objnum;
@@ -3638,8 +3644,8 @@ void mission_parse_maybe_create_parse_object(p_object *pobjp)
 				// Same with the ship registry so that SEXPs don't refer to phantom ships
 				auto entry = &Ship_registry[Ship_registry_map[pobjp->name]];
 				entry->status = ShipStatus::EXITED;
-				entry->objp = nullptr;
-				entry->shipp = nullptr;
+				entry->objnum = -1;
+				entry->shipnum = -1;
 				entry->cleanup_mode = SHIP_DESTROYED;
 
 				// once the ship is exploded, find the debris pieces belonging to this object, mark them
@@ -4319,7 +4325,7 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 			{
 				ship_registry_entry entry(p_objp->name);
 				entry.status = ShipStatus::NOT_YET_PRESENT;
-				entry.p_objp = p_objp;
+				entry.pobj_num = POBJ_INDEX(p_objp);
 
 				Ship_registry.push_back(entry);
 				Ship_registry_map[p_objp->name] = static_cast<int>(Ship_registry.size() - 1);
@@ -4969,7 +4975,7 @@ void post_process_ships_wings()
 	{
 		ship_registry_entry entry(p_obj.name);
 		entry.status = ShipStatus::NOT_YET_PRESENT;
-		entry.p_objp = &p_obj;
+		entry.pobj_num = POBJ_INDEX(&p_obj);
 
 		Ship_registry.push_back(entry);
 		Ship_registry_map[p_obj.name] = static_cast<int>(Ship_registry.size() - 1);
@@ -6108,6 +6114,27 @@ void parse_custom_data(mission* pm)
 
 		parse_string_map(pm->custom_data, "$end_data_map", "+Val:");
 	}
+
+	if (optional_string("$begin_custom_strings")) {
+		while (optional_string("$Name:")) {
+			mission_custom_string cs;
+
+			// The name of the string
+			stuff_string(cs.name, F_NAME);
+
+			// Arbitrary string value used for grouping strings together
+			required_string("+Value:");
+			stuff_string(cs.value, F_NAME);
+
+			// The string text itself
+			required_string("+String:");
+			stuff_string(cs.text, F_MULTITEXT);
+
+			pm->custom_strings.push_back(cs);
+		}
+
+		required_string("$end_custom_strings");
+	}
 }
 
 void apply_default_custom_data(mission* pm)
@@ -6646,6 +6673,7 @@ void mission::Reset()
 	volumetrics.reset();
 
 	custom_data.clear();
+	custom_strings.clear();
 }
 
 /**
@@ -8536,7 +8564,7 @@ void mission_bring_in_support_ship( object *requester_objp )
 	{
 		ship_registry_entry entry(pobj->name);
 		entry.status = ShipStatus::NOT_YET_PRESENT;
-		entry.p_objp = pobj;
+		entry.pobj_num = POBJ_INDEX(pobj);
 
 		Ship_registry.push_back(entry);
 		Ship_registry_map[pobj->name] = static_cast<int>(Ship_registry.size() - 1);
@@ -8894,6 +8922,10 @@ bool check_for_23_3_data()
 		return true;
 	}
 
+	if (The_mission.custom_strings.size() > 0) {
+		return true;
+	}
+
 	for (const auto& so : list_range(&Ship_obj_list))
 	{
 		auto shipp = &Ships[Objects[so->objnum].instance];
@@ -8907,6 +8939,12 @@ bool check_for_23_3_data()
 		sip_params = &Warp_params[Ship_info[shipp->ship_info_index].warpout_params_index];
 		if (shipp_params->supercap_warp_physics != sip_params->supercap_warp_physics)
 			return true;
+	}
+
+	for (int t = 0; t < Num_teams; t++) {
+		if (Team_data[t].do_not_validate) {
+			return true;
+		}
 	}
 
 	return false;

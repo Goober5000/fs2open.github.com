@@ -287,6 +287,15 @@ float	AI_frametime;
 
 char** Ai_class_names = NULL;
 
+//used for good-primary-time
+typedef struct {
+	object_ship_wing_point_team subject;
+	object_ship_wing_point_team target;
+	int weapon_index;
+} primary_fire_info;
+
+static SCP_vector<primary_fire_info> Preferred_primary_info;
+
 typedef struct {
 	int team;
 	int weapon_index;
@@ -294,7 +303,7 @@ typedef struct {
 	int ship_registry_index;
 } huge_fire_info;
 
-SCP_vector<huge_fire_info> Ai_huge_fire_info;
+static SCP_vector<huge_fire_info> Ai_huge_fire_info;
 
 int Ai_last_arrive_path;	// index of ship_bay path used by last arrival from a fighter bay
 
@@ -386,10 +395,10 @@ int is_preferred_weapon(int weapon_num, object *firer_objp, object *target_objp)
 			continue;
 
 		auto ship_entry = &Ship_registry[hfi->ship_registry_index];
-		if (!ship_entry->objp)
+		if (!ship_entry->has_objp())
 			continue;
 
-		int signature = ship_entry->objp->signature;
+		int signature = ship_entry->objp()->signature;
 
 		// sigatures, weapon_index, and team must match
 		if ( (signature == target_signature) && (hfi->weapon_index == weapon_num) && (hfi->team == firer_team) )
@@ -1001,6 +1010,9 @@ void ai_level_init()
 	ai_init_secondary_info();
 
 	Ai_last_arrive_path=0;
+
+	// clear out the preferred primaries so that it doesn't persist between missions or between mission reloads
+	Preferred_primary_info.clear();
 }
 
 // BEGIN STEALTH
@@ -5479,6 +5491,61 @@ float	G_collision_time;
 vec3d	G_predicted_pos, G_fire_pos;
 
 
+/*
+* plieblang
+* Used by the good-primary-time sexp to store the info supplied from there
+* weapon_idx indexes into Weapon_info if the primary preference is being set
+*/
+void ai_set_or_clear_preferred_primary_weapon(bool set_it, const object_ship_wing_point_team *subject, const object_ship_wing_point_team *target, int weapon_idx)
+{
+	// force the ai to reselect a primary instead of possibly waiting the normal elapsed time
+	for (auto so : list_range(&Ship_obj_list))
+	{
+		auto subject_objp = &Objects[so->objnum];
+		if (subject_objp->flags[Object::Object_Flags::Should_be_dead])
+			continue;
+
+		auto subject_shipp = &Ships[subject_objp->instance];
+		if (!subject->matches(subject_shipp))
+			continue;
+
+		auto subject_aip = &Ai_info[subject_shipp->ai_index];
+		if (subject_aip->target_objnum < 0)
+			continue;
+
+		auto target_objp = &Objects[subject_aip->target_objnum];
+		if (target_objp->type != OBJ_SHIP || !target->matches(&Ships[target_objp->instance]))
+			continue;
+
+		// for AIs that match this subject-target pair, select a new primary immediately
+		subject_aip->primary_select_timestamp = timestamp(1);
+	}
+
+	if (set_it)
+	{
+		for (auto& ppi : Preferred_primary_info)
+		{
+			if (ppi.subject == *subject && ppi.target == *target)
+			{
+				ppi.weapon_index = weapon_idx;
+				return;
+			}
+		}
+
+		// not found, so add a new entry
+		Preferred_primary_info.push_back({ *subject, *target, weapon_idx });
+	}
+	else
+	{
+		Preferred_primary_info.erase(
+			std::remove_if(Preferred_primary_info.begin(), Preferred_primary_info.end(), [&](const primary_fire_info& ppi) {
+				return ppi.subject == *subject && ppi.target == *target;
+			}), Preferred_primary_info.end()
+		);
+	}
+}
+
+
 //old version of this fuction, this will be useful for playing old missions and not having the new primary
 //selection code throw off the balance of the mission.
 //	If:
@@ -5564,6 +5631,7 @@ int ai_select_primary_weapon(object *objp, object *other_objp, Weapon::Info_Flag
 {
 	// Pointer Set Up
 	ship	*shipp = &Ships[objp->instance];
+	ship	*other_shipp = nullptr;
 	ship_weapon *swp = &shipp->weapons;
 
 	// Debugging
@@ -5574,6 +5642,46 @@ int ai_select_primary_weapon(object *objp, object *other_objp, Weapon::Info_Flag
 		mprintf(("'other_objpp == NULL' in ai_select_primary_weapon()\n"));
 		return -1;
 	}
+
+	bool other_is_ship = (other_objp->type == OBJ_SHIP);
+
+	if (other_is_ship)
+	{
+		other_shipp = &Ships[other_objp->instance];
+
+		//if the good-primary-time sexp has been used, return that weapon immediately
+		//if smart primary weapon selection isn't set, turning this override behavior off might not do anything
+		//however this seems acceptable
+		for (const auto &ppi : Preferred_primary_info)
+		{
+			if (ppi.subject.matches(shipp) && ppi.target.matches(other_shipp))
+			{
+				int weapon_idx = ppi.weapon_index;
+
+				//figure out what bank the weapon belongs to
+				int bank_num = -1;
+				for (int i = 0; i < MAX_SHIP_PRIMARY_BANKS; i++) {
+					if (weapon_idx == swp->primary_bank_weapons[i]) {
+						bank_num = i;
+						break;
+					}
+				}
+
+				//if it's a valid bank, set it and return
+				if (bank_num != -1) {
+					//forcing a ship to use a certain primary should prevent it from linking weapons
+					shipp->flags.set(Ship::Ship_Flags::Force_primary_unlinking);
+
+					swp->current_primary_bank = bank_num;
+					return bank_num;
+				}
+			}
+		}
+	}
+
+	// we're not prioritizing a specific primary weapon
+	shipp->flags.remove(Ship::Ship_Flags::Force_primary_unlinking);
+
 
 	//not using the new AI, use the old version of this function instead.
 	if (!(Ai_info[shipp->ai_index].ai_profile_flags[AI::Profile_Flags::Smart_primary_weapon_selection]))
@@ -5610,12 +5718,11 @@ int ai_select_primary_weapon(object *objp, object *other_objp, Weapon::Info_Flag
 		}
 	}
 
-	bool other_is_ship = (other_objp->type == OBJ_SHIP);
 	float enemy_remaining_shield = get_shield_pct(other_objp);
 
 	if ( other_is_ship )
 	{
-		ship_info* other_sip = &Ship_info[Ships[other_objp->instance].ship_info_index];
+		ship_info* other_sip = &Ship_info[other_shipp->ship_info_index];
 
 		if (other_sip->class_type >= 0 && Ship_types[other_sip->class_type].flags[Ship::Type_Info_Flags::Targeted_by_huge_Ignored_by_small_only]) {
 			//Check if we have a capital+ weapon on board
@@ -5631,7 +5738,7 @@ int ai_select_primary_weapon(object *objp, object *other_objp, Weapon::Info_Flag
 						if (enemy_remaining_shield <= 0.05f || (wip->shield_factor * 1.33f > wip->armor_factor))
 						{
 							swp->current_primary_bank = i;
-							nprintf(("AI", "%i: Ship %s selecting weapon %s (capital+) vs target %s\n", Framecount, Ships[objp->instance].ship_name, wip->name, Ships[other_objp->instance].ship_name));
+							nprintf(("AI", "%i: Ship %s selecting weapon %s (capital+) vs target %s\n", Framecount, shipp->ship_name, wip->name, other_shipp->ship_name));
 							return i;
 						}
 					}
@@ -5669,7 +5776,7 @@ int ai_select_primary_weapon(object *objp, object *other_objp, Weapon::Info_Flag
 			i_hullfactor_prev_bank = 0;		// Just switch to the first one
 		}
 		swp->current_primary_bank = i_hullfactor_prev_bank;		// Select the best weapon
-		nprintf(("AI", "%i: Ship %s selecting weapon %s (no shields) vs target %s\n", Framecount, shipp->ship_name, Weapon_info[swp->primary_bank_weapons[i_hullfactor_prev_bank]].name, (other_is_ship ? Ships[other_objp->instance].ship_name : "non-ship") ));
+		nprintf(("AI", "%i: Ship %s selecting weapon %s (no shields) vs target %s\n", Framecount, shipp->ship_name, Weapon_info[swp->primary_bank_weapons[i_hullfactor_prev_bank]].name, (other_is_ship ? other_shipp->ship_name : "non-ship") ));
 		return i_hullfactor_prev_bank;							// Return
 	}
 
@@ -5790,6 +5897,11 @@ void set_primary_weapon_linkage(object *objp)
 	swp = &shipp->weapons;
 
 	shipp->flags.remove(Ship::Ship_Flags::Primary_linked);
+
+	//bail if it's been included in a good-primary-time
+	if (shipp->flags[Ship::Ship_Flags::Force_primary_unlinking]) {
+		return;
+	}
 
 	// AL: ensure target is a ship!
 	if ( (aip->target_objnum != -1) && (Objects[aip->target_objnum].type == OBJ_SHIP) ) {
@@ -6070,6 +6182,7 @@ int ai_fire_primary_weapon(object *objp)
 		enemy_sip = NULL;
 	}
 
+	//plieblang - added check for size of Preferred_primaries to force reevaluation if good-primary-time has been used in the meantime
 	if ( (swp->current_primary_bank < 0) || (swp->current_primary_bank >= swp->num_primary_banks) || timestamp_elapsed(aip->primary_select_timestamp)) {
 		Weapon::Info_Flags flags = Weapon::Info_Flags::NUM_VALUES;
 		if ( aip->targeted_subsys != NULL ) {
@@ -6077,7 +6190,7 @@ int ai_fire_primary_weapon(object *objp)
 		}
 		ai_select_primary_weapon(objp, enemy_objp, flags);
 		ship_primary_changed(shipp);	// AL: maybe send multiplayer information when AI ship changes primaries
-		aip->primary_select_timestamp = timestamp(5 * 1000);	//	Maybe change primary weapon five seconds from now.
+		aip->primary_select_timestamp = timestamp(5 * MILLISECONDS_PER_SECOND);	//	Maybe change primary weapon five seconds from now.
 	}
 
 	//We can only check LoS if we have a target defined
@@ -6445,7 +6558,7 @@ float compute_incoming_payload(object *target_objp)
 //			OR: secondary los flag is set but no line of sight is availabe
 //	Note: If player is attacking a ship, that ship is allowed to fire at player.  Otherwise, we get in a situation in which
 //	player is attacking a large ship, but that large ship is not defending itself with missiles.
-int check_ok_to_fire(int objnum, int target_objnum, weapon_info *wip, int secondary_bank, ship_subsys* turret)
+bool check_ok_to_fire(int objnum, int target_objnum, weapon_info *wip, int secondary_bank, vec3d *firing_pos_global)
 {
 	int	num_homers = 0;
 
@@ -6461,8 +6574,8 @@ int check_ok_to_fire(int objnum, int target_objnum, weapon_info *wip, int second
 
 		if (The_mission.ai_profile->flags[AI::Profile_Flags::Require_exact_los] || wip->wi_flags[Weapon::Info_Flags::Require_exact_los]) {
 			//Check if th AI has Line of Sight and is allowed to fire
-			if (!check_los(objnum, target_objnum, 10.0f, -1, secondary_bank, turret)) {
-				return 0;
+			if (!check_los(objnum, target_objnum, 10.0f, -1, secondary_bank, firing_pos_global)) {
+				return false;
 			}
 		}
 
@@ -6476,14 +6589,14 @@ int check_ok_to_fire(int objnum, int target_objnum, weapon_info *wip, int second
 					//	At Easy, 2/7...at Expert, 5/7
 					int t = ((Missiontime /(65536*10)) ^ target_objnum ^ 0x01) % (NUM_SKILL_LEVELS+2);
 					if (t > Ai_info[Ships[tobjp->instance].ai_index].ai_chance_to_use_missiles_on_plr) {
-						return 0;
+						return false;
 					}
 				}
 				int	swarmers = 0;
 				if (wip->wi_flags[Weapon::Info_Flags::Swarm])
 					swarmers = 2;	//	Note, always want to be able to fire swarmers if no currently incident homers.
 				if (The_mission.ai_profile->max_allowed_player_homers[Game_skill_level] < num_homers + swarmers) {
-					return 0;
+					return false;
 				}
 			} else if (num_homers > 3) {
 				float	incoming_payload;
@@ -6491,22 +6604,22 @@ int check_ok_to_fire(int objnum, int target_objnum, weapon_info *wip, int second
 				incoming_payload = compute_incoming_payload(&Objects[target_objnum]);
 
 				if (incoming_payload > tobjp->hull_strength) {
-					return 0;
+					return false;
 				}
 			}
 		}
 	}
 
-	return 1;
+	return true;
 }
 
 //	--------------------------------------------------------------------------
 //  Returns true if *aip has a line of sight to its current target.
 //	threshold defines the minimum radius for an object to be considered relevant for LoS
-bool check_los(int objnum, int target_objnum, float threshold, int primary_bank, int secondary_bank, ship_subsys* turret) {
+bool check_los(int objnum, int target_objnum, float threshold, int primary_bank, int secondary_bank, vec3d *firing_pos_global) {
 
 	//Do both checks over an XOR-Check for more detailed messages
-	int sources = (primary_bank != -1 ? 1 : 0) + (secondary_bank != -1 ? 1 : 0) + (turret != nullptr ? 1 : 0);
+	int sources = (primary_bank != -1 ? 1 : 0) + (secondary_bank != -1 ? 1 : 0) + (firing_pos_global != nullptr ? 1 : 0);
 	Assertion(sources >= 1, "Cannot check line of sight from a model with neither a primar bank, nor secondary bank nor a turret set as a source.");
 	Assertion(sources <= 1, "Cannot check line of sight from a model with more than one source set.");
 
@@ -6514,10 +6627,8 @@ bool check_los(int objnum, int target_objnum, float threshold, int primary_bank,
 
 	object* firing_ship = &Objects[objnum];
 
-	if (turret != nullptr) {
-		vec3d turret_fvec;
-		//It doesn't like not having an fvec output vector, so give it a dummy vector
-		ship_get_global_turret_gun_info(firing_ship, turret, &start, &turret_fvec, 1, nullptr);
+	if (firing_pos_global != nullptr) {
+		start = *firing_pos_global;
 	} else {
 		bool is_primary = secondary_bank == -1;
 		ship *shipp = &Ships[firing_ship->instance];
@@ -8824,38 +8935,40 @@ void ai_chase()
 		//	Set predicted_enemy_pos.
 		//	See if attacking a subsystem.
 		weapon_info* wip = ai_get_weapon(&shipp->weapons);
-		bool ballistic = !IS_VEC_NULL(&The_mission.gravity) && wip->gravity_const != 0.0f;
-		if (aip->targeted_subsys != NULL && get_shield_pct(En_objp) < HULL_DAMAGE_THRESHOLD_PERCENT) {
-			Assert(En_objp->type == OBJ_SHIP);
-			vec3d target_pos;
-			get_subsystem_pos(&target_pos, En_objp, aip->targeted_subsys);
+		if (wip) {
+			bool ballistic = !IS_VEC_NULL(&The_mission.gravity) && wip->gravity_const != 0.0f;
+			if (aip->targeted_subsys != NULL && get_shield_pct(En_objp) < HULL_DAMAGE_THRESHOLD_PERCENT) {
+				Assert(En_objp->type == OBJ_SHIP);
+				vec3d target_pos;
+				get_subsystem_pos(&target_pos, En_objp, aip->targeted_subsys);
 
-			if (!ballistic)
-				predicted_enemy_pos = target_pos;
-			else {
-				vec3d gravity_vec = The_mission.gravity * wip->gravity_const;
-				has_valid_ballistic_trajectory =
-					physics_lead_ballistic_trajectory(&Pl_objp->pos, &target_pos, &aip->last_aim_enemy_vel, wip->max_speed, &gravity_vec, &predicted_enemy_pos);
-
-				if (has_valid_ballistic_trajectory)
-					predicted_enemy_pos = Pl_objp->pos + predicted_enemy_pos * vm_vec_dist(&Pl_objp->pos, &target_pos);
-				else
+				if (!ballistic)
 					predicted_enemy_pos = target_pos;
-			}
+				else {
+					vec3d gravity_vec = The_mission.gravity * wip->gravity_const;
+					has_valid_ballistic_trajectory =
+						physics_lead_ballistic_trajectory(&Pl_objp->pos, &target_pos, &aip->last_aim_enemy_vel, wip->max_speed, &gravity_vec, &predicted_enemy_pos);
 
-			predicted_vec_to_enemy = real_vec_to_enemy;			
-		} else {
-			if (!ballistic)
-				set_predicted_enemy_pos(&predicted_enemy_pos, Pl_objp, &aip->last_aim_enemy_pos, &aip->last_aim_enemy_vel, aip);
-			else {
-				vec3d gravity_vec = The_mission.gravity * wip->gravity_const;
-				has_valid_ballistic_trajectory =
-					physics_lead_ballistic_trajectory(&Pl_objp->pos, &aip->last_aim_enemy_pos, &aip->last_aim_enemy_vel, wip->max_speed, &gravity_vec, &predicted_enemy_pos);			
-				
-				if (has_valid_ballistic_trajectory)
-					predicted_enemy_pos = Pl_objp->pos + predicted_enemy_pos * vm_vec_dist(&Pl_objp->pos, &aip->last_aim_enemy_pos);
-				else
+					if (has_valid_ballistic_trajectory)
+						predicted_enemy_pos = Pl_objp->pos + predicted_enemy_pos * vm_vec_dist(&Pl_objp->pos, &target_pos);
+					else
+						predicted_enemy_pos = target_pos;
+				}
+
+				predicted_vec_to_enemy = real_vec_to_enemy;			
+			} else {
+				if (!ballistic)
 					set_predicted_enemy_pos(&predicted_enemy_pos, Pl_objp, &aip->last_aim_enemy_pos, &aip->last_aim_enemy_vel, aip);
+				else {
+					vec3d gravity_vec = The_mission.gravity * wip->gravity_const;
+					has_valid_ballistic_trajectory =
+						physics_lead_ballistic_trajectory(&Pl_objp->pos, &aip->last_aim_enemy_pos, &aip->last_aim_enemy_vel, wip->max_speed, &gravity_vec, &predicted_enemy_pos);			
+				
+					if (has_valid_ballistic_trajectory)
+						predicted_enemy_pos = Pl_objp->pos + predicted_enemy_pos * vm_vec_dist(&Pl_objp->pos, &aip->last_aim_enemy_pos);
+					else
+						set_predicted_enemy_pos(&predicted_enemy_pos, Pl_objp, &aip->last_aim_enemy_pos, &aip->last_aim_enemy_vel, aip);
+				}
 			}
 		}
 	}
@@ -14844,6 +14957,9 @@ void ai_frame(int objnum)
 
 	//Default to glide OFF
 	Pl_objp->phys_info.flags &= ~PF_GLIDING;
+	
+	// turn off trigger down
+	shipp->weapons.flags.remove(Ship::Weapon_Flags::Primary_trigger_down);
 
 	// warping out?
 	if ((aip->mode == AIM_WARP_OUT) || (aip->ai_flags[AI::AI_Flags::Trying_unsuccessfully_to_warp]))

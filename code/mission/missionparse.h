@@ -19,7 +19,7 @@
 #include "graphics/2d.h"
 #include "io/keycontrol.h"
 #include "model/model.h"
-#include "model/modelanimation.h"
+#include "model/animation/modelanimation.h"
 #include "object/object.h"
 #include "parse/sexp.h"
 #include "sound/sound.h"
@@ -127,6 +127,12 @@ typedef struct mission_default_custom_data {
 	SCP_string description;
 } mission_default_custom_data;
 
+typedef struct mission_custom_string {
+	SCP_string name;
+	SCP_string value;
+	SCP_string text;
+} mission_custom_string;
+
 // descriptions of flags for FRED
 template <class T>
 struct parse_object_flag_description {
@@ -185,6 +191,8 @@ typedef struct mission {
 	SCP_vector<mission_cutscene> cutscenes;
 
 	SCP_map<SCP_string, SCP_string> custom_data;
+
+	SCP_vector<mission_custom_string> custom_strings;
 
 	void Reset( );
 
@@ -434,6 +442,7 @@ typedef struct team_data {
 
 	// weapons
 	int		num_weapon_choices;
+	bool    do_not_validate;
 	int		weaponry_pool[MAX_WEAPON_TYPES];
 	int		weaponry_count[MAX_WEAPON_TYPES];
 	char	weaponry_pool_variable[MAX_WEAPON_TYPES][TOKEN_LENGTH];

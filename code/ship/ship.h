@@ -22,7 +22,7 @@
 #include "hud/hud.h"
 #include "hud/hudparse.h"
 #include "model/model.h"
-#include "model/modelanimation.h"
+#include "model/animation/modelanimation.h"
 #include "network/multi_obj.h"
 #include "radar/radarsetup.h"
 #include "render/3d.h"
@@ -147,6 +147,10 @@ public:
 	int remote_detonaters_active;
 	int detonate_weapon_time;			//	time at which last fired weapon can be detonated
 	int ai_class;
+
+	int firing_loop_sounds[MAX_SHIP_PRIMARY_BANKS]; // objsnd indices, 
+													// -2 is a special value used to mean 'a loop WOULD be going on right now' 
+													// but the modder did not actually specify a loop sound
 
 	flagset<Ship::Weapon_Flags> flags;
 
@@ -283,8 +287,9 @@ typedef struct cockpit_display {
 	char name[MAX_FILENAME_LEN];
 } cockpit_display;
 
-extern bool disableCockpits;
-extern bool cockpitActive;
+extern bool Disable_cockpits;
+extern bool Disable_cockpit_sway;
+extern bool Cockpit_active;
 
 extern SCP_vector<cockpit_display> Player_displays;
 
@@ -369,6 +374,7 @@ public:
 	ship_subsys	*targeted_subsys;					//	subsystem this turret is attacking
 	bool	scripting_target_override;
 	int		last_fired_weapon_info_index;		// which weapon class was last fired
+	int		shared_fire_direction_beam_objnum;		// reference beam for shared fire direction
 
 	int		turret_pick_big_attack_point_timestamp;	//	Next time to pick an attack point for this turret
 	vec3d	turret_big_attack_point;			//	local coordinate of point for this turret to attack on enemy
@@ -922,18 +928,28 @@ enum class ShipStatus
 struct ship_registry_entry
 {
 	ShipStatus status = ShipStatus::INVALID;
-	char name[NAME_LENGTH];
+	char name[NAME_LENGTH] = { 0 };
 
-	p_object *p_objp = nullptr;
-	object *objp = nullptr;
-	ship *shipp = nullptr;
+	int pobj_num = -1;
+	int objnum = -1;
+	int shipnum = -1;
+
 	int cleanup_mode = 0;
 	int exited_index = -1;
 
-	ship_registry_entry(const char *_name)
-	{
-		strcpy_s(name, _name);
-	}
+	ship_registry_entry(const char* _name);
+
+	inline bool has_p_objp() const { return pobj_num >= 0; }
+	inline bool has_objp() const { return objnum >= 0; }
+	inline bool has_shipp() const { return shipnum >= 0; }
+
+	p_object* p_objp() const;
+	object* objp() const;
+	ship* shipp() const;
+
+	p_object* p_objp_or_null() const;
+	object* objp_or_null() const;
+	ship* shipp_or_null() const;
 };
 
 extern SCP_vector<ship_registry_entry> Ship_registry;
@@ -1008,7 +1024,7 @@ typedef struct ship_type_info {
 	SCP_vector<int> ai_cripple_ignores;
 
 	//Explosions
-	float vaporize_chance;
+	float skip_deathroll_chance;
 
 	//Resources
 	SCP_vector<int> explosion_bitmap_anims;
@@ -1022,7 +1038,7 @@ typedef struct ship_type_info {
 		  ff_multiplier( 0.f ), emp_multiplier( 0.f ), warp_sound_range_multiplier( 1.f ),
 		  fog_start_dist( 0.f ), fog_complete_dist( 0.f ),
 		  ai_valid_goals( 0 ), ai_active_dock( 0 ), ai_passive_dock( 0 ),
-		  vaporize_chance( 0.f )
+		  skip_deathroll_chance( 0.f )
 
 	{
         flags.reset();
@@ -1156,6 +1172,7 @@ public:
 
 	char		cockpit_pof_file[MAX_FILENAME_LEN];	// POF file for cockpit view
 	vec3d		cockpit_offset;
+	float   cockpit_sway_val;					// multiplier for cockpit 'swaying'
 	char		pof_file[MAX_FILENAME_LEN];			// POF file to load/associate with ship
 	char		pof_file_hud[MAX_FILENAME_LEN];		// POF file to load for the HUD target box
 	char		pof_file_tech[MAX_FILENAME_LEN];	// POF file to load for the techroom
@@ -1211,7 +1228,7 @@ public:
 	int death_fx_count;
 	int	shockwave_count;					// the # of total shockwaves
 	SCP_vector<int> explosion_bitmap_anims;
-	float vaporize_chance;					
+	float skip_deathroll_chance;					
 
 	particle_effect		impact_spew;
 	particle_effect		damage_spew;
@@ -1642,8 +1659,9 @@ extern SCP_vector<wing_formation> Wing_formations;
 
 // Use the below macros when you want to find the index of an array element in the
 // Wings[] or Ships[] arrays.
-#define WING_INDEX(wingp) ((int)(wingp-Wings))
-#define SHIP_INDEX(shipp) ((int)(shipp-Ships))
+#define WING_INDEX(wingp) (static_cast<int>(wingp-Wings))
+#define SHIP_INDEX(shipp) (static_cast<int>(shipp-Ships))
+#define SHIP_REGISTRY_INDEX(ship_entry) (static_cast<int>(ship_entry-Ship_registry.data()))
 
 
 extern void ship_init();				// called once	at game start
@@ -1655,7 +1673,7 @@ extern void change_ship_type(int n, int ship_type, int by_sexp = 0);
 extern void ship_process_pre( object * objp, float frametime );
 extern void ship_process_post( object * objp, float frametime );
 extern void ship_render( object * obj, model_draw_list * scene );
-extern void ship_render_player_ship( object * objp);
+extern void ship_render_player_ship( object * objp, const vec3d* offset = nullptr, const matrix* rot_offset = nullptr, const fov_t* fov_override = nullptr);
 extern void ship_delete( object * objp );
 extern int ship_check_collision_fast( object * obj, object * other_obj, vec3d * hitpos );
 extern int ship_get_num_ships();
@@ -1903,7 +1921,7 @@ int is_support_allowed(object *objp, bool do_simple_check = false);
 //	Stuffs:
 //		*gpos: absolute position of gun firing point
 //		*gvec: vector fro *gpos to *targetp
-void ship_get_global_turret_gun_info(object *objp, ship_subsys *ssp, vec3d *gpos, vec3d *gvec, int use_angles, vec3d *targetp);
+void ship_get_global_turret_gun_info(object *objp, ship_subsys *ssp, vec3d *gpos, bool avg_origin, vec3d *gvec, bool use_angles, vec3d *targetp);
 
 //	Given an object and a turret on that object, return the global position and forward vector
 //	of the turret.   The gun normal is the unrotated gun normal, (the center of the FOV cone), not

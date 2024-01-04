@@ -2886,6 +2886,8 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 
 	create_family_tree(pm);
 
+	// Now do submodel movement post-processing.  This should come before all other error checking.
+
 	// ---------- submodel movement sanity checks ----------
 
 	for (i = 0; i < pm->n_models; i++) {
@@ -2931,6 +2933,16 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 		}
 	}
 
+	// And now look through all the submodels and set the model flag if any are intrinsic-moving
+	for (i = 0; i < pm->n_models; i++) {
+		if (pm->submodel[i].rotation_type == MOVEMENT_TYPE_INTRINSIC || pm->submodel[i].translation_type == MOVEMENT_TYPE_INTRINSIC) {
+			pm->flags |= PM_FLAG_HAS_INTRINSIC_MOTION;
+			break;
+		}
+	}
+
+	// -------------------- Now do any other error checking that validates data in the POF --------------------
+
 	// some dockpoint checks
 	for (i = 0; i < pm->n_docks; i++) {
 		auto dock = &pm->docking_bays[i];
@@ -2966,11 +2978,14 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 		}
 	}
 
-	// And now look through all the submodels and set the model flag if any are intrinsic-moving
-	for (i = 0; i < pm->n_models; i++) {
-		if (pm->submodel[i].rotation_type == MOVEMENT_TYPE_INTRINSIC || pm->submodel[i].translation_type == MOVEMENT_TYPE_INTRINSIC) {
-			pm->flags |= PM_FLAG_HAS_INTRINSIC_MOTION;
-			break;
+	// For several revisions, Pof Tools was writing invalid eyepoint data. We cannot guarantee that this will catch all instances,
+	// but should at least head off potential crashes before they happen
+	for (i = 0; i < pm->n_view_positions; ++i) {
+		if (pm->view_positions[i].parent < 0 || pm->view_positions[i].parent >= pm->n_models) {
+			nprintf(("Warning", "Model %s has an invalid eye position %i. Use a recent version of Pof Tools to fix the model.\n", pm->filename, i));
+			pm->view_positions[i].parent = 0;
+			pm->view_positions[i].norm = {{{1.0f, 0.0f, 0.0f}}};
+			pm->view_positions[i].pnt = ZERO_VECTOR;
 		}
 	}
 
@@ -3001,7 +3016,7 @@ modelread_status read_model_file(polymodel* pm, const char* filename, int ferror
 	modelread_status status;
 
 	//See if this is a modular, virtual pof, and if so, parse it from there
-	if (read_virtual_model_file(pm, filename, depth, ferror, deferredTasks)) {
+	if (read_virtual_model_file(pm, filename, std::move(depth), ferror, deferredTasks)) {
 		status = modelread_status::SUCCESS_VIRTUAL;
 	}
 	else {
@@ -4375,10 +4390,10 @@ void submodel_translate(bsp_info *sm, submodel_instance *smi)
 	submodel_canonicalize_translation(sm, smi);
 }
 
-// Tries to move joints so that the turret points to the point dst.
+// Tries to move joints so that the turret points to the point dst.  If dst is nullptr, the turret's joints are reset.
 // turret1 is the angles of the turret, turret2 is the angles of the gun from turret
 //	Returns 1 if rotated gun, 0 if no gun to rotate (rotation handled by AI)
-int model_rotate_gun(object *objp, polymodel *pm, polymodel_instance *pmi, ship_subsys *ss, vec3d *dst, bool reset)
+int model_rotate_gun(object *objp, polymodel *pm, polymodel_instance *pmi, ship_subsys *ss, vec3d *dst)
 {
 	model_subsystem *turret = ss->system_info;
 
@@ -4401,7 +4416,7 @@ int model_rotate_gun(object *objp, polymodel *pm, polymodel_instance *pmi, ship_
 	// Find the heading and pitch that the gun needs to turn to
 	float desired_base_angle, desired_gun_angle;
 
-	if (!reset) {
+	if (dst) {
 		vec3d world_axis, world_pos, planar_dst, dir, rotated_vec;
 		matrix save_base_orient;
 
@@ -4476,10 +4491,10 @@ int model_rotate_gun(object *objp, polymodel *pm, polymodel_instance *pmi, ship_
 	float step_size = turret->turret_turning_rate * calc_time;
 	float base_delta, gun_delta;
 
-	if (reset)
-		step_size /= 3.0f;
-	else
+	if (dst)
 		ss->rotation_timestamp = timestamp(turret->turret_reset_delay);
+	else
+		step_size /= 3.0f;
 
 	base_delta = vm_interp_angle(&base_smi->cur_angle, desired_base_angle, step_size, turret->turret_base_fov > -1.0f);
 	gun_delta = vm_interp_angle(&gun_smi->cur_angle, desired_gun_angle, step_size);

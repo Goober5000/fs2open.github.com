@@ -3329,6 +3329,32 @@ int CFred_mission_save::save_custom_data()
 				fout("\n$end_data_map");
 			}
 		}
+
+		if (The_mission.custom_strings.size() > 0) {
+			required_string_fred("$begin_custom_strings");
+			parse_comments(2);
+
+			for (const auto& cs : The_mission.custom_strings) {
+				required_string_fred("$Name:");
+				parse_comments(2);
+				fout(" %s", cs.name.c_str());
+
+				required_string_fred("+Value:");
+				parse_comments();
+				fout(" %s", cs.value.c_str());
+				
+				auto copy = cs.text;
+				lcl_fred_replace_stuff(copy);
+				required_string_fred("+String:");
+				parse_comments();
+				fout(" %s", copy.c_str());
+				
+				required_string_fred("$end_multi_text");
+				parse_comments();
+			}
+			required_string_fred("$end_custom_strings");
+			parse_comments(2);
+		}
 	}
 
 	return err;
@@ -4260,6 +4286,13 @@ int CFred_mission_save::save_players()
 		Assert(Player_start_shipnum >= 0);
 		fout(" %s", Ships[Player_start_shipnum].ship_name);
 
+		if (Mission_save_format != FSO_FORMAT_RETAIL) {
+			if (Team_data[i].do_not_validate) {
+				required_string_fred("+Do Not Validate Loadout");
+				parse_comments();
+			}
+		}
+
 		required_string_fred("$Ship Choices:");
 		parse_comments();
 		fout(" (\n");
@@ -4358,9 +4391,11 @@ int CFred_mission_save::save_players()
 		}
 
 		// now we add anything left in the used pool as a static entry
-		for (j = 0; j < weapon_info_size(); j++) {
-			if (used_pool[j] > 0) {
-				fout("\t\"%s\"\t%d\n", Weapon_info[j].name, used_pool[j]);
+		if (!Team_data[i].do_not_validate) {
+			for (j = 0; j < weapon_info_size(); j++) {
+				if (used_pool[j] > 0) {
+					fout("\t\"%s\"\t%d\n", Weapon_info[j].name, used_pool[j]);
+				}
 			}
 		}
 
