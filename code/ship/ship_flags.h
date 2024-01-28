@@ -296,6 +296,7 @@ namespace Ship {
 		Same_arrival_warp_when_docked,		// Goober5000
 		Same_departure_warp_when_docked,	// Goober5000
 		No_first_wave_message,		// don't play arrival message for the first wave
+		Performing_staggered_arrival,	// Goober5000 - wing is currently in the process of arriving, so it needs to repeatedly create ships
 
 		NUM_VALUES
 	};

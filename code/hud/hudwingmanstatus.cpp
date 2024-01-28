@@ -665,7 +665,7 @@ bool HudGaugeWingmanStatus::maybeFlashStatus(int wing_index, int wing_pos)
 	return draw_bright;
 }
 
-void hud_wingman_status_set_index(wing *wingp, ship *shipp, p_object *pobjp)
+void hud_wingman_status_set_index(wing *wingp, ship *shipp, p_object *pobjp, int specific_instance)
 {
 	int wing_index;
 
@@ -685,21 +685,35 @@ void hud_wingman_status_set_index(wing *wingp, ship *shipp, p_object *pobjp)
 	// for subsequent waves, find the first position not taken
 	else
 	{
-		int i, pos, wing_bitfield = 0;
+		int wing_bitfield = 0;
 
 		// fill in all the positions currently used by this wing
-		for (i = 0; i < wingp->wave_count; i++)
+		for (int i = 0; i < MAX_SHIPS_PER_WING; i++)
 		{
-			pos = Ships[wingp->ship_index[i]].wing_status_wing_pos;
+			if (wingp->ship_index[i] < 0)
+				continue;
+
+			// for staggered arrivals, only fill in the positions before this wave started arriving
+			if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival] && specific_instance > 0 && i >= wingp->current_count_before_wave)
+				break;
+
+			int pos = Ships[wingp->ship_index[i]].wing_status_wing_pos;
 			if (pos >= 0)
 				wing_bitfield |= (1<<pos);
 		}
 
 		// now assign the first available slot
-		for (i = 0; i < MAX_SHIPS_PER_WING; i++)
+		for (int i = 0; i < MAX_SHIPS_PER_WING; i++)
 		{
 			if (!(wing_bitfield & (1<<i)))
 			{
+				// for staggered arrivals, choose the Nth avaialble slot
+				if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival] && specific_instance > 0)
+				{
+					specific_instance--;
+					continue;
+				}
+
 				shipp->wing_status_wing_pos = (char) i;
 				break;
 			}

@@ -7006,11 +7006,16 @@ void wing::clear()
 
 	wave_count = 0;
 	total_arrived_count = 0;
+	total_arrived_count_before_wave = 0;
 	red_alert_skipped_ships = 0;
 	current_count = 0;
+	current_count_before_wave = 0;
 
 	for (int i = 0; i < MAX_SHIPS_PER_WING; i++)
+	{
 		ship_index[i] = -1;
+		staggered_arrival_order[i] = i;
+	}
 
 	total_destroyed = 0;
 	total_departed = 0;
@@ -7038,6 +7043,10 @@ void wing::clear()
 	// be sure to set the wave arrival timestamp of this wing to pop right away so that the
 	// wing could be created if it needs to be
 	wave_delay_timestamp = TIMESTAMP::immediate();
+
+	staggered_arrival_min = 0;
+	staggered_arrival_max = 0;
+	staggered_arrival_timestamp = TIMESTAMP::immediate();
 
 	flags.reset();
 

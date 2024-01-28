@@ -8,6 +8,26 @@
 #include "globalincs/toolchain.h"
 
 
+template <typename comparable_t>
+int increasing_order(const comparable_t *A, const comparable_t *B)
+{
+	if (*A < *B)
+		return -1;
+	if (*A > *B)
+		return 1;
+	return 0;
+}
+
+template <typename comparable_t>
+int decreasing_order(const comparable_t *A, const comparable_t *B)
+{
+	if (*A < *B)
+		return 1;
+	if (*A > *B)
+		return -1;
+	return 0;
+}
+
 // Goober5000
 // A sort for use with small or almost-sorted lists.  Iteration time is O(n) for a fully-sorted list.
 // This uses a type-safe version of the function prototype for stdlib's qsort, although the size is an int rather than a size_t (for the reasons that j is an int).

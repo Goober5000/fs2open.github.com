@@ -540,7 +540,7 @@ inline void* memset_if_trivial_else_error(ImDrawListSplitter* memset_data, int c
 
 	// assume memcpy with void* is "safe"
 	// used in:
-	//   globalincs/systemvars.cpp:insertion_sort()
+	//   globalincs/utility.h:insertion_sort()
 	//   network/chat_api.cpp:AddChatCommandToQueue()
 	//   network/multi_obj.cpp:multi_oo_sort_func()
 	//   parse/lua.cpp:ade_get_args() && ade_set_args()

@@ -26,7 +26,7 @@ void	hud_set_wingman_status_departed(int wing_index, int wing_pos);
 void	hud_set_wingman_status_alive( int wing_index, int wing_pos);
 void	hud_set_wingman_status_none( int wing_index, int wing_pos);
 void	hud_wingman_status_start_flash(int wing_index, int wing_pos);
-void	hud_wingman_status_set_index(wing *wingp, ship *shipp, p_object *pobjp);
+void	hud_wingman_status_set_index(wing *wingp, ship *shipp, p_object *pobjp, int specific_instance = -1);
 
 class HudGaugeWingmanStatus: public HudGauge
 {

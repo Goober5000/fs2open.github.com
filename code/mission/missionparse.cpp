@@ -14,7 +14,6 @@
 #include <cstdarg>
 #include <csetjmp>
 
-
 #include "ai/aigoals.h"
 #include "ai/ailua.h"
 #include "asteroid/asteroid.h"
@@ -25,6 +24,7 @@
 #include "gamesnd/eventmusic.h"
 #include "globalincs/alphacolors.h"
 #include "globalincs/linklist.h"
+#include "globalincs/utility.h"
 #include "hud/hud.h"
 #include "hud/hudescort.h"
 #include "hud/hudets.h"
@@ -456,7 +456,7 @@ int mission_set_arrival_location(int anchor, int location, int distance, int obj
 int get_anchor(const char *name);
 void mission_parse_set_up_initial_docks();
 void mission_parse_set_arrival_locations();
-void mission_set_wing_arrival_location( wing *wingp, int num_to_set );
+void mission_set_wing_arrival_location( const wing *wingp, const int *ship_indexes, int num_to_set, int offset );
 void parse_object_set_handled_flag_helper(p_object *pobjp, p_dock_function_info *infop);
 void parse_object_clear_all_handled_flags();
 int parse_object_on_arrival_list(p_object *pobjp);
@@ -4096,7 +4096,6 @@ int find_wing_name(char *name)
 */
 int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, bool force_arrival, int specific_instance )
 {
-	int wingnum, objnum, num_create_save;
 	int time_to_arrive;
 	int pre_create_count;
 	int i, j;
@@ -4105,7 +4104,8 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 	pre_create_count = wingp->total_arrived_count;
 
 	// force_create is used to force creation of the wing -- used for multiplayer
-	if ( !force_create ) {
+	// staggered arrival also skips this
+	if ( !force_create && !wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival] ) {
 		// we only want to evaluate the arrival cue of the wing if:
 		// 1) single player
 		// 2) multiplayer and I am the host of the game
@@ -4210,22 +4210,60 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 			return 0;
 	}
 
-	// finally we can create the wing.
-
-	num_create_save = num_to_create;
-
-	wingnum = WING_INDEX(wingp);					// get the wing number
-
 	// if there are no ships to create, then all ships must be player start ships -- do nothing in this case.
-	if ( num_to_create == 0 ){
+	if (num_to_create == 0) {
 		return 0;
 	}
 
-	wingp->current_wave++;						// we are creating new ships
+	// finally we can create the wing.
+
+	bool first_call_for_this_wave = false;
+	if (!wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
+	{
+		first_call_for_this_wave = true;
+
+		// do this for all non-staggered wings as well as the first ship in a staggered wing
+		wingp->total_arrived_count_before_wave = wingp->total_arrived_count;
+		wingp->current_count_before_wave = wingp->current_count;
+
+		// see whether we need to set up staggered arrival (not in multiplayer or FRED though)
+		if (!(Game_mode & GM_MULTIPLAYER) && !Fred_running && (wingp->staggered_arrival_min > 0 || wingp->staggered_arrival_max > 0) && (wingp->wave_count > 1))
+		{
+			std::random_shuffle(wingp->staggered_arrival_order, wingp->staggered_arrival_order + wingp->wave_count);
+			wingp->flags.set(Ship::Wing_Flags::Performing_staggered_arrival);
+			num_to_create = 1;	// just one at a time
+		}
+	}
+
+	if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
+	{
+		// we can use the "specific instance" logic to create the ship whose turn it is to arrive
+		specific_instance = wingp->total_arrived_count - wingp->total_arrived_count_before_wave;
+		Assertion(specific_instance >= 0 && specific_instance < wingp->wave_count, "Number of arrived ships was calculated incorrectly; get a coder!");
+		specific_instance = wingp->staggered_arrival_order[specific_instance];
+
+		// set the timestamp for the next ship in the wave
+		wingp->staggered_arrival_timestamp = _timestamp(Random::next(wingp->staggered_arrival_min, wingp->staggered_arrival_max));
+	}
+
+	if (first_call_for_this_wave)
+		wingp->current_wave++;						// we are creating new ships
+
 	// we need to create num_to_create ships.  Since the arrival cues for ships in a wing
 	// are ignored, then *all* ships must be in the Ship_arrival_list.
 
-	objnum = -1;
+	int objnum = -1;
+
+	// save these because the variables are decremented for each ship
+	int num_create_save = num_to_create;
+	int specific_instance_save = specific_instance;
+
+	int wingnum = WING_INDEX(wingp);					// get the wing number
+
+	int staggered_arrival_order_subset[MAX_SHIPS_PER_WING];
+	int sparse_indexes[MAX_SHIPS_PER_WING];
+	memset(staggered_arrival_order_subset, -1, MAX_SHIPS_PER_WING * sizeof(int));
+	memset(sparse_indexes, -1, MAX_SHIPS_PER_WING * sizeof(int));
 
 	// Goober5000 - we have to do this via the array because we have no guarantee we'll be able to iterate along the list
 	// (since created objects plus anything they're docked to will be removed from it)
@@ -4261,13 +4299,14 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 		}
 
 		// ensure on arrival list
-		if (!parse_object_on_arrival_list(p_objp))
+		// (skip this check for staggered arrivals because the counts are out of order)
+		if (!parse_object_on_arrival_list(p_objp) && !wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
 			continue;
 	
-		// when ingame joining, we need to create a specific ship out of the list of ships for a
-		// wing.  specific_instance is a 0 based integer which specified which ship in the wing
-		// to create.  So, only create the ship we actually need to.
-		if ((Game_mode & GM_MULTIPLAYER) && (specific_instance > 0))
+		// when ingame joining or doing staggered arrival, we need to create a specific ship out
+		// of the list of ships for a wing.  specific_instance is a 0 based integer that specifies
+		// which ship in the wing to create.  So, only create the ship we actually need to.
+		if (specific_instance > 0)
 		{
 			specific_instance--;
 			continue;
@@ -4304,8 +4343,14 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 		wingp->total_arrived_count++;
 		if (wingp->num_waves > 1)
 		{
+			int wing_ship_number;
+			if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
+				wing_ship_number = wingp->total_arrived_count_before_wave + 1 + wingp->red_alert_skipped_ships + specific_instance_save;
+			else
+				wing_ship_number = wingp->total_arrived_count + wingp->red_alert_skipped_ships;
+
 			bool needs_display_name;
-			wing_bash_ship_name(p_objp->name, wingp->name, wingp->total_arrived_count + wingp->red_alert_skipped_ships, &needs_display_name);
+			wing_bash_ship_name(p_objp->name, wingp->name, wing_ship_number, &needs_display_name);
 
 			// set up display name if we need to
 			// (In the unlikely edge case where the ship already has a display name for some reason, it will be overwritten.
@@ -4355,17 +4400,46 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 			aip->ai_flags.set(AI::AI_Flags::No_dynamic);
 
 		// update housekeeping variables
-		// NOTE:  for the initial wing setup we use actual position to get around
-		//        object order isses, but ships in all following waves just get
-		//        tacked onto the end of the list
-		if (wingp->current_wave == 1) {
-			wingp->ship_index[p_objp->pos_in_wing] = Objects[objnum].instance;
-		} else {
-			wingp->ship_index[wingp->current_count] = Objects[objnum].instance;
+
+		// for staggered arrival, we want to maintain the correct order even if the ships arrive out of order
+		if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
+		{
+			int arrived_so_far = wingp->current_count - wingp->current_count_before_wave + 1;
+
+			if (arrived_so_far < 2)
+			{
+				staggered_arrival_order_subset[0] = wingp->staggered_arrival_order[0];
+			}
+			else
+			{
+				memcpy(staggered_arrival_order_subset, wingp->staggered_arrival_order, arrived_so_far * sizeof(int));
+				insertion_sort(staggered_arrival_order_subset, arrived_so_far - 1, increasing_order<int>);
+			}
+
+			// put the current ships and the newest ship into the proper order, albeit with gaps
+			for (i = wingp->current_count_before_wave, j = 0; i < wingp->current_count; ++i, ++j)
+				sparse_indexes[staggered_arrival_order_subset[j]] = wingp->ship_index[i];
+			sparse_indexes[staggered_arrival_order_subset[j]] = Objects[objnum].instance;
+
+			// now copy the reordered ships into the array without gaps
+			for (i = 0, j = wingp->current_count_before_wave; i < MAX_SHIPS_PER_WING; ++i)
+				if (sparse_indexes[i] >= 0)
+					wingp->ship_index[j++] = sparse_indexes[i];
+		}
+		else
+		{
+			// NOTE:  for the initial wing setup we use actual position to get around
+			//        object order isses, but ships in all following waves just get
+			//        tacked onto the end of the list
+			if (wingp->current_wave == 1) {
+				wingp->ship_index[p_objp->pos_in_wing] = Objects[objnum].instance;
+			} else {
+				wingp->ship_index[wingp->current_count] = Objects[objnum].instance;
+			}
 		}
 
 		// set up wingman status index
-		hud_wingman_status_set_index(wingp, &Ships[Objects[objnum].instance], p_objp);
+		hud_wingman_status_set_index(wingp, &Ships[Objects[objnum].instance], p_objp, specific_instance_save);
 
 		p_objp->wing_status_wing_index = Ships[Objects[objnum].instance].wing_status_wing_index;
 		p_objp->wing_status_wing_pos = Ships[Objects[objnum].instance].wing_status_wing_pos;
@@ -4443,21 +4517,41 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 			}
 		}
 		if ( it < MAX_STARTING_WINGS ){
+			// it's ok to call this repeatedly if this is a staggered arrival wing, since the already-arrived
+			// ships will already have goals and thus will be skipped
 			ai_maybe_add_form_goal( wingp );
 		}
 
-		mission_log_add_entry( LOG_WING_ARRIVED, wingp->name, NULL, wingp->current_wave );
 		ship_num = wingp->ship_index[0];
 
-		if ( !(Ships[ship_num].flags[Ship::Ship_Flags::No_arrival_music]) && !(wingp->flags[Ship::Wing_Flags::No_arrival_music]) ) {
-			if ( timestamp_elapsed(Allow_arrival_music_timestamp) ) {
-				Allow_arrival_music_timestamp = timestamp(ARRIVAL_MUSIC_MIN_SEPARATION);
-				event_music_arrival(Ships[ship_num].team);	
+		if (first_call_for_this_wave) {
+			mission_log_add_entry( LOG_WING_ARRIVED, wingp->name, NULL, wingp->current_wave );
+
+			if ( !(Ships[ship_num].flags[Ship::Ship_Flags::No_arrival_music]) && !(wingp->flags[Ship::Wing_Flags::No_arrival_music]) ) {
+				if ( timestamp_elapsed(Allow_arrival_music_timestamp) ) {
+					Allow_arrival_music_timestamp = timestamp(ARRIVAL_MUSIC_MIN_SEPARATION);
+					event_music_arrival(Ships[ship_num].team);
+				}
 			}
 		}
 
+		// we don't necessarily start at the beginning of the array; we could start past it if there is a wing threshold
+		auto ship_indexes = &wingp->ship_index[wingp->current_count_before_wave];
+		int ship_indexes_buf[MAX_SHIPS_PER_WING];
+		int offset = 0;
+
+		// for staggered arrivals, we want to supply the ship indexes in creation order
+		if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival]) {
+			memset(ship_indexes_buf, -1, MAX_SHIPS_PER_WING * sizeof(int));
+			for (i = 0; i < wingp->current_count - wingp->current_count_before_wave; ++i) {
+				ship_indexes_buf[i] = sparse_indexes[wingp->staggered_arrival_order[i]];
+			}
+			ship_indexes = ship_indexes_buf;
+			offset = wingp->current_count - wingp->current_count_before_wave - 1;
+		}
+
 		// possibly change the location where these ships arrive based on the wings arrival location
-		mission_set_wing_arrival_location( wingp, num_create_save );
+		mission_set_wing_arrival_location( wingp, ship_indexes, num_create_save, offset );
 
 		// if in multiplayer (and I am the host) and in the mission, send a wing create command to all
 		// other players
@@ -4466,15 +4560,13 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 		}
 
 #ifndef NDEBUG
-		// test code to check to be sure that all ships in the wing are ignoring the same types
-		// of orders from the leader
+		// test code to check to be sure that all ships in the wing are ignoring the same types of orders
 		if ( Fred_running ) {
-			Assert( wingp->ship_index[wingp->special_ship] != -1 );
+			Assert( wingp->ship_index[0] != -1 );
 			const std::set<size_t>& orders = Ships[wingp->ship_index[0]].orders_accepted;
-			for (it = 0; it < wingp->current_count; it++ ) {
-				if (it == wingp->special_ship)
+			for (it = 1; it < wingp->current_count; it++ ) {
+				if (wingp->ship_index[it] < 0)
 					continue;
-
 				if ( orders != Ships[wingp->ship_index[it]].orders_accepted ) {
 					Warning(LOCATION, "ships in wing %s are ignoring different player orders.  Please find Mark A\nto talk to him about this.", wingp->name );
 					break;
@@ -4482,7 +4574,6 @@ int parse_wing_create_ships( wing *wingp, int num_to_create, bool force_create, 
 			}
 		}
 #endif
-
 	}
 
 	wingp->wave_delay_timestamp = TIMESTAMP::invalid();		// we will need to set this up properly for the next wave
@@ -6842,62 +6933,51 @@ void mission_parse_close()
  * Sets the arrival location of the ships in wingp.  
  *
  * @param wingp Pointer to wing
- * @param num_to_set The threshold value for wings may have us create more ships in the wing when there are still some remaining
+ * @param ship_indexes Pointer to the array of ship indexes corresponding to ships that have been created, which could be wingp->ship_indexes, an offset past the start of it, or a different array
+ * @param num_to_set Number of ships that have been created (which may not be the total number of ships currently in the wing, due to the wing threshold)
+ * @param offset offset from the start of the ship and wing index arrays
  */
-void mission_set_wing_arrival_location( wing *wingp, int num_to_set )
+void mission_set_wing_arrival_location( const wing *wingp, const int *ship_indexes, int num_to_set, int offset )
 {
-	int index;
 	int anchor_objnum = -1;
 
 	// get the starting index into the ship_index array of the first ship whose location we need set.
 
-	index = wingp->current_count - num_to_set;
 	if ( (wingp->arrival_location == ARRIVE_FROM_DOCK_BAY) || (wingp->arrival_location == ARRIVE_AT_LOCATION) ) {
-		while ( index < wingp->current_count ) {
-			object *objp;
-
-			objp = &Objects[Ships[wingp->ship_index[index]].objnum];
+		for (int i = 0; i < num_to_set; ++i) {
+			auto objp = &Objects[Ships[ship_indexes[i+offset]].objnum];
 			anchor_objnum = mission_set_arrival_location(wingp->arrival_anchor, wingp->arrival_location, wingp->arrival_distance, OBJ_INDEX(objp), wingp->arrival_path_mask, NULL, NULL);
-
-			index++;
 		}
 	} else {
-		object *leader_objp;
 		vec3d pos;
 		matrix orient;
-		int wing_index;
 
-		// wing is not arriving from a docking bay -- possibly move them based on arriving near
-		// or in front of some other ship.
-		index = wingp->current_count - num_to_set;
-		leader_objp = &Objects[Ships[wingp->ship_index[index]].objnum];
+		auto leader_objp = &Objects[Ships[ship_indexes[0]].objnum];
 		anchor_objnum = mission_set_arrival_location(wingp->arrival_anchor, wingp->arrival_location, wingp->arrival_distance, OBJ_INDEX(leader_objp), wingp->arrival_path_mask, &pos, &orient);
 		if (anchor_objnum != -1) {
 			// modify the remaining ships created
-			index++;
-			wing_index = 1;
-			while ( index < wingp->current_count ) {
-				object *objp;
+			for (int i = 0; i < num_to_set; ++i) {
+				auto objp = &Objects[Ships[ship_indexes[i+offset]].objnum];
+				if (objp == leader_objp)	// along with starting i at 0, this is a hackish way to make the loop work for both staggered and non-staggered wings
+					continue;
 
-				objp = &Objects[Ships[wingp->ship_index[index]].objnum];
+				int wing_index = wingp->staggered_arrival_order[i+offset];	// this will simply be the iteration order for non-staggered wings
 
 				// change the position of the next ships in the wing.  Use the cool function in AiCode.cpp which
 				// Mike K wrote to give new positions to the wing members.
-				get_absolute_wing_pos( &objp->pos, leader_objp, WING_INDEX(wingp), wing_index++, false);
+				get_absolute_wing_pos( &objp->pos, leader_objp, WING_INDEX(wingp), wing_index, false);
 				memcpy( &objp->orient, &orient, sizeof(matrix) );
-
-				index++;
 			}
 		}
 	}
 
 	if (Game_mode & GM_IN_MISSION) {
-		for ( index = wingp->current_count - num_to_set; index < wingp->current_count; index ++ ) {
-			object *objp = &Objects[Ships[wingp->ship_index[index]].objnum];
-			object *anchor_objp = (anchor_objnum >= 0) ? &Objects[anchor_objnum] : nullptr;
+		for (int i = 0; i < num_to_set; ++i) {
+			auto objp = &Objects[Ships[ship_indexes[i+offset]].objnum];
+			auto anchor_objp = (anchor_objnum >= 0) ? &Objects[anchor_objnum] : nullptr;
 
 			if (scripting::hooks::OnShipArrive->isActive()) {
-				scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ &Ships[wingp->ship_index[index]], wingp->arrival_location, anchor_objp },
+				scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ &Ships[ship_indexes[i+offset]], wingp->arrival_location, anchor_objp },
 					scripting::hook_param_list(
 						scripting::hook_param("Ship", 'o', objp),
 						scripting::hook_param("Parent", 'o', anchor_objp, anchor_objp != nullptr)
@@ -6945,7 +7025,7 @@ void mission_parse_set_arrival_locations()
 		if ( Wings[i].current_count == 0 )
 			continue;
 
-		mission_set_wing_arrival_location( &Wings[i], Wings[i].current_count );
+		mission_set_wing_arrival_location( &Wings[i], Wings[i].ship_index, Wings[i].current_count, 0 );
 	}
 }
 
@@ -7788,6 +7868,23 @@ bool mission_maybe_make_wing_arrive(int wingnum, bool force_arrival)
 	if (wingp->flags[Ship::Wing_Flags::Departing])
 		return false;
 
+	// this wing might be arriving over many frames; if so, create ships as needed (only the first ship is created through the normal pipeline)
+	if (wingp->flags[Ship::Wing_Flags::Performing_staggered_arrival])
+	{
+		if (timestamp_elapsed(wingp->staggered_arrival_timestamp))
+		{
+			int created = parse_wing_create_ships(wingp, 1);
+
+			// the wave is done arriving if all ships have arrived OR if we couldn't create any ships for some reason
+			if ((created <= 0) || (wingp->total_arrived_count - wingp->total_arrived_count_before_wave >= wingp->wave_count))
+				wingp->flags.remove(Ship::Wing_Flags::Performing_staggered_arrival);
+
+			return true;
+		}
+
+		return false;
+	}
+
 	// must check to see if we are at the last wave.  Code above to determine when a wing is gone only
 	// gets run when a ship is destroyed (not every N seconds like it used to).  Do a quick check here.
 	if (wingp->current_wave == wingp->num_waves)
@@ -7825,7 +7922,7 @@ bool mission_maybe_make_wing_arrive(int wingnum, bool force_arrival)
 		if(MULTI_TEAM)
 		{
 			// send a hostile wing arrived message
-			rship = wingp->ship_index[wingp->special_ship];
+			rship = wingp->ship_index[0];
 
 			int multi_team_filter = Ships[rship].team;
 

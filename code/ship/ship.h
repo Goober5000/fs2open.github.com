@@ -837,8 +837,8 @@ public:
 
 	TIMESTAMP	multi_client_collision_timestamp;
 
-	enum warpstage {
-		STAGE1 = 0,
+	enum class warpstage {
+		STAGE1,
 		STAGE2,
 		BOTH,
 	};
@@ -1571,8 +1571,10 @@ typedef struct wing {
 
 	int	wave_count;								// max ships per wave (as defined by the number of ships in the ships list)
 	int	total_arrived_count;					// count of number of ships that we have created, regardless of wave
+	int	total_arrived_count_before_wave;		// used mostly for staggered arrivals
 	int red_alert_skipped_ships;				// Goober5000 - if we skipped over any indexes while creating red-alert ships
 	int	current_count;							// count of number of ships actually in this wing -- used for limit in next array
+	int current_count_before_wave;				// used mostly for staggered arrivals
 	int	ship_index[MAX_SHIPS_PER_WING];	// index into ships array of all ships currently in the wing
 
 	int	total_destroyed;						// total number of ships destroyed in the wing (including all waves)
@@ -1597,7 +1599,12 @@ typedef struct wing {
 
 	int	wave_delay_min;						// minimum number of seconds before new wave can arrive
 	int	wave_delay_max;						// maximum number of seconds before new wave can arrive
-	TIMESTAMP	wave_delay_timestamp;				// timestamp used for delaying arrival of next wave
+	TIMESTAMP wave_delay_timestamp;			// timestamp used for delaying arrival of next wave
+
+	int staggered_arrival_min;				// minimum number of milliseconds before next ship in wave arrives
+	int staggered_arrival_max;				// maximum number of milliseconds before next ship in wave arrives
+	TIMESTAMP staggered_arrival_timestamp;	// timestamp at which next ship in wave should arrive
+	int	staggered_arrival_order[MAX_SHIPS_PER_WING];	// the wave arrives in shuffled order
 
 	flagset<Ship::Wing_Flags> flags;
 
