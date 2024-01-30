@@ -259,6 +259,11 @@ ADE_FUNC(playCutscene, l_UserInterface, "string Filename, boolean RestartMusic, 
 	return ADE_RETURN_NIL;
 }
 
+ADE_FUNC(isCutscenePlaying, l_UserInterface, nullptr, "Checks if a cutscene is playing.", "boolean", "Returns true if cutscene is playing, false otherwise")
+{
+	return ade_set_args(L, "b", Movie_active);
+}
+
 ADE_FUNC(launchURL, l_UserInterface, "string url", "Launches the given URL in a web browser", nullptr, nullptr)
 {
 	const char* url;
@@ -386,6 +391,23 @@ ADE_FUNC(
 	}
 
 	return ade_set_args(L, "b", player_create_new_pilot(callsign, is_multi, copy_from));
+}
+
+ADE_FUNC(unloadPilot,
+	l_UserInterface_PilotSelect,
+	nullptr,
+	"Unloads a player file & associated campaign file. Can not be used outside of pilot select!",
+	"boolean",
+	"Returns true if successful, false otherwise")
+{
+	if (gameseq_get_state() == GS_STATE_INITIAL_PLAYER_SELECT) {
+		Player = nullptr;
+		Campaign.filename[0] = '\0';
+
+		return ADE_RETURN_TRUE;
+	}
+
+	return ADE_RETURN_FALSE;
 }
 
 ADE_FUNC(isAutoselect, l_UserInterface_PilotSelect, nullptr,
@@ -1620,12 +1642,28 @@ ADE_LIB_DERIV(l_UserInterface_Cutscenes, "Cutscenes", nullptr, nullptr, l_UserIn
 ADE_INDEXER(l_UserInterface_Cutscenes,
 	"number Index",
 	"Array of cutscenes",
-	"custscene_info",
+	"cutscene_info",
 	"Cutscene handle, or invalid handle if index is invalid")
 {
-	int idx;
-	if (!ade_get_args(L, "*i", &idx))
-		return ade_set_error(L, "s", "");
+	const char* name;
+	if (!ade_get_args(L, "*s", &name))
+		return ade_set_error(L, "o", l_TechRoomCutscene.Set(cutscene_info_h(-1)));
+
+	int idx = get_cutscene_index_by_name(name);
+
+	if (idx < 0) {
+		try {
+			idx = std::stoi(name);
+			idx--; // Lua->FS2
+		} catch (const std::exception&) {
+			// Not a number
+			return ade_set_error(L, "o", l_TechRoomCutscene.Set(cutscene_info_h(-1)));
+		}
+
+		if (!SCP_vector_inbounds(Cutscenes, idx)) {
+			return ade_set_error(L, "o", l_TechRoomCutscene.Set(cutscene_info_h(-1)));
+		}
+	}
 
 	return ade_set_args(L, "o", l_TechRoomCutscene.Set(cutscene_info_h(idx)));
 }

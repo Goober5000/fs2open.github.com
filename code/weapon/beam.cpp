@@ -838,7 +838,7 @@ void beam_unpause_sounds()
 	}
 }
 
-void beam_get_global_turret_gun_info(object *objp, ship_subsys *ssp, vec3d *gpos, bool avg_origin, vec3d *gvec, bool use_angles, vec3d *targetp, bool fighter_beam)
+void beam_get_global_turret_gun_info(const object *objp, const ship_subsys *ssp, vec3d *gpos, bool avg_origin, vec3d *gvec, bool use_angles, const vec3d *targetp, bool fighter_beam)
 {
 	if (fighter_beam)
 	{
@@ -2869,8 +2869,10 @@ void beam_aim(beam *b)
 				b->subsys->shared_fire_direction_beam_objnum = b->objnum;
 			}
 
-			// after pointing, jitter based on shot_aim
-			beam_jitter_aim(b, b->binfo.shot_aim[b->shot_index]);
+			// after pointing, jitter based on shot_aim (if we have a target object)
+			if (!(b->flags & BF_TARGETING_COORDS)) {
+				beam_jitter_aim(b, b->binfo.shot_aim[b->shot_index]);
+			}
 		}
 		break;
 
