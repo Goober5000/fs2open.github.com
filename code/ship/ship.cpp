@@ -6165,6 +6165,60 @@ void ship_init()
 
 			ship_parse_post_cleanup();
 
+
+			for (auto& wi : Weapon_info)
+			{
+				if (VALID_FNAME(wi.pofbitmap_name) && wi.render_type == WRT_POF)
+				{
+					mprintf(("\n%s\n%s\n", wi.name, wi.pofbitmap_name));
+				}
+			}
+
+
+			for (auto& si : Ship_info)
+			{
+				mprintf(("\n%s\n%s\n", si.name, si.pof_file));
+
+				for (int xi = 0; xi < si.n_subsystems; xi++)
+				{
+					auto& ss = si.subsystems[xi];
+
+					bool first = true;
+
+					for (int pb = 0; pb < MAX_SHIP_PRIMARY_BANKS; pb++)
+					{
+						if (ss.primary_banks[pb] >= 0)
+						{
+							if (first)
+							{
+								mprintf(("%s\n", ss.subobj_name));
+								first = false;
+							}
+							else
+								mprintf((","));
+							mprintf(("%s", Weapon_info[ss.primary_banks[pb]].name));
+						}
+					}
+					for (int sb = 0; sb < MAX_SHIP_SECONDARY_BANKS; sb++)
+					{
+						if (ss.secondary_banks[sb] >= 0)
+						{
+							if (first)
+							{
+								mprintf(("%s\n", ss.subobj_name));
+								first = false;
+							}
+							else
+								mprintf((","));
+							mprintf(("%s", Weapon_info[ss.secondary_banks[sb]].name));
+						}
+					}
+
+					if (!first)
+						mprintf(("\n"));
+				}
+			}
+
 			Ships_inited = true;
 		}
 
