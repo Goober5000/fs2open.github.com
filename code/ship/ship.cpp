@@ -2231,9 +2231,24 @@ static void parse_ship(const char *filename, bool replace)
 	// an entry does not exist
 	else
 	{
+		static bool skip_all_in_file = false;
+		static const char *last_file = nullptr;
+
 		// Don't create ship if it has +nocreate and is in a modular table.
 		if (!create_if_not_found && replace)
 		{
+			if (last_file == nullptr || strcmp(filename, last_file) != 0)
+			{
+				last_file = filename;
+				skip_all_in_file = false;
+			}
+
+			if (!skip_all_in_file)
+			{
+				Warning(LOCATION, "wokka!");
+			}
+
+			
 			if (!skip_to_start_of_string_either("$Name:", "#End")) {
 				error_display(1, "Missing [#End] or [$Name] after ship class %s", fname);
 			}
