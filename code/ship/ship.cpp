@@ -55,6 +55,7 @@
 #include "model/model.h"
 #include "model/modelrender.h"
 #include "model/modelreplace.h"
+#include "model/animation/modelanimation_driver.h"
 #include "nebula/neb.h"
 #include "network/multimsgs.h"
 #include "network/multiutil.h"
@@ -225,12 +226,35 @@ int ship_registry_get_index(const char *name)
 	return -1;
 }
 
+int ship_registry_get_index(const SCP_string &name)
+{
+	auto ship_it = Ship_registry_map.find(name);
+	if (ship_it != Ship_registry_map.end())
+		return ship_it->second;
+
+	return -1;
+}
+
 bool ship_registry_exists(const char *name)
 {
 	return Ship_registry_map.find(name) != Ship_registry_map.end();
 }
 
+bool ship_registry_exists(const SCP_string &name)
+{
+	return Ship_registry_map.find(name) != Ship_registry_map.end();
+}
+
 const ship_registry_entry *ship_registry_get(const char *name)
+{
+	auto ship_it = Ship_registry_map.find(name);
+	if (ship_it != Ship_registry_map.end())
+		return &Ship_registry[ship_it->second];
+
+	return nullptr;
+}
+
+const ship_registry_entry *ship_registry_get(const SCP_string &name)
 {
 	auto ship_it = Ship_registry_map.find(name);
 	if (ship_it != Ship_registry_map.end())
@@ -322,6 +346,7 @@ flag_def_list_new<Model::Subsystem_Flags> Subsystem_flags[] = {
 	{ "no impact debris",           Model::Subsystem_Flags::No_impact_debris,                   true, false },
 	{ "hide turret from loadout stats", Model::Subsystem_Flags::Hide_turret_from_loadout_stats, true, false },
 	{ "turret has distant firepoint", Model::Subsystem_Flags::Turret_distant_firepoint,         true, false },
+	{ "override submodel impact",   Model::Subsystem_Flags::Override_submodel_impact,           true, false },
 };
 
 const size_t Num_subsystem_flags = sizeof(Subsystem_flags)/sizeof(flag_def_list_new<Model::Subsystem_Flags>);
@@ -2941,7 +2966,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 
 		// Goober5000 - if this is a modular table, and we're replacing an existing file name, and the file doesn't exist, don't replace it
 		if (replace)
-			if (sip->cockpit_pof_file[0] != '\0')
+			if (VALID_FNAME(sip->cockpit_pof_file))
 				if (!model_exists(temp))
 					valid = false;
 
@@ -2952,6 +2977,10 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 
 		if (optional_string("$Cockpit Animations:")) {
 			animation::ModelAnimationParseHelper::parseAnimsetInfo(sip->cockpit_animations, 'c', sip->name);
+		}
+		if (optional_string("$Driven Cockpit Animations:")) {
+			//Despite not being a ship, cockpits have access to full ship driver sources as they can get data fed from the player ship
+			animation::ModelAnimationParseHelper::parseAnimsetInfoDrivers(sip->cockpit_animations, 'c', sip->name, animation::parse_ship_property_driver_source);
 		}
 		if (optional_string("$Cockpit Moveables:")) {
 			animation::ModelAnimationParseHelper::parseMoveablesetInfo(sip->cockpit_animations);
@@ -3021,7 +3050,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 
 		// Goober5000 - if this is a modular table, and we're replacing an existing file name, and the file doesn't exist, don't replace it
 		if (replace)
-			if (sip->pof_file[0] != '\0')
+			if (VALID_FNAME(sip->pof_file))
 				if (!model_exists(temp))
 					valid = false;
 
@@ -3041,7 +3070,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 
 		// if this is a modular table, and we're replacing an existing file name, and the file doesn't exist, don't replace it
 		if (replace)
-			if (sip->pof_file_tech[0] != '\0')
+			if (VALID_FNAME(sip->pof_file_tech))
 				if (!cf_exists_full(temp, CF_TYPE_MODELS))
 					valid = false;
 
@@ -3102,7 +3131,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 
 		// Goober5000 - if this is a modular table, and we're replacing an existing file name, and the file doesn't exist, don't replace it
 		if (replace)
-			if (sip->pof_file_hud[0] != '\0')
+			if (VALID_FNAME(sip->pof_file_hud))
 				if (!cf_exists_full(temp, CF_TYPE_MODELS))
 					valid = false;
 
@@ -3380,7 +3409,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 			bool valid = true;
 
 			if (replace)
-				if (sip->generic_debris_pof_file[0] != '\0')
+				if (VALID_FNAME(sip->generic_debris_pof_file))
 					if (!cf_exists_full(temp, CF_TYPE_MODELS))
 						valid = false;
 
@@ -4081,7 +4110,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 			ship_type_index = ship_type_name_lookup(cur_flag);
 
 			// set ship class type
-			if ((ship_type_index >= 0) && (sip->class_type < 0))
+			if (ship_type_index >= 0)
 				sip->class_type = ship_type_index;
 
 			// check various ship flags
@@ -4346,7 +4375,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 	{
 		stuff_vec3d(&sip->closeup_pos);
 	}
-	else if (first_time && strlen(sip->pof_file))
+	else if (first_time && VALID_FNAME(sip->pof_file))
 	{
 		//Calculate from the model file. This is inefficient, but whatever
 		int model_idx = model_load(sip->pof_file, 0, NULL);
@@ -4724,7 +4753,7 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 			stuff_float(&ci->spread);
 		
 		required_string("+Spew Time:");
-		stuff_int(&ci->stamp);		
+		stuff_int(&ci->spew_duration);
 
 		required_string("+Bitmap:");
 		stuff_string(name_tmp, F_NAME, NAME_LENGTH);
@@ -5033,6 +5062,13 @@ static void parse_ship_values(ship_info* sip, const bool is_template, const bool
 		stuff_float(&new_info.duration);
 		required_string("+Frequency:");
 		stuff_float(&new_info.frequency);
+
+		if (optional_string("+Width:")) {
+			stuff_float(&new_info.width);
+		} else {
+			new_info.width = 0.0f;
+		}
+
 		if (optional_string("+Primary color 1:")) {
 			int rgb[3];
 			stuff_int_list(rgb, 3, RAW_INTEGER_TYPE);
@@ -6764,10 +6800,11 @@ void ship::clear()
 	for (int i = 0; i < NUM_SUB_EXPL_HANDLES; i++)
 		sub_expl_sound_handle[i] = sound_handle::invalid();
 
-	memset(&arc_pts, 0, MAX_SHIP_ARCS * 2 * sizeof(vec3d));
-	for (int i = 0; i < MAX_SHIP_ARCS; i++)
+	memset(&arc_pts, 0, MAX_ARC_EFFECTS * 2 * sizeof(vec3d));
+	for (int i = 0; i < MAX_ARC_EFFECTS; i++)
 		arc_timestamp[i] = TIMESTAMP::invalid();
-	memset(&arc_type, 0, MAX_SHIP_ARCS * sizeof(ubyte));
+	memset(&arc_type, 0, MAX_ARC_EFFECTS * sizeof(ubyte));
+	memset(&arc_width, 0, MAX_ARC_EFFECTS * sizeof(float));
 	arc_next_time = timestamp(-1);
 
 	emp_intensity = -1.0f;
@@ -8056,7 +8093,9 @@ void ship_init_cockpit_displays(ship *shipp)
 		return;
 	}
 
-	shipp->cockpit_model_instance = model_create_instance(shipp->objnum, cockpit_model_num);
+	//-2 is reserved for cockpits as special PMI objnum, as they are NOT simply handleable as the ships objnum.
+	//Functions that know what they are doing can replace the -2 with Player->objnum, otherwise it must be configured as "without object"
+	shipp->cockpit_model_instance = model_create_instance(model_objnum_special::OBJNUM_COCKPIT, cockpit_model_num);
 	sip->cockpit_animations.initializeMoveables(model_get_instance(shipp->cockpit_model_instance));
 
 	// check if we even have cockpit displays
@@ -10738,7 +10777,7 @@ static void ship_init_afterburners(ship *shipp)
 			ci->a_decay_exponent = sip->afterburner_trail_alpha_decay_exponent;
 
 			ci->max_life = sip->afterburner_trail_life;	// table loaded max life
-			ci->stamp = 60;	//spew time???	
+			ci->spew_duration = 60;	//spew time???
 			ci->spread = sip->afterburner_trail_spread; // table loaded spread speed
 
 			ci->n_fade_out_sections = sip->afterburner_trail_faded_out_sections; // initial fade out
@@ -10797,15 +10836,20 @@ int ship_create(matrix* orient, vec3d* pos, int ship_type, const char* ship_name
 	shipp->clear();
 	shipp->orders_allowed_against = ship_set_default_orders_against();
 
+	if (!VALID_FNAME(sip->pof_file))
+	{
+		Error(LOCATION, "Cannot create ship %s; pof file is not valid", sip->name);
+		return -1;
+	}
 	sip->model_num = model_load(sip->pof_file, sip->n_subsystems, &sip->subsystems[0]);		// use the highest detail level
 
-	if(strlen(sip->cockpit_pof_file))
+	if(VALID_FNAME(sip->cockpit_pof_file))
 	{
 		sip->cockpit_model_num = model_load(sip->cockpit_pof_file, 0, NULL);
 	}
 
 	// maybe load an optional hud target model
-	if(strlen(sip->pof_file_hud)){
+	if(VALID_FNAME(sip->pof_file_hud)){
 		// check to see if a "real" ship uses this model. if so, load it up for him so that subsystems are setup properly
 		for(auto it = Ship_info.begin(); it != Ship_info.end(); ++it){
 			if(!stricmp(it->pof_file, sip->pof_file_hud)){
@@ -10817,7 +10861,7 @@ int ship_create(matrix* orient, vec3d* pos, int ship_type, const char* ship_name
 		sip->model_num_hud = model_load(sip->pof_file_hud, 0, NULL);
 	}
 
-	if (strlen(sip->generic_debris_pof_file)) {
+	if (VALID_FNAME(sip->generic_debris_pof_file)) {
 		sip->generic_debris_model_num = model_load(sip->generic_debris_pof_file, 0, nullptr);
 		if (sip->generic_debris_model_num >= 0) {
 			polymodel* pm = model_get(sip->generic_debris_model_num);
@@ -11048,7 +11092,7 @@ static void ship_model_change(int n, int ship_type)
 	}
 
 	if ( sip->cockpit_model_num == -1 ) {
-		if ( strlen(sip->cockpit_pof_file) ) {
+		if ( VALID_FNAME(sip->cockpit_pof_file) ) {
 			sip->cockpit_model_num = model_load(sip->cockpit_pof_file, 0, NULL);
 		}
 	}
@@ -11182,12 +11226,13 @@ void change_ship_type(int n, int ship_type, int by_sexp)
 		return;
 
 	int objnum = sp->objnum;
+	auto ship_entry = ship_registry_get(sp->ship_name);
 
 	swp = &sp->weapons;
 	sip = &(Ship_info[ship_type]);
 	sip_orig = &Ship_info[sp->ship_info_index];
 	objp = &Objects[objnum];
-	p_objp = mission_parse_get_parse_object(sp->ship_name);
+	p_objp = ship_entry ? ship_entry->p_objp_or_null() : nullptr;
 	ph_inf = objp->phys_info;
 
 	// if this ship is the wing leader, update the ship info index that the wing keeps track of.
@@ -11708,7 +11753,7 @@ void change_ship_type(int n, int ship_type, int by_sexp)
 
 				ci->spread = sip->afterburner_trail_spread; // table loaded spread speed
 	
-				ci->stamp = 60;	//spew time???	
+				ci->spew_duration = 60;	//spew time???
 
 				ci->n_fade_out_sections = sip->afterburner_trail_faded_out_sections; // table loaded n sections to be faded out
 
@@ -16399,8 +16444,8 @@ bool ship_can_bay_depart(ship* sp)
 	if ( departure_location == DEPART_AT_DOCK_BAY )
 	{
 		Assertion( departure_anchor >= 0, "Ship %s must have a valid departure anchor", sp->ship_name );
-		int anchor_shipnum = ship_name_lookup(Parse_names[departure_anchor]);
-		if (anchor_shipnum >= 0 && ship_useful_for_departure(anchor_shipnum, departure_path_mask)) {
+		auto anchor_ship_entry = ship_registry_get(Parse_names[departure_anchor]);
+		if (anchor_ship_entry && anchor_ship_entry->has_shipp() && ship_useful_for_departure(anchor_ship_entry->shipnum, departure_path_mask)) {
 			// can bay depart at this time
 			return true;
 		}
@@ -18483,20 +18528,20 @@ int is_support_allowed(object *objp, bool do_simple_check)
 			Assert(The_mission.support_ships.arrival_anchor != -1);
 
 			// ensure it's in-mission
-			int temp = ship_name_lookup(Parse_names[The_mission.support_ships.arrival_anchor]);
-			if (temp < 0)
+			auto anchor_ship_entry = ship_registry_get(Parse_names[The_mission.support_ships.arrival_anchor]);
+			if (!anchor_ship_entry || !anchor_ship_entry->has_shipp())
 			{
 				return 0;
 			}
 
 			// make sure it's not leaving or blowing up
-			if (Ships[temp].is_dying_or_departing())
+			if (anchor_ship_entry->shipp()->is_dying_or_departing())
 			{
 				return 0;
 			}
 
 			// also make sure that parent ship's fighterbay hasn't been destroyed
-			if (ship_fighterbays_all_destroyed(&Ships[temp]))
+			if (ship_fighterbays_all_destroyed(anchor_ship_entry->shipp()))
 			{
 				return 0;
 			}
@@ -19178,7 +19223,9 @@ bool ship_has_dock_bay(int shipnum)
 // Goober5000
 bool ship_useful_for_departure(int shipnum, int  /*path_mask*/)
 {
-	Assert( shipnum >= 0 && shipnum < MAX_SHIPS );
+	Assert(shipnum < MAX_SHIPS);
+	if (shipnum < 0 || shipnum >= MAX_SHIPS)
+		return false;
 
 	// not valid if dying or departing
 	if (Ships[shipnum].is_dying_or_departing())
@@ -19216,7 +19263,7 @@ int ship_get_ship_for_departure(int team)
 		int shipnum = Objects[so->objnum].instance;
 		Assert(shipnum >= 0);
 
-		if ( (Ships[shipnum].team == team) && ship_useful_for_departure(shipnum) )
+		if ( ship_useful_for_departure(shipnum) && (Ships[shipnum].team == team) )
 			return shipnum;
 	}
 
@@ -20588,7 +20635,7 @@ void ship_render_weapon_models(model_render_params *ship_render_info, model_draw
 			{
 				if (pm->submodel[mn].flags[Model::Submodel_flags::Gun_rotation])
 				{
-					swp->primary_bank_external_model_instance[i] = model_create_instance(-1, wip->external_model_num);
+					swp->primary_bank_external_model_instance[i] = model_create_instance(model_objnum_special::OBJNUM_NONE, wip->external_model_num);
 					break;
 				}
 			}
@@ -20808,7 +20855,7 @@ void ship_render(object* obj, model_draw_list* scene)
 
 	// Only render electrical arcs if within 500m of the eye (for a 10m piece)
 	if ( vm_vec_dist_quick( &obj->pos, &Eye_position ) < obj->radius*50.0f && !Rendering_to_shadow_map ) {
-		for ( int i = 0; i < MAX_SHIP_ARCS; i++ )	{
+		for ( int i = 0; i < MAX_ARC_EFFECTS; i++ )	{
 			if ( shipp->arc_timestamp[i].isValid() ) {
 				model_instance_add_arc(pm,
 					pmi,
@@ -20818,7 +20865,8 @@ void ship_render(object* obj, model_draw_list* scene)
 					shipp->arc_type[i],
 					&shipp->arc_primary_color_1[i],
 					&shipp->arc_primary_color_2[i],
-					&shipp->arc_secondary_color[i]);
+					&shipp->arc_secondary_color[i],
+					shipp->arc_width[i]);
 			}
 		}
 	}

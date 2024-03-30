@@ -48,6 +48,7 @@ bool Enable_external_default_scripts;
 int Default_detail_level;
 bool Full_color_head_anis;
 bool Dont_automatically_select_turret_when_targeting_ship;
+bool Automatically_select_subsystem_under_reticle_when_targeting_same_ship;
 bool Always_reset_selected_wep_on_loadout_open;
 bool Weapons_inherit_parent_collision_group;
 bool Flight_controls_follow_eyepoint_orientation;
@@ -149,11 +150,12 @@ bool Randomize_particle_rotation;
 bool Calculate_subsystem_hitpoints_after_parsing;
 bool Disable_internal_loadout_restoration_system;
 bool Contrails_use_absolute_speed;
+bool Lua_API_returns_nil_instead_of_invalid_object;
 
 static auto DiscordOption __UNUSED = options::OptionBuilder<bool>("Game.Discord",
                      std::pair<const char*, int>{"Discord Presence", 1754},
                      std::pair<const char*, int>{"Toggle Discord Rich Presence", 1755})
-                     .category("Game")
+                     .category(std::make_pair("Game", 1824))
                      .default_val(Discord_presence)
                      .level(options::ExpertLevel::Advanced)
                      .importance(55)
@@ -174,10 +176,6 @@ static auto DiscordOption __UNUSED = options::OptionBuilder<bool>("Game.Discord"
                      .finish();
 
 void mod_table_set_version_flags();
-
-SCP_vector<std::pair<SCP_string, gr_capability>> req_render_ext_pairs = {
-	std::make_pair("BPTC Texture Compression", CAPABILITY_BPTC)
-};
 
 void parse_mod_table(const char *filename)
 {
@@ -294,6 +292,11 @@ void parse_mod_table(const char *filename)
 
 		if (optional_string("$Disable FSO Internal Loadout Restoration System:")) {
 			stuff_boolean(&Disable_internal_loadout_restoration_system);
+		}
+
+		if (optional_string("$Lua API returns nil instead of invalid object:")) {
+			stuff_boolean(&Lua_API_returns_nil_instead_of_invalid_object);
+			mprintf(("Game Settings Table: Lua API returns nil instead of invalid object: %s\n", Lua_API_returns_nil_instead_of_invalid_object ? "yes" : "no"));
 		}
 
 		optional_string("#LOCALIZATION SETTINGS");
@@ -416,6 +419,10 @@ void parse_mod_table(const char *filename)
 
 		if (optional_string("$Don't automatically select a turret when targeting a ship:")) {
 			stuff_boolean(&Dont_automatically_select_turret_when_targeting_ship);
+		}
+
+		if (optional_string("$Auto select subsystem under reticle when targeting same ship:")) {
+			stuff_boolean(&Automatically_select_subsystem_under_reticle_when_targeting_same_ship);
 		}
 
 		if (optional_string("$Supernova hits at zero:")) {
@@ -697,10 +704,10 @@ void parse_mod_table(const char *filename)
 			stuff_string_list(ext_strings);
 
 			for (auto& ext_str : ext_strings) {
-				auto ext = std::find_if(req_render_ext_pairs.begin(), req_render_ext_pairs.end(), 
-								[ext_str](const std::pair<SCP_string, gr_capability> &ext_pair) { return !stricmp(ext_pair.first.c_str(), ext_str.c_str()); });
-				if (ext != req_render_ext_pairs.end()) {
-					Required_render_ext.push_back(ext->second);
+				auto ext = std::find_if(&gr_capabilities[0], &gr_capabilities[gr_capabilities_num],
+								[ext_str](const gr_capability_def &ext_pair) { return !stricmp(ext_pair.parse_name, ext_str.c_str()); });
+				if (ext != &gr_capabilities[gr_capabilities_num]) {
+					Required_render_ext.push_back(ext->capability);
 				}
 			}
 		}
@@ -1443,6 +1450,7 @@ void mod_table_reset()
 	Default_detail_level = 3; // "very high" seems a reasonable default in 2012 -zookeeper
 	Full_color_head_anis = false;
 	Dont_automatically_select_turret_when_targeting_ship = false;
+	Automatically_select_subsystem_under_reticle_when_targeting_same_ship = false;
 	Always_reset_selected_wep_on_loadout_open = false;
 	Weapons_inherit_parent_collision_group = false;
 	Flight_controls_follow_eyepoint_orientation = false;
@@ -1474,7 +1482,7 @@ void mod_table_reset()
 	Window_icon_path = "app_icon_sse";
 	Disable_built_in_translations = false;
 	Weapon_shockwaves_respect_huge = false;
-	Using_in_game_options = false;
+	Using_in_game_options = true;
 	Dinky_shockwave_default_multiplier = 1.0f;
 	Shockwaves_always_damage_bombs = false;
 	Shockwaves_damage_all_obj_types_once = false;
@@ -1551,6 +1559,7 @@ void mod_table_reset()
 	Calculate_subsystem_hitpoints_after_parsing = false;
 	Disable_internal_loadout_restoration_system = false;
 	Contrails_use_absolute_speed = false;
+	Lua_API_returns_nil_instead_of_invalid_object = false;
 }
 
 void mod_table_set_version_flags()

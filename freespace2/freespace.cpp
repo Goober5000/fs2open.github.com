@@ -146,6 +146,7 @@
 #include "object/objectsnd.h"
 #include "object/waypoint.h"
 #include "observer/observer.h"
+#include "options/Ingame_Options.h"
 #include "options/Option.h"
 #include "options/OptionsManager.h"
 #include "osapi/osapi.h"
@@ -260,13 +261,14 @@ static SCP_string skill_level_display(int value)
 static auto GameSkillOption __UNUSED = options::OptionBuilder<int>("Game.SkillLevel",
                      std::pair<const char*, int>{"Skill Level", 1284},
                      std::pair<const char*, int>{"The skill level for the game.", 1700})
-                     .category("Game")
+                     .category(std::make_pair("Game", 1824))
                      .range(0, 4)
                      .level(options::ExpertLevel::Beginner)
                      .default_val(DEFAULT_SKILL_LEVEL)
                      .bind_to(&Game_skill_level)
                      .display(skill_level_display)
                      .importance(1)
+                     .flags({options::OptionFlags::RetailBuiltinOption})
                      .finish();
 
 bool Screenshake_enabled = true;
@@ -274,7 +276,7 @@ bool Screenshake_enabled = true;
 auto ScreenShakeOption = options::OptionBuilder<bool>("Graphics.ScreenShake",
                      std::pair<const char*, int>{"Screen Shudder Effect", 1812}, // do xstr
                      std::pair<const char*, int>{"Toggles the screen shake effect for weapons, afterburners, and shockwaves", 1813})
-                     .category("Graphics")
+                     .category(std::make_pair("Graphics", 1825))
                      .default_val(Screenshake_enabled)
                      .level(options::ExpertLevel::Advanced)
                      .importance(55)
@@ -288,7 +290,7 @@ static SCP_string unfocused_pause_display(bool mode) { return mode ? XSTR("Yes",
 auto UnfocusedPauseOption = options::OptionBuilder<bool>("Game.UnfocusedPause",
                      std::pair<const char*, int>{"Pause If Unfocused", 1814}, // do xstr
                      std::pair<const char*, int>{"Whether or not the game automatically pauses if it loses focus", 1815})
-                     .category("Game")
+                     .category(std::make_pair("Game", 1824))
                      .default_val(Allow_unfocused_pause)
                      .level(options::ExpertLevel::Advanced)
                      .display(unfocused_pause_display) 
@@ -659,16 +661,18 @@ DCF(sn_glare, "Sets the sun glare scale (Default is 1.7)")
 }
 
 float Supernova_last_glare = 0.0f;
-bool stars_sun_has_glare(int index);
+
 void game_sunspot_process(float frametime)
 {
 	TRACE_SCOPE(tracing::SunspotProcess);
-	int n_lights, idx;
 	float Sun_spot_goal = 0.0f;
+
+	int supernova_sun_idx = 0;
+	int supernova_light_idx = light_find_for_sun(supernova_sun_idx);
 
 	// supernova
 	auto sn_stage = supernova_stage();
-	if (sn_stage != SUPERNOVA_STAGE::NONE) {
+	if (sn_stage != SUPERNOVA_STAGE::NONE && supernova_light_idx >= 0) {
 		// sunspot differently based on supernova stage
 		switch (sn_stage) {
 		// this case is only here to make gcc happy - apparently it doesn't know we already checked for it
@@ -683,7 +687,7 @@ void game_sunspot_process(float frametime)
 			pct = supernova_sunspot_pct();
 
 			vec3d light_dir;				
-			light_get_global_dir(&light_dir, 0);
+			light_get_global_dir(&light_dir, supernova_light_idx);
 			float dot;
 			dot = vm_vec_dot( &light_dir, &Eye_matrix.vec.fvec );
 			
@@ -696,9 +700,9 @@ void game_sunspot_process(float frametime)
 			}
 
 			// draw the sun glow
-			if ( !shipfx_eye_in_shadow( &Eye_position, Viewer_obj, 0 ) )	{
+			if ( !shipfx_eye_in_shadow( &Eye_position, Viewer_obj, supernova_light_idx ) )	{
 				// draw the glow for this sun
-				stars_draw_sun_glow(0);	
+				stars_draw_sun_glow(supernova_sun_idx);
 			}
 
 			Supernova_last_glare = Sun_spot_goal;
@@ -735,24 +739,27 @@ void game_sunspot_process(float frametime)
 		Sun_spot_goal = 0.0f;
 		if ( Sun_drew )	{
 			// check sunspots for all suns
-			n_lights = light_get_global_count();
+			int n_lights = light_get_global_count();
 
 			// check
-			for(idx=0; idx<n_lights; idx++)	{
-				bool in_shadow = shipfx_eye_in_shadow(&Eye_position, Viewer_obj, idx);
+			for(int light_idx=0; light_idx<n_lights; light_idx++)	{
+				bool in_shadow = shipfx_eye_in_shadow(&Eye_position, Viewer_obj, light_idx);
 
 				if (!in_shadow) {
 					vec3d light_dir;				
-					light_get_global_dir(&light_dir, idx);
+					light_get_global_dir(&light_dir, light_idx);
 
-					//only do sunglare stuff if this sun has one
-					if (stars_sun_has_glare(idx))	{
+					//only do sunglare stuff if this light source has one
+					if (light_has_glare(light_idx))	{
 						float dot = vm_vec_dot( &light_dir, &Eye_matrix.vec.fvec )*0.5f+0.5f;
 						Sun_spot_goal += (float)pow(dot,85.0f);
 					}
 
 					// draw the glow for this sun
-					stars_draw_sun_glow(idx);				
+					int sun_idx = light_get_sun_index(light_idx);
+					if (sun_idx >= 0) {
+						stars_draw_sun_glow(sun_idx);
+					}
 				}
 			}
 
@@ -962,8 +969,7 @@ void game_level_close()
 	}
 }
 
-uint load_gl_init;
-uint load_mission_load;
+time_t load_gl_init;
 uint load_post_level_init;
 extern bool Cmdline_reuse_rng_seed;
 extern uint Cmdline_rng_seed;
@@ -975,7 +981,7 @@ extern uint Cmdline_rng_seed;
 void game_level_init()
 {
 	game_busy( NOX("** starting game_level_init() **") );
-	load_gl_init = (uint) time(nullptr);
+	load_gl_init = time(nullptr);
 
 	// seed the random number generator in multiplayer
 	if ( Game_mode & GM_MULTIPLAYER ) {
@@ -1076,7 +1082,8 @@ void game_level_init()
 	// campaign wasn't ended
 	Campaign_ending_via_supernova = 0;
 
-	load_gl_init = (uint) (time(nullptr) - load_gl_init);
+	load_gl_init = (time(nullptr) - load_gl_init);
+	mprintf(("Game_level_init took %ld seconds", load_gl_init));
 
 	//WMC - Init multi players for level
 	if (Game_mode & GM_MULTIPLAYER && Player != nullptr) {
@@ -1431,9 +1438,7 @@ bool game_start_mission()
 	}
 
 	game_busy( NOX("** starting mission_load() **") );
-	load_mission_load = (uint) time(nullptr);
 	bool load_success = mission_load(Game_current_mission_filename);
-	load_mission_load = (uint)(time(nullptr) - load_mission_load);
 
 	// free up memory from parsing the mission
 	stop_parse();
@@ -2541,7 +2546,7 @@ void game_set_view_clip(float  /*frametime*/)
 
 extern int Tool_enabled;
 int tst = 0;
-int tst_time = 0;
+time_t tst_time = 0;
 int tst_big = 0;
 vec3d tst_pos;
 int tst_bitmap = -1;
@@ -2596,7 +2601,7 @@ void game_tst_frame()
 	
 	// setup tst
 	if(tst == 2){		
-		tst_time = (int) time(nullptr);
+		tst_time = time(nullptr);
 
 		// load the tst bitmap		
 		switch(Random::next(4)){
@@ -5155,6 +5160,10 @@ void game_process_event( int current_state, int event )
 			gameseq_push_state(GS_STATE_SCRIPTING_MISSION);
 			break;
 
+		case GS_EVENT_INGAME_OPTIONS:
+			gameseq_push_state(GS_STATE_INGAME_OPTIONS);
+			break;
+
 		default:
 			Error(LOCATION, "FSO does not have a valid game state to set. It tried to set %d", event);
 			break;
@@ -5222,6 +5231,7 @@ void game_leave_state( int old_state, int new_state )
 		case GS_STATE_GAMEPLAY_HELP:
 		case GS_STATE_LAB:
 		case GS_STATE_SCRIPTING_MISSION:
+		case GS_STATE_INGAME_OPTIONS:
 			end_mission = 0;  // these events shouldn't end a mission
 			break;
 	}
@@ -5667,6 +5677,10 @@ void game_leave_state( int old_state, int new_state )
 				}
 			}
 			scripting_state_close();
+			break;
+
+		case GS_STATE_INGAME_OPTIONS:
+			ingame_options_close();
 			break;
 	}
 
@@ -6237,6 +6251,9 @@ void mouse_force_pos(int x, int y);
 		case GS_STATE_SCRIPTING_MISSION:
 			scripting_state_init();
 			break;
+
+		case GS_STATE_INGAME_OPTIONS:
+			ingame_options_init();
 	} // end switch
 
 	//WMC - now do user scripting stuff
@@ -6583,6 +6600,10 @@ void game_do_state(int state)
 			game_set_frametime(GS_STATE_SCRIPTING_MISSION);
 			scripting_state_do_frame(flFrametime, false);
 			break;
+
+		case GS_STATE_INGAME_OPTIONS:
+			game_set_frametime(GS_STATE_INGAME_OPTIONS);
+			ingame_options_do_frame();
 
    } // end switch(gs_current_state)
 

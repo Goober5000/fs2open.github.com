@@ -140,7 +140,7 @@ bool Editor::loadMission(const std::string& mission_name, int flags) {
 	// activate the localizer hash table
 	fhash_flush();
 
-	clearMission();
+	clearMission(flags & MPF_FAST_RELOAD);
 
 	std::string filepath = mission_name;
 	auto res = cf_find_file_location(filepath.c_str(), CF_TYPE_MISSIONS);
@@ -388,7 +388,7 @@ void Editor::unmarkObject(int obj) {
 	}
 }
 
-void Editor::clearMission() {
+void Editor::clearMission(bool fast_reload) {
 	// clean up everything we need to before we reset back to defaults.
 #if 0
     if (Briefing_dialog){
@@ -401,7 +401,10 @@ void Editor::clearMission() {
 	mission_init(&The_mission);
 
 	obj_init();
-	model_free_all();                // Free all existing models
+
+	if (!fast_reload)
+		model_free_all();                // Free all existing models
+
 	ai_init();
 	asteroid_level_init();
 	ship_level_init();
@@ -488,11 +491,8 @@ void Editor::clearMission() {
 }
 
 void Editor::initialSetup() {
-	// Get the default player ship
-	Default_player_model = get_default_player_ship_index();
-
-	Id_select_type_waypoint = (int) (Ship_info.size());
-	Id_select_type_jump_node = (int) (Ship_info.size() + 1);
+	Id_select_type_waypoint = static_cast<int>(Ship_info.size());
+	Id_select_type_jump_node = static_cast<int>(Ship_info.size() + 1);
 }
 
 void Editor::setupCurrentObjectIndices(int selectedObj) {
@@ -588,11 +588,11 @@ void Editor::updateAllViewports() {
 	}
 }
 
-int Editor::create_player(int  /*num*/, vec3d* pos, matrix* orient, int type, int  /*init*/) {
+int Editor::create_player(vec3d* pos, matrix* orient, int type) {
 	int obj;
 
 	if (type == -1) {
-		type = Default_player_model;
+		type = get_default_player_ship_index();
 	}
 	Assert(type >= 0);
 
@@ -712,7 +712,7 @@ void Editor::fix_ship_name(int ship) {
 
 void Editor::createNewMission() {
 	clearMission();
-	create_player(0, &vmd_zero_vector, &vmd_identity_matrix);
+	create_player(&vmd_zero_vector, &vmd_identity_matrix);
 	stars_post_level_init();
 }
 void Editor::hideMarkedObjects() {

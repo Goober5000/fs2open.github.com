@@ -116,7 +116,7 @@ bool CFREDDoc::autoload() {
 	}
 
 	// Load Backup.002
-	r = load_mission(name);
+	r = load_mission(name, MPF_FAST_RELOAD);
 	Update_window = 1;
 
 	// Delete Backup.001
@@ -228,7 +228,7 @@ bool CFREDDoc::load_mission(const char *pathname, int flags) {
 	// activate the localizer hash table
 	fhash_flush();
 
-	clear_mission();
+	clear_mission(flags & MPF_FAST_RELOAD);
 
 	// message 1: required version
 	if (!parse_main(pathname, flags)) {
@@ -461,7 +461,7 @@ void CFREDDoc::OnFileImportFSM() {
 	if (Briefing_dialog)
 		Briefing_dialog->icon_select(-1);
 
-	clear_mission();
+	clear_mission(true);
 
 	int num_files = 0;
 	int successes = 0;
@@ -494,7 +494,7 @@ void CFREDDoc::OnFileImportFSM() {
 		strcpy_s(fs1_path, fs1_path_mfc);
 
 		// load mission into memory
-		if (!load_mission(fs1_path, MPF_IMPORT_FSM))
+		if (!load_mission(fs1_path, MPF_IMPORT_FSM | MPF_FAST_RELOAD))
 			continue;
 
 		// get filename
@@ -805,7 +805,7 @@ BOOL CFREDDoc::OnSaveDocument(LPCTSTR pathname) {
 	}
 
 	SetModifiedFlag(FALSE);
-	if (!load_mission(pathname))
+	if (!load_mission(pathname, MPF_FAST_RELOAD))
 		Error(LOCATION, "Failed attempting to reload mission after saving.  Report this bug now!");
 
 	if (Briefing_dialog) {
