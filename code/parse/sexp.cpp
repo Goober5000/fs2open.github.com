@@ -233,11 +233,12 @@ SCP_vector<sexp_oper> Operators = {
 	{ "is-nav-visited",					OP_NAV_IS_VISITED,						1,	1,			SEXP_BOOLEAN_OPERATOR,	}, // Kazan
 	{ "ship-type-destroyed",			OP_SHIP_TYPE_DESTROYED,					2,	2,			SEXP_BOOLEAN_OPERATOR,	},
 	{ "percent-ships-destroyed",		OP_PERCENT_SHIPS_DESTROYED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
-	{ "percent-ships-disabled",			OP_PERCENT_SHIPS_DISABLED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
-	{ "percent-ships-disarmed",			OP_PERCENT_SHIPS_DISARMED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
+	{ "percent-ships-disabled",			OP_PERCENT_SHIPS_DISABLED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},	// Goober5000
+	{ "percent-ships-disarmed",			OP_PERCENT_SHIPS_DISARMED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},	// Goober5000
 	{ "percent-ships-departed",			OP_PERCENT_SHIPS_DEPARTED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
 	{ "percent-ships-arrived",			OP_PERCENT_SHIPS_ARRIVED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
-	{ "depart-node-delay",				OP_DEPART_NODE_DELAY,					3,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},	
+	{ "percent-ships-scanned",			OP_PERCENT_SHIPS_SCANNED,				2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},	// Goober5000
+	{ "depart-node-delay",				OP_DEPART_NODE_DELAY,					3,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},
 	{ "destroyed-or-departed-delay",	OP_DESTROYED_DEPARTED_DELAY,			2,	INT_MAX,	SEXP_BOOLEAN_OPERATOR,	},	
 
 	//Status Category
@@ -437,6 +438,7 @@ SCP_vector<sexp_oper> Operators = {
 	{ "clear-ship-goals",				OP_CLEAR_SHIP_GOALS,					1,	1,			SEXP_ACTION_OPERATOR,	},
 	{ "clear-wing-goals",				OP_CLEAR_WING_GOALS,					1,	1,			SEXP_ACTION_OPERATOR,	},
 	{ "good-rearm-time",				OP_GOOD_REARM_TIME,						2,	2,			SEXP_ACTION_OPERATOR,	},
+	{ "bad-rearm-time",					OP_BAD_REARM_TIME,						2,	2,			SEXP_ACTION_OPERATOR,   },	// Asteroth
 	{ "good-primary-time",				OP_GOOD_PRIMARY_TIME,					4,	4,			SEXP_ACTION_OPERATOR,	},	// plieblang
 	{ "good-secondary-time",			OP_GOOD_SECONDARY_TIME,					4,	4,			SEXP_ACTION_OPERATOR,	},
 	{ "change-ai-class",				OP_CHANGE_AI_CLASS,						2,	INT_MAX,	SEXP_ACTION_OPERATOR,	},
@@ -757,6 +759,7 @@ SCP_vector<sexp_oper> Operators = {
 	{ "nebula-change-fog-color",		OP_NEBULA_CHANGE_FOG_COLOR,				3,	3,			SEXP_ACTION_OPERATOR,   },	// Asteroth
 	{ "set-skybox-model",				OP_SET_SKYBOX_MODEL,					1,	8,			SEXP_ACTION_OPERATOR,	},	// taylor
 	{ "set-skybox-orientation",			OP_SET_SKYBOX_ORIENT,					3,	3,			SEXP_ACTION_OPERATOR,	},	// Goober5000
+	{ "set-skybox-alpha",				OP_SET_SKYBOX_ALPHA,					1,	1,			SEXP_ACTION_OPERATOR,	},	// Goober5000
 	{ "set-ambient-light",				OP_SET_AMBIENT_LIGHT,					3,	3,			SEXP_ACTION_OPERATOR,	},	// Karajorma
 	{ "toggle-asteroid-field",			OP_TOGGLE_ASTEROID_FIELD,				1,	1,			SEXP_ACTION_OPERATOR,	},	// MjnMixael
 	{ "set-asteroid-field",				OP_SET_ASTEROID_FIELD,					1,	INT_MAX,	SEXP_ACTION_OPERATOR,	},	// MjnMixael
@@ -4171,6 +4174,66 @@ int check_sexp_syntax(int node, int return_type, int recursive, int *bad_node, s
 		node = Sexp_nodes[node].rest;
 		argnum++;
 	}
+
+	return 0;
+}
+
+int check_sexp_potential_issues(int node, int *bad_node, SCP_string &issue_msg)
+{
+	// empty tree
+	if (node < 0)
+		return 0;
+
+	if (bad_node)
+		*bad_node = node;
+
+	// check operators for anything that might trip up a mission designer
+	if (Sexp_nodes[node].subtype == SEXP_ATOM_OPERATOR)
+	{
+		auto op_num = get_operator_const(node);
+		int first_arg_node = CDR(node);
+
+		switch (op_num)
+		{
+			// examine all sexps that check for wing destruction
+			case OP_IS_DESTROYED_DELAY:
+			case OP_PERCENT_SHIPS_DESTROYED:
+				first_arg_node = CDR(first_arg_node);
+				FALLTHROUGH;
+			case OP_IS_DESTROYED:
+			case OP_TIME_WING_DESTROYED:
+			{
+				for (int n = first_arg_node; n >= 0; n = CDR(n))
+				{
+					int wingnum = wing_lookup(CTEXT(n));
+					if (wingnum >= 0)
+					{
+						auto wingp = &Wings[wingnum];
+						if (wingp->num_waves > 1 && wingp->arrival_location == ArrivalLocation::FROM_DOCK_BAY)
+						{
+							issue_msg = "Wing ";
+							issue_msg += wingp->name;
+							issue_msg += " has more than one wave and arrives from a docking bay.  Be careful when checking for this wing's destruction.  If the "
+								"mothership is destroyed before all waves have arrived, the wing will not be considered destroyed.";
+							return SEXP_CHECK_POTENTIAL_ISSUE;
+						}
+					}
+				}
+				break;
+			}
+
+			default:
+				break;
+		}
+	}
+
+	// recurse down the tree
+	int z = check_sexp_potential_issues(CAR(node), bad_node, issue_msg);
+	if (z)
+		return z;
+	z = check_sexp_potential_issues(CDR(node), bad_node, issue_msg);
+	if (z)
+		return z;
 
 	return 0;
 }
@@ -9865,15 +9928,15 @@ int sexp_get_damage_caused(int node)
 }
 
 /**
- * Returns true if the percentage of ships (and ships in wings) departed is at least the percentage given.  
+ * Returns true if the percentage of ships (and ships in wings) that have met the given objective is at least the percentage given.
  * 
- * what determine if we should check destroyed or departed status
- * Goober5000 - added disarm and disable
+ * "what" determines if we should check destroyed or departed status
+ * Goober5000 - added disarm, disable, and scan
  */
-int sexp_percent_ships_arrive_depart_destroy_disarm_disable(int n, int what)
+int sexp_percent_ships_arrive_depart_destroy_disarm_disable_scan(int n, int what)
 {
 	int percent;
-	int total, count;
+	int total, count, impossible_count;
 	bool is_nan, is_nan_forever;
 
 	percent = eval_num(n, is_nan, is_nan_forever);
@@ -9884,6 +9947,7 @@ int sexp_percent_ships_arrive_depart_destroy_disarm_disable(int n, int what)
 
 	total = 0;
 	count = 0;
+	impossible_count = 0;
 	// iterate through the rest of the ships/wings in the list and tally the departures and the
 	// total
 	for ( n = CDR(n); n != -1; n = CDR(n) ) {
@@ -9894,14 +9958,16 @@ int sexp_percent_ships_arrive_depart_destroy_disarm_disable(int n, int what)
 			// this wing, and the departures by the number of departures stored for this wing
 			total += (wingp->wave_count * wingp->num_waves);
 
-			if ( what == OP_PERCENT_SHIPS_DEPARTED )
+			if ( what == OP_PERCENT_SHIPS_DEPARTED ) {
 				count += wingp->total_departed;
-			else if ( what == OP_PERCENT_SHIPS_DESTROYED )
+				impossible_count += (wingp->total_destroyed + wingp->total_vanished);
+			} else if ( what == OP_PERCENT_SHIPS_DESTROYED ) {
 				count += wingp->total_destroyed;
-			else if ( what == OP_PERCENT_SHIPS_ARRIVED )
+				impossible_count += (wingp->total_departed + wingp->total_vanished);
+			} else if ( what == OP_PERCENT_SHIPS_ARRIVED ) {
 				count += wingp->total_arrived_count;
-			else
-				Error(LOCATION, "Invalid status check '%d' for wing '%s' in sexp_percent_ships_arrive_depart_destroy_disarm_disable", what, wingp->name);
+			} else
+				Warning(LOCATION, "Invalid status check '%d' for wing '%s' in sexp_percent_ships_arrive_depart_destroy_disarm_disable_scan", what, wingp->name);
 		} else {
 			auto ship_entry = eval_ship(n);
 
@@ -9913,6 +9979,7 @@ int sexp_percent_ships_arrive_depart_destroy_disarm_disable(int n, int what)
 				continue;
 			}
 			auto name = ship_entry->name;
+			int old_count = count;
 
 			if ( what == OP_PERCENT_SHIPS_DEPARTED ) {
 				if ( mission_log_get_time(LOG_SHIP_DEPARTED, name, nullptr, nullptr) )
@@ -9929,15 +9996,23 @@ int sexp_percent_ships_arrive_depart_destroy_disarm_disable(int n, int what)
 			} else if ( what == OP_PERCENT_SHIPS_ARRIVED ) {
 				if ( mission_log_get_time(LOG_SHIP_ARRIVED, name, nullptr, nullptr) )
 					count++;
+			} else if ( what == OP_PERCENT_SHIPS_SCANNED ) {
+				if ( mission_log_get_time(LOG_CARGO_REVEALED, name, nullptr, nullptr) )
+					count++;
 			} else
-				Error(LOCATION, "Invalid status check '%d' for ship '%s' in sexp_percent_ships_depart_destroy_disarm_disable", what, name);
+				Warning(LOCATION, "Invalid status check '%d' for ship '%s' in sexp_percent_ships_arrive_depart_destroy_disarm_disable_scan", what, name);
 
+			if (old_count == count && ship_entry->status == ShipStatus::EXITED)
+				impossible_count++;
 		}
 	}
 
 	// now, look at the percentage
 	if ( ((count * 100) / total) >= percent )
 		return SEXP_KNOWN_TRUE;
+	// now see if the percentage can't be satisfied
+	else if ( ((impossible_count * 100) / total) > (100 - percent) )
+		return SEXP_KNOWN_FALSE;
 	else
 		return SEXP_FALSE;
 }
@@ -16423,11 +16498,9 @@ void sexp_set_traitor_override(int node)
 }
 
 /**
- * Toggle the status bit for the AI code which tells the AI if it is a good time to rearm.
- *
- * The status being set means good time.  Status not being set (unset), means bad time. Designers must implement this.
+ * Toggle the status for the AI code which tells the AI if it is a good or bad time to rearm.
  */
-void sexp_good_time_to_rearm(int n)
+void sexp_good_bad_time_to_rearm(int n, bool good)
 {
 	int team, time;
 	bool is_nan, is_nan_forever;
@@ -16438,7 +16511,10 @@ void sexp_good_time_to_rearm(int n)
 	if (is_nan || is_nan_forever)
 		return;
 
-	ai_set_rearm_status(team, time);
+	if (good)
+		ai_set_good_rearm_time(team, time);
+	else
+		ai_set_bad_rearm_time(team, time);
 }
 
 /**
@@ -18786,7 +18862,7 @@ void sexp_ship_create(int n)
 	mission_log_add_entry(LOG_SHIP_ARRIVED, shipp->ship_name, nullptr, -1, show_in_mission_log ? 0 : MLF_HIDDEN);
 
 	if (scripting::hooks::OnShipArrive->isActive()) {
-		scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ shipp, ARRIVE_AT_LOCATION, nullptr },
+		scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ shipp, ArrivalLocation::AT_LOCATION, nullptr },
 			scripting::hook_param_list(
 				scripting::hook_param("Ship", 'o', &Objects[objnum])
 			));
@@ -21071,6 +21147,19 @@ void sexp_set_skybox_orientation(int n)
 	stars_set_background_orientation(&m);
 }
 
+// Goober5000
+void sexp_set_skybox_alpha(int n)
+{
+	int alphax1000;
+	bool is_nan, is_nan_forever;
+
+	alphax1000 = eval_num(n, is_nan, is_nan_forever);
+	if (is_nan || is_nan_forever)
+		return;
+
+	stars_set_background_alpha(alphax1000 / 1000.0f);
+}
+
 // taylor - load and set a skybox model
 void sexp_set_skybox_model(int n)
 {
@@ -22667,29 +22756,27 @@ void sexp_damage_escort_list(int node)
 // Goober5000 - set stuff for mission support ship
 void sexp_set_support_ship(int n)
 {
-	int i, temp_val;
+	int temp_val;
 	bool is_nan, is_nan_forever;
 
 	// get arrival location
-	temp_val = -1;
-	for (i = 0; i < MAX_ARRIVAL_NAMES; i++)
-	{
-		if (!stricmp(CTEXT(n), Arrival_location_names[i]))
-			temp_val = i;
-	}
-	if (temp_val < 0)
+	auto arrival_location = ArrivalLocation::AT_LOCATION;
+	int index = string_lookup(CTEXT(n), Arrival_location_names, MAX_ARRIVAL_NAMES);
+	if (index >= 0)
+		arrival_location = static_cast<ArrivalLocation>(index);
+	else
 	{
 		Warning(LOCATION, "Support ship arrival location '%s' not found.\n", CTEXT(n));
 		return;
 	}
-	The_mission.support_ships.arrival_location = temp_val;
+	The_mission.support_ships.arrival_location = arrival_location;
 
 	// get arrival anchor
 	n = CDR(n);
 	if (!stricmp(CTEXT(n), "<no anchor>"))
 	{
 		// if no anchor, set arrival location to hyperspace
-		The_mission.support_ships.arrival_location = 0;
+		The_mission.support_ships.arrival_location = ArrivalLocation::AT_LOCATION;
 	}
 	else
 	{
@@ -22699,25 +22786,23 @@ void sexp_set_support_ship(int n)
 
 	// get departure location
 	n = CDR(n);
-	temp_val = -1;
-	for (i = 0; i < MAX_DEPARTURE_NAMES; i++)
-	{
-		if (!stricmp(CTEXT(n), Departure_location_names[i]))
-			temp_val = i;
-	}
-	if (temp_val < 0)
+	auto departure_location = DepartureLocation::AT_LOCATION;
+	index = string_lookup(CTEXT(n), Departure_location_names, MAX_DEPARTURE_NAMES);
+	if (index >= 0)
+		departure_location = static_cast<DepartureLocation>(index);
+	else
 	{
 		Warning(LOCATION, "Support ship departure location '%s' not found.\n", CTEXT(n));
 		return;
 	}
-	The_mission.support_ships.departure_location = temp_val;
+	The_mission.support_ships.departure_location = departure_location;
 
 	// get departure anchor
 	n = CDR(n);
 	if (!stricmp(CTEXT(n), "<no anchor>"))
 	{
 		// if no anchor, set departure location to hyperspace
-		The_mission.support_ships.departure_location = 0;
+		The_mission.support_ships.departure_location = DepartureLocation::AT_LOCATION;
 	}
 	else
 	{
@@ -22763,7 +22848,7 @@ void sexp_set_support_ship(int n)
 // Goober5000 - set stuff for arriving ships or wings
 void sexp_set_arrival_info(int node)
 {
-	int i, arrival_location, arrival_anchor, arrival_mask, arrival_distance, arrival_delay, n = node;
+	int arrival_anchor, arrival_mask, arrival_distance, arrival_delay, n = node;
 	bool show_warp, adjust_warp_when_docked, is_nan, is_nan_forever;
 	object_ship_wing_point_team oswpt;
 
@@ -22772,13 +22857,11 @@ void sexp_set_arrival_info(int node)
 	n = CDR(n);
 
 	// get arrival location
-	arrival_location = -1;
-	for (i=0; i<MAX_ARRIVAL_NAMES; i++)
-	{
-		if (!stricmp(CTEXT(n), Arrival_location_names[i]))
-			arrival_location = i;
-	}
-	if (arrival_location < 0)
+	auto arrival_location = ArrivalLocation::AT_LOCATION;
+	int index = string_lookup(CTEXT(n), Arrival_location_names, MAX_ARRIVAL_NAMES);
+	if (index >= 0)
+		arrival_location = static_cast<ArrivalLocation>(index);
+	else
 	{
 		Warning(LOCATION, "Arrival location '%s' not found.\n", CTEXT(n));
 		return;
@@ -22790,7 +22873,7 @@ void sexp_set_arrival_info(int node)
 	if ((n < 0) || !stricmp(CTEXT(n), "<no anchor>"))
 	{
 		// if no anchor, set arrival location to hyperspace
-		arrival_location = 0;
+		arrival_location = ArrivalLocation::AT_LOCATION;
 	}
 	else
 	{
@@ -22865,7 +22948,7 @@ void sexp_set_arrival_info(int node)
 // Goober5000 - set stuff for departing ships or wings
 void sexp_set_departure_info(int node)
 {
-	int i, departure_location, departure_anchor, departure_mask, departure_delay, n = node;
+	int departure_anchor, departure_mask, departure_delay, n = node;
 	bool show_warp, adjust_warp_when_docked, is_nan, is_nan_forever;
 	object_ship_wing_point_team oswpt;
 
@@ -22874,13 +22957,11 @@ void sexp_set_departure_info(int node)
 	n = CDR(n);
 
 	// get departure location
-	departure_location = -1;
-	for (i=0; i<MAX_DEPARTURE_NAMES; i++)
-	{
-		if (!stricmp(CTEXT(n), Departure_location_names[i]))
-			departure_location = i;
-	}
-	if (departure_location < 0)
+	auto departure_location = DepartureLocation::AT_LOCATION;
+	int index = string_lookup(CTEXT(n), Departure_location_names, MAX_DEPARTURE_NAMES);
+	if (index >= 0)
+		departure_location = static_cast<DepartureLocation>(index);
+	else
 	{
 		Warning(LOCATION, "Departure location '%s' not found.\n", CTEXT(n));
 		return;
@@ -22892,7 +22973,7 @@ void sexp_set_departure_info(int node)
 	if ((n < 0) || !stricmp(CTEXT(n), "<no anchor>"))
 	{
 		// if no anchor, set departure location to hyperspace
-		departure_location = 0;
+		departure_location = DepartureLocation::AT_LOCATION;
 	}
 	else
 	{
@@ -27544,7 +27625,8 @@ int eval_sexp(int cur_node, int referenced_node)
 			case OP_PERCENT_SHIPS_DESTROYED:
 			case OP_PERCENT_SHIPS_DISARMED:
 			case OP_PERCENT_SHIPS_DISABLED:
-				sexp_val = sexp_percent_ships_arrive_depart_destroy_disarm_disable(node, op_num);
+			case OP_PERCENT_SHIPS_SCANNED:
+				sexp_val = sexp_percent_ships_arrive_depart_destroy_disarm_disable_scan(node, op_num);
 				break;
 
 			case OP_DEPART_NODE_DELAY:
@@ -28279,9 +28361,10 @@ int eval_sexp(int cur_node, int referenced_node)
 				sexp_val = SEXP_TRUE;
 				break;
 
-				// sexpressions for setting flag for good/bad time for someone to reasm
+				// sexpressions for setting flag for good/bad time for someone to rearm
 			case OP_GOOD_REARM_TIME:
-				sexp_good_time_to_rearm(node);
+			case OP_BAD_REARM_TIME:
+				sexp_good_bad_time_to_rearm(node, op_num == OP_GOOD_REARM_TIME);
 				sexp_val = SEXP_TRUE;
 				break;
 
@@ -28951,6 +29034,11 @@ int eval_sexp(int cur_node, int referenced_node)
 
 			case OP_SET_SKYBOX_ORIENT:
 				sexp_set_skybox_orientation(node);
+				sexp_val = SEXP_TRUE;
+				break;
+
+			case OP_SET_SKYBOX_ALPHA:
+				sexp_set_skybox_alpha(node);
 				sexp_val = SEXP_TRUE;
 				break;
 
@@ -30149,6 +30237,7 @@ int query_operator_return_type(int op)
 		case OP_PERCENT_SHIPS_DISARMED:
 		case OP_PERCENT_SHIPS_DISABLED:
 		case OP_PERCENT_SHIPS_ARRIVED:
+		case OP_PERCENT_SHIPS_SCANNED:
 		case OP_DEPART_NODE_DELAY:
 		case OP_DESTROYED_DEPARTED_DELAY:
 		case OP_SPECIAL_CHECK:
@@ -30359,6 +30448,7 @@ int query_operator_return_type(int op)
 		case OP_SET_SUBSYSTEM_STRNGTH:
 		case OP_DESTROY_SUBSYS_INSTANTLY:
 		case OP_GOOD_REARM_TIME:
+		case OP_BAD_REARM_TIME:
 		case OP_GRANT_PROMOTION:
 		case OP_GRANT_MEDAL:
 		case OP_ALLOW_SHIP:
@@ -30469,6 +30559,7 @@ int query_operator_return_type(int op)
 		case OP_ACTIVATE_GLOW_POINT_BANK:
 		case OP_SET_SKYBOX_MODEL:
 		case OP_SET_SKYBOX_ORIENT:
+		case OP_SET_SKYBOX_ALPHA:
 		case OP_SET_SUPPORT_SHIP:
 		case OP_SET_ARRIVAL_INFO:
 		case OP_SET_DEPARTURE_INFO:
@@ -32145,6 +32236,7 @@ int query_operator_argument_type(int op, int argnum)
 			return OPF_SHIP;
 
 		case OP_GOOD_REARM_TIME:
+		case OP_BAD_REARM_TIME:
 			if ( argnum == 0 )
 				return OPF_IFF;
 			else
@@ -32294,6 +32386,7 @@ int query_operator_argument_type(int op, int argnum)
 
 		case OP_PERCENT_SHIPS_DISARMED:
 		case OP_PERCENT_SHIPS_DISABLED:
+		case OP_PERCENT_SHIPS_SCANNED:
 			if ( argnum == 0 ){
 				return OPF_POSITIVE;
 			} else {
@@ -32912,6 +33005,9 @@ int query_operator_argument_type(int op, int argnum)
 				return OPF_SKYBOX_FLAGS;
 
 		case OP_SET_SKYBOX_ORIENT:
+			return OPF_NUMBER;
+
+		case OP_SET_SKYBOX_ALPHA:
 			return OPF_NUMBER;
 
 		// Goober5000 - this is complicated :)
@@ -34144,6 +34240,9 @@ const char *sexp_error_message(int num)
 		case SEXP_CHECK_INVALID_CUSTOM_STRING:
 			return "Invalid custom string name";
 
+		case SEXP_CHECK_POTENTIAL_ISSUE:
+			return "This particular SEXP_CHECK_ code is handled differently from the others.  You shouldn't actually see this message; if you do, report it to a SCP coder.";
+
 		default:
 			Warning(LOCATION, "Unhandled sexp error code %d!", num);
 			return "Unhandled sexp error code!";
@@ -35202,6 +35301,7 @@ int get_category(int op_id)
 		case OP_PERCENT_SHIPS_DISARMED:
 		case OP_PERCENT_SHIPS_DISABLED:
 		case OP_PERCENT_SHIPS_ARRIVED:
+		case OP_PERCENT_SHIPS_SCANNED:
 		case OP_NAV_IS_VISITED:
 		case OP_WAS_DESTROYED_BY_DELAY:
 			return OP_CATEGORY_OBJECTIVE;
@@ -35641,6 +35741,7 @@ int get_category(int op_id)
 		case OP_SET_ARRIVAL_INFO:
 		case OP_SET_DEPARTURE_INFO:
 		case OP_SET_SKYBOX_ORIENT:
+		case OP_SET_SKYBOX_ALPHA:
 		case OP_DESTROY_INSTANTLY:
 		case OP_DESTROY_SUBSYS_INSTANTLY:
 		case OP_DEBUG:
@@ -35837,6 +35938,7 @@ int get_subcategory(int op_id)
 		case OP_REMOVE_GOAL:
 		case OP_CLEAR_GOALS:
 		case OP_GOOD_REARM_TIME:
+		case OP_BAD_REARM_TIME:
 		case OP_GOOD_PRIMARY_TIME:
 		case OP_GOOD_SECONDARY_TIME:
 		case OP_CHANGE_AI_CLASS:
@@ -36138,6 +36240,7 @@ int get_subcategory(int op_id)
 
 		case OP_SET_SKYBOX_MODEL:
 		case OP_SET_SKYBOX_ORIENT:
+		case OP_SET_SKYBOX_ALPHA:
 		case OP_MISSION_SET_NEBULA:
 		case OP_MISSION_SET_SUBSPACE:
 		case OP_CHANGE_BACKGROUND:
@@ -38701,10 +38804,20 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_GOOD_REARM_TIME, "Good rearm time (Action operator)\r\n"
 		"\tInforms the game logic that right now is a good time for a given team to attempt to "
-		"rearm their ships.  The time parameter specified how long the \"good time\" will last.\r\n\r\n"
+		"rearm their ships.  The time parameter specifies how long the \"good time\" will last.\r\n"
+		"Can be used to prematurely end its counterpart, bad-rearm-time.\r\n\r\n"
 		"Takes 2 arguments...\r\n"
 		"\t1:\tTeam Name\r\n"
 		"\t2:\tTime in seconds rearm window should last" },
+
+	{ OP_BAD_REARM_TIME, "Bad rearm time (Action operator)\r\n"
+		"\tInforms the game logic that right now is a bad time for a given team to attempt to "
+		"rearm their ships.  AI ships will not choose to rearm. "
+		"The time parameter specifies how long the \"bad time\" will last.\r\n"
+		"Can be used to prematurely end its counterpart, good-rearm-time.\r\n\r\n"
+		"Takes 2 arguments...\r\n"
+		"\t1:\tTeam Name\r\n"
+		"\t2:\tTime in seconds 'no rearm' window should last" },
 
 	{ OP_ALLOW_SHIP, "Allow ship (Action operator)\r\n"
 		"\tThis operator makes the given ship type available to the player team.  Players will be "
@@ -39047,49 +39160,59 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 
 	{ OP_PERCENT_SHIPS_ARRIVED, "percent-ships-arrived\r\n"
 		"\tBoolean function which returns true if the percentage of ships in the listed ships and wings "
-		"which have arrived is greater or equal to the given percentage.  For wings, all ships of all waves "
+		"which have arrived is greater than or equal to the given percentage.  For wings, all ships of all waves "
 		"are used for calculation for the total possible ships to arrive.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
-		"\t1:\tPercentge of arriving ships at which this function will return true.\r\n"
+		"\t1:\tPercentage of arrived ships at which this function will return true.\r\n"
 		"\t2+:\tList of ships/wings whose arrival status should be determined." },
 
 	{ OP_PERCENT_SHIPS_DEPARTED, "percent-ships-departed\r\n"
 		"\tBoolean function which returns true if the percentage of ships in the listed ships and wings "
-		"which have departed is greater or equal to the given percentage.  For wings, all ships of all waves "
-		"are used for calculation for the total possible ships to depart.  Ships yet to arrive are "
-		" included in the percentage that has not departed.\r\n\r\n"
+		"which have departed is greater than or equal to the given percentage.  For wings, all ships of all waves "
+		"are used for calculation for the total possible ships to depart.  Listed ships and wings yet to arrive are "
+		"included in the total from which the percentage is calculated.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
-		"\t1:\tPercentge of departed ships at which this function will return true.\r\n"
+		"\t1:\tPercentage of departed ships at which this function will return true.\r\n"
 		"\t2+:\tList of ships/wings whose departure status should be determined." },
 
 	{ OP_PERCENT_SHIPS_DESTROYED, "percent-ships-destroyed\r\n"
 		"\tBoolean function which returns true if the percentage of ships in the listed ships and wings "
-		"which have been destroyed is greater or equal to the given percentage.  For wings, all ships of all waves "
-		"are used for calculation for the total possible ships to be destroyed.  Ships yet to arrive are "
-		" included in the percentage that has not been destroyed.\r\n\r\n"
+		"which have been destroyed is greater than or equal to the given percentage.  For wings, all ships of all waves "
+		"are used for calculation for the total possible ships to be destroyed.  Listed ships and wings yet to arrive are "
+		"included in the total from which the percentage is calculated.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
-		"\t1:\tPercentge of destroyed ships at which this function will return true.\r\n"
+		"\t1:\tPercentage of destroyed ships at which this function will return true.\r\n"
 		"\t2+:\tList of ships/wings whose destroyed status should be determined." },
 
 	// Goober5000
 	{ OP_PERCENT_SHIPS_DISARMED, "percent-ships-disarmed\r\n"
 		"\tBoolean function which returns true if the percentage of ships in the listed ships "
-		"which have been disarmed is greater or equal to the given percentage.  For wings, all ships of all waves "
-		"are used for calculation for the total possible ships to be destroyed.  Ships yet to arrive are "
-		" included in the percentage that has not been disarmed.\r\n\r\n"
+		"which have been disarmed is greater than or equal to the given percentage.  Wings cannot be checked with this function; "
+		"any ships that are part of wings must be listed explicitly.  Listed ships yet to arrive are "
+		"included in the total from which the percentage is calculated.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
-		"\t1:\tPercentge of disarmed ships at which this function will return true.\r\n"
+		"\t1:\tPercentage of disarmed ships at which this function will return true.\r\n"
 		"\t2+:\tList of ships whose disarmed status should be determined." },
 
 	// Goober5000
 	{ OP_PERCENT_SHIPS_DISABLED, "percent-ships-disabled\r\n"
 		"\tBoolean function which returns true if the percentage of ships in the listed ships "
-		"which have been disabled is greater or equal to the given percentage.  For wings, all ships of all waves "
-		"are used for calculation for the total possible ships to be destroyed.  Ships yet to arrive are "
-		" included in the percentage that has not been disabled.\r\n\r\n"
+		"which have been disabled is greater than or equal to the given percentage.  Wings cannot be checked with this function; "
+		"any ships that are part of wings must be listed explicitly.  Listed ships yet to arrive are "
+		"included in the total from which the percentage is calculated.\r\n\r\n"
 		"Takes 2 or more arguments...\r\n"
-		"\t1:\tPercentge of disabled ships at which this function will return true.\r\n"
+		"\t1:\tPercentage of disabled ships at which this function will return true.\r\n"
 		"\t2+:\tList of ships whose disabled status should be determined." },
+
+	// Goober5000
+	{ OP_PERCENT_SHIPS_SCANNED, "percent-ships-scanned\r\n"
+		"\tBoolean function which returns true if the percentage of ships in the listed ships "
+		"which have been scanned (or cargo revealed) is greater than or equal to the given percentage.  Wings cannot be checked with this function; "
+		"any ships that are part of wings must be listed explicitly.  Listed ships yet to arrive are "
+		"included in the total from which the percentage is calculated.\r\n\r\n"
+		"Takes 2 or more arguments...\r\n"
+		"\t1:\tPercentage of scanned ships at which this function will return true.\r\n"
+		"\t2+:\tList of ships whose scanned status should be determined." },
 
 	{ OP_RED_ALERT, "red-alert\r\n"
 		"\tCauses Red Alert status in a mission.  This function ends the current mission, and moves to "
@@ -40696,6 +40819,12 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 		"\t1:\tPitch\r\n"
 		"\t2:\tBank\r\n"
 		"\t3:\tHeading\r\n"
+	},
+
+	// Goober5000
+	{ OP_SET_SKYBOX_ALPHA, "set-skybox-alpha\r\n"
+		"\tSets the current skybox transparency.  Takes 1 argument...\r\n"
+		"\t1:\tAlpha value x1000 (so 1.0 is represented as 1000)\r\n"
 	},
 
 	// Goober5000

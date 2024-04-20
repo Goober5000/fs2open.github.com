@@ -1111,7 +1111,7 @@ ADE_FUNC(createShip,
 		mission_log_add_entry(LOG_SHIP_ARRIVED, shipp->ship_name, nullptr, -1, show_in_log ? 0 : MLF_HIDDEN);
 
 		if (scripting::hooks::OnShipArrive->isActive()) {
-			scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ shipp, ARRIVE_AT_LOCATION, nullptr },
+			scripting::hooks::OnShipArrive->run(scripting::hooks::ShipArriveConditions{ shipp, ArrivalLocation::AT_LOCATION, nullptr },
 				scripting::hook_param_list(
 					scripting::hook_param("Ship", 'o', &Objects[obj_idx])
 				));
@@ -2157,6 +2157,24 @@ ADE_FUNC(removeBackgroundElement, l_Mission, "background_element el",
 	} else {
 		return ADE_RETURN_FALSE;
 	}
+}
+
+ADE_VIRTVAR(SkyboxOrientation, l_Mission, "orientation", "Sets or returns the current skybox orientation", "orientation", "the orientation")
+{
+	matrix_h* orient_h = nullptr;
+	if (ADE_SETTING_VAR && ade_get_args(L, "*|o", l_Matrix.GetPtr(&orient_h)))
+		stars_set_background_orientation(orient_h->GetMatrix());
+
+	return ade_set_args(L, "o", l_Matrix.Set(matrix_h(&Nmodel_orient)));
+}
+
+ADE_VIRTVAR(SkyboxAlpha, l_Mission, "number", "Sets or returns the current skybox alpha", "number", "the alpha")
+{
+	float alpha = 1.0f;
+	if (ADE_SETTING_VAR && ade_get_args(L, "*|f", &alpha))
+		stars_set_background_alpha(alpha);
+
+	return ade_set_args(L, "f", Nmodel_alpha);
 }
 
 ADE_FUNC(isRedAlertMission,

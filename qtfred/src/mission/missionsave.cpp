@@ -3045,14 +3045,23 @@ void CFred_mission_save::save_mission_internal(const char* pathname)
 	The_mission.required_fso_version = MISSION_VERSION;
 
 	// Additional incremental version update for some features
-	auto newer_version = gameversion::version(23, 3);
-	if (MISSION_VERSION >= newer_version)
+	auto version_23_3 = gameversion::version(23, 3);
+	auto version_24_1 = gameversion::version(24, 1);
+	if (MISSION_VERSION >= version_24_1)
 	{
-		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 23.3, the incremental version code can be removed");
+		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 24.1, the check_for_24_1_data() and check_for_23_3_data() code can be removed");
+	}
+	else if (check_for_24_1_data())
+	{
+		The_mission.required_fso_version = version_24_1;
+	}
+	else if (MISSION_VERSION >= version_23_3)
+	{
+		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 23.3, the check_for_23_3_data() code can be removed");
 	}
 	else if (check_for_23_3_data())
 	{
-		The_mission.required_fso_version = newer_version;
+		The_mission.required_fso_version = version_23_3;
 	}
 
 	reset_parse();
@@ -3513,14 +3522,14 @@ int CFred_mission_save::save_objects()
 		save_common_object_data(&Objects[shipp->objnum], &Ships[i]);
 
 		if (shipp->wingnum >= 0) {
-			shipp->arrival_location = ARRIVE_AT_LOCATION;
+			shipp->arrival_location = ArrivalLocation::AT_LOCATION;
 		}
 
 		required_string_fred("$Arrival Location:");
 		parse_comments();
-		fout(" %s", Arrival_location_names[shipp->arrival_location]);
+		fout(" %s", Arrival_location_names[static_cast<int>(shipp->arrival_location)]);
 
-		if (shipp->arrival_location != ARRIVE_AT_LOCATION) {
+		if (shipp->arrival_location != ArrivalLocation::AT_LOCATION) {
 			if (optional_string_fred("+Arrival Distance:", "$Name:")) {
 				parse_comments();
 			} else {
@@ -3551,7 +3560,7 @@ int CFred_mission_save::save_objects()
 
 		// Goober5000
 		if (save_format != MissionFormat::RETAIL) {
-			if ((shipp->arrival_location == ARRIVE_FROM_DOCK_BAY) && (shipp->arrival_path_mask > 0)) {
+			if ((shipp->arrival_location == ArrivalLocation::FROM_DOCK_BAY) && (shipp->arrival_path_mask > 0)) {
 				int anchor_shipnum;
 				polymodel* pm;
 
@@ -3587,14 +3596,14 @@ int CFred_mission_save::save_objects()
 		fout(" %s", sexp_out.c_str());
 
 		if (shipp->wingnum >= 0) {
-			shipp->departure_location = DEPART_AT_LOCATION;
+			shipp->departure_location = DepartureLocation::AT_LOCATION;
 		}
 
 		required_string_fred("$Departure Location:");
 		parse_comments();
-		fout(" %s", Departure_location_names[shipp->departure_location]);
+		fout(" %s", Departure_location_names[static_cast<int>(shipp->departure_location)]);
 
-		if (shipp->departure_location != DEPART_AT_LOCATION) {
+		if (shipp->departure_location != DepartureLocation::AT_LOCATION) {
 			required_string_fred("$Departure Anchor:");
 			parse_comments();
 
@@ -3607,7 +3616,7 @@ int CFred_mission_save::save_objects()
 
 		// Goober5000
 		if (save_format != MissionFormat::RETAIL) {
-			if ((shipp->departure_location == DEPART_AT_DOCK_BAY) && (shipp->departure_path_mask > 0)) {
+			if ((shipp->departure_location == DepartureLocation::TO_DOCK_BAY) && (shipp->departure_path_mask > 0)) {
 				int anchor_shipnum;
 				polymodel* pm;
 
@@ -5112,9 +5121,9 @@ int CFred_mission_save::save_wings()
 
 		required_string_fred("$Arrival Location:");
 		parse_comments();
-		fout(" %s", Arrival_location_names[Wings[i].arrival_location]);
+		fout(" %s", Arrival_location_names[static_cast<int>(Wings[i].arrival_location)]);
 
-		if (Wings[i].arrival_location != ARRIVE_AT_LOCATION) {
+		if (Wings[i].arrival_location != ArrivalLocation::AT_LOCATION) {
 			if (optional_string_fred("+Arrival Distance:", "$Name:")) {
 				parse_comments();
 			} else {
@@ -5145,7 +5154,7 @@ int CFred_mission_save::save_wings()
 
 		// Goober5000
 		if (save_format != MissionFormat::RETAIL) {
-			if ((Wings[i].arrival_location == ARRIVE_FROM_DOCK_BAY) && (Wings[i].arrival_path_mask > 0)) {
+			if ((Wings[i].arrival_location == ArrivalLocation::FROM_DOCK_BAY) && (Wings[i].arrival_path_mask > 0)) {
 				int anchor_shipnum;
 				polymodel* pm;
 
@@ -5182,9 +5191,9 @@ int CFred_mission_save::save_wings()
 
 		required_string_fred("$Departure Location:");
 		parse_comments();
-		fout(" %s", Departure_location_names[Wings[i].departure_location]);
+		fout(" %s", Departure_location_names[static_cast<int>(Wings[i].departure_location)]);
 
-		if (Wings[i].departure_location != DEPART_AT_LOCATION) {
+		if (Wings[i].departure_location != DepartureLocation::AT_LOCATION) {
 			required_string_fred("$Departure Anchor:");
 			parse_comments();
 
@@ -5197,7 +5206,7 @@ int CFred_mission_save::save_wings()
 
 		// Goober5000
 		if (save_format != MissionFormat::RETAIL) {
-			if ((Wings[i].departure_location == DEPART_AT_DOCK_BAY) && (Wings[i].departure_path_mask > 0)) {
+			if ((Wings[i].departure_location == DepartureLocation::TO_DOCK_BAY) && (Wings[i].departure_path_mask > 0)) {
 				int anchor_shipnum;
 				polymodel* pm;
 

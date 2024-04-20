@@ -6687,14 +6687,14 @@ void ship::clear()
 
 	time_cargo_revealed = 0;
 
-	arrival_location = 0;
+	arrival_location = ArrivalLocation::AT_LOCATION;
 	arrival_distance = 0;
 	arrival_anchor = -1;
 	arrival_path_mask = 0;
 	arrival_cue = -1;
 	arrival_delay = 0;
 
-	departure_location = 0;
+	departure_location = DepartureLocation::AT_LOCATION;
 	departure_anchor = -1;
 	departure_path_mask = 0;
 	departure_cue = -1;
@@ -7056,14 +7056,14 @@ void wing::clear()
 	special_ship = 0;
 	special_ship_ship_info_index = -1;
 
-	arrival_location = ARRIVE_AT_LOCATION;
+	arrival_location = ArrivalLocation::AT_LOCATION;
 	arrival_distance = 0;
 	arrival_anchor = -1;
 	arrival_path_mask = 0;
 	arrival_cue = -1;
 	arrival_delay = 0;
 
-	departure_location = DEPART_AT_LOCATION;
+	departure_location = DepartureLocation::AT_LOCATION;
 	departure_anchor = -1;
 	departure_path_mask = 0;
 	departure_cue = -1;
@@ -7222,9 +7222,9 @@ static void ship_set(int ship_index, int objnum, int ship_type)
 	int max_points_per_bank = 0;
 	for (int i = 0; i < sip->num_secondary_banks; ++i)
 	{
-		int slots = pm->missile_banks[i].num_slots;
-		if (slots > max_points_per_bank)
-			max_points_per_bank = slots;
+		int num_slots = pm->missile_banks[i].num_slots; // old variable name was conflicting with qt slots macro
+		if (num_slots > max_points_per_bank)
+			max_points_per_bank = num_slots;
 	}
 	shipp->secondary_point_reload_pct.init(sip->num_secondary_banks, max_points_per_bank, 1.0f);
 
@@ -12659,7 +12659,7 @@ int ship_fire_primary(object * obj, int force, bool rollback_shot)
 				shipp->beam_sys_info.model_num = sip->model_num;
 				shipp->beam_sys_info.turret_gun_sobj = pm->detail[0];
 				shipp->beam_sys_info.turret_num_firing_points = 1;  // dummy turret info is used per firepoint
-				shipp->beam_sys_info.turret_fov = cosf((winfo_p->field_of_fire != 0.0f)?winfo_p->field_of_fire:180);
+				shipp->beam_sys_info.turret_fov = cosf(fl_radians((winfo_p->field_of_fire != 0.0f) ? winfo_p->field_of_fire : 180.0f) / 2.0f);
 
 				shipp->fighter_beam_turret_data.disruption_timestamp = timestamp(0);
 				shipp->fighter_beam_turret_data.turret_next_fire_pos = 0;
@@ -16426,7 +16426,7 @@ bool ship_can_warp_full_check(ship* sp)
 bool ship_can_bay_depart(ship* sp)
 {
 	// if this ship belongs to a wing, then use the wing departure information
-	int departure_location;
+	DepartureLocation departure_location;
 	int departure_anchor;
 	int departure_path_mask;
 	if (sp->wingnum >= 0)
@@ -16441,7 +16441,7 @@ bool ship_can_bay_depart(ship* sp)
 		departure_path_mask = sp->departure_path_mask;
 	}
 	
-	if ( departure_location == DEPART_AT_DOCK_BAY )
+	if ( departure_location == DepartureLocation::TO_DOCK_BAY )
 	{
 		Assertion( departure_anchor >= 0, "Ship %s must have a valid departure anchor", sp->ship_name );
 		auto anchor_ship_entry = ship_registry_get(Parse_names[departure_anchor]);
@@ -18523,7 +18523,7 @@ int is_support_allowed(object *objp, bool do_simple_check)
 	if (!do_simple_check)
 	{
 		// make sure, if exiting from bay, that parent ship is in the mission!
-		if ((result == 0 || result == 2) && (The_mission.support_ships.arrival_location == ARRIVE_FROM_DOCK_BAY))
+		if ((result == 0 || result == 2) && (The_mission.support_ships.arrival_location == ArrivalLocation::FROM_DOCK_BAY))
 		{
 			Assert(The_mission.support_ships.arrival_anchor != -1);
 

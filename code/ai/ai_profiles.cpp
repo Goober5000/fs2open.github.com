@@ -475,6 +475,8 @@ void parse_ai_profiles_tbl(const char *filename)
 
 				set_flag(profile, "$fighterbay departures use carrier orientation:", AI::Profile_Flags::Fighterbay_departures_use_carrier_orient);
 
+				set_flag(profile, "$debris damage respects 'big damage' flag:", AI::Profile_Flags::Debris_respects_big_damage);
+
 				if (optional_string("$ai path mode:"))
 				{
 					stuff_string(buf, F_NAME, NAME_LENGTH);
@@ -631,13 +633,15 @@ void parse_ai_profiles_tbl(const char *filename)
 
 				set_flag(profile, "$align to target when guarding stationary ship:", AI::Profile_Flags::Align_to_target_when_guarding_still);
 
+				// end of options ----------------------------------------
+
 				// if we've been through once already and are at the same place, force a move
 				if (saved_Mp && (saved_Mp == Mp))
 				{
 					char tmp[60];
 					memset(tmp, 0, 60);
 					strncpy(tmp, Mp, 59);
-					mprintf(("WARNING: Unrecognized parameter in ai_profiles: %s\n", tmp));
+					mprintf(("WARNING: Unrecognized parameter in %s: %s\n", filename, tmp));
 
 					Mp++;
 				}
@@ -822,5 +826,8 @@ void ai_profile_t::reset()
 	}
 	if (mod_supports_version(23, 4, 0)) {
 		flags.set(AI::Profile_Flags::Hudsquadmsg_tactical_disarm_disable);
+	}
+	if (mod_supports_version(24, 2, 0)) {
+		flags.set(AI::Profile_Flags::Debris_respects_big_damage);
 	}
 }
