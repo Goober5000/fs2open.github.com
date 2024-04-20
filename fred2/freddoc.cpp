@@ -640,7 +640,7 @@ void CFREDDoc::OnFileImportXWI()
 		strcpy_s(xwi_path, xwi_path_mfc);
 
 		// load mission into memory
-		if (!load_mission(xwi_path, MPF_IMPORT_XWI))
+		if (!load_mission(xwi_path, MPF_IMPORT_XWI | MPF_FAST_RELOAD))
 			continue;
 
 		// get filename
