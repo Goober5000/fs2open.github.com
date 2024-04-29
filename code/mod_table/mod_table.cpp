@@ -151,6 +151,8 @@ bool Calculate_subsystem_hitpoints_after_parsing;
 bool Disable_internal_loadout_restoration_system;
 bool Contrails_use_absolute_speed;
 bool Lua_API_returns_nil_instead_of_invalid_object;
+bool Dont_show_callsigns_in_escort_list;
+bool Fix_scripted_velocity;
 
 static auto DiscordOption __UNUSED = options::OptionBuilder<bool>("Game.Discord",
                      std::pair<const char*, int>{"Discord Presence", 1754},
@@ -443,6 +445,10 @@ void parse_mod_table(const char *filename)
 
 			if (optional_string("$HUD drop shadows enabled by default:")) {
 				stuff_boolean(&HUD_shadows);
+			}
+
+			if (optional_string("$Don't show callsigns in the escort list:")) {
+				stuff_boolean(&Dont_show_callsigns_in_escort_list);
 			}
 
 			optional_string("#SEXP SETTINGS");
@@ -1372,6 +1378,10 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Contrails_use_absolute_speed);
 			}
 
+			if (optional_string("$Fix scripted velocity:")) {
+				stuff_boolean(&Fix_scripted_velocity);
+			}
+
 			// end of options ----------------------------------------
 
 			// if we've been through once already and are at the same place, force a move
@@ -1582,6 +1592,8 @@ void mod_table_reset()
 	Disable_internal_loadout_restoration_system = false;
 	Contrails_use_absolute_speed = false;
 	Lua_API_returns_nil_instead_of_invalid_object = false;
+	Dont_show_callsigns_in_escort_list = false;
+	Fix_scripted_velocity = false;
 }
 
 void mod_table_set_version_flags()
@@ -1599,5 +1611,8 @@ void mod_table_set_version_flags()
 	}
 	if (mod_supports_version(24, 0, 0)) {
 		Calculate_subsystem_hitpoints_after_parsing = true;		// this is essentially a bugfix
+	}
+	if (mod_supports_version(24, 2, 0)) {
+		Fix_scripted_velocity = true;		// more sensical behavior
 	}
 }
