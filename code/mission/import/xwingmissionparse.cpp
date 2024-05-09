@@ -245,7 +245,7 @@ const char *xwi_determine_base_ship_class(const XWMFlightGroup *fg)
 		case XWMFlightGroupType::fg_TIE_Bomber:
 			return "TIE/sa Bomber";
 		case XWMFlightGroupType::fg_Gunboat:
-			return nullptr;
+			return "XG-1 Star Wing";
 		case XWMFlightGroupType::fg_Transport:
 			return "DX-9 Stormtrooper Transport";
 		case XWMFlightGroupType::fg_Shuttle:
