@@ -11,7 +11,7 @@
 
 #include <qevent.h>
 #include <FredApplication.h>
-#include <ui/dialogs/ShipEditorDialog.h>
+#include <ui/dialogs/ShipEditor/ShipEditorDialog.h>
 #include <ui/dialogs/EventEditorDialog.h>
 #include <ui/dialogs/AsteroidEditorDialog.h>
 #include <ui/dialogs/BriefingEditorDialog.h>
@@ -143,7 +143,9 @@ void FredView::loadMissionFile(const QString& pathName) {
 	try {
 		QApplication::setOverrideCursor(QCursor(Qt::WaitCursor));
 
-		fred->loadMission(pathName.toStdString());
+		auto pathToLoad = fred->maybeUseAutosave(pathName.toStdString());
+
+		fred->loadMission(pathToLoad);
 
 		QApplication::restoreOverrideCursor();
 	} catch (const fso::fred::mission_load_error&) {
@@ -546,6 +548,12 @@ void FredView::on_actionHide_Marked_Objects_triggered(bool  /*enabled*/) {
 }
 void FredView::on_actionShow_All_Hidden_Objects_triggered(bool  /*enabled*/) {
 	fred->showHiddenObjects();
+}
+void FredView::on_actionLock_Marked_Objects_triggered(bool  /*enabled*/) {
+	fred->lockMarkedObjects();
+}
+void FredView::on_actionUnlock_All_Objects_triggered(bool  /*enabled*/) {
+	fred->unlockAllObjects();
 }
 void FredView::onUpdateViewSpeeds() {
 	ui->actionx1->setChecked(_viewport->physics_speed == 1);

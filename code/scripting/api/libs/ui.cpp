@@ -520,15 +520,16 @@ ADE_FUNC(listSquadImages, l_UserInterface_Barracks, nullptr, "Lists the names of
 	return ade_set_args(L, "t", &out);
 }
 
-ADE_FUNC(acceptPilot, l_UserInterface_Barracks, "player selection", "Accept the given player as the current player",
+ADE_FUNC(acceptPilot, l_UserInterface_Barracks, "player selection, boolean changeState", "Accept the given player as the current player. Set second argument to false to prevent returning to the mainhall",
          "boolean", "true on success, false otherwise")
 {
 	player_h* plh;
-	if (!ade_get_args(L, "o", l_Player.GetPtr(&plh))) {
+	bool changeState = true;
+	if (!ade_get_args(L, "o|b", l_Player.GetPtr(&plh), &changeState)) {
 		return ADE_RETURN_FALSE;
 	}
 
-	barracks_accept_pilot(plh->get());
+	barracks_accept_pilot(plh->get(), changeState);
 	return ADE_RETURN_TRUE;
 }
 
@@ -1759,7 +1760,7 @@ ADE_INDEXER(l_UserInterface_Cutscenes,
 	if (!ade_get_args(L, "*s", &name))
 		return ade_set_error(L, "o", l_TechRoomCutscene.Set(cutscene_info_h(-1)));
 
-	// coverity[uninit_use_in_call] - name is assigned via ade_get_args
+	// coverity[uninit_use_in_call:FALSE] - name is assigned via ade_get_args
 	int idx = get_cutscene_index_by_name(name);
 
 	if (idx < 0) {
@@ -1920,6 +1921,7 @@ ADE_FUNC(initHotkeysList,
 
 	reset_hotkeys();
 	hotkey_set_selected_line(1);
+	hotkey_lines_reset_all();
 	hotkey_build_listing();
 
 	// We want to allow the API to handle expanding wings on its own,
@@ -2078,10 +2080,8 @@ ADE_FUNC(initMissionLog, l_UserInterface_MissionLog, nullptr, "Initializes the M
 {
 	SCP_UNUSED(L);
 
-	Log_scrollback_vec.clear(); // Make sure the vector is empty before we start
-
-	//explicitely do not split lines!
-	message_log_init_scrollback(0, false);
+	//explicitly do not split lines!
+	mission_log_init_scrollback(0, false);
 
 	return ADE_RETURN_NIL;
 }
@@ -2090,7 +2090,7 @@ ADE_FUNC(closeMissionLog, l_UserInterface_MissionLog, nullptr, "Clears the Missi
 {
 	SCP_UNUSED(L);
 
-	message_log_shutdown_scrollback();
+	mission_log_shutdown_scrollback();
 
 	return ADE_RETURN_NIL;
 }
@@ -2107,7 +2107,7 @@ ADE_INDEXER(l_Log_Entries,
 		return ade_set_error(L, "o", l_Log_Entry.Set(log_entry_h()));
 	idx--; //Convert to Lua's 1 based index system
 
-	if ((idx < 0) || (idx >= (int)Log_scrollback_vec.size()))
+	if ((idx < 0) || (idx >= mission_log_scrollback_num_lines()))
 		return ade_set_error(L, "o", l_Log_Entry.Set(log_entry_h()));
 
 	return ade_set_args(L, "o", l_Log_Entry.Set(log_entry_h(idx)));
@@ -2115,7 +2115,7 @@ ADE_INDEXER(l_Log_Entries,
 
 ADE_FUNC(__len, l_Log_Entries, nullptr, "The number of mission log entries", "number", "The number of log entries.")
 {
-	return ade_set_args(L, "i", (int)Log_scrollback_vec.size());
+	return ade_set_args(L, "i", mission_log_scrollback_num_lines());
 }
 
 ADE_LIB_DERIV(l_Log_Messages, "Log_Messages", nullptr, nullptr, l_UserInterface_MissionLog);

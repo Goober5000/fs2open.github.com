@@ -130,9 +130,9 @@ SCP_vector<poof> Neb2_poofs;
 int Neb2_background_color[3] = {0, 0, 255};			// rgb background color (used for lame rendering)
 
 const SCP_vector<std::pair<int, std::pair<const char*, int>>> DetailLevelValues = {{ 0, {"Minimum", 1680}},
-                                                                                   { 1, {"Low", 1161}},
-                                                                                   { 2, {"Medium", 1162}},
-                                                                                   { 3, {"High", 1163}},
+                                                                                   { 1, {"Low", 1160}},
+                                                                                   { 2, {"Medium", 1161}},
+                                                                                   { 3, {"High", 1162}},
                                                                                    { 4, {"Ultra", 1721}}};
 
 const auto NebulaDetailOption __UNUSED = options::OptionBuilder<int>("Graphics.NebulaDetail",
@@ -277,7 +277,7 @@ void parse_nebula_table(const char* filename)
 					error_display(0, "Bitmap defined for nebula poof %s was not found!", poofp->name);
 
 				if (optional_string("$Scale:"))
-					poofp->scale = ::util::parseUniformRange<float>(0.01f, 100000.0f);
+					poofp->scale = ::util::ParsedRandomFloatRange::parseRandomRange(0.01f, 100000.0f);
 
 				if (optional_string("$Density:")) {
 					stuff_float(&poofp->density);
@@ -299,7 +299,7 @@ void parse_nebula_table(const char* filename)
 				}
 
 				if (optional_string("$Rotation:"))
-					poofp->rotation = ::util::parseUniformRange<float>(-1000.0f, 1000.0f);
+					poofp->rotation = util::ParsedRandomFloatRange::parseRandomRange(-1000.0f, 1000.0f);
 
 				if (optional_string("$View Distance:")) {
 					stuff_float(&poofp->view_dist);
@@ -318,7 +318,7 @@ void parse_nebula_table(const char* filename)
 				}
 
 				if (optional_string("$Alpha:")) {
-					poofp->alpha = ::util::parseUniformRange<float>(0.0f, 1.0f);
+					poofp->alpha = util::ParsedRandomFloatRange::parseRandomRange(0.0f, 1.0f);
 				}
 			}
 		}
@@ -843,7 +843,7 @@ void new_poof(size_t poof_info_idx, vec3d* pos) {
 	new_poof.rot_speed = fl_radians(pinfo->rotation.next());
 	new_poof.alpha = pinfo->alpha.next();
 	new_poof.anim_time = frand_range(0.0f, pinfo->bitmap.total_time);
-	if (pinfo->alignment != vmd_zero_vector)
+	if (pinfo->alignment == vmd_zero_vector)
 		vm_vec_rand_vec(&new_poof.up_vec);
 	else
 		new_poof.up_vec = pinfo->alignment;

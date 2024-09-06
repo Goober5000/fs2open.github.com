@@ -3,6 +3,7 @@
 #include "globalincs/pstypes.h"
 #include "libs/jansson.h"
 #include <memory>
+#include <tl/optional.hpp>
 
 namespace options {
 
@@ -26,7 +27,7 @@ class OptionsManager {
 
 	~OptionsManager();
 
-	std::unique_ptr<json_t> getValueFromConfig(const SCP_string& key) const;
+	tl::optional<std::unique_ptr<json_t>> getValueFromConfig(const SCP_string& key) const;
 
 	void setConfigValue(const SCP_string& key, std::unique_ptr<json_t>&& value);
 
@@ -58,6 +59,11 @@ class OptionsManager {
 	void loadInitialValues();
 
 	void printValues();
+
+	void set_ingame_binary_option(SCP_string key, bool value);
+	void set_ingame_multi_option(SCP_string key, int value);
+	void set_ingame_range_option(SCP_string key, int value);
+	void set_ingame_range_option(SCP_string key, float value);
 };
 
 }

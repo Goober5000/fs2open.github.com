@@ -183,8 +183,10 @@ factor_table ftables;
 // time compression/dilation values - Goober5000
 // (Volition sez "can't compress below 0.25"... not sure if
 // this is arbitrary or dictated by code)
-#define MAX_TIME_MULTIPLIER		64
-#define MAX_TIME_DIVIDER		4
+constexpr int MAX_TIME_MULTIPLIER = 64;
+constexpr int MAX_TIME_DIVIDER    =  4;
+constexpr int MAX_TIME_MULTIPLIER_RETAIL = 4;
+constexpr int MAX_TIME_DIVIDER_RETAIL   =  1;
 
 char CheatBuffer[CHEAT_BUFFER_LEN+1];
 
@@ -215,7 +217,6 @@ static struct Cheat cheatsTable[] = {
 
 
 int Tool_enabled = 0;
-bool Perspective_locked=false;
 
 extern int AI_watch_object;
 extern int Countermeasures_enabled;
@@ -749,28 +750,24 @@ void process_debug_keys(int k)
 		case KEY_DEBUGGED + KEY_SHIFTED + KEY_COMMA:
 		case KEY_DEBUGGED1 + KEY_SHIFTED + KEY_COMMA:
 			if ( Game_mode & GM_NORMAL ) {
-				if ( Game_time_compression > (F1_0/MAX_TIME_DIVIDER) ) {
-					change_time_compression(0.5);
-				} else {
-					gamesnd_play_error_beep();
+				if (Game_time_compression > (F1_0 / (Cmdline_retail_time_compression_range ? MAX_TIME_DIVIDER_RETAIL : MAX_TIME_DIVIDER))) {
+					change_time_compression(0.5f);
+					break;
 				}
-			} else {
-				gamesnd_play_error_beep();
 			}
+			gamesnd_play_error_beep();
 			break;
 
 		// Goober5000: handle as normal here
 		case KEY_DEBUGGED + KEY_SHIFTED + KEY_PERIOD:
 		case KEY_DEBUGGED1 + KEY_SHIFTED + KEY_PERIOD:
 			if ( Game_mode & GM_NORMAL ) {
-				if ( Game_time_compression < (F1_0*MAX_TIME_MULTIPLIER) ) {
-					change_time_compression(2);
-				} else {
-					gamesnd_play_error_beep();
+				if (Game_time_compression < (F1_0 * (Cmdline_retail_time_compression_range ? MAX_TIME_MULTIPLIER_RETAIL : MAX_TIME_MULTIPLIER))) {
+					change_time_compression(2.0f);
+					break;
 				}
-			} else {
-				gamesnd_play_error_beep();
 			}
+			gamesnd_play_error_beep();
 			break;
 
 		//	Kill! the currently targeted ship.
@@ -800,11 +797,8 @@ void process_debug_keys(int k)
 		// play the next mission message
 		case KEY_DEBUGGED + KEY_V:		
 			extern int Message_debug_index;
-			extern int Num_messages_playing;
 			// stop any other messages
-			if(Num_messages_playing){
-				message_kill_all(1);
-			}
+			message_kill_all(true);
 
 			// next message
 			if(Message_debug_index >= Num_messages - 1){
@@ -823,11 +817,8 @@ void process_debug_keys(int k)
 		// play the previous mission message
 		case KEY_DEBUGGED + KEY_SHIFTED + KEY_V:
 			extern int Message_debug_index;
-			extern int Num_messages_playing;
 			// stop any other messages
-			if(Num_messages_playing){
-				message_kill_all(1);
-			}
+			message_kill_all(true);
 
 			// go maybe go down one
 			if(Message_debug_index == Num_builtin_messages - 1){
@@ -1267,17 +1258,17 @@ void process_debug_keys(int k)
 		case KEY_PADMINUS: {
 			int init_flag = 0;
 
-			if ( keyd_pressed[KEY_1] )	{
+			if ( key_is_pressed(KEY_1) ) {
 				init_flag = 1;
 				HUD_color_red -= 4;
 			} 
 
-			if ( keyd_pressed[KEY_2] )	{
+			if ( key_is_pressed(KEY_2) ) {
 				init_flag = 1;
 				HUD_color_green -= 4;
-			} 
+			}
 
-			if ( keyd_pressed[KEY_3] )	{
+			if ( key_is_pressed(KEY_3) ) {
 				init_flag = 1;
 				HUD_color_blue -= 4;
 			} 
@@ -1296,17 +1287,17 @@ void process_debug_keys(int k)
 		case KEY_PADPLUS: {
 			int init_flag = 0;
 
-			if ( keyd_pressed[KEY_1] )	{
+			if ( key_is_pressed(KEY_1) ) {
 				init_flag = 1;
 				HUD_color_red += 4;
 			} 
 
-			if ( keyd_pressed[KEY_2] )	{
+			if ( key_is_pressed(KEY_2) ) {
 				init_flag = 1;
 				HUD_color_green += 4;
 			} 
 
-			if ( keyd_pressed[KEY_3] )	{
+			if ( key_is_pressed(KEY_3) ) {
 				init_flag = 1;
 				HUD_color_blue += 4;
 			} 
@@ -1460,7 +1451,7 @@ void process_player_ship_keys(int k)
 	// moved this line to beginning of function since hotkeys now encompass
 	// F5 - F12.  We can return after using F11 as a hotkey.
 	ppsk_hotkeys(masked_k);
-	if (keyd_pressed[KEY_DEBUG_KEY]){
+	if (key_is_pressed(KEY_DEBUG_KEY)){
 		return;
 	}
 
@@ -2223,31 +2214,27 @@ int button_function_demo_valid(int n)
 		break;
 
 	case TIME_SLOW_DOWN:
-		if ( Game_mode & GM_NORMAL ) {
+		ret = 1;
+		if ( Game_mode & GM_NORMAL && !Time_compression_locked ) {
 			// Goober5000 - time dilation only available in cheat mode (see above);
 			// now you can do it with or without pressing the tilde, per Kazan's request
-			if ( ((Game_time_compression > F1_0) || (Cheats_enabled && (Game_time_compression > (F1_0/MAX_TIME_DIVIDER)))) && !Time_compression_locked) {
+			if ((Game_time_compression > F1_0) || (Cheats_enabled && (Game_time_compression > (F1_0 / (Cmdline_retail_time_compression_range ? MAX_TIME_DIVIDER_RETAIL : MAX_TIME_DIVIDER))))) {
 				change_time_compression(0.5f);
-			} else {
-				gamesnd_play_error_beep();
+				break;
 			}
-		} else {
-			gamesnd_play_error_beep();
 		}
-		ret = 1;
+		gamesnd_play_error_beep();
 		break;
 
 	case TIME_SPEED_UP:
-		if ( Game_mode & GM_NORMAL ) {
-			if ( (Game_time_compression < (F1_0*MAX_TIME_MULTIPLIER)) && !Time_compression_locked ) {
-				change_time_compression(2.0f);
-			} else {
-				gamesnd_play_error_beep();
-			}
-		} else {
-			gamesnd_play_error_beep();
-		}
 		ret = 1;
+		if ( Game_mode & GM_NORMAL && !Time_compression_locked ) {
+			if (Game_time_compression < (F1_0 * (Cmdline_retail_time_compression_range ? MAX_TIME_MULTIPLIER_RETAIL : MAX_TIME_MULTIPLIER))) {
+				change_time_compression(2.0f);
+				break;
+			}
+		}
+		gamesnd_play_error_beep();
 		break;
 	}
 

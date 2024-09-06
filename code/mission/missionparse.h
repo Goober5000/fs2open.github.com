@@ -131,11 +131,11 @@ typedef struct mission_default_custom_data {
 	SCP_string description;
 } mission_default_custom_data;
 
-typedef struct mission_custom_string {
+typedef struct custom_string {
 	SCP_string name;
 	SCP_string value;
 	SCP_string text;
-} mission_custom_string;
+} custom_string;
 
 // descriptions of flags for FRED
 template <class T>
@@ -196,7 +196,7 @@ typedef struct mission {
 
 	SCP_map<SCP_string, SCP_string> custom_data;
 
-	SCP_vector<mission_custom_string> custom_strings;
+	SCP_vector<custom_string> custom_strings;
 
 	void Reset( );
 
@@ -320,6 +320,7 @@ typedef struct subsys_status {
 	int	secondary_ammo[MAX_SHIP_SECONDARY_BANKS];
 	int	ai_class;
 	int	subsys_cargo_name;
+	char subsys_cargo_title[NAME_LENGTH];
 } subsys_status;
 
 typedef struct texture_replace {
@@ -355,6 +356,7 @@ public:
 	int loadout_team = -1;						// original team, should never be changed after being set!!
 	int	ai_goals = -1;							// sexp of lists of goals that this ship should try and do
 	char	cargo1 = '\0';
+	char cargo_title[NAME_LENGTH] = "";
 	SCP_string team_color_setting;
 
 	int	subsys_index = -1;						// index into subsys_status array
@@ -568,7 +570,7 @@ void clear_texture_replacements();
 subsys_status *parse_get_subsys_status(p_object *pobjp, const char *subsys_name);
 
 // MjnMixael
-mission_custom_string* get_custom_string_by_name(SCP_string name);
+custom_string* get_custom_string_by_name(SCP_string name);
 
 #endif
 

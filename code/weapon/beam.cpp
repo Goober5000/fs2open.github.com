@@ -525,7 +525,7 @@ int beam_fire(beam_fire_info *fire_info)
 	} else {
 		float burst_rot = 0.0f;
 		if (new_item->type == BeamType::OMNI && !wip->b_info.t5info.burst_rot_pattern.empty()) {
-			burst_rot = wip->b_info.t5info.burst_rot_pattern[fire_info->burst_index];
+			burst_rot = wip->b_info.t5info.burst_rot_pattern[fire_info->burst_index % wip->b_info.t5info.burst_rot_pattern.size()];
 		}
 		beam_get_binfo(new_item, fire_info->accuracy, wip->b_info.beam_shots,fire_info->burst_seed, burst_rot, fire_info->per_burst_rotation);			// to fill in b_info	- the set of directional aim vectors
 	}	
@@ -1077,18 +1077,32 @@ void beam_type_omni_move(beam* b)
 	vec3d actual_dir;
 	bool no_sweep = vm_vec_dot(&b->binfo.dir_a, &b->binfo.dir_b) > 0.9999f;
 
+	float rotation_amount;
+	if (Weapon_info[b->weapon_info_index].b_info.t5info.rot_curve_idx >= 0) {
+		rotation_amount = Curves[Weapon_info[b->weapon_info_index].b_info.t5info.rot_curve_idx].GetValue(BEAM_T(b)) * PI2;
+	} else {
+		rotation_amount = (b->life_total - b->life_left) * b->type5_rot_speed;
+	}
+
 	if (b->rotates) {
-		vm_rot_point_around_line(&newdir_a, &b->binfo.dir_a, (b->life_total - b->life_left) * b->type5_rot_speed, &zero_vec, &b->binfo.rot_axis); 
+		vm_rot_point_around_line(&newdir_a, &b->binfo.dir_a, rotation_amount, &zero_vec, &b->binfo.rot_axis); 
 		if (no_sweep)
 			actual_dir = newdir_a;
 		else 
-			vm_rot_point_around_line(&newdir_b, &b->binfo.dir_b, (b->life_total - b->life_left) * b->type5_rot_speed, &zero_vec, &b->binfo.rot_axis);
+			vm_rot_point_around_line(&newdir_b, &b->binfo.dir_b, rotation_amount, &zero_vec, &b->binfo.rot_axis);
 	}
 
 	if (no_sweep)
 		actual_dir = newdir_a;
-	else
-		vm_vec_interp_constant(&actual_dir, &newdir_a, &newdir_b, BEAM_T(b));
+	else {
+		float slash_completion;
+		if (Weapon_info[b->weapon_info_index].b_info.t5info.slash_pos_curve_idx >= 0) {
+			slash_completion = Curves[Weapon_info[b->weapon_info_index].b_info.t5info.slash_pos_curve_idx].GetValue(BEAM_T(b));
+		} else {
+			slash_completion = BEAM_T(b);
+		}
+		vm_vec_interp_constant(&actual_dir, &newdir_a, &newdir_b, slash_completion);
+	}
 
 	// now recalculate shot_point to be shooting through our new point
 	vm_vec_scale_add(&b->last_shot, &b->last_start, &actual_dir, b->range);
@@ -2162,7 +2176,7 @@ int beam_get_model(object *objp)
 		if(Asteroids[objp->instance].asteroid_type < 0){
 			return -1;
 		}
-		return Asteroid_info[Asteroids[objp->instance].asteroid_type].model_num[pof];
+		return Asteroid_info[Asteroids[objp->instance].asteroid_type].subtypes[pof].model_number;
 
 	default:
 		// this shouldn't happen too often
@@ -2382,7 +2396,7 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 
 	// get a model # to work with
 	model_num = beam_get_model(b->target);
-	if ((model_num < 0) && !(b->flags & BF_TARGETING_COORDS)) {
+	if ((model_num < 0) && !(b->flags & BF_TARGETING_COORDS) && b->type != BeamType::OMNI) {
 		return;
 	}
 
@@ -2574,7 +2588,7 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 				vm_vec_random_in_circle(&pos1, &center, &orient, 1.f, bwi->t5info.start_pos == Type5BeamPos::RANDOM_OUTSIDE);
 
 			if (bwi->t5info.end_pos != Type5BeamPos::CENTER)
-				vm_vec_random_in_circle(&pos2, &center, &orient, 1.f, bwi->t5info.start_pos == Type5BeamPos::RANDOM_OUTSIDE);
+				vm_vec_random_in_circle(&pos2, &center, &orient, 1.f, bwi->t5info.end_pos == Type5BeamPos::RANDOM_OUTSIDE);
 
 			if (bwi->t5info.no_translate || bwi->t5info.end_pos == Type5BeamPos::SAME_RANDOM)
 				pos2 = pos1;
@@ -2654,9 +2668,9 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 			// randomness
 			vm_vec_random_in_sphere(&random_offset, &vmd_zero_vector, 1.f, false, true);
 			random_offset *= scale_factor;
-			random_offset.xyz.x *= bwi->t5info.start_pos_rand.xyz.x;
-			random_offset.xyz.y *= bwi->t5info.start_pos_rand.xyz.y;
-			random_offset.xyz.z *= bwi->t5info.start_pos_rand.xyz.z;
+			random_offset.xyz.x *= bwi->t5info.end_pos_rand.xyz.x;
+			random_offset.xyz.y *= bwi->t5info.end_pos_rand.xyz.y;
+			random_offset.xyz.z *= bwi->t5info.end_pos_rand.xyz.z;
 			offset += random_offset;
 
 			// rotate
@@ -2757,8 +2771,8 @@ void beam_aim(beam *b)
 	if (!(b->flags & BF_TARGETING_COORDS)) {
 		// targeting type beam weapons have no target
 		if (b->target == NULL) {
-			Assert(b->type == BeamType::TARGETING);
-			if(b->type != BeamType::TARGETING){
+			Assert(b->type == BeamType::TARGETING || b->type == BeamType::OMNI);
+			if(b->type != BeamType::TARGETING && b->type != BeamType::OMNI){
 				return;
 			}
 		}
@@ -3958,8 +3972,9 @@ void beam_handle_collisions(beam *b)
 						// stream of fire for big ships
 						if (width <= Objects[target].radius * BEAM_AREA_PERCENT) {
 							auto particleSource = particle::ParticleManager::get()->createSource(wi->piercing_impact_effect);
-							particleSource.moveTo(&b->f_collisions[idx].cinfo.hit_point_world);
-							particleSource.setOrientationFromNormalizedVec(&fvec);
+							matrix fvec_orient;
+							vm_vector_2_matrix_norm(&fvec_orient, &fvec);
+							particleSource.moveTo(&b->f_collisions[idx].cinfo.hit_point_world, &fvec_orient);
 							particleSource.setOrientationNormal(&worldNormal);
 
 							particleSource.finish();
@@ -3986,15 +4001,14 @@ void beam_handle_collisions(beam *b)
 					}
 
 					auto particleSource = particle::ParticleManager::get()->createSource(wi->impact_weapon_expl_effect);
-					particleSource.moveTo(&b->f_collisions[idx].cinfo.hit_point_world);
-					particleSource.setOrientationNormal(&worldNormal);
-
 					vec3d fvec;
 					vm_vec_sub(&fvec, &b->last_shot, &b->last_start);
-
+					matrix fvec_orient = vmd_identity_matrix;
 					if (!IS_VEC_NULL(&fvec)) {
-						particleSource.setOrientationFromVec(&fvec);
+						vm_vector_2_matrix_norm(&fvec_orient, &fvec);
 					}
+					particleSource.moveTo(&b->f_collisions[idx].cinfo.hit_point_world, &fvec_orient);
+					particleSource.setOrientationNormal(&worldNormal);
 
 					particleSource.finish();
 				}
@@ -4167,25 +4181,23 @@ int beam_ok_to_fire(beam *b)
 		vm_vec_sub(&aim_dir, &b->last_shot, &b->last_start);
 		vm_vec_normalize(&aim_dir);
 
-		if (The_mission.ai_profile->flags[AI::Profile_Flags::Force_beam_turret_fov]) {
-			vec3d turret_normal;
-
-			if (b->flags & BF_IS_FIGHTER_BEAM) {
-				turret_normal = b->objp->orient.vec.fvec;
-			} else {
+		if (!(b->flags & BF_IS_FIGHTER_BEAM)) {
+			if (The_mission.ai_profile->flags[AI::Profile_Flags::Force_beam_turret_fov]) {
+				vec3d turret_normal;
 				model_instance_local_to_global_dir(&turret_normal, &b->subsys->system_info->turret_norm, Ships[b->objp->instance].model_instance_num, b->subsys->system_info->subobj_num, &b->objp->orient, true);
-			}
 
-			if (!(turret_fov_test(b->subsys, &turret_normal, &aim_dir))) {
-				nprintf(("BEAM", "BEAM : powering beam down because of FOV condition!\n"));
-				return 0;
+				if (!(turret_fov_test(b->subsys, &turret_normal, &aim_dir))) {
+					nprintf(("BEAM", "BEAM : powering beam down because of FOV condition!\n"));
+					return 0;
+				}
 			}
-		} else {
-			vec3d turret_dir, turret_pos;
-			beam_get_global_turret_gun_info(b->objp, b->subsys, &turret_pos, false, &turret_dir, true, nullptr, (b->flags & BF_IS_FIGHTER_BEAM) != 0);
-			if (vm_vec_dot(&aim_dir, &turret_dir) < b->subsys->system_info->turret_fov) {
-				nprintf(("BEAM", "BEAM : powering beam down because of FOV condition!\n"));
-				return 0;
+			else {
+				vec3d turret_dir, turret_pos;
+				beam_get_global_turret_gun_info(b->objp, b->subsys, &turret_pos, false, &turret_dir, true, nullptr, (b->flags & BF_IS_FIGHTER_BEAM) != 0);
+				if (vm_vec_dot(&aim_dir, &turret_dir) < b->subsys->system_info->turret_fov) {
+					nprintf(("BEAM", "BEAM : powering beam down because of FOV condition!\n"));
+					return 0;
+				}
 			}
 		}
 
@@ -4300,7 +4312,9 @@ float beam_get_ship_damage(beam *b, object *objp, vec3d* hitpos)
 		damage *= Curves[wip->damage_curve_idx].GetValue((b->life_total - b->life_left) / b->life_total);
 
 	// same team. yikes
-	if ( (b->team == Ships[objp->instance].team) && (damage > The_mission.ai_profile->beam_friendly_damage_cap[Game_skill_level]) ) {
+	if ( (b->team == Ships[objp->instance].team)
+			&& (The_mission.ai_profile->beam_friendly_damage_cap[Game_skill_level] >= 0.f)
+			&& (damage > The_mission.ai_profile->beam_friendly_damage_cap[Game_skill_level]) ) {
 		damage = The_mission.ai_profile->beam_friendly_damage_cap[Game_skill_level] * attenuation;
 	} else {
 		// normal damage

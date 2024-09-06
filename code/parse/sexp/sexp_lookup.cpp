@@ -1,8 +1,7 @@
 
 #include "ai/ailua.h"
-
+#include "mission/missionmessage.h"
 #include "parse/sexp/sexp_lookup.h"
-
 #include "parse/parselo.h"
 #include "parse/sexp.h"
 #include "parse/sexp/LuaSEXP.h"
@@ -55,7 +54,7 @@ void parse_sexp_table(const char* filename) {
 
 
 				dynamic_sexp_enum_list thisList;
-				thisList.name = name;
+				thisList.name = std::move(name);
 
 				while (optional_string("+Enum:")) {
 					SCP_string item;
@@ -314,6 +313,7 @@ void dynamic_sexp_init()
 	}
 	global.pending_sexps.clear();
 
+	message_types_init();
 	parse_modular_table("*-sexp.tbm", parse_sexp_table, CF_TYPE_TABLES);
 
 	Script_system.OnStateDestroy.add(free_lua_sexps);

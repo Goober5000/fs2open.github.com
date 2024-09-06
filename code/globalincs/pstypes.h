@@ -99,6 +99,14 @@ struct ivec2 {
 	int x, y;
 };
 
+inline bool operator<(const ivec3& l, const ivec3& r){
+	return l.x < r.x || (l.x == r.x && (l.y < r.y || (l.y == r.y && l.z < r.z)));
+}
+
+inline bool operator<(const ivec2& l, const ivec2& r){
+	return l.x < r.x || (l.x == r.x && l.y < r.y);
+}
+
 namespace scripting {
 	class ade_table_entry;
 }
@@ -117,9 +125,6 @@ typedef struct vec3d {
 		} xyz;
 		float a1d[3];
 	};
-
-	void serialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, const luacpp::LuaValue& value, ubyte* data, int& packet_size);
-	void deserialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, char* data_ptr, ubyte* data, int& offset);
 } vec3d;
 
 typedef struct vec2d {

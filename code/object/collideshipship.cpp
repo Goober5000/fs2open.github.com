@@ -20,6 +20,7 @@
 #include "io/joy_ff.h"
 #include "io/timer.h"
 #include "network/multi.h"
+#include "network/multi_interpolate.h"
 #include "object/objcollide.h"
 #include "object/object.h"
 #include "object/objectdock.h"
@@ -582,7 +583,7 @@ void calculate_ship_ship_collision_physics(collision_info_struct *ship_ship_hit_
 			model_instance_num = Ships[heavy->instance].model_instance_num;
 			pmi = model_get_instance(model_instance_num);
 		} else if (heavy->type == OBJ_ASTEROID) {
-			pm = Asteroid_info[Asteroids[heavy->instance].asteroid_type].modelp[Asteroids[heavy->instance].asteroid_subtype];
+			pm = Asteroid_info[Asteroids[heavy->instance].asteroid_type].subtypes[Asteroids[heavy->instance].asteroid_subtype].model_pointer;
 			model_instance_num = Asteroids[heavy->instance].model_instance_num;
 			pmi = model_get_instance(model_instance_num);
 		} else if (heavy->type == OBJ_DEBRIS) {
@@ -688,47 +689,45 @@ void calculate_ship_ship_collision_physics(collision_info_struct *ship_ship_hit_
 	// calculate the effect on the velocity of the collison point per unit impulse
 	// first find the effect thru change in rotvel
 	// then find the change in the cm vel
+	vm_vec_cross(&rotational_impulse_heavy, &ship_ship_hit_info->r_heavy, &impulse);
+	get_I_inv(&heavy_I_inv, &heavy->phys_info.I_body_inv, &heavy->orient);
+	vm_vec_rotate(&delta_rotvel_heavy, &rotational_impulse_heavy, &heavy_I_inv);
+	float rotation_factor_heavy = (heavy->type == OBJ_SHIP) ? heavy_sip->collision_physics.rotation_factor : COLLISION_ROTATION_FACTOR;
 	if (heavy == Player_obj) {
-		vm_vec_zero( &delta_rotvel_heavy );
-		heavy_denom = 1.0f / heavy->phys_info.mass;
-	} else {
-		vm_vec_cross(&rotational_impulse_heavy, &ship_ship_hit_info->r_heavy, &impulse);
-		get_I_inv(&heavy_I_inv, &heavy->phys_info.I_body_inv, &heavy->orient);
-		vm_vec_rotate(&delta_rotvel_heavy, &rotational_impulse_heavy, &heavy_I_inv);
-		float rotation_factor = (heavy->type == OBJ_SHIP) ? heavy_sip->collision_physics.rotation_factor : COLLISION_ROTATION_FACTOR;
-		vm_vec_scale(&delta_rotvel_heavy, rotation_factor);		// hack decrease rotation (delta_rotvel)
-		vm_vec_cross(&delta_vel_from_delta_rotvel_heavy, &delta_rotvel_heavy , &ship_ship_hit_info->r_heavy);
-		heavy_denom = vm_vec_dot(&delta_vel_from_delta_rotvel_heavy, &ship_ship_hit_info->collision_normal);
-		if (heavy_denom < 0) {
-			// sanity check
-			heavy_denom = 0.0f;
-		}
-		heavy_denom += 1.0f / heavy->phys_info.mass;
-	} 
+		rotation_factor_heavy *= The_mission.ai_profile->rot_fac_multiplier_ply_collisions;
+	}
+	vm_vec_scale(&delta_rotvel_heavy, rotation_factor_heavy); // hack decrease rotation (delta_rotvel)
+	vm_vec_cross(&delta_vel_from_delta_rotvel_heavy, &delta_rotvel_heavy , &ship_ship_hit_info->r_heavy);
+	heavy_denom = vm_vec_dot(&delta_vel_from_delta_rotvel_heavy, &ship_ship_hit_info->collision_normal);
+	if (heavy_denom < 0) {
+		// sanity check
+		heavy_denom = 0.0f;
+	}
+	heavy_denom += 1.0f / heavy->phys_info.mass;
 
 	// calculate the effect on the velocity of the collison point per unit impulse
 	// first find the effect thru change in rotvel
 	// then find the change in the cm vel
-	// SUSHI: If on a landing surface, use the same shortcut the player gets
-	// This is a bit of a hack, but gets around some nasty unpredictable collision behavior
-	// when trying to do AI landings for certain ships
-	if (lighter == Player_obj || subsys_landing_allowed) {
-		vm_vec_zero( &delta_rotvel_light );
-		light_denom = 1.0f / lighter->phys_info.mass;
-	} else {
-		vm_vec_cross(&rotational_impulse_light, &ship_ship_hit_info->r_light, &impulse);
-		get_I_inv(&light_I_inv, &lighter->phys_info.I_body_inv, &lighter->orient);
-		vm_vec_rotate(&delta_rotvel_light, &rotational_impulse_light, &light_I_inv);
-		float rotation_factor = (lighter->type == OBJ_SHIP) ? light_sip->collision_physics.rotation_factor : COLLISION_ROTATION_FACTOR;
-		vm_vec_scale(&delta_rotvel_light, rotation_factor);		// hack decrease rotation (delta_rotvel)
-		vm_vec_cross(&delta_vel_from_delta_rotvel_light, &delta_rotvel_light, &ship_ship_hit_info->r_light);
-		light_denom = vm_vec_dot(&delta_vel_from_delta_rotvel_light, &ship_ship_hit_info->collision_normal);
-		if (light_denom < 0) {
-			// sanity check
-			light_denom = 0.0f;
-		}
-		light_denom += 1.0f / lighter->phys_info.mass;
-	} 
+	vm_vec_cross(&rotational_impulse_light, &ship_ship_hit_info->r_light, &impulse);
+	get_I_inv(&light_I_inv, &lighter->phys_info.I_body_inv, &lighter->orient);
+	vm_vec_rotate(&delta_rotvel_light, &rotational_impulse_light, &light_I_inv);
+	float rotation_factor_light = (lighter->type == OBJ_SHIP) ? light_sip->collision_physics.rotation_factor : COLLISION_ROTATION_FACTOR;
+	if (subsys_landing_allowed) {
+		// SUSHI: If on a landing surface, use the same shortcut the player gets
+		// This is a bit of a hack, but gets around some nasty unpredictable collision behavior
+		// when trying to do AI landings for certain ships
+		rotation_factor_light *= 0.0f;
+	} else if (lighter == Player_obj) {
+		rotation_factor_light *= The_mission.ai_profile->rot_fac_multiplier_ply_collisions;
+	}
+	vm_vec_scale(&delta_rotvel_light, rotation_factor_light); // hack decrease rotation (delta_rotvel)
+	vm_vec_cross(&delta_vel_from_delta_rotvel_light, &delta_rotvel_light, &ship_ship_hit_info->r_light);
+	light_denom = vm_vec_dot(&delta_vel_from_delta_rotvel_light, &ship_ship_hit_info->collision_normal);
+	if (light_denom < 0) {
+		// sanity check
+		light_denom = 0.0f;
+	}
+	light_denom += 1.0f / lighter->phys_info.mass;
 
 	// calculate the necessary impulse to achieved the desired relative velocity after the collision
 	// update damage info in mc
@@ -788,7 +787,7 @@ void calculate_ship_ship_collision_physics(collision_info_struct *ship_ship_hit_
 	// We will try not to worry about the left over time in the frame
 	// heavy's position unchanged by collision
 	// light's position is heavy's position plus relative position from heavy
-	if (should_collide && !lighter->flags[Object::Object_Flags::Immobile]){
+	if (should_collide && !lighter->flags[Object::Object_Flags::Dont_change_position, Object::Object_Flags::Immobile]){
 		vm_vec_add(&lighter->pos, &heavy->pos, &ship_ship_hit_info->light_collision_cm_pos);
 	}
 
@@ -800,7 +799,7 @@ void calculate_ship_ship_collision_physics(collision_info_struct *ship_ship_hit_
 
 	if (should_collide){
 
-		if (!heavy->flags[Object::Object_Flags::Immobile]) {
+		if (!heavy->flags[Object::Object_Flags::Dont_change_position, Object::Object_Flags::Immobile]) {
 			Assert(!vm_is_vec_nan(&direction_light));
 			vm_vec_scale_add2(&heavy->pos, &direction_light, 0.2f * lighter->phys_info.mass / (heavy->phys_info.mass + lighter->phys_info.mass));
 			vm_vec_scale_add2(&heavy->pos, &ship_ship_hit_info->collision_normal, -0.1f * lighter->phys_info.mass / (heavy->phys_info.mass + lighter->phys_info.mass));
@@ -820,7 +819,7 @@ void calculate_ship_ship_collision_physics(collision_info_struct *ship_ship_hit_
 	if (ship_ship_hit_info->is_landing) {
 		vm_vec_scale_add2(&lighter->pos, &ship_ship_hit_info->collision_normal, LANDING_POS_OFFSET);
 	}
-	else if (!lighter->flags[Object::Object_Flags::Immobile]) {
+	else if (!lighter->flags[Object::Object_Flags::Dont_change_position, Object::Object_Flags::Immobile]) {
 		vm_vec_scale_add2(&lighter->pos, &direction_light, -0.2f * heavy->phys_info.mass / (heavy->phys_info.mass + lighter->phys_info.mass));
 		vm_vec_scale_add2(&lighter->pos, &ship_ship_hit_info->collision_normal,  0.1f * heavy->phys_info.mass / (heavy->phys_info.mass + lighter->phys_info.mass));
 	}
@@ -1399,8 +1398,10 @@ int collide_ship_ship( obj_pair * pair )
 									if ((LightOne == &Objects[current_player.m_player->objnum]) || (HeavyOne == &Objects[current_player.m_player->objnum])) {
 										// finally if the host is also a player, ignore making these adjustments for him because he is in a pure simulation.
 										if (&Ships[Objects[current_player.m_player->objnum].instance] != Player_ship) {
+											Assertion(Interp_info.find(current_player.m_player->objnum) != Interp_info.end(), "Somehow the collision code thinks there is not a player ship interp record in multi when there really *should* be.  This is a coder mistake, please report!");
+
 											// temp set this as an uninterpolated ship, to make the collision look more natural until the next update comes in.
-											Objects[current_player.m_player->objnum].interp_info.force_interpolation_mode();
+											Interp_info[current_player.m_player->objnum].force_interpolation_mode();
 
 											// check to see if it has been long enough since the last collision, if not, negate the damage
 											if (!timestamp_elapsed(current_player.s_info.player_collision_timestamp)) {

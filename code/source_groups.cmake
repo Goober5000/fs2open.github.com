@@ -1152,6 +1152,8 @@ add_file_folder("PcxUtils"
 add_file_folder("Physics"
 	physics/physics.cpp
 	physics/physics.h
+	physics/physics_state.cpp
+	physics/physics_state.h
 )
 
 # PilotFile files
@@ -1252,6 +1254,7 @@ add_file_folder("Scripting"
 	scripting/ade_args.h
 	scripting/ade_doc.cpp
 	scripting/ade_doc.h
+	scripting/ade_external_serializer.h
 	scripting/doc_html.cpp
 	scripting/doc_html.h
 	scripting/doc_json.cpp

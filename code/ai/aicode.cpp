@@ -216,11 +216,13 @@ int	Mission_all_attack = 0;					//	!0 means all teams attack all teams.
 ai_flag_name Ai_flag_names[] = {
 	{AI::AI_Flags::No_dynamic,				"no-dynamic",			},
 	{AI::AI_Flags::Free_afterburner_use,	"free-afterburner-use",	},
+	{AI::AI_Flags::Waypoints_no_formation,		"waypoints-no-formation" },
 };
 
 ai_flag_description Ai_flag_descriptions[] = {
 	{AI::AI_Flags::No_dynamic,				"Will stop allowing the AI to pursue dynamic goals (eg: chasing ships it was not ordered to)."},
 	{AI::AI_Flags::Free_afterburner_use,	"Will allow AI to use afterburners when attacking a big ship, flying to a target position, guarding a ship, and flying in formation."},
+	{AI::AI_Flags::Waypoints_no_formation,		"Ship will not form up with its wingmates while running waypoints with them." },
 };
 
 extern const int Num_ai_flag_names = sizeof(Ai_flag_names) / sizeof(ai_flag_name);
@@ -1367,8 +1369,8 @@ void ai_turn_towards_vector(const vec3d* dest, object* objp, const vec3d* slide_
 			return;
 	}
 
-	//	Don't allow a ship to turn if it's immobile.
-	if ( objp->flags[Object::Object_Flags::Immobile] ) {
+	//	Don't allow a ship to turn if it's prevented from turning.
+	if ( objp->flags[Object::Object_Flags::Dont_change_orientation, Object::Object_Flags::Immobile] ) {
 		return;
 	}
 
@@ -6233,7 +6235,7 @@ int ai_fire_primary_weapon(object *objp)
 	weapon_info* wip = &Weapon_info[swp->primary_bank_weapons[swp->current_primary_bank]];
 	if (aip->target_objnum != -1 && (The_mission.ai_profile->flags[AI::Profile_Flags::Require_exact_los] || wip->wi_flags[Weapon::Info_Flags::Require_exact_los])) {
 		//Check if th AI has Line of Sight and is allowed to fire
-		if (!check_los(OBJ_INDEX(objp), aip->target_objnum, 10.0f, swp->current_primary_bank, -1, nullptr)) {
+		if (!check_los(OBJ_INDEX(objp), aip->target_objnum, The_mission.ai_profile->los_min_detection_radius, swp->current_primary_bank, -1, nullptr)) {
 			return 0;
 		}
 	}
@@ -6610,7 +6612,7 @@ bool check_ok_to_fire(int objnum, int target_objnum, const weapon_info *wip, int
 
 		if (The_mission.ai_profile->flags[AI::Profile_Flags::Require_exact_los] || wip->wi_flags[Weapon::Info_Flags::Require_exact_los]) {
 			//Check if th AI has Line of Sight and is allowed to fire
-			if (!check_los(objnum, target_objnum, 10.0f, -1, secondary_bank, firing_pos_global)) {
+			if (!check_los(objnum, target_objnum, The_mission.ai_profile->los_min_detection_radius, -1, secondary_bank, firing_pos_global)) {
 				return false;
 			}
 		}
@@ -6701,7 +6703,7 @@ bool check_los(int objnum, int target_objnum, float threshold, int primary_bank,
 	vec3d end = Objects[target_objnum].pos;
 
 	//Don't collision check against ourselves or our target
-	return test_line_of_sight(&start, &end, {&Objects[objnum], &Objects[target_objnum]}, threshold);
+	return test_line_of_sight(&start, &end, {objnum, target_objnum}, threshold);
 }
 
 //	--------------------------------------------------------------------------
@@ -10267,6 +10269,11 @@ void guard_object_was_hit(object *guard_objp, object *hitter_objp)
 		if (is_ignore_object(aip, OBJ_INDEX(hitter_objp)))
 			return;
 
+		//  If the hitter is protected, ignore it
+		if (The_mission.ai_profile->flags[AI::Profile_Flags::Guards_ignore_protected_attackers] && 
+			hitter_objp->flags[Object::Object_Flags::Protected])
+			return;
+
 		//	If hitter is on same team as me, don't attack him.
 		if (Ships[guard_objp->instance].team == Ships[hitter_objp->instance].team)
 			return;
@@ -10276,9 +10283,9 @@ void guard_object_was_hit(object *guard_objp, object *hitter_objp)
 			return;
 		}
 
-		// don't attack if you can't see him
+		// don't attack if you can't see it
 		if ( awacs_get_level(hitter_objp, &Ships[aip->shipnum], true) < 1.0f ) {
-			// if he's a stealth and visible, but not targetable, ok to attack.
+			// if it's stealthed and visible, but not targetable, ok to attack.
 			if ( is_object_stealth_ship(hitter_objp) ) {
 				if ( ai_is_stealth_visible(guard_objp, hitter_objp) != STEALTH_IN_FRUSTUM ) {
 					return;
@@ -10947,7 +10954,8 @@ void ai_guard()
 					set_accel_for_target_speed(Pl_objp, (dist_to_goal_point-10.0f)/2.0f);
 				} else if (Pl_objp->phys_info.speed < 1.0f) {
 					if (aip->ai_profile_flags[AI::Profile_Flags::Align_to_target_when_guarding_still]) {
-						turn_towards_point(Pl_objp, &guard_objp->pos, nullptr, 0.0f, &guard_objp->orient);
+						vec3d goal_vec = guard_objp->orient.vec.fvec + Pl_objp->pos;
+						turn_towards_point(Pl_objp, &goal_vec, nullptr, 0.0f, &guard_objp->orient);
 					} else {
 						turn_away_from_point(Pl_objp, &guard_objp->pos, 0.0f);
 					}
@@ -12648,6 +12656,11 @@ int ai_formation()
 	}
 	
 	if (aip->mode == AIM_WAYPOINTS) {
+		// skip if they have the flag
+		if (aip->ai_flags[AI::AI_Flags::Waypoints_no_formation] || 
+			(shipp->wingnum >= 0 && Wings[shipp->wingnum].flags[Ship::Wing_Flags::Waypoints_no_formation]))
+			return 1;
+
 		if (The_mission.ai_profile->flags[AI::Profile_Flags::Fix_ai_path_order_bug]){
 			// skip if wing leader has no waypoint order or a different waypoint list
 			// ...or if it's a different start index or direction
@@ -16690,7 +16703,7 @@ void maybe_cheat_fire_synaptic(object *objp)
 	}
 }
 
-bool test_line_of_sight(vec3d* from, vec3d* to, std::unordered_set<const object*>&& excluded_objects, float threshold, bool test_for_shields, bool test_for_hull, float* first_intersect_dist, object** first_intersect_obj) {
+bool test_line_of_sight(vec3d* from, vec3d* to, std::unordered_set<int>&& excluded_object_ids, float threshold, bool test_for_shields, bool test_for_hull, float* first_intersect_dist, object** first_intersect_obj) {
 	bool collides = false;
 
 	for (object* objp = GET_FIRST(&obj_used_list); objp != END_OF_LIST(&obj_used_list); objp = GET_NEXT(objp)) {
@@ -16698,7 +16711,7 @@ bool test_line_of_sight(vec3d* from, vec3d* to, std::unordered_set<const object*
 			continue;
 
 		//Don't collision check against excluded objects
-		if (excluded_objects.count(objp) > 0)
+		if (excluded_object_ids.count(OBJ_INDEX(objp)) > 0)
 			continue;
 
 		int model_num = 0;
@@ -16711,7 +16724,7 @@ bool test_line_of_sight(vec3d* from, vec3d* to, std::unordered_set<const object*
 			model_instance_num = -1;
 		}
 		else if (type == OBJ_ASTEROID) {
-			model_num = Asteroid_info[Asteroids[objp->instance].asteroid_type].model_num[Asteroids[objp->instance].asteroid_subtype];
+			model_num = Asteroid_info[Asteroids[objp->instance].asteroid_type].subtypes[Asteroids[objp->instance].asteroid_subtype].model_number;
 			model_instance_num = Asteroids[objp->instance].model_instance_num;
 		}
 		else if (type == OBJ_SHIP) {

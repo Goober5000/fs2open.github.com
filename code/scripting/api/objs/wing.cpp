@@ -32,7 +32,7 @@ ADE_INDEXER(l_Wing, "number Index", "Array of ships in the wing", "ship", "Ship 
 	sdx--;
 
 	if(ADE_SETTING_VAR && ndx != NULL && ndx->isValid()) {
-		Wings[wdx].ship_index[sdx] = ndx->objp->instance;
+		Wings[wdx].ship_index[sdx] = ndx->objp()->instance;
 	}
 
 	return ade_set_args(L, "o", l_Ship.Set(object_h(&Objects[Ships[Wings[wdx].ship_index[sdx]].objnum])));
@@ -349,6 +349,16 @@ ADE_VIRTVAR(DepartureDelay, l_Wing, "number", "The wing's departure delay", "num
 ADE_VIRTVAR(ArrivalDistance, l_Wing, "number", "The wing's arrival distance", "number", "Arrival distance, or nil if handle is invalid")
 {
 	return wing_getset_helper(L, &wing::arrival_distance, true);
+}
+
+ADE_VIRTVAR(WaveDelayMinimum, l_Wing, "number", "The wing's minimum wave delay", "number", "Min wave delay, or nil if handle is invalid")
+{
+	return wing_getset_helper(L, &wing::wave_delay_min, true);
+}
+
+ADE_VIRTVAR(WaveDelayMaximum, l_Wing, "number", "The wing's maximum wave delay", "number", "Max wave delay, or nil if handle is invalid")
+{
+	return wing_getset_helper(L, &wing::wave_delay_max, true);
 }
 
 

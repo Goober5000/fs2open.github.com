@@ -314,6 +314,8 @@ flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[] = {
     { "afterburners-locked",			Mission::Parse_Object_Flags::SF_Afterburner_locked,		true, false },
     { "force-shields-on",				Mission::Parse_Object_Flags::OF_Force_shields_on,		true, false },
     { "immobile",						Mission::Parse_Object_Flags::OF_Immobile,				true, false },
+    { "don't-change-position",			Mission::Parse_Object_Flags::OF_Dont_change_position,	true, false },
+    { "don't-change-orientation",		Mission::Parse_Object_Flags::OF_Dont_change_orientation,	true, false },
     { "no-ets",							Mission::Parse_Object_Flags::SF_No_ets,					true, false },
     { "cloaked",						Mission::Parse_Object_Flags::SF_Cloaked,				true, false },
     { "ship-locked",					Mission::Parse_Object_Flags::SF_Ship_locked,			true, false },
@@ -377,7 +379,9 @@ parse_object_flag_description<Mission::Parse_Object_Flags> Parse_object_flag_des
     { Mission::Parse_Object_Flags::SF_Lock_all_turrets_initially,	"Lock all turrets on this ship at mission start or on arrival."},
     { Mission::Parse_Object_Flags::SF_Afterburner_locked,			"Will stop a ship from firing their afterburner."},
     { Mission::Parse_Object_Flags::OF_Force_shields_on,				"Shields will be activated regardless of other flags."},
-    { Mission::Parse_Object_Flags::OF_Immobile,						"Will not let a ship move or rotate in any fashion. Upon destruction the ship will still do the death roll and explosion."},
+    { Mission::Parse_Object_Flags::OF_Immobile,						"Will not let a ship change position or orientation. Upon destruction the ship will still do the death roll and explosion."},
+    { Mission::Parse_Object_Flags::OF_Dont_change_position,			"Will not let a ship change position. Upon destruction the ship will still do the death roll and explosion."},
+    { Mission::Parse_Object_Flags::OF_Dont_change_orientation,		"Will not let a ship change orientation. Upon destruction the ship will still do the death roll and explosion."},
     { Mission::Parse_Object_Flags::SF_No_ets,						"Will not allow a ship to alter its ETS system."},
     { Mission::Parse_Object_Flags::SF_Cloaked,						"This ship will not be rendered."},
     { Mission::Parse_Object_Flags::SF_Ship_locked,					"Prevents the player from changing the ship class on loadout screen."},
@@ -432,10 +436,9 @@ fix Mission_end_time;
 // WARNING : do NOT call this function on the server - it will overwrite goals, etc
 #define MISSION_CHECKSUM_SIZE (NAME_LENGTH + NAME_LENGTH + 4 + DATE_TIME_LENGTH + DATE_TIME_LENGTH)
 
-// timers used to limit arrival messages and music
+// a timer used to limit arrival music
 #define ARRIVAL_MUSIC_MIN_SEPARATION	60000
-#define ARRIVAL_MESSAGE_MIN_SEPARATION 30000
-
+// a random delay before announcing enemy arrivals
 #define ARRIVAL_MESSAGE_DELAY_MIN		2000
 #define ARRIVAL_MESSAGE_DELAY_MAX		3000
 
@@ -443,6 +446,8 @@ static int Allow_arrival_music_timestamp;
 static int Allow_arrival_message_timestamp;
 static int Arrival_message_delay_timestamp;
 static int Arrival_message_subject;
+
+static int Allow_backup_message_timestamp;
 
 // multi TvT
 static int Allow_arrival_music_timestamp_m[2];
@@ -489,7 +494,8 @@ const std::shared_ptr<scripting::Hook<scripting::hooks::ShipDepartConditions>> O
  const std::shared_ptr<scripting::Hook<>> OnLoadoutAboutToParseHook = scripting::Hook<>::Factory("On Loadout About To Parse",
 	"Called during mission load just before parsing the team loadout.",{});
 
-mission_custom_string* get_custom_string_by_name(SCP_string name) {
+custom_string* get_custom_string_by_name(SCP_string name)
+ {
 	for (size_t i = 0; i < The_mission.custom_strings.size(); i++) {
 		if (The_mission.custom_strings[i].name == name) {
 			return &The_mission.custom_strings[i];
@@ -2094,6 +2100,7 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 	}
 
 	shipp->cargo1 = p_objp->cargo1;
+	strcpy_s(shipp->cargo_title, p_objp->cargo_title);
 
 	shipp->arrival_location = p_objp->arrival_location;
 	shipp->arrival_distance = p_objp->arrival_distance;
@@ -2425,6 +2432,7 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 		}
 
 		ptr->subsys_cargo_name = sssp->subsys_cargo_name;
+		strcpy_s(ptr->subsys_cargo_title, sssp->subsys_cargo_title);
 
 		if (sssp->ai_class != SUBSYS_STATUS_NO_CHANGE)
 			ptr->weapons.ai_class = sssp->ai_class;
@@ -2718,6 +2726,12 @@ void resolve_parse_flags(object *objp, flagset<Mission::Parse_Object_Flags> &par
     if (parse_flags[Mission::Parse_Object_Flags::SF_No_departure_warp])
         shipp->flags.set(Ship::Ship_Flags::No_departure_warp);
 
+    if (parse_flags[Mission::Parse_Object_Flags::SF_Ship_locked])
+        shipp->flags.set(Ship::Ship_Flags::Ship_locked);
+
+    if (parse_flags[Mission::Parse_Object_Flags::SF_Weapons_locked])
+        shipp->flags.set(Ship::Ship_Flags::Weapons_locked);
+
     if (parse_flags[Mission::Parse_Object_Flags::SF_Locked]) {
         shipp->flags.set(Ship::Ship_Flags::Ship_locked);
         shipp->flags.set(Ship::Ship_Flags::Weapons_locked);
@@ -2812,20 +2826,30 @@ void resolve_parse_flags(object *objp, flagset<Mission::Parse_Object_Flags> &par
     if (parse_flags[Mission::Parse_Object_Flags::OF_Force_shields_on])
         shipp->flags.set(Ship::Ship_Flags::Force_shields_on);
 
+    if (parse_flags[Mission::Parse_Object_Flags::OF_Dont_change_position])
+        objp->flags.set(Object::Object_Flags::Dont_change_position);
+
+    if (parse_flags[Mission::Parse_Object_Flags::OF_Dont_change_orientation])
+        objp->flags.set(Object::Object_Flags::Dont_change_orientation);
+
     if (parse_flags[Mission::Parse_Object_Flags::OF_Immobile])
-        objp->flags.set(Object::Object_Flags::Immobile);
+    {
+        // handle "soft deprecation" of Immobile by setting the two half-flags, but only in FRED
+        // (FRED has dialog support for the two half-flags but not the legacy Immobile flag)
+        if (Fred_running)
+        {
+            objp->flags.set(Object::Object_Flags::Dont_change_position);
+            objp->flags.set(Object::Object_Flags::Dont_change_orientation);
+        }
+        else
+            objp->flags.set(Object::Object_Flags::Immobile);
+    }
 
     if (parse_flags[Mission::Parse_Object_Flags::SF_No_ets])
         shipp->flags.set(Ship::Ship_Flags::No_ets);
 
     if (parse_flags[Mission::Parse_Object_Flags::SF_Cloaked])
         shipp->flags.set(Ship::Ship_Flags::Cloaked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Ship_locked])
-        shipp->flags.set(Ship::Ship_Flags::Ship_locked);
-
-    if (parse_flags[Mission::Parse_Object_Flags::SF_Weapons_locked])
-        shipp->flags.set(Ship::Ship_Flags::Weapons_locked);
 
     if (parse_flags[Mission::Parse_Object_Flags::SF_Scramble_messages])
         shipp->flags.set(Ship::Ship_Flags::Scramble_messages);
@@ -3150,6 +3174,11 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 	if (optional_string("$Cargo 2:"))
 	{
 		stuff_string(name, F_NAME, NAME_LENGTH);
+	}
+
+	if (optional_string("$Cargo Title:"))
+	{
+		stuff_string(p_objp->cargo_title, F_NAME, NAME_LENGTH);
 	}
 
 	parse_common_object_data(p_objp);  // get initial conditions and subsys status
@@ -3765,6 +3794,11 @@ void parse_common_object_data(p_object *p_objp)
 				}
 			}
 			Subsys_status[i].subsys_cargo_name = index;
+		}
+
+		Subsys_status[i].subsys_cargo_title[0] = '\0';
+		if (optional_string("+Cargo Title:")) {
+			stuff_string(Subsys_status[i].subsys_cargo_title, F_NAME, NAME_LENGTH);
 		}
 
 		if (optional_string("+AI Class:"))
@@ -5254,13 +5288,12 @@ void parse_event(mission *pm)
 		
 		stuff_string_list(buffer); 
 		for (int i = 0; i < (int)buffer.size(); i++) {
-			int add_flag = 1; 
 
 			for (int j = 0; j < MAX_MISSION_EVENT_LOG_FLAGS; j++) {
 				if (!stricmp(buffer[i].c_str(), Mission_event_log_flags[j])) {
-					// bitshift add_flag so that it equals the index of the flag in Mission_event_log_flags[]
-					add_flag = add_flag << j; 
-					event->mission_log_flags |= add_flag;
+					// add the flag to the variable, bitshifted by the index used in Mission_event_log_flags[]
+					event->mission_log_flags |= 1 << j; 
+					break;
 				}
 			}
 		}
@@ -5814,14 +5847,13 @@ void parse_bitmaps(mission *pm)
 
 void parse_asteroid_fields(mission *pm)
 {
-	int i, count;
+	int i;
 
 	Assert(pm != NULL);
 
 	Asteroid_field.num_initial_asteroids = 0;
 
 	i = 0;
-	count = 0;
 
 	if (!optional_string("#Asteroid Fields"))
 		return;
@@ -5848,68 +5880,82 @@ void parse_asteroid_fields(mission *pm)
 			Asteroid_field.debris_genre = (debris_genre_t)type;
 		}
 
-		Asteroid_field.field_debris_type[0] = -1;
-		Asteroid_field.field_debris_type[1] = -1;
-		Asteroid_field.field_debris_type[2] = -1;
+		Asteroid_field.field_debris_type.clear();
+		Asteroid_field.field_asteroid_type.clear();
 
 		// Debris types
 		if (Asteroid_field.debris_genre == DG_DEBRIS) {
 
 			// Obsolete and only for backwards compatibility
-			for (int j = 0; j < MAX_ACTIVE_DEBRIS_TYPES; j++) {
+			for (int j = 0; j < MAX_RETAIL_DEBRIS_TYPES; j++) {
 				if (optional_string("+Field Debris Type:")) {
-					stuff_int(&Asteroid_field.field_debris_type[j]);
-					count++;
+					int subtype;
+					stuff_int(&subtype);
+					Asteroid_field.field_debris_type.push_back(subtype);
 				}
 			}
 
 			// Get asteroids by name
-			for (int j = 0; j < MAX_ACTIVE_DEBRIS_TYPES; j++) {
-				if (optional_string("+Field Debris Type Name:")) {
-					SCP_string ast_name;
-					stuff_string(ast_name, F_NAME);
-					int subtype;
-					subtype = get_asteroid_index(ast_name.c_str());
-					if (subtype >= 0) {
-						Asteroid_field.field_debris_type[j] = subtype;
-						count++;
-					} else {
-						WarningEx(LOCATION, "Mission %s\n Invalid asteroid debris %s!", pm->name, ast_name.c_str());
-					}
+			while (optional_string("+Field Debris Type Name:")) {
+				SCP_string ast_name;
+				stuff_string(ast_name, F_NAME);
+				int subtype;
+				subtype = get_asteroid_index(ast_name.c_str());
+				if (subtype >= 0) {
+					Asteroid_field.field_debris_type.push_back(subtype);
+				} else {
+					WarningEx(LOCATION, "Mission %s\n Invalid asteroid debris %s!", pm->name, ast_name.c_str());
 				}
 			}
 
 		// Asteroid types
 		} else {
 
+			// Retail asteroid subtypes
+			SCP_string colors[NUM_ASTEROID_SIZES] = {"Brown", "Blue", "Orange"};
+
 			// Obsolete and only for backwards compatibility
-			for (int j = 0; j < MAX_ACTIVE_DEBRIS_TYPES; j++) {
+			for (int j = 0; j < NUM_ASTEROID_SIZES; j++) {
 				if (optional_string("+Field Debris Type:")) {
 					int subtype;
 					stuff_int(&subtype);
-					Asteroid_field.field_debris_type[subtype] = 1;
-					count++;
+					Asteroid_field.field_asteroid_type.push_back(colors[subtype]);
 				}
 			}
 
 			// Get asteroids by name
-			for (int j = 0; j < MAX_ACTIVE_DEBRIS_TYPES; j++) {
-				if (optional_string("+Field Debris Type Name:")) {
-					SCP_string ast_name;
-					stuff_string(ast_name, F_NAME);
-					int subtype = get_asteroid_index(ast_name.c_str());
-					// If the returned index is valid but not one of the first three then it's a debris type instead of asteroid
-					if ((subtype >= 0) && (subtype < NUM_ASTEROID_SIZES)) {
-						Asteroid_field.field_debris_type[subtype] = 1;
-						count++;
-					} else {
-						WarningEx(LOCATION, "Mission %s\n Invalid asteroid %s!", pm->name, ast_name.c_str());
+			while (optional_string("+Field Debris Type Name:")) {
+				SCP_string ast_name;
+				stuff_string(ast_name, F_NAME);
+
+				// Old saving for asteroids was bugged and saved the asteroid size rather than the subtype color
+				// so we'll compensate for that here
+				for (size_t k = 0; k < NUM_ASTEROID_SIZES; k++) {
+					// if we get the name for small/medium/large asteroid then convert it to retail colors
+					if (stricmp(ast_name.c_str(), Asteroid_info[k].name) == 0) {
+						ast_name = colors[k];
+						break;
 					}
+				}
+
+				auto list = get_list_valid_asteroid_subtypes();
+
+				//validate the asteroid subtype name
+				bool valid = false;
+				for (const auto& entry : list) {
+					if (ast_name == entry) {
+						valid = true;
+						break;
+					}
+				}
+
+				if (valid){
+					Asteroid_field.field_asteroid_type.push_back(ast_name);
+				} else {
+					WarningEx(LOCATION, "Mission %s\n Invalid asteroid %s!", pm->name, ast_name.c_str());
 				}
 			}
 		}
-
-		Asteroid_field.num_used_field_debris_types = count;
 
 		bool invalid_asteroids = false;
 		for (int& ast_type : Asteroid_field.field_debris_type) {
@@ -5923,9 +5969,11 @@ void parse_asteroid_fields(mission *pm)
 			Warning(LOCATION, "The Asteroid field contains invalid entries!");
 
 		// backward compatibility
-		if ( (Asteroid_field.debris_genre == DG_ASTEROID) && (Asteroid_field.num_used_field_debris_types == 0) ) {
-			Asteroid_field.field_debris_type[0] = 0;
-			Asteroid_field.num_used_field_debris_types = 1;
+		// Is this a good idea? This doesn't seem like a good idea. What is this compatibility actually for??
+		// If you've defined an asteroid field but didn't define any 'roids, then tough luck. Fix your mission.
+		// If this is for a retail mission then this needs to be hardcoded for that specific mission file probably. - Mjn
+		if ((Asteroid_field.debris_genre == DG_ASTEROID) && (Asteroid_field.field_asteroid_type.empty())) {
+			Asteroid_field.field_asteroid_type.push_back("Brown");
 		}
 
 		required_string("$Average Speed:");
@@ -6153,7 +6201,7 @@ void parse_custom_data(mission* pm)
 
 	if (optional_string("$begin_custom_strings")) {
 		while (optional_string("$Name:")) {
-			mission_custom_string cs;
+			custom_string cs;
 
 			// The name of the string
 			stuff_string(cs.name, F_NAME);
@@ -6558,6 +6606,7 @@ bool post_process_mission(mission *pm)
 
 	Allow_arrival_music_timestamp=timestamp(0);
 	Allow_arrival_message_timestamp=timestamp(0);
+	Allow_backup_message_timestamp=timestamp(0);
 	Arrival_message_delay_timestamp = timestamp(-1);
 	Arrival_message_subject = -1;
 
@@ -6744,6 +6793,7 @@ void mission_init(mission *pm)
 	mission_parse_reset_callsign();
 	ai_lua_reset_general_orders();
 
+	Parse_names.clear();
 	Num_path_restrictions = 0;
 	Num_ai_dock_names = 0;
 	ai_clear_goal_target_names();
@@ -7937,7 +7987,7 @@ bool mission_maybe_make_wing_arrive(int wingnum, bool force_arrival)
 				{
 					Arrival_message_delay_timestamp_m[multi_team_filter] = timestamp_rand(ARRIVAL_MESSAGE_DELAY_MIN, ARRIVAL_MESSAGE_DELAY_MAX);
 				}
-				Allow_arrival_message_timestamp_m[multi_team_filter] = timestamp(ARRIVAL_MESSAGE_MIN_SEPARATION);
+				Allow_arrival_message_timestamp_m[multi_team_filter] = timestamp(Builtin_messages[MESSAGE_ARRIVE_ENEMY].min_delay);
 						
 				// send to the proper team
 				message_send_builtin(MESSAGE_ARRIVE_ENEMY, nullptr, nullptr, -1, multi_team_filter);
@@ -7956,14 +8006,17 @@ bool mission_maybe_make_wing_arrive(int wingnum, bool force_arrival)
 					Arrival_message_delay_timestamp = timestamp_rand(ARRIVAL_MESSAGE_DELAY_MIN, ARRIVAL_MESSAGE_DELAY_MAX);
 					Arrival_message_subject = wingp->ship_index[0];
 				}
-				Allow_arrival_message_timestamp = timestamp(ARRIVAL_MESSAGE_MIN_SEPARATION);
+				Allow_arrival_message_timestamp = timestamp(Builtin_messages[MESSAGE_ARRIVE_ENEMY].min_delay);
 			}
 		}
 		// everything else
-		else {
+		else if (timestamp_elapsed(Allow_backup_message_timestamp)) {
 			rship = ship_get_random_ship_in_wing(wingnum, SHIP_GET_UNSILENCED);
 			if (rship >= 0) {
-				message_send_builtin(MESSAGE_BACKUP, &Ships[rship], nullptr, -1, -1);
+				auto sent = message_send_builtin(MESSAGE_BACKUP, &Ships[rship], nullptr, -1, -1);
+				if (sent) {
+					Allow_backup_message_timestamp = timestamp(Builtin_messages[MESSAGE_BACKUP].min_delay);
+				}
 			}
 		}
 
@@ -8409,6 +8462,8 @@ int get_special_anchor(const char *name)
 
 	strcpy_s(tmp, name+5);
 	iff_name = strtok(tmp, " >");
+	if (iff_name == nullptr)
+		return -1;
 
 	// hack substitute "hostile" for "enemy"
 	if (!stricmp(iff_name, "enemy"))
@@ -8962,11 +9017,11 @@ bool check_for_23_3_data()
 			return true;
 	}
 
-	if (The_mission.custom_data.size() > 0) {
+	if (!The_mission.custom_data.empty()) {
 		return true;
 	}
 
-	if (The_mission.custom_strings.size() > 0) {
+	if (!The_mission.custom_strings.empty()) {
 		return true;
 	}
 
@@ -9010,7 +9065,19 @@ bool check_for_24_1_data()
 		if (shipp->arrival_location == ArrivalLocation::IN_BACK_OF_SHIP || shipp->arrival_location == ArrivalLocation::ABOVE_SHIP || shipp->arrival_location == ArrivalLocation::BELOW_SHIP
 			|| shipp->arrival_location == ArrivalLocation::TO_LEFT_OF_SHIP || shipp->arrival_location == ArrivalLocation::TO_RIGHT_OF_SHIP)
 			return true;
+
+		if (shipp->cargo_title[0] != '\0')
+			return true;
+		for (const auto& ss : list_range(&shipp->subsys_list))
+		{
+			if (ss->subsys_cargo_title[0] != '\0')
+				return true;
+		}
 	}
+
+	if ((Asteroid_field.debris_genre == DG_DEBRIS && !Asteroid_field.field_debris_type.empty()) ||
+		(Asteroid_field.debris_genre == DG_ASTEROID && !Asteroid_field.field_asteroid_type.empty()))
+		return true;
 
 	return false;
 }

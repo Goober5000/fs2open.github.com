@@ -32,6 +32,8 @@ namespace AI {
 		Unload_primaries,			//	Fire primaries as fast as possible!
 		Trying_unsuccessfully_to_warp,	// Trying to warp, but can't warp at the moment
 		Free_afterburner_use,		// Use afterburners while following waypoints or flying towards objects
+		Waypoints_no_formation,		// wont get into formation when running waypoints as part of a wing
+
 
 		NUM_VALUES
 	};
@@ -161,6 +163,8 @@ namespace AI {
 		Hudsquadmsg_tactical_disarm_disable,
 		Align_to_target_when_guarding_still,
 		Debris_respects_big_damage,
+		Dont_limit_change_in_speed_due_to_physics_whack,
+		Guards_ignore_protected_attackers,
 
 		NUM_VALUES
 	};

@@ -354,7 +354,7 @@ ADE_VIRTVAR(SwarmInfo, l_Weaponclass, nullptr, nullptr, "boolean, number, number
 	if (Weapon_info[idx].wi_flags[Weapon::Info_Flags::Swarm])
 		flag = true;
 
-	return ade_set_args(L, "bif", flag, Weapon_info[idx].swarm_count, Weapon_info[idx].SwarmWait);
+	return ade_set_args(L, "bii", flag, Weapon_info[idx].swarm_count, Weapon_info[idx].SwarmWait);
 }
 
 ADE_VIRTVAR(CorkscrewInfo, l_Weaponclass, nullptr, nullptr, "boolean, number, number, number, boolean, number", 
@@ -524,6 +524,26 @@ ADE_VIRTVAR(EnergyConsumed, l_Weaponclass, nullptr, nullptr, "number", "Energy C
 	return ade_set_args(L, "f", Weapon_info[idx].energy_consumed);
 }
 
+ADE_VIRTVAR(ShockwaveDamage, l_Weaponclass, "number", "Damage the shockwave is set to if damage is overriden", "number", "Shockwave Damage, or 0 if weapon shockwave damage is not overriden. Returns nil if handle is invalid")
+{
+	int idx;
+	if(!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
+		return ade_set_error(L, "f", 0.0f);
+
+	if(idx < 0 || idx >= weapon_info_size())
+		return ADE_RETURN_NIL;
+
+	if(ADE_SETTING_VAR) {
+		LuaError(L, "Setting Shockwave Damage is not supported");
+	}
+
+	if (Weapon_info[idx].shockwave.damage_overidden) {
+		return ade_set_args(L, "f", Weapon_info[idx].shockwave.damage);
+	} else {
+		return ade_set_args(L, "f", 0.0f);
+	}
+}
+
 
 ADE_VIRTVAR(InnerRadius, l_Weaponclass, "number", "Radius at which the full explosion damage is done. Marks the line where damage attenuation begins. Same as $Inner Radius in weapons.tbl", "number", "Inner Radius, or 0 if handle is invalid")
 {
@@ -618,6 +638,66 @@ ADE_FUNC(hasCustomData, l_Weaponclass, nullptr, "Detects whether the weapon clas
 	weapon_info *wip = &Weapon_info[idx];
 
 	bool result = !wip->custom_data.empty();
+	return ade_set_args(L, "b", result);
+}
+
+ADE_VIRTVAR(CustomStrings,
+	l_Weaponclass,
+	nullptr,
+	"Gets the indexed custom string table for this weapon. Each item in the table is a table with the following values: "
+	"Name - the name of the custom string, Value - the value associated with the custom string, String - the custom "
+	"string itself.",
+	"table",
+	"The weapon's custom data table")
+{
+	int idx;
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
+		return ADE_RETURN_NIL;
+
+	if (idx < 0 || idx >= weapon_info_size())
+		return ADE_RETURN_NIL;
+
+	weapon_info* wip = &Weapon_info[idx];
+
+	if (ADE_SETTING_VAR) {
+		LuaError(L, "Setting Custom Data is not supported");
+	}
+
+	auto table = luacpp::LuaTable::create(L);
+
+	int cnt = 0;
+
+	for (const auto& cs : wip->custom_strings) {
+		cnt++;
+		auto item = luacpp::LuaTable::create(L);
+
+		item.addValue("Name", luacpp::LuaValue::createValue(Script_system.GetLuaSession(), cs.name));
+		item.addValue("Value", luacpp::LuaValue::createValue(Script_system.GetLuaSession(), cs.value));
+		item.addValue("String", luacpp::LuaValue::createValue(Script_system.GetLuaSession(), cs.text));
+
+		table.addValue(cnt, item);
+	}
+
+	return ade_set_args(L, "t", &table);
+}
+
+ADE_FUNC(hasCustomStrings,
+	l_Weaponclass,
+	nullptr,
+	"Detects whether the weapon has any custom strings",
+	"boolean",
+	"true if the weapon's custom_strings is not empty, false otherwise")
+{
+	int idx;
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
+		return ADE_RETURN_NIL;
+
+	if (idx < 0 || idx >= weapon_info_size())
+		return ADE_RETURN_NIL;
+
+	weapon_info* wip = &Weapon_info[idx];
+
+	bool result = !wip->custom_strings.empty();
 	return ade_set_args(L, "b", result);
 }
 

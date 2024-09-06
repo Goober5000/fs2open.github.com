@@ -78,6 +78,7 @@ bool Use_tabled_strings_for_default_language;
 bool No_built_in_languages;
 bool Dont_preempt_training_voice;
 SCP_string Movie_subtitle_font;
+std::array<int, 4> Movie_subtitle_rgba;
 bool Enable_scripts_in_fred; // By default FRED does not initialize the scripting system
 SCP_string Window_icon_path;
 bool Disable_built_in_translations;
@@ -150,6 +151,7 @@ bool Randomize_particle_rotation;
 bool Calculate_subsystem_hitpoints_after_parsing;
 bool Disable_internal_loadout_restoration_system;
 bool Contrails_use_absolute_speed;
+bool Use_new_scanning_behavior;
 bool Lua_API_returns_nil_instead_of_invalid_object;
 bool Dont_show_callsigns_in_escort_list;
 bool Fix_scripted_velocity;
@@ -411,11 +413,11 @@ void parse_mod_table(const char *filename)
 				Cutscene_camera_displays_hud = !temp;
 			}
 
-			if (optional_string("$Full color head animations:")) {
+			if (optional_string("$Full color head animations:") || optional_string("$Full colour head animations:")) {
 				stuff_boolean(&Full_color_head_anis);
 			}
 			// compatibility
-			if (optional_string("$Color head animations with hud colors:")) {
+			if (optional_string("$Color head animations with hud colors:") || optional_string("$Colour head animations with hud colours:")) {
 				mprintf(("Game Settings Table: \"$Color head animations with hud colors\" is deprecated in favor of \"$Full color head animations\"\n"));
 				bool temp;
 				stuff_boolean(&temp);
@@ -445,6 +447,10 @@ void parse_mod_table(const char *filename)
 
 			if (optional_string("$HUD drop shadows enabled by default:")) {
 				stuff_boolean(&HUD_shadows);
+			}
+
+			if (optional_string("$Unify scanning behavior:")) {
+				stuff_boolean(&Use_new_scanning_behavior);
 			}
 
 			if (optional_string("$Don't show callsigns in the escort list:")) {
@@ -594,7 +600,7 @@ void parse_mod_table(const char *filename)
 				}
 			}
 
-			if (optional_string("$EMP Pain Flash Color:")) {
+			if (optional_string("$EMP Pain Flash Color:") || optional_string("$EMP Pain Flash Colour:")) {
 				int rgb[3];
 				stuff_int_list(rgb, 3);
 				if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -612,8 +618,8 @@ void parse_mod_table(const char *filename)
 				mprintf(("Game Settings Table: $BMPMAN Slot Limit is deprecated and should be removed. It is not needed anymore.\n"));
 			}
 
-			if (optional_string("$EMP Arc Color:")) {
-				if (optional_string("+Primary Color Option 1:")) {
+			if (optional_string("$EMP Arc Color:") || optional_string("$EMP Arc Colour:")) {
+				if (optional_string("+Primary Color Option 1:") || optional_string("+Primary Colour Option 1:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -623,7 +629,7 @@ void parse_mod_table(const char *filename)
 							"One or more of these values is not within the range of 0-255. Assuming default color.", rgb[0], rgb[1], rgb[2]);
 					}
 				}
-				if (optional_string("+Primary Color Option 2:")) {
+				if (optional_string("+Primary Color Option 2:") || optional_string("+Primary Colour Option 2:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -633,7 +639,7 @@ void parse_mod_table(const char *filename)
 							"One or more of these values is not within the range of 0-255. Assuming default color.", rgb[0], rgb[1], rgb[2]);
 					}
 				}
-				if (optional_string("+Secondary Color Option 1:")) {
+				if (optional_string("+Secondary Color Option 1:") || optional_string("+Secondary Colour Option 1:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -660,8 +666,8 @@ void parse_mod_table(const char *filename)
 				}
 			}
 
-			if (optional_string("$Damage Arc Color:")) {
-				if (optional_string("+Primary Color Option 1:")) {
+			if (optional_string("$Damage Arc Color:") || optional_string("$Damage Arc Colour:")) {
+				if (optional_string("+Primary Color Option 1:") || optional_string("+Primary Colour Option 1:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -671,7 +677,7 @@ void parse_mod_table(const char *filename)
 							"One or more of these values is not within the range of 0-255. Assuming default color.", rgb[0], rgb[1], rgb[2]);
 					}
 				}
-				if (optional_string("+Primary Color Option 2:")) {
+				if (optional_string("+Primary Color Option 2:") || optional_string("+Primary Colour Option 2:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -681,7 +687,7 @@ void parse_mod_table(const char *filename)
 							"One or more of these values is not within the range of 0-255. Assuming default color.", rgb[0], rgb[1], rgb[2]);
 					}
 				}
-				if (optional_string("+Secondary Color Option 1:")) {
+				if (optional_string("+Secondary Color Option 1:") || optional_string("+Secondary Colour Option 1:")) {
 					int rgb[3];
 					stuff_int_list(rgb, 3);
 					if ((rgb[0] >= 0 && rgb[0] <= 255) && (rgb[1] >= 0 && rgb[1] <= 255) && (rgb[2] >= 0 && rgb[2] <= 255)) {
@@ -1194,6 +1200,22 @@ void parse_mod_table(const char *filename)
 				// Fonts have not been parsed at this point so we can't validate the font name here
 				stuff_string(Movie_subtitle_font, F_NAME);
 			}
+			
+			if (optional_string("$Movie subtitle color:") || optional_string("$Movie subtitle colour:")) {
+				int rgba[4];
+				auto n = stuff_int_list(rgba, 4);
+				if (n < 3) {
+					Warning(LOCATION, "Movie subtitle color requires 3 or 4 values from 0 to 255");
+				} else {
+					if (n < 4) {
+						rgba[3] = 255;
+					}
+					for (int i = 0; i < 4; i++) {
+						CLAMP(rgba[i], 0, 255);
+						Movie_subtitle_rgba[i] = rgba[i];
+					}
+				}
+			}
 
 			if (optional_string("$Disable built-in translations:")) {
 				stuff_boolean(&Disable_built_in_translations);
@@ -1510,6 +1532,7 @@ void mod_table_reset()
 	No_built_in_languages = false;
 	Dont_preempt_training_voice = false;
 	Movie_subtitle_font = "";
+	Movie_subtitle_rgba = std::array<int, 4>{-1, -1, -1, -1};
 	Enable_scripts_in_fred = false;
 	Window_icon_path = "app_icon_sse";
 	Disable_built_in_translations = false;
@@ -1591,6 +1614,7 @@ void mod_table_reset()
 	Calculate_subsystem_hitpoints_after_parsing = false;
 	Disable_internal_loadout_restoration_system = false;
 	Contrails_use_absolute_speed = false;
+	Use_new_scanning_behavior = false;
 	Lua_API_returns_nil_instead_of_invalid_object = false;
 	Dont_show_callsigns_in_escort_list = false;
 	Fix_scripted_velocity = false;

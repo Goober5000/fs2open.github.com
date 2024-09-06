@@ -22,6 +22,8 @@ enum lua_enum : int32_t {
 	LE_MOUSE_MIDDLE_BUTTON,
 	LE_MOUSE_X1_BUTTON,
 	LE_MOUSE_X2_BUTTON,
+	LE_FLIGHTMODE_FLIGHTCURSOR,
+	LE_FLIGHTMODE_SHIPLOCKED,
 	LE_ORDER_ATTACK,
 	LE_ORDER_ATTACK_ANY,
 	LE_ORDER_DEPART,
@@ -238,8 +240,8 @@ public:
 	friend enum_h operator&(const enum_h& l, const enum_h& other);
 	friend enum_h operator|(const enum_h& l, const enum_h& other);
 
-	void serialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, const luacpp::LuaValue& value, ubyte* data, int& packet_size);
-	void deserialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, char* data_ptr, ubyte* data, int& offset);
+	static void serialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, const luacpp::LuaValue& value, ubyte* data, int& packet_size);
+	static void deserialize(lua_State* /*L*/, const scripting::ade_table_entry& /*tableEntry*/, char* data_ptr, ubyte* data, int& offset);
 };
 
 

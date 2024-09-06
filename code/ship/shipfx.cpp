@@ -979,7 +979,7 @@ bool shipfx_eye_in_shadow( vec3d *eye_pos, object * src_obj, int light_n )
         vm_vec_scale_add( &rp1, &rp0, &light_dir, objp->radius*10.0f );
 
 		mc.model_instance_num = -1;
-		mc.model_num = Asteroid_info[ast->asteroid_type].model_num[ast->asteroid_subtype];	// Fill in the model to check
+		mc.model_num = Asteroid_info[ast->asteroid_type].subtypes[ast->asteroid_subtype].model_number;	// Fill in the model to check
 		mc.submodel_num = -1;
 		mc.orient = &objp->orient;					// The object's orient
 		mc.pos = &objp->pos;							// The object's position
@@ -1051,12 +1051,26 @@ void shipfx_flash_create(object *objp, int model_num, vec3d *gun_pos, vec3d *gun
 	// HACK - let the flak guns do this on their own since they fire so quickly
 	// Also don't create if its the player in the cockpit unless he's also got show_ship_model, provided render_player_mflash isnt on
 	bool in_cockpit_view = (Viewer_mode & (VM_EXTERNAL | VM_CHASE | VM_OTHER_SHIP | VM_WARP_CHASE)) == 0;
-	bool player_show_ship_model = objp == Player_obj && Ship_info[Ships[objp->instance].ship_info_index].flags[Ship::Info_Flags::Show_ship_model];
-	if ((Weapon_info[weapon_info_index].muzzle_flash >= 0) && !(Weapon_info[weapon_info_index].wi_flags[Weapon::Info_Flags::Flak]) &&
+	bool player_show_ship_model =
+		objp == Player_obj && Ship_info[Ships[objp->instance].ship_info_index].flags[Ship::Info_Flags::Show_ship_model];
+	if (!(Weapon_info[weapon_info_index].wi_flags[Weapon::Info_Flags::Flak]) &&
 		(objp != Player_obj || Render_player_mflash || (!in_cockpit_view || player_show_ship_model))) {
-		vec3d real_dir;
-		vm_vec_rotate(&real_dir, gun_dir,&objp->orient);	
-		mflash_create(gun_pos, &real_dir, &objp->phys_info, Weapon_info[weapon_info_index].muzzle_flash, objp);		
+			// if there's a muzzle effect entry, we use that
+			if (Weapon_info[weapon_info_index].muzzle_effect.isValid()) {
+				vec3d gun_world_pos;
+				vm_vec_unrotate(&gun_world_pos, gun_pos, &Objects[OBJ_INDEX(objp)].orient);
+				vm_vec_add2(&gun_world_pos, &Objects[OBJ_INDEX(objp)].pos);
+
+				// spawn particle effect
+				auto particleSource = particle::ParticleManager::get()->createSource(Weapon_info[weapon_info_index].muzzle_effect);
+				particleSource.moveToObject(objp, gun_pos);
+				particleSource.setOrientationFromVec(gun_dir, true);
+				particleSource.setVelocity(&objp->phys_info.vel);
+				particleSource.finish();
+			// if there's a muzzle flash entry and no muzzle effect entry, we use the mflash
+			} else if (Weapon_info[weapon_info_index].muzzle_flash >= 0) {
+				mflash_create(gun_pos, gun_dir, &objp->phys_info, Weapon_info[weapon_info_index].muzzle_flash, objp);
+			}
 	}
 
 	if ( pm->num_lights < 1 ) return;
@@ -1606,7 +1620,7 @@ void shipfx_queue_render_ship_halves_and_debris(model_draw_list *scene, clip_shi
 	vm_vec_add2(&debris_clip_plane_pt, &half_ship->local_pivot);
 
 	// set up render flags
-	uint render_flags = MR_NORMAL;
+	uint64_t render_flags = MR_NORMAL;
 
 	if ( Rendering_to_shadow_map ) {
 		render_flags |= MR_NO_TEXTURING | MR_NO_LIGHTING;
@@ -1646,7 +1660,7 @@ void shipfx_queue_render_ship_halves_and_debris(model_draw_list *scene, clip_shi
 				model_render_params render_info;
 
 				render_info.set_clip_plane(debris_clip_plane_pt, clip_plane_norm);
-				render_info.set_replacement_textures(shipp->ship_replacement_textures);
+				render_info.set_replacement_textures(pmi->texture_replace);
 				render_info.set_flags(render_flags);
 
 				submodel_render_queue(&render_info, scene, pm, pmi, pm->debris_objects[i], &half_ship->orient, &tmp);
@@ -1690,7 +1704,7 @@ void shipfx_queue_render_ship_halves_and_debris(model_draw_list *scene, clip_shi
 
 	render_info.set_flags(render_flags);
 	render_info.set_clip_plane(model_clip_plane_pt, clip_plane_norm);
-	render_info.set_replacement_textures(shipp->ship_replacement_textures);
+	render_info.set_replacement_textures(pmi->texture_replace);
 	render_info.set_object_number(shipp->objnum);
 
 	if (Ship_info[shipp->ship_info_index].uses_team_colors && !shipp->flags[Ship::Ship_Flags::Render_without_miscmap]) {

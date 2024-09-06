@@ -130,6 +130,7 @@
 #include "network/multi_endgame.h"
 #include "network/multi_fstracker.h"
 #include "network/multi_ingame.h"
+#include "network/multi_interpolate.h"
 #include "network/multi_log.h"
 #include "network/multi_pause.h"
 #include "network/multi_pxo.h"
@@ -891,6 +892,7 @@ void game_level_close()
 		// De-Initialize the game subsystems
 		obj_delete_all();
 		obj_reset_colliders();
+		multi_interpolate_clear_all(); // object related
 		sexp_music_close();	// Goober5000
 		event_music_level_close();
 		game_stop_looped_sounds();
@@ -1006,6 +1008,7 @@ void game_level_init()
 	Game_shudder_time = TIMESTAMP::invalid();
 
 	Perspective_locked = false;
+	Slew_locked = false;
 
 	// reset the geometry map and distortion map batcher, this should to be done pretty soon in this mission load process (though it's not required)
 	batch_reset();
@@ -1774,8 +1777,13 @@ void game_init()
 		Cmdline_freespace_no_music = 1;
 		Cmdline_NoFPSCap = 0;
 		Cmdline_load_all_weapons = 0;
-		Cmdline_enable_3d_shockwave = 0;
+
+		// Force some ingame options to off
 		Fireball_use_3d_warp = false;
+		options::OptionsManager::instance()->set_ingame_binary_option("Graphics.WarpFlash", false);
+
+		Use_3D_shockwaves = false;
+		options::OptionsManager::instance()->set_ingame_binary_option("Graphics.3DShockwaves", false);
 
 		// now init the standalone server code
 		std_init_standalone();
@@ -1951,6 +1959,7 @@ void game_init()
 
 	player_controls_init();
 	model_init();	
+	virtual_pof_init();
 
 	event_music_init();
 
@@ -1970,7 +1979,6 @@ void game_init()
 	sexp_startup();
 
 	obj_init();	
-	virtual_pof_init();
 	mflash_game_init();	
 	armor_init();
 	ai_init();
@@ -2998,11 +3006,7 @@ bool is_screenshake_enabled()
 	if (Game_mode & GM_MULTIPLAYER) {
 		return true;
 	} else {
-		if (Using_in_game_options) {
-			return Screenshake_enabled;
-		} else {
-			return !Cmdline_no_screenshake;
-		}
+		return ScreenShakeOption->getValue();
 	}
 }
 

@@ -15,6 +15,9 @@
 #include <memory>
 #include <stdexcept>
 
+#define MISSION_BACKUP_NAME     "Backup"
+#define MISSION_BACKUP_DEPTH    9
+
 namespace fso {
 namespace fred {
 
@@ -35,6 +38,8 @@ class Editor : public QObject {
 	void unmark_all();
 
 	void createNewMission();
+
+	std::string maybeUseAutosave(const std::string& filepath);
 
 	/*! Load a mission. */
 	bool loadMission(const std::string& filepath, int flags = 0);
@@ -63,6 +68,9 @@ class Editor : public QObject {
 
 	void hideMarkedObjects();
 	void showHiddenObjects();
+
+	void lockMarkedObjects();
+	void unlockAllObjects();
 
 	int dup_object(object* objp);
 

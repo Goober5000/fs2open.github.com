@@ -82,6 +82,10 @@ constexpr int BANK_SWITCH_DELAY = 250;	// after switching banks, 1/4 second dela
 
 #define MAX_SPAWN_TYPES_PER_WEAPON 5
 
+// homing missiles have an extended lifetime so they don't appear to run out of gas before they can hit a moving target at extreme
+// range. Check the comment in weapon_set_tracking_info() for more details
+#define LOCKED_HOMING_EXTENDED_LIFE_FACTOR			1.2f
+
 typedef struct weapon {
 	int		weapon_info_index;			// index into weapon_info array
 	int		objnum;							// object number for this weapon
@@ -198,10 +202,12 @@ typedef struct type5_beam_info {
 	vec3d end_pos_offset;                        // position simply added to end pos (possibly manipulated by the bools below)
 	vec3d start_pos_rand;                        // same as above but a randomly chosen between defined value for each axis and its negative
 	vec3d end_pos_rand;
+	int slash_pos_curve_idx;
 	bool target_orient_positions;                // if true, offsets are oriented relative to the target, else the shooter's pov
 	bool target_scale_positions;                 // if true, offsets are scaled by target radius, else its a fixed span from the shooters pov
 	                                             // regardless of distance
 	float continuous_rot;                        // radians per sec rotation over beam lifetime
+	int rot_curve_idx;
 	Type5BeamRotAxis continuous_rot_axis;		 // axis around which do continuous rotation
 	SCP_vector<float> burst_rot_pattern;         // radians to rotate for each beam in a burst, will also make spawned and ssb beams fire 
 	                                             // this many beams simultaneously with the defined rotations
@@ -303,6 +309,15 @@ enum class HomingAcquisitionType {
 	RANDOM,
 };
 
+struct ConditionalImpact {
+	particle::ParticleEffectHandle effect;
+	float min_health_threshold; //factor, 0-1
+	float max_health_threshold; //factor, 0-1
+	float min_angle_threshold; //in degrees
+	float max_angle_threshold; //in degrees
+	bool dinky;
+};
+
 struct weapon_info
 {
 	char	name[NAME_LENGTH];				// name of this weapon
@@ -345,7 +360,13 @@ struct weapon_info
 	color	laser_color_1;						// for cycling between glow colors
 	color	laser_color_2;						// for cycling between glow colors
 	float	laser_head_radius, laser_tail_radius;
+	float laser_glow_length_scale;
+	float laser_glow_head_scale;
+	float laser_glow_tail_scale;
 	int	laser_radius_curve_idx;				// tail + head radius over time curve
+	float laser_min_pixel_size;
+	vec3d	laser_pos_offset;
+
 	float	collision_radius_override;          // overrides the radius for the purposes of collision
 	int laser_alpha_curve_idx;			// alpha over time curve
 
@@ -404,6 +425,10 @@ struct weapon_info
 	float	optimum_range;						// causes ai fighters to prefer this distance when attacking with the weapon
 	float weapon_min_range;           // *Minimum weapon range, default is 0 -Et1
 
+	flagset<Object::Aiming_Flags> aiming_flags;
+	float minimum_convergence_distance;
+	float convergence_distance;
+
 	bool pierce_objects;
 	bool spawn_children_on_pierce;
 
@@ -411,6 +436,8 @@ struct weapon_info
     int num_spawn_weapons_defined;
     int maximum_children_spawned;		// An upper bound for the total number of spawned children, used by multi
     spawn_weapon_info spawn_info[MAX_SPAWN_TYPES_PER_WEAPON];
+
+	float lifetime_variation_factor_when_child;
 
 	// swarm count
 	short swarm_count;						// how many swarm missiles are fired for this weapon
@@ -477,6 +504,10 @@ struct weapon_info
 
 	particle::ParticleEffectHandle piercing_impact_effect;
 	particle::ParticleEffectHandle piercing_impact_secondary_effect;
+
+	SCP_map<int, SCP_vector<ConditionalImpact>> conditional_impacts;
+
+	particle::ParticleEffectHandle muzzle_effect;
 
 	// Particle effect for the various states, WeaponState::NORMAL is the state for the whole lifetime, even for missiles
 	SCP_unordered_map<WeaponState, particle::ParticleEffectHandle, WeaponStateHash> state_effects;
@@ -603,6 +634,8 @@ struct weapon_info
 	
 	SCP_map<SCP_string, SCP_string> custom_data;
 
+	SCP_vector<custom_string> custom_strings;
+
 	decals::creation_info impact_decal;
 
 	actions::ProgramSet on_create_program;
@@ -728,7 +761,7 @@ size_t* get_pointer_to_weapon_fire_pattern_index(int weapon_type, int ship_idx, 
 void weapon_maybe_spew_particle(object *obj);
 
 bool weapon_armed(weapon *wp, bool hit_target);
-void weapon_hit( object * weapon_obj, object * other_obj, vec3d * hitpos, int quadrant = -1, vec3d* hitnormal = NULL );
+void weapon_hit( object * weapon_obj, object * impacted_obj, vec3d * hitpos, int quadrant = -1, vec3d* hitnormal = nullptr );
 void spawn_child_weapons( object *objp, int spawn_index_override = -1);
 
 // call to detonate a weapon. essentially calls weapon_hit() with other_obj as NULL, and sends a packet in multiplayer

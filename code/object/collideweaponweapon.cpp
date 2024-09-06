@@ -64,12 +64,17 @@ int collide_weapon_weapon( obj_pair * pair )
 		if (!(wipA->wi_flags[Weapon::Info_Flags::No_radius_doubling])) {
 			A_radius *= 2;		// Makes bombs easier to hit
 		}
+
+		// the erroneous extra time a bomb stays invulnerable without the fix
+		float extra_buggy_time = 0.0f;
+		if (wipA->is_locked_homing())
+			extra_buggy_time = (wipA->lifetime * LOCKED_HOMING_EXTENDED_LIFE_FACTOR) - wipA->lifetime;
 		
 		if ((The_mission.ai_profile->flags[AI::Profile_Flags::Aspect_invulnerability_fix]) && (wipA->is_locked_homing()) && (wpA->homing_object != &obj_used_list)) {
 			if (A_time_alive < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
 				return 0;
 		}
-		else if (A_time_alive < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
+		else if (A_time_alive - extra_buggy_time < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
 			return 0;
 	}
 
@@ -78,11 +83,16 @@ int collide_weapon_weapon( obj_pair * pair )
 			B_radius *= 2;		// Makes bombs easier to hit
 		}
 
+		// the erroneous extra time a bomb stays invulnerable without the fix
+		float extra_buggy_time = 0.0f;
+		if (wipB->is_locked_homing())
+			extra_buggy_time = (wipB->lifetime * LOCKED_HOMING_EXTENDED_LIFE_FACTOR) - wipB->lifetime;
+
 		if ((The_mission.ai_profile->flags[AI::Profile_Flags::Aspect_invulnerability_fix]) && (wipB->is_locked_homing()) && (wpB->homing_object != &obj_used_list)) {
 			if (B_time_alive < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
 				return 0;
 		}
-		else if (B_time_alive < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
+		else if (B_time_alive - extra_buggy_time < The_mission.ai_profile->delay_bomb_arm_timer[Game_skill_level] )
 			return 0;
 	}
 
@@ -125,12 +135,10 @@ int collide_weapon_weapon( obj_pair * pair )
 			if (wipA->weapon_hitpoints > 0) {
 				if (wipB->weapon_hitpoints > 0) {		//	Two bombs collide, detonate both.
 					if ((wipA->wi_flags[Weapon::Info_Flags::Bomb]) && (wipB->wi_flags[Weapon::Info_Flags::Bomb])) {
-						wpA->lifeleft = 0.001f;
-						wpA->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 						wpA->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
-						wpB->lifeleft = 0.001f;
-						wpB->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
+						weapon_hit(A, B, &A->pos, -1, nullptr);
 						wpB->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+						weapon_hit(B, A, &B->pos, -1, nullptr);
 					} else {
 						A->hull_strength -= bDamage;
 						B->hull_strength -= aDamage;
@@ -145,36 +153,30 @@ int collide_weapon_weapon( obj_pair * pair )
 						}
 						
 						if (A->hull_strength < 0.0f) {
-							wpA->lifeleft = 0.001f;
-							wpA->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 							wpA->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+							weapon_hit(A, B, &A->pos, -1, nullptr);
 						}
 						if (B->hull_strength < 0.0f) {
-							wpB->lifeleft = 0.001f;
-							wpB->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 							wpB->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+							weapon_hit(B, A, &B->pos, -1, nullptr);
 						}
 					}
 				} else {
 					A->hull_strength -= bDamage;
-					wpB->lifeleft = 0.001f;
-					wpB->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 					wpB->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+					weapon_hit(B, A, &B->pos, -1, nullptr);
 					if (A->hull_strength < 0.0f) {
-						wpA->lifeleft = 0.001f;
-						wpA->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 						wpA->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+						weapon_hit(A, B, &A->pos, -1, nullptr);
 					}
 				}
 			} else if (wipB->weapon_hitpoints > 0) {
 				B->hull_strength -= aDamage;
-				wpA->lifeleft = 0.001f;
-				wpA->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 				wpA->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+				weapon_hit(A, B, &A->pos, -1, nullptr);
 				if (B->hull_strength < 0.0f) {
-					wpB->lifeleft = 0.001f;
-					wpB->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
 					wpB->weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
+					weapon_hit(B, A, &B->pos, -1, nullptr);
 				}
 			}
 

@@ -1061,7 +1061,7 @@ ADE_FUNC(drawTargetingBrackets, l_Graphics, "object Object, [boolean draw=true, 
 		return ADE_RETURN_NIL;
 	}
 
-	object *targetp = objh->objp;
+	object *targetp = objh->objp();
 
 	int x1,x2,y1,y2;
 	int bound_rc, pof;
@@ -1109,7 +1109,7 @@ ADE_FUNC(drawTargetingBrackets, l_Graphics, "object Object, [boolean draw=true, 
 			break;
 		case OBJ_ASTEROID:
 			pof = Asteroids[targetp->instance].asteroid_subtype;
-			modelnum = Asteroid_info[Asteroids[targetp->instance].asteroid_type].model_num[pof];
+			modelnum = Asteroid_info[Asteroids[targetp->instance].asteroid_type].subtypes[pof].model_number;
 			bound_rc = model_find_2d_bound_min( modelnum, &targetp->orient, &targetp->pos,&x1,&y1,&x2,&y2 );
 			break;
 		case OBJ_JUMP_NODE:
@@ -1218,7 +1218,7 @@ ADE_FUNC(drawOffscreenIndicator, l_Graphics, "object Object, [boolean draw=true,
 		return ADE_RETURN_NIL;
 	}
 
-	object *targetp = objh->objp;
+	object *targetp = objh->objp();
 	bool in_frame = g3_in_frame() > 0;
 
 	if (!in_frame)
@@ -2058,14 +2058,20 @@ ADE_FUNC(hasViewmode, l_Graphics, "enumeration", "Specifies if the current viemo
 	return ade_set_args(L, "b", (Viewer_mode & bit) != 0);
 }
 
-ADE_FUNC(setClip, l_Graphics, "number x, number y, number width, number height", "Sets the clipping region to the specified rectangle. Most drawing functions are able to handle the offset.", "boolean", "true if successful, false otherwise")
+ADE_FUNC(setClip, l_Graphics, "number x, number y, number width, number height, [enumeration ResizeMode]", "Sets the clipping region to the specified rectangle. Most drawing functions are able to handle the offset.", "boolean", "true if successful, false otherwise")
 {
 	int x, y, width, height;
+	enum_h resize_arg;
 
-	if (!ade_get_args(L, "iiii", &x, &y, &width, &height))
+	if (!ade_get_args(L, "iiii|o", &x, &y, &width, &height, l_Enum.Get(&resize_arg)))
 		return ADE_RETURN_FALSE;
 
-	gr_set_clip(x, y, width, height, lua_ResizeMode);
+	int resize_mode = lua_ResizeMode;
+
+	if (resize_arg.isValid() && resize_arg.index >= LE_GR_RESIZE_NONE && resize_arg.index <= LE_GR_RESIZE_MENU_NO_OFFSET)
+		resize_mode = resize_arg.index - LE_GR_RESIZE_NONE;
+
+	gr_set_clip(x, y, width, height, resize_mode);
 
 	return ADE_RETURN_TRUE;
 }
@@ -2165,8 +2171,8 @@ ADE_FUNC(createPersistentParticle,
 		pi.reverse = false;
 
 	if (objh != nullptr && objh->isValid()) {
-		pi.attached_objnum = OBJ_INDEX(objh->objp);
-		pi.attached_sig    = objh->objp->signature;
+		pi.attached_objnum = objh->objnum;
+		pi.attached_sig    = objh->sig;
 	}
 
 	particle::WeakParticlePtr p = particle::createPersistent(&pi);
@@ -2238,8 +2244,8 @@ ADE_FUNC(createParticle,
 		pi.reverse = false;
 
 	if (objh != nullptr && objh->isValid()) {
-		pi.attached_objnum = OBJ_INDEX(objh->objp);
-		pi.attached_sig    = objh->objp->signature;
+		pi.attached_objnum = objh->objnum;
+		pi.attached_sig    = objh->sig;
 	}
 
 	particle::create(&pi);

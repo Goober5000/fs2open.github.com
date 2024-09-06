@@ -394,6 +394,7 @@ void player_select_init()
 
 // no need to reset this to false because we only ever see player_select once per game run
 static bool Startup_warning_dialog_displayed = false;
+static bool Save_file_warning_displayed = false;
 
 void player_select_do()
 {
@@ -405,6 +406,11 @@ void player_select_do()
 		sprintf(text, XSTR ("Warning!\n\nThe currently active mod has generated %d warnings and/or errors during program startup.  These could have been caused by anything from incorrectly formatted table files to corrupt models.\n\nWhile FreeSpace Open will attempt to compensate for these issues, it cannot guarantee a trouble-free gameplay experience.\n\nPlease contact the authors of the mod for assistance.", 1640), Global_warning_count + Global_error_count);
 		popup(PF_TITLE_BIG | PF_TITLE_RED | PF_USE_AFFIRMATIVE_ICON, 1, POPUP_OK, text);
 		Startup_warning_dialog_displayed = true;
+	}
+
+	if (!Ingame_options_save_found && Using_in_game_options && !Save_file_warning_displayed) {
+		popup(PF_BODY_BIG | PF_USE_AFFIRMATIVE_ICON, 1, POPUP_OK, XSTR("In-game Options are enabled but a save file could not be found. You may need to update your settings in the Options menu.", 1854));
+		Save_file_warning_displayed = true;
 	}
 		
 	// set the input box at the "virtual" line 0 to be active so the player can enter a callsign

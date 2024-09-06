@@ -150,9 +150,9 @@ static auto GammaOption __UNUSED = options::OptionBuilder<float>("Graphics.Gamma
 
 
 const SCP_vector<std::pair<int, std::pair<const char*, int>>> DetailLevelValues = {{ 0, {"Minimum", 1680}},
-                                                                                   { 1, {"Low", 1161}},
-                                                                                   { 2, {"Medium", 1162}},
-                                                                                   { 3, {"High", 1163}},
+                                                                                   { 1, {"Low", 1160}},
+                                                                                   { 2, {"Medium", 1161}},
+                                                                                   { 3, {"High", 1162}},
                                                                                    { 4, {"Ultra", 1721}}};
 
 const auto LightingOption __UNUSED = options::OptionBuilder<int>("Graphics.Lighting",
@@ -1599,6 +1599,17 @@ bool gr_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, int d_mode, 
 		if ( (sscanf(Cmdline_center_res, "%dx%d", &tmp_center_width, &tmp_center_height) == 2) && (tmp_center_width > 0) && (tmp_center_height > 0) ) {
 			center_aspect_ratio = (float)tmp_center_width / (float)tmp_center_height;
 		}
+	}
+
+	if (!gr_is_viewport_window() && !Cmdline_window_res.has_value()) {
+		// For whatever reason, it seems that a combination of Win 11 and presumably NVidia GPU's causes weird artifacts.
+		// These artifacts do not appear in windowed mode, or with an attached renderdoc / nvidia nsight.
+		// Similarly using the -window_res command line parameter prevents this.
+		// To the best of our knowledge, this is because all of the aforementioned methods route the rendering through another buffer
+		// (be that a window, a render overlay from nsight, or an FSO-internal buffer) instead of directly rendering to the OS-provided direct screen backbuffer.
+		// As the cost of -window_res is one single blit of a fullscreen buffer, it's probably an acceptable compromise to get rid of render artifacts.
+		// As such, forcibly enable -window_res at the screen resolution here, if we're in fullscreen.
+		Cmdline_window_res.emplace(static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 	}
 
 	if (d_mode == GR_DEFAULT) {

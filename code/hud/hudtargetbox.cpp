@@ -57,7 +57,7 @@ static int Target_static_next;
 static int Target_static_playing;
 sound_handle Target_static_looping = sound_handle::invalid();
 
-int Target_display_cargo;
+bool Target_display_cargo;
 char Cargo_string[256] = "";
 
 #ifndef NDEBUG
@@ -570,7 +570,7 @@ void HudGaugeTargetBox::renderTargetShip(object *target_objp)
 	target_shipp	= &Ships[target_objp->instance];
 	target_sip		= &Ship_info[target_shipp->ship_info_index];
 
-	int flags=0;
+	uint64_t flags = 0;
 	if ( Detail.targetview_model )	{
 		// take the forward orientation to be the vector from the player to the current target
 		vm_vec_sub(&orient_vec, &target_objp->pos, &Player_obj->pos);
@@ -677,7 +677,7 @@ void HudGaugeTargetBox::renderTargetShip(object *target_objp)
 		if(target_sip->model_num_hud >= 0){
 			model_render_immediate( &render_info, target_sip->model_num_hud, &target_objp->orient, &obj_pos);
 		} else {
-			render_info.set_replacement_textures(target_shipp->ship_replacement_textures);
+			render_info.set_replacement_textures(model_get_instance(target_shipp->model_instance_num)->texture_replace);
 
 			model_render_immediate( &render_info, target_sip->model_num, &target_objp->orient, &obj_pos);
 		}
@@ -746,7 +746,7 @@ void HudGaugeTargetBox::renderTargetDebris(object *target_objp)
 	debris	*debrisp;
 	vec3d	orient_vec, up_vector;
 	float		factor;	
-	int flags=0;
+	uint64_t flags = 0;
 
 	debrisp = &Debris[target_objp->instance];
 
@@ -776,6 +776,9 @@ void HudGaugeTargetBox::renderTargetDebris(object *target_objp)
 		model_clear_instance(debrisp->model_num);
 
 		model_render_params render_info;
+
+		if (debrisp->model_instance_num >= 0)
+			render_info.set_replacement_textures(model_get_instance(debrisp->model_instance_num)->texture_replace);
 
 		color thisColor = GaugeWirecolor;
 		bool thisOverride = GaugeWirecolorOverride;
@@ -863,9 +866,9 @@ void HudGaugeTargetBox::renderTargetWeapon(object *target_objp)
 	weapon_info	*target_wip = NULL;
 	weapon		*wp = NULL;
 	object		*viewer_obj, *viewed_obj;
-	int *replacement_textures = NULL;
+	std::shared_ptr<model_texture_replace> replacement_textures = nullptr;
 	int			target_team, is_homing, is_player_missile, missile_view, viewed_model_num, hud_target_lod, w, h;
-	int flags=0;
+	uint64_t flags = 0;
 
 	target_team = obj_team(target_objp);
 
@@ -902,9 +905,12 @@ void HudGaugeTargetBox::renderTargetWeapon(object *target_objp)
 			viewed_obj			= wp->homing_object;
 			missile_view		= TRUE;
 			viewed_model_num	= homing_sip->model_num;
-			replacement_textures = homing_shipp->ship_replacement_textures;
 			hud_target_lod		= homing_sip->hud_target_lod;
 		}
+
+		int pmi_id = object_get_model_instance(viewed_obj);
+		if (pmi_id >= 0)
+			replacement_textures = model_get_instance(pmi_id)->texture_replace;
 
 		// take the forward orientation to be the vector from the player to the current target
 		vm_vec_sub(&orient_vec, &viewed_obj->pos, &viewer_obj->pos);
@@ -1068,7 +1074,6 @@ void HudGaugeTargetBox::renderTargetWeapon(object *target_objp)
 				model_render_immediate( &render_info, homing_sip->model_num_hud, &viewed_obj->orient, &obj_pos);
 			} else {
 				render_info.set_flags(flags | MR_NO_FOGGING);
-				render_info.set_replacement_textures(homing_shipp->ship_replacement_textures);
 
 				model_render_immediate( &render_info, homing_sip->model_num, &viewed_obj->orient, &obj_pos );
 			}
@@ -1136,7 +1141,7 @@ void HudGaugeTargetBox::renderTargetAsteroid(object *target_objp)
 	float			time_to_impact, factor;	
 	int			pof;
 
-	int flags=0;									//draw flags for wireframe
+	uint64_t flags = 0;									//draw flags for wireframe
 	asteroidp = &Asteroids[target_objp->instance];
 
 	pof = asteroidp->asteroid_subtype;
@@ -1166,9 +1171,12 @@ void HudGaugeTargetBox::renderTargetAsteroid(object *target_objp)
 		vm_vec_copy_scale(&obj_pos,&orient_vec,factor);
 
 		renderTargetSetup(&camera_eye, &camera_orient, 0.5f);
-		model_clear_instance(Asteroid_info[asteroidp->asteroid_type].model_num[pof]);
+		model_clear_instance(Asteroid_info[asteroidp->asteroid_type].subtypes[pof].model_number);
 		
 		model_render_params render_info;
+
+		if (asteroidp->model_instance_num >= 0)
+			render_info.set_replacement_textures(model_get_instance(asteroidp->model_instance_num)->texture_replace);
 
 		color thisColor = GaugeWirecolor;
 		bool thisOverride = GaugeWirecolorOverride;
@@ -1223,7 +1231,7 @@ void HudGaugeTargetBox::renderTargetAsteroid(object *target_objp)
 
 		render_info.set_flags(flags | MR_NO_FOGGING);
 
-		model_render_immediate( &render_info, Asteroid_info[asteroidp->asteroid_type].model_num[pof], &target_objp->orient, &obj_pos );
+		model_render_immediate( &render_info, Asteroid_info[asteroidp->asteroid_type].subtypes[pof].model_number, &target_objp->orient, &obj_pos );
 
 		if ( Monitor_mask >= 0 ) {
 			gr_stencil_set(GR_STENCIL_NONE);
