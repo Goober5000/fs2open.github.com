@@ -59,6 +59,8 @@ extern SCP_vector<message_extra> Message_waves;
 extern SCP_vector<SCP_string> Builtin_moods;
 extern int Current_mission_mood;
 extern float Command_announces_enemy_arrival_chance;
+extern bool Always_loop_head_anis;
+extern bool Use_newer_head_ani_suffix;
 
 // Builtin messages
 
@@ -266,7 +268,7 @@ void message_pagein_mission_messages();
 int message_filter_multi(int id);
 
 // Goober5000
-bool message_filename_is_generic(char *filename);
+bool message_filename_is_generic(const char *filename);
 
 // m!m
 void message_load_wave(int index, const char *filename);

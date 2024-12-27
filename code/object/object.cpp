@@ -53,6 +53,7 @@
 #include "tracing/Monitor.h"
 #include "graphics/light.h"
 #include "graphics/color.h"
+#include "math/curve.h"
 
 extern void ship_reset_disabled_physics(object *objp, int ship_class);
 
@@ -337,7 +338,7 @@ int free_object_slots(int target_num_used)
 }
 
 // Goober5000
-float get_hull_pct(object *objp)
+float get_hull_pct(const object *objp)
 {
 	Assert(objp);
 	Assert(objp->type == OBJ_SHIP);
@@ -355,7 +356,7 @@ float get_hull_pct(object *objp)
 	return objp->hull_strength / total_strength;
 }
 
-float get_sim_hull_pct(object *objp)
+float get_sim_hull_pct(const object *objp)
 {
 	Assert(objp);
 	Assert(objp->type == OBJ_SHIP);
@@ -374,7 +375,7 @@ float get_sim_hull_pct(object *objp)
 }
 
 // Goober5000
-float get_shield_pct(object *objp)
+float get_shield_pct(const object *objp)
 {
 	Assert(objp);
 
@@ -1252,35 +1253,48 @@ void obj_move_all_post(object *objp, float frametime)
 					}
 				}
 				if (cast_light) {
-					weapon_info* wi = &Weapon_info[Weapons[objp->instance].weapon_info_index];
+					weapon* wp = &Weapons[objp->instance];
+					weapon_info* wi = &Weapon_info[wp->weapon_info_index];
 					auto lp = lighting_profiles::current();
 					hdr_color light_color;
+
+					float intensity_mult = wi->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LIGHT_INTENSITY_MULT, *wp, &wp->modular_curves_instance);
+					float radius_mult = wi->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LIGHT_RADIUS_MULT, *wp, &wp->modular_curves_instance);
+					float r_mult = wi->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LIGHT_R_MULT, *wp, &wp->modular_curves_instance);
+					float g_mult = wi->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LIGHT_G_MULT, *wp, &wp->modular_curves_instance);
+					float b_mult = wi->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LIGHT_B_MULT, *wp, &wp->modular_curves_instance);
+
+					float source_radius = objp->radius;
+					float light_radius;
+					float light_brightness;
+
+					// Handle differing adjustments depending on weapon type.
+					if (wi->render_type == WRT_LASER) {
+						light_radius = lp->laser_light_radius.handle(wi->light_radius) * radius_mult;
+						// intensity is stored in the light color even if no user setting is done.
+						light_brightness = lp->laser_light_brightness.handle(wi->light_color.i());
+					} else {
+						// Missiles should typically not be treated as lights for their whole radius. TODO: make configurable.
+						source_radius *= 0.05f;
+						light_radius = lp->missile_light_radius.handle(wi->light_radius) * radius_mult;
+						light_brightness = lp->missile_light_brightness.handle(wi->light_color.i());
+					}
+
 					// If there is no specific color set in the table, laser render weapons have a dynamic color.
 					if (!wi->light_color_set && wi->render_type == WRT_LASER) {
-						// intensity is stored in the light color even if no user setting is done.
-						light_color = hdr_color(&wi->light_color);
 						// Classic dynamic laser color is handled with an old color object
 						color c;
 						weapon_get_laser_color(&c, objp);
-						light_color.set_rgb(&c);
+						light_color.set_rgbai((c.red/255.f), (c.green/255.f), (c.blue/255.f), 1.f, light_brightness);
 					} else {
 						// If not a laser then all default information needed is stored in the weapon light color
-						light_color = hdr_color(&wi->light_color);
+						light_color.set_rgbai(wi->light_color.r(), wi->light_color.g(), wi->light_color.b(), 1.f, light_brightness);
 					}
-					//handles both defaults and adjustments.
-					float r = wi->light_radius;
-					float source_radius = objp->radius;
-					if (wi->render_type == WRT_LASER) {
-						r = lp->laser_light_radius.handle(r);
-						light_color.i(lp->laser_light_brightness.handle(light_color.i()));
-					} else {
-						//Missiles should typically not be treated as lights for their whole radius. TODO: make configurable.
-						source_radius *= 0.05f;
-						r = lp->missile_light_radius.handle(r);
-						light_color.i(lp->missile_light_brightness.handle(light_color.i()));
-					}
-					if(r > 0.0f && light_color.i() > 0.0f)
-						light_add_point(&objp->pos, r, r, &light_color,source_radius);
+
+					light_color.multiply_rgbai(r_mult, g_mult, b_mult, 1.f, intensity_mult);
+
+					if(light_radius > 0.0f && intensity_mult > 0.0f && light_color.i() > 0.0f)
+						light_add_point(&objp->pos, light_radius, light_radius, &light_color, source_radius);
 				}
 			}
 

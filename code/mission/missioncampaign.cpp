@@ -49,6 +49,7 @@
 #include "ship/ship.h"
 #include "starfield/supernova.h"
 #include "ui/ui.h"
+#include "utils/string_utils.h"
 #include "weapon/weapon.h"
 
 // campaign wasn't ended
@@ -740,13 +741,15 @@ void mission_campaign_init()
  */
 void mission_campaign_savefile_delete(const char* cfilename)
 {
-	char filename[_MAX_FNAME], base[_MAX_FNAME];
-
-	_splitpath( cfilename, NULL, NULL, base, NULL );
+	char filename[_MAX_FNAME];
 
 	if ( Player->flags & PLAYER_FLAGS_IS_MULTI ) {
 		return;	// no such thing as a multiplayer campaign savefile
 	}
+
+	auto base = util::get_file_part(cfilename);
+	// do a sanity check, but don't arbitrarily drop any extension in case the filename contains a period
+	Assertion(!stristr(base, FS_CAMPAIGN_FILE_EXT), "The campaign should not have an extension at this point!");
 
 	// only support the new filename here - taylor
 	sprintf_safe( filename, NOX("%s.%s.csg"), Player->callsign, base );
@@ -1468,7 +1471,6 @@ void mission_campaign_maybe_play_movie(int type)
 		return;
 
 	movie::play(filename);	//Play the movie!
-	cutscene_mark_viewable( filename );
 }
 
 /**
@@ -1669,6 +1671,18 @@ void mission_campaign_skip_to_next()
 
 	// now set the next mission
 	mission_campaign_eval_next_mission();
+
+	// because all goals/events are marked true, it's possible for the campaign condition to unexpectedly *not* evaluate to the next mission
+	// (e.g. if is-previous-goal-false or is-previous-event-false is used without the optional argument), so this is a failsafe
+	if (Campaign.next_mission == Campaign.current_mission) {
+		Campaign.next_mission++;
+		if (Campaign.next_mission < Campaign.num_missions) {
+			Warning(LOCATION, "mission_campaign_skip_to_next() could not determine the next mission!  Choosing the next-in-sequence mission as a failsafe...");
+		} else {
+			Warning(LOCATION, "mission_campaign_skip_to_next() could not determine the next mission!");
+			Campaign.next_mission = -1;
+		}
+	}
 
 	// clear out relevant player vars
 	Player->failures_this_session = 0;

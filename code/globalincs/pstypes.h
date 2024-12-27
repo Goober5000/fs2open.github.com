@@ -220,15 +220,19 @@ struct particle_pnt {
 	vec3d up;
 };
 
+// for compiler compatibility, even though C++17 supports omitting the template type...
+
 //def_list
-struct flag_def_list {
+template<typename T>
+struct flag_def_list_templated {
 	const char *name;
-	int def;
+	T def;
 	ubyte var;
 };
+using flag_def_list = flag_def_list_templated<int>;
 
 //A list of parse names for a flag enum
-template<class T>
+template<typename T>
 struct flag_def_list_new {
     const char* name;			// The parseable representation of this flag
     T def;				// The flag definition for this flag
@@ -380,8 +384,13 @@ const size_t INVALID_SIZE = static_cast<size_t>(-1);
 #define INTEL_FLOAT(x)	(*x)
 #endif // BYTE_ORDER
 
+// since a lot of header files will try to #define TRUE and FALSE,
+// making them constexpr here doesn't gain us much
 #define TRUE	1
 #define FALSE	0
+
+// the trailing underscores are to avoid conflicts with previously #define'd tokens
+enum class TriStateBool : int { FALSE_ = 0, TRUE_ = 1, UNKNOWN_ = -1 };
 
 
 // lod checker for (modular) table parsing

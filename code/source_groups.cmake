@@ -400,6 +400,7 @@ add_file_folder("GlobalIncs"
 	globalincs/systemvars.cpp
 	globalincs/systemvars.h
 	globalincs/toolchain.h
+	globalincs/type_traits.h
 	globalincs/undosys.cpp
 	globalincs/undosys.h
 	globalincs/utility.h
@@ -1227,6 +1228,10 @@ add_file_folder("ScpUi"
 	scpui/IncludeNodeHandler.h
 	scpui/rocket_ui.cpp
 	scpui/rocket_ui.h
+	scpui/RocketDecorators.cpp
+	scpui/RocketDecorators.h
+	scpui/RocketDecoratorsInstancer.cpp
+	scpui/RocketDecoratorsInstancer.h
 	scpui/RocketFileInterface.cpp
 	scpui/RocketFileInterface.h
 	scpui/RocketLuaSystemInterface.cpp
@@ -1677,6 +1682,7 @@ add_file_folder("Utils"
 	utils/HeapAllocator.h
 	utils/id.h
 	utils/join_string.h
+	utils/modular_curves.h
 	utils/Random.cpp
 	utils/Random.h
 	utils/RandomRange.h

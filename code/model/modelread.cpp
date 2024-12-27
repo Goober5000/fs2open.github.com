@@ -1113,10 +1113,9 @@ void do_new_subsystem( int n_subsystems, model_subsystem *slist, int subobj_num,
 		}
 	}
 #ifndef NDEBUG
-	char bname[_MAX_FNAME];
+	char bname[FILESPEC_LENGTH];
 
 	if ( !ss_warning_shown_mismatch) {
-		_splitpath(model_filename, NULL, NULL, bname, NULL);
 		// Lets still give a comment about it and not just erase it
 		Warning(LOCATION,"Not all subsystems in model \"%s\" have a record in ships.tbl.\nThis can cause game to crash.\n\nList of subsystems not found from table is in log file.\n", model_get(model_num)->filename );
 		mprintf(("Subsystem %s in model %s was not found in ships.tbl!\n", subobj_name, model_get(model_num)->filename));
@@ -1602,9 +1601,9 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 	// code to get a filename to write out subsystem information for each model that
 	// is read.  This info is essentially debug stuff that is used to help get models
 	// into the game quicker
-#if 0
+#ifndef NDEBUG
 	{
-		char bname[_MAX_FNAME];
+		char bname[FILESPEC_LENGTH];
 
 		_splitpath(filename, NULL, NULL, bname, NULL);
 		sprintf(debug_name, "%s.subsystems", bname);
@@ -1700,7 +1699,7 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 					Warning(LOCATION, "Model <%s> has a radius <= 0.1f\n", filename);
 				}
 
-				pm->submodel = new bsp_info[pm->n_models];
+				pm->submodel = new bsp_info[MAX(1,pm->n_models)];
 
 				//Assert(pm->n_models <= MAX_SUBMODELS);
 
@@ -4032,7 +4031,7 @@ int subobj_find_2d_bound(float radius ,matrix * /*orient*/, vec3d * pos,int *x1,
 
 
 // Given a rotating submodel, find the local and world axes of rotation.
-void model_get_rotating_submodel_axis(vec3d *model_axis, vec3d *world_axis, const polymodel *pm, const polymodel_instance *pmi, int submodel_num, matrix *objorient)
+void model_get_rotating_submodel_axis(vec3d *model_axis, vec3d *world_axis, const polymodel *pm, const polymodel_instance *pmi, int submodel_num, const matrix *objorient)
 {
 	Assert(pm->id == pmi->model_num);
 	bsp_info *sm = &pm->submodel[submodel_num];
@@ -5379,7 +5378,7 @@ int model_create_bsp_collision_tree()
 		return (int)i;
 	}
 
-	bsp_collision_tree tree;
+	bsp_collision_tree tree{};
 
 	tree.used = true;
 	Bsp_collision_tree_list.push_back(tree);
