@@ -357,7 +357,7 @@ struct weapon_info
 	char	name[NAME_LENGTH];				// name of this weapon
 	char	display_name[NAME_LENGTH];		// display name of this weapon
 	char	title[WEAPON_TITLE_LEN];		// official title of weapon (used by tooltips)
-	char	*desc;								// weapon's description (used by tooltips)
+	std::unique_ptr<char[]> desc;				// weapon's description (used by tooltips)
 	char	altSubsysName[NAME_LENGTH];        // rename turret to this if this is the turrets first weapon
 
 	char	pofbitmap_name[MAX_FILENAME_LEN];	// Name of the pof representing this if POF, or bitmap filename if bitmap
@@ -365,7 +365,7 @@ struct weapon_info
 	char	external_model_name[MAX_FILENAME_LEN];					//the model rendered on the weapon points of a ship
 	int		external_model_num;					//the model rendered on the weapon points of a ship
 
-	char	*tech_desc;								// weapon's description (in tech database)
+	std::unique_ptr<char[]> tech_desc;		// weapon's description (in tech database)
 	char	tech_anim_filename[MAX_FILENAME_LEN];	// weapon's tech room animation
 	char	tech_title[NAME_LENGTH];			// weapon's name (in tech database)
 	char	tech_model[MAX_FILENAME_LEN];		//Image to display in the techroom (TODO) or the weapon selection screen if the ANI isn't specified/missing
@@ -513,6 +513,7 @@ struct weapon_info
 	gamesnd_id	ambient_snd;
 	gamesnd_id  start_firing_snd;
 	gamesnd_id  loop_firing_snd;
+	gamesnd_id  linked_loop_firing_snd;
 	gamesnd_id  end_firing_snd;
 	
 	gamesnd_id hud_tracking_snd; // Sound played when the player is tracking a target with this weapon
@@ -527,7 +528,8 @@ struct weapon_info
 	char	anim_filename[MAX_FILENAME_LEN];	// filename for animation that plays in weapon selection
 	int 	selection_effect;
 
-	float shield_impact_explosion_radius;
+	float shield_impact_effect_radius;    // shield surface effect radius
+	float shield_impact_explosion_radius; // shield-specific particle effect radius
 
 	particle::ParticleEffectHandle impact_weapon_expl_effect; // Impact particle effect
 	particle::ParticleEffectHandle dinky_impact_weapon_expl_effect; // Dinky impact particle effect
@@ -654,7 +656,7 @@ struct weapon_info
 
 	// Optional weapon failures
 	float failure_rate;
-	SCP_string failure_sub_name;
+	std::unique_ptr<char[]> failure_sub_name;
 	int failure_sub;
 
 	// the optional pattern of weapons that this weapon will fire
@@ -974,7 +976,7 @@ size_t* get_pointer_to_weapon_fire_pattern_index(int weapon_type, int ship_idx, 
 void weapon_maybe_spew_particle(object *obj);
 
 bool weapon_armed(weapon *wp, bool hit_target);
-void weapon_hit( object* weapon_obj, object* impacted_obj, const vec3d* hitpos, int quadrant = -1, const vec3d* hitnormal = nullptr );
+void weapon_hit( object* weapon_obj, object* impacted_obj, const vec3d* hitpos, int quadrant = -1, const vec3d* hitnormal = nullptr, const vec3d* local_hitpos = nullptr, int submodel = -1 );
 void spawn_child_weapons( object *objp, int spawn_index_override = -1);
 
 // call to detonate a weapon. essentially calls weapon_hit() with other_obj as NULL, and sends a packet in multiplayer

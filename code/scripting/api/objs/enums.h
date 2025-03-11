@@ -7,7 +7,7 @@
 #include "globalincs/pstypes.h"
 #include "scripting/ade_api.h"
 
-#include <tl/optional.hpp>
+#include <optional>
 
 namespace scripting {
 namespace api {
@@ -25,6 +25,8 @@ enum lua_enum : int32_t {
 	LE_FLIGHTMODE_FLIGHTCURSOR,
 	LE_FLIGHTMODE_SHIPLOCKED,
 	LE_ORDER_ATTACK,
+	LE_ORDER_ATTACK_WING,
+	LE_ORDER_ATTACK_SHIP_CLASS,
 	LE_ORDER_ATTACK_ANY,
 	LE_ORDER_DEPART,
 	LE_ORDER_DISABLE,
@@ -36,6 +38,7 @@ enum lua_enum : int32_t {
 	LE_ORDER_FLY_TO,
 	LE_ORDER_FORM_ON_WING,
 	LE_ORDER_GUARD,
+	LE_ORDER_GUARD_WING,
 	LE_ORDER_IGNORE,
 	LE_ORDER_IGNORE_NEW,
 	LE_ORDER_KEEP_SAFE_DISTANCE,
@@ -47,9 +50,7 @@ enum lua_enum : int32_t {
 	LE_ORDER_UNDOCK,
 	LE_ORDER_WAYPOINTS,
 	LE_ORDER_WAYPOINTS_ONCE,
-	LE_ORDER_ATTACK_WING,
-	LE_ORDER_GUARD_WING,
-	LE_ORDER_ATTACK_SHIP_CLASS,
+	LE_ORDER_LUA,
 	LE_PARTICLE_DEBUG,
 	LE_PARTICLE_BITMAP,
 	LE_PARTICLE_FIRE,
@@ -210,8 +211,8 @@ enum lua_enum : int32_t {
 };
 
 struct lua_enum_def_list : public flag_def_list_new<lua_enum> {
-	tl::optional<int32_t> value;
-	constexpr lua_enum_def_list(const char* enum_name, lua_enum flag, bool used) : flag_def_list_new<lua_enum>{ enum_name, flag, used, false }, value(tl::nullopt) {}
+	std::optional<int32_t> value;
+	constexpr lua_enum_def_list(const char* enum_name, lua_enum flag, bool used) : flag_def_list_new<lua_enum>{ enum_name, flag, used, false }, value(std::nullopt) {}
 	constexpr lua_enum_def_list(const char* enum_name, lua_enum flag, int32_t val, bool used) : flag_def_list_new<lua_enum>{ enum_name, flag, used, false }, value(val) {}
 };
 
@@ -221,13 +222,13 @@ extern const size_t Num_enumerations;
 struct enum_h {
 private:
 	enum class last_combine_op { NATIVE, AND, OR };
-	tl::optional<SCP_string> name;
+	std::optional<SCP_string> name;
 	last_combine_op last_op = last_combine_op::NATIVE;
 
 public:
 	lua_enum index;
 	bool is_constant;
-	tl::optional<int32_t> value;
+	std::optional<int32_t> value;
 
 	enum_h();
 

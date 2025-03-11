@@ -1296,8 +1296,7 @@ bool control_config_accept(bool API_Access)
 		retry:;
 			SCP_string default_string = (Current_preset_name.empty()) ? Player->callsign : Current_preset_name;
 			cstr = popup_input(flags,
-				"Confirm new custom preset name.\n\nThe name must not be empty.\n\n Press [Enter] to accept, [Esc] to "
-				"abort to config menu.",
+				XSTR( "Confirm new custom preset name.\n\nThe name must not be empty or a default preset.\n\n Press [Enter] to accept, [Esc] to abort to config menu.", 1867),
 				32 - 6,
 				default_string.c_str());
 			if (cstr == nullptr) {
@@ -1320,7 +1319,7 @@ bool control_config_accept(bool API_Access)
 			});
 
 			if (it != Control_config_presets.end()) {
-				popup(flags, 1, POPUP_OK, "You may not overwrite a default preset.  Please choose another name.");
+				popup(flags | PF_USE_AFFIRMATIVE_ICON, 1, POPUP_OK, "You may not overwrite a default preset.  Please choose another name.");
 				goto retry;
 			}
 
@@ -1335,11 +1334,11 @@ bool control_config_accept(bool API_Access)
 				cfclose(fp);
 				int n = popup(flags,
 					2,
-					POPUP_OK,
 					POPUP_CANCEL,
+					POPUP_OK,
 					"'%s'\n Already exists!\n Press OK to overwrite existing preset, or CANCEL to input another name",
 					str.c_str());
-				if ((n == 1) || (n == -1)) {
+				if ((n == 0) || (n == -1)) {
 					// If Cancel button was pressed, or popup dismissed:
 					// retry
 					gamesnd_play_iface(InterfaceSounds::USER_SELECT);
@@ -1366,6 +1365,11 @@ bool control_config_accept(bool API_Access)
 		}
 	}
 	
+	// adds scripting hook for 'On Control Config Menu Closed' --wookieejedi
+	if (scripting::hooks::OnControlConfigMenuClosed->isActive()) {
+		scripting::hooks::OnControlConfigMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', true)));
+	}
+
 	if (!API_Access) {
 		gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
 		gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
@@ -1381,8 +1385,8 @@ void control_config_cancel_exit(bool API_Access)
 	// Check if any changes were made
 	if (!API_Access && (control_config_get_current_preset() == Control_config_presets.end())) {
 		// Changes were made, prompt the user first.
-		int flags = PF_TITLE_WHITE;
-		int choice = popup(flags, 2, POPUP_NO, POPUP_YES, "You have unsaved changes.\n\n\n Do you wish to continue without saving?");
+		int flags = PF_TITLE_WHITE | PF_USE_NEGATIVE_ICON | PF_USE_AFFIRMATIVE_ICON;
+		int choice = popup(flags, 2, POPUP_NO, POPUP_YES, XSTR( "You have unsaved changes.\n\n\n Do you wish to continue without saving?", 1866));
 
 		switch (choice) {
 			case -1:	// Aborted
@@ -1402,6 +1406,11 @@ void control_config_cancel_exit(bool API_Access)
 
 	// Restore all bindings with the backup
 	std::move(Control_config_backup.begin(), Control_config_backup.end(), Control_config.begin());
+
+	// adds scripting hook for 'On Control Config Menu Closed' --wookieejedi
+	if (scripting::hooks::OnControlConfigMenuClosed->isActive()) {
+		scripting::hooks::OnControlConfigMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', false)));
+	}
 
 	if (!API_Access) {
 		gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
@@ -1758,7 +1767,7 @@ bool control_config_delete_preset(CC_preset preset) {
 	return delete_preset_file(preset);
 }
 
-bool control_config_create_new_preset(SCP_string newName)
+bool control_config_create_new_preset(const SCP_string& newName, bool overwrite)
 {
 
 	// Check if a hardcoded preset with name already exists. If so, complain to user and force retry
@@ -1771,7 +1780,7 @@ bool control_config_create_new_preset(SCP_string newName)
 	}
 
 	// Check if a preset file with name already exists.
-	if ((cf_exists_full((newName + ".json").c_str(), CF_TYPE_PLAYER_BINDS)) != 0) {
+	if (!overwrite && ((cf_exists_full((newName + ".json").c_str(), CF_TYPE_PLAYER_BINDS)) != 0)) {
 		return false;
 	}
 
@@ -1806,7 +1815,7 @@ bool control_config_create_new_preset(SCP_string newName)
 	return false; //should be unreachable, but just in case
 }
 
-bool control_config_clone_preset(CC_preset preset, SCP_string newName) {
+bool control_config_clone_preset(const CC_preset& preset, const SCP_string& newName, bool overwrite) {
 
 	// Check if a hardcoded preset with name already exists. If so, complain to user and force retry
 	auto it = std::find_if(Control_config_presets.begin(), Control_config_presets.end(), [newName](CC_preset& p) {
@@ -1818,7 +1827,7 @@ bool control_config_clone_preset(CC_preset preset, SCP_string newName) {
 	}
 
 	// Check if a preset file with name already exists.
-	if ((cf_exists_full((newName + ".json").c_str(), CF_TYPE_PLAYER_BINDS)) != 0) {
+	if (!overwrite && ((cf_exists_full((newName + ".json").c_str(), CF_TYPE_PLAYER_BINDS)) != 0)) {
 		return false;
 	}
 

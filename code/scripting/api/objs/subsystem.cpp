@@ -243,7 +243,7 @@ ADE_VIRTVAR(HitpointsMax, l_Subsystem, "number", "Subsystem hitpoints max", "num
 
 	if(ADE_SETTING_VAR)
 	{
-		sso->ss->max_hits = MIN(0.0f, f);
+		sso->ss->max_hits = MAX(0.0f, f);
 
 		ship_recalc_subsys_strength(&Ships[sso->objh.objp()->instance]);
 	}
@@ -1001,7 +1001,7 @@ ADE_FUNC(getTurretMatrix, l_Subsystem, nullptr, "Returns current subsystems turr
 	model_subsystem *tp = sso->ss->system_info;
 
 	// we have to fake a turret matrix because that field is no longer part of model_subsystem
-	vm_vector_2_matrix(&m, &tp->turret_norm, nullptr, nullptr);
+	vm_vector_2_matrix_norm(&m, &tp->turret_norm, nullptr, nullptr);
 
 	return ade_set_args(L, "o", l_Matrix.Set(matrix_h(&m)));
 }

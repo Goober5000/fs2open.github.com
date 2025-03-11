@@ -20,6 +20,12 @@ typedef enum {
 	OH_ROTATING
 } overhead_style;
 
+// Typedef for Escape key behavior --wookieejedi
+typedef enum {
+	DEFAULT,
+	SAVE
+} EscapeKeyBehaviorInOptions;
+
 // And one for splash screens
 struct splash_screen {
 	SCP_string filename;
@@ -42,6 +48,8 @@ extern bool Cutscene_camera_displays_hud;
 extern bool Alternate_chaining_behavior;
 extern bool Fixed_chaining_to_repeat;
 extern bool Use_host_orientation_for_set_camera_facing;
+extern bool Use_model_eyepoint_for_set_camera_host;
+extern bool Always_show_directive_value_count;
 extern bool Use_3d_ship_select;
 extern int Default_ship_select_effect;
 extern bool Use_3d_ship_icons;
@@ -53,7 +61,7 @@ extern overhead_style Default_overhead_ship_style;
 extern int Default_fiction_viewer_ui;
 extern bool Enable_external_shaders;
 extern bool Enable_external_default_scripts;
-extern int Default_detail_level;
+extern DefaultDetailPreset Default_detail_preset;
 extern bool Full_color_head_anis;
 extern bool Dont_automatically_select_turret_when_targeting_ship;
 extern bool Automatically_select_subsystem_under_reticle_when_targeting_same_ship;
@@ -130,6 +138,7 @@ extern std::tuple<float, float, float, float> Shadow_distances;
 extern std::tuple<float, float, float, float> Shadow_distances_cockpit;
 extern bool Show_ship_casts_shadow;
 extern bool Cockpit_shares_coordinate_space;
+extern bool Show_ship_only_if_cockpits_enabled;
 extern bool Custom_briefing_icons_always_override_standard_icons;
 extern float Min_pixel_size_thruster;
 extern float Min_pixel_size_beam;
@@ -165,6 +174,9 @@ extern bool Lua_API_returns_nil_instead_of_invalid_object;
 extern bool Dont_show_callsigns_in_escort_list;
 extern bool Fix_scripted_velocity;
 extern color Overhead_line_colors[MAX_SHIP_SECONDARY_BANKS];
+extern bool Preload_briefing_icon_models;
+extern EscapeKeyBehaviorInOptions escape_key_behavior_in_options;
+extern bool Fix_asteroid_bounding_box_check;
 
 void mod_table_init();
 void mod_table_post_process();

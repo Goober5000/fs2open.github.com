@@ -491,12 +491,13 @@ void get_user_prop_value(char *buf, char *value)
 	while ( isspace(*p) || (*p == '=') )		// skip white space and equal sign
 		p++;
 	p1 = p;
-	while ( !iscntrl(*p1) )
+	while ( !iscntrl(*p1) )						// copy until we get to a control character
 		p1++;
 	c = *p1;
 	*p1 = '\0';
 	strcpy(value, p);
 	*p1 = c;
+	drop_trailing_white_space(value);			// trim ending whitespace, just as we trimmed leading whitespace
 }
 
 // routine to parse out a vec3d from a user property field of an object
@@ -1113,19 +1114,17 @@ void do_new_subsystem( int n_subsystems, model_subsystem *slist, int subobj_num,
 		}
 	}
 #ifndef NDEBUG
-	char bname[FILESPEC_LENGTH];
-
 	if ( !ss_warning_shown_mismatch) {
 		// Lets still give a comment about it and not just erase it
 		Warning(LOCATION,"Not all subsystems in model \"%s\" have a record in ships.tbl.\nThis can cause game to crash.\n\nList of subsystems not found from table is in log file.\n", model_get(model_num)->filename );
-		mprintf(("Subsystem %s in model %s was not found in ships.tbl!\n", subobj_name, model_get(model_num)->filename));
 		ss_warning_shown_mismatch = true;
-	} else
+	}
 #endif
-		mprintf(("Subsystem %s in model %s was not found in ships.tbl!\n", subobj_name, model_get(model_num)->filename));
+	mprintf(("Subsystem %s in model %s was not found in ships.tbl!\n", subobj_name, model_get(model_num)->filename));
 
 #ifndef NDEBUG
 	if ( ss_fp )	{
+		char bname[FILESPEC_LENGTH];
 		_splitpath(model_filename, NULL, NULL, bname, NULL);
 		mprintf(("A subsystem was found in model %s that does not have a record in ships.tbl.\nA list of subsystems for this ship will be dumped to:\n\ndata%stables%s%s.subsystems for inclusion\ninto ships.tbl.\n", model_filename, DIR_SEPARATOR_STR, DIR_SEPARATOR_STR, bname));
 		char tmp_buffer[128];
@@ -1133,7 +1132,6 @@ void do_new_subsystem( int n_subsystems, model_subsystem *slist, int subobj_num,
 		cfputs(tmp_buffer, ss_fp);
 	}
 #endif
-
 }
 
 void print_family_tree(polymodel *obj)
@@ -1574,7 +1572,7 @@ void resolve_submodel_index(const polymodel *pm, const char *requester, const ch
 	submodel_index = -1;
 }
 
-modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename, int ferror, model_read_deferred_tasks& subsystemParseList)
+modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename, ErrorType error_type, model_read_deferred_tasks& subsystemParseList)
 {
 	CFILE *fp;
 	int version;
@@ -1585,9 +1583,9 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 	fp = cfopen(filename,"rb");
 
 	if (!fp) {
-		if (ferror == 1) {
+		if (error_type == ErrorType::FATAL_ERROR) {
 			Error( LOCATION, "Can't open model file <%s>", filename );
-		} else if (ferror == 0) {
+		} else if (error_type == ErrorType::WARNING) {
 			Warning( LOCATION, "Can't open model file <%s>", filename );
 		}
 
@@ -1694,9 +1692,9 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
                 Assertion(pm->n_models >= 1, "Models without any submodels are not supported!");
 
 				// Check for unrealistic radii
-				if ( pm->rad <= 0.1f )
+				if ( pm->rad <= 0.00001f )
 				{
-					Warning(LOCATION, "Model <%s> has a radius <= 0.1f\n", filename);
+					Warning(LOCATION, "Model <%s> has a radius <= 0.00001f\n", filename);
 				}
 
 				pm->submodel = new bsp_info[MAX(1,pm->n_models)];
@@ -1881,8 +1879,8 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 				cfread_string_len(props, MAX_PROP_LEN, fp);			// and the user properties
 
 				// Check for unrealistic radii
-				if ( sm->rad <= 0.1f ) {
-					Warning(LOCATION, "Submodel <%s> in model <%s> has a radius <= 0.1f\n", sm->name, filename);
+				if ( sm->rad <= 0.00001f ) {
+					Warning(LOCATION, "Submodel <%s> in model <%s> has a radius <= 0.00001f\n", sm->name, filename);
 				}
 				
 				// sanity first!
@@ -1933,19 +1931,24 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 
 				if (in(p, props, "$special")) {
 					char type[64];
+					SCP_string type_desc;
+					sprintf(type_desc, "$special property (for submodel %s) allowed token", sm->name);
 
 					get_user_prop_value(p+9, type);
-					if ( !stricmp(type, "subsystem") ) {	// if we have a subsystem, put it into the list!
+					const char* type_list[] = { "subsystem", "no_movement", "no_rotate", "no_translate" };
+					int type_index = string_lookup(type, type_list, 4, type_desc.c_str(), true, true);
+
+					if (type_index == 0) {	// if we have a subsystem, put it into the list!
 						subsystemParseList.model_subsystems.emplace(sm->name, model_read_deferred_tasks::model_subsystem_parse{ n, sm->rad, sm->offset, props });
 					} else {
-						if ( !stricmp(type, "no_rotate") || !stricmp(type, "no_movement") ) {
+						if (type_index == 2 || type_index == 1) {	// this doesn't rotate
 							// mark those submodels which should not move - i.e., those with no subsystem
 							sm->rotation_type = MOVEMENT_TYPE_NONE;
 						} else {
 							// if submodel rotates (via bspgen), then there is either a subsys or special=no_rotate
 							Assert( sm->rotation_type != MOVEMENT_TYPE_REGULAR );
 						}
-						if ( !stricmp(type, "no_translate") || !stricmp(type, "no_movement") ) {
+						if (type_index == 3 || type_index == 1) {	// this doesn't translate
 							// mark those submodels which should not move - i.e., those with no subsystem
 							sm->translation_type = MOVEMENT_TYPE_NONE;
 						} else {
@@ -2313,12 +2316,6 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 						cfread_string_len( props, MAX_PROP_LEN, fp );
 						if (in(p, props, "$name")) {
 							get_user_prop_value(p+5, bay->name);
-
-							auto length = strlen(bay->name);
-							if ((length > 0) && is_white_space(bay->name[length-1])) {
-								nprintf(("Model", "model '%s' has trailing whitespace on bay name '%s'; this will be trimmed\n", pm->filename, bay->name));
-								drop_trailing_white_space(bay->name);
-							}
 							if (strlen(bay->name) == 0) {
 								nprintf(("Model", "model '%s' has an empty name specified for docking point %d\n", pm->filename, i));
 							}
@@ -2373,8 +2370,12 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 						for (j = 0; j < bay->num_slots; j++) {
 							cfread_vector( &(bay->pnt[j]), fp );
 							cfread_vector( &(bay->norm[j]), fp );
-							if(vm_vec_mag(&(bay->norm[j])) <= 0.0f) {
-								Warning(LOCATION, "Model '%s' dock point '%s' has a null normal. ", filename, bay->name);
+
+							if (vm_vec_mag(&(bay->norm[j])) <= 0.0f) {
+								Warning(LOCATION, "Model '%s' dock point '%s' has a null normal.  Generating a normal in the forward Z direction.", filename, bay->name);
+								bay->norm[j] = vmd_z_vector;
+							} else if (!vm_vec_is_normalized(&(bay->norm[j]))) {
+								vm_vec_normalize(&(bay->norm[j]));
 							}
 						}
 
@@ -2630,11 +2631,16 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 						Assert(pm->num_split_plane <= MAX_SPLIT_PLANE);
 					} else if (in(p, props_spcl, "$special")) {
 						char type[64];
+						SCP_string type_desc;
+						sprintf(type_desc, "$special property (for special point %s) allowed token", name);
 
 						get_user_prop_value(p+9, type);
-						if ( !stricmp(type, "subsystem") ) {	// if we have a subsystem, put it into the list!
+						const char *type_list[] = { "subsystem", "shieldpoint" };
+						int type_index = string_lookup(type, type_list, 2, type_desc.c_str(), true, true);
+
+						if (type_index == 0) {	// if we have a subsystem, put it into the list!
 							subsystemParseList.model_subsystems.emplace(&name[1], model_read_deferred_tasks::model_subsystem_parse{ -1, radius, pnt, props_spcl }); // skip the first '$' character of the name
-						} else if ( !stricmp(type, "shieldpoint") ) {
+						} else if (type_index == 1) {
 							pm->shield_points.push_back(pnt);
 						}
 					} else if (in(name, "$enginelarge") || in(name, "$enginehuge")) 
@@ -3019,25 +3025,25 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 	return modelread_status::SUCCESS_REAL;
 }
 
-modelread_status read_model_file(polymodel* pm, const char* filename, int ferror, model_read_deferred_tasks& deferredTasks, model_parse_depth depth = {})
+modelread_status read_model_file(polymodel* pm, const char* filename, ErrorType error_type, model_read_deferred_tasks& deferredTasks, model_parse_depth depth = {})
 {
 	modelread_status status;
 
 	//See if this is a modular, virtual pof, and if so, parse it from there
-	if (read_virtual_model_file(pm, filename, std::move(depth), ferror, deferredTasks)) {
+	if (read_virtual_model_file(pm, filename, std::move(depth), error_type, deferredTasks)) {
 		status = modelread_status::SUCCESS_VIRTUAL;
 	}
 	else {
-		status = read_model_file_no_subsys(pm, filename, ferror, deferredTasks);
+		status = read_model_file_no_subsys(pm, filename, error_type, deferredTasks);
 	}
 
 	return status;
 }
 
 //reads a binary file containing a 3d model
-modelread_status read_and_process_model_file(polymodel* pm, const char* filename, int n_subsystems, model_subsystem* subsystems, int ferror, model_read_deferred_tasks& deferredTasks)
+modelread_status read_and_process_model_file(polymodel* pm, const char* filename, int n_subsystems, model_subsystem* subsystems, ErrorType error_type, model_read_deferred_tasks& deferredTasks)
 {
-	modelread_status status = read_model_file(pm, filename, ferror, deferredTasks);
+	modelread_status status = read_model_file(pm, filename, error_type, deferredTasks);
 
 	//By now, we have finished reading this model. If it was virtual, we might have accumulated cache.
 	//This is now a tradeoff between speed and memory usage. To further accelerate loading, the cache can be kept until all models are loaded, but there is a risk that this cache will be very big.
@@ -3270,14 +3276,14 @@ int model_load(ship_info* sip, bool prefer_tech_model)
 	if (prefer_tech_model && VALID_FNAME(sip->pof_file_tech)) {
 		// This cannot load into sip->subsystems, as this will overwrite the subsystems model_num to the
 		// techroom model, which is decidedly wrong for the mission itself.
-		return model_load(sip->pof_file_tech, 0, nullptr);
+		return model_load(sip->pof_file_tech);
 	} else {
-		return model_load(sip->pof_file, sip->n_subsystems, &sip->subsystems[0]);
+		return model_load(sip->pof_file, sip);
 	}
 }
 
 //returns the number of this model
-int model_load(const  char* filename, int n_subsystems, model_subsystem* subsystems, int ferror, int duplicate)
+int model_load(const  char* filename, ship_info* sip, ErrorType error_type, bool allow_redundant_load)
 {
 	int i, num;
 	polymodel *pm = NULL;
@@ -3285,11 +3291,19 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 	if ( !model_initted )
 		model_init();
 
+	int n_subsystems = 0;
+	model_subsystem* subsystems = nullptr;
+
+	if (sip != nullptr) {
+		n_subsystems = sip->n_subsystems;
+		subsystems = sip->subsystems;
+	}
+
 	num = -1;
 
 	for (i=0; i< MAX_POLYGON_MODELS; i++)	{
 		if ( Polygon_models[i] )	{
-			if (!stricmp(filename , Polygon_models[i]->filename) && !duplicate) {
+			if (!stricmp(filename , Polygon_models[i]->filename) && !allow_redundant_load) {
 				// Model already loaded; just return.
 				Polygon_models[i]->used_this_mission++;
 				return Polygon_models[i]->id;
@@ -3310,6 +3324,9 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 	if (!VALID_FNAME(filename)) {
 		return -1;
 	}
+	pause_parse();
+	Mp = Parse_text;
+	strcpy_s(Current_filename, filename);
 
 	TRACE_SCOPE(tracing::LoadModelFile);
 
@@ -3348,12 +3365,13 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 
 	model_read_deferred_tasks deferredTasks;
 
-	if (read_and_process_model_file(pm, filename, n_subsystems, subsystems, ferror, deferredTasks) == modelread_status::FAIL)	{
+	if (read_and_process_model_file(pm, filename, n_subsystems, subsystems, error_type, deferredTasks) == modelread_status::FAIL)	{
 		if (pm != NULL) {
 			delete pm;
 		}
-
 		Polygon_models[num] = NULL;
+
+		unpause_parse();
 		return -1;
 	}
 
@@ -3420,6 +3438,7 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 
 	//==============================
 	// Find all the lower detail versions of the hires model
+	SCP_unordered_map<SCP_string, SCP_string, SCP_string_lcase_hash, SCP_string_lcase_equal_to> lower_to_higher_detail_submodels;
 	for (i=0; i<pm->n_models; i++ )	{
 		int j;
 		size_t l1;
@@ -3497,6 +3516,7 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 					if (dl2 >= sm1->num_details ) sm1->num_details = dl2+1;
 					sm1->details[dl2] = j;
   				    mprintf(( "Submodel '%s' is detail level %d of '%s'\n", sm2->name, dl2 + 1, sm1->name ));
+					lower_to_higher_detail_submodels.emplace(sm2->name, sm1->name);
 				}
 			}
 		}
@@ -3506,8 +3526,23 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 				sm1->num_details = 0;
 			}
 		}
-
 	}
+
+#ifndef NDEBUG
+	// make sure no lower detail submodels were actually made subsystems
+	for (const auto& pair : lower_to_higher_detail_submodels) {
+		auto lower_ss = deferredTasks.model_subsystems.find(pair.first);
+		if (lower_ss != deferredTasks.model_subsystems.end()) {
+			auto higher_ss = deferredTasks.model_subsystems.find(pair.second);
+			if (higher_ss != deferredTasks.model_subsystems.end()) {
+				auto lower_ss_name = lower_ss->first.c_str();
+				auto higher_ss_name = higher_ss->first.c_str();
+				Warning(LOCATION, "%s is a lower-detail submodel of %s, but both are configured as subsystems.  Subsystem properties should be removed from lower-detail "
+					"submodels, as this causes them to be recognized as extra subsystems.", lower_ss_name, higher_ss_name);
+			}
+		}
+	}
+#endif
 
 	TRACE_SCOPE(tracing::ModelParseAllBSPTrees);
 
@@ -3541,6 +3576,7 @@ int model_load(const  char* filename, int n_subsystems, model_subsystem* subsyst
 	model_set_subsys_path_nums(pm, n_subsystems, subsystems);
 	model_set_bay_path_nums(pm);
 
+	unpause_parse();
 	return pm->id;
 }
 
@@ -4710,7 +4746,7 @@ void model_instance_global_to_local_point(vec3d* outpnt, const vec3d* mpnt, cons
 	constexpr int preallocatedStackDepth = 5;
 	std::tuple<const matrix*, const vec3d*, const vec3d*> preallocatedStack[preallocatedStackDepth];
 
-	auto submodelStack = pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new std::tuple<const matrix*, const vec3d*, const vec3d*>[pm->submodel[submodel_num].depth];
+	auto submodelStack = submodel_num < 0 || pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new std::tuple<const matrix*, const vec3d*, const vec3d*>[pm->submodel[submodel_num].depth];
 	int stackCounter = 0;
 
 	int mn = submodel_num;
@@ -4747,7 +4783,7 @@ void model_instance_global_to_local_point(vec3d* outpnt, const vec3d* mpnt, cons
 
 	*outpnt = resultPnt;
 
-	if (pm->submodel[submodel_num].depth > preallocatedStackDepth)
+	if (submodel_num >= 0 && pm->submodel[submodel_num].depth > preallocatedStackDepth)
 		delete[] submodelStack;
 }
 
@@ -4763,7 +4799,7 @@ void model_instance_global_to_local_dir(vec3d* out_dir, const vec3d* in_dir, con
 	constexpr int preallocatedStackDepth = 5;
 	const matrix* preallocatedStack[preallocatedStackDepth];
 
-	auto submodelStack = pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new const matrix*[pm->submodel[submodel_num].depth];
+	auto submodelStack = submodel_num < 0 || pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new const matrix*[pm->submodel[submodel_num].depth];
 	int stackCounter = 0;
 
 	int mn = submodel_num;
@@ -4792,7 +4828,7 @@ void model_instance_global_to_local_dir(vec3d* out_dir, const vec3d* in_dir, con
 
 	*out_dir = resultDir;
 
-	if (pm->submodel[submodel_num].depth > preallocatedStackDepth)
+	if (submodel_num >= 0 && pm->submodel[submodel_num].depth > preallocatedStackDepth)
 		delete[] submodelStack;
 }
 
@@ -4802,7 +4838,7 @@ void model_instance_global_to_local_point_orient(vec3d* outpnt, matrix* outorien
 	constexpr int preallocatedStackDepth = 5;
 	std::tuple<const matrix*, const vec3d*, const vec3d*> preallocatedStack[preallocatedStackDepth];
 
-	auto submodelStack = pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new std::tuple<const matrix*, const vec3d*, const vec3d*>[pm->submodel[submodel_num].depth];
+	auto submodelStack = submodel_num < 0 || pm->submodel[submodel_num].depth <= preallocatedStackDepth ? preallocatedStack : new std::tuple<const matrix*, const vec3d*, const vec3d*>[pm->submodel[submodel_num].depth];
 	int stackCounter = 0;
 
 	int mn = submodel_num;
@@ -4837,7 +4873,7 @@ void model_instance_global_to_local_point_orient(vec3d* outpnt, matrix* outorien
 	*outpnt = resultPnt;
 	*outorient = resultMat;
 
-	if (pm->submodel[submodel_num].depth > preallocatedStackDepth)
+	if (submodel_num >= 0 && pm->submodel[submodel_num].depth > preallocatedStackDepth)
 		delete[] submodelStack;
 }
 
@@ -5126,7 +5162,7 @@ void model_do_intrinsic_motions(object *objp)
 	// we are handling a specific object
 	if (objp)
 	{
-		int model_instance_num = object_get_model_instance(objp);
+		int model_instance_num = object_get_model_instance_num(objp);
 		if (model_instance_num >= 0)
 		{
 			auto obj_it = Intrinsic_motions.find(model_instance_num);

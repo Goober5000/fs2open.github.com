@@ -35,6 +35,7 @@
 #include "pilotfile/pilotfile.h"
 #include "popup/popup.h"
 #include "popup/popupdead.h"
+#include "scripting/global_hooks.h"
 #include "sound/audiostr.h"
 #include "weapon/weapon.h"
 
@@ -238,6 +239,11 @@ static float Backup_sound_volume;
 static float Backup_music_volume;
 static float Backup_voice_volume;
 
+static int Backup_mouse_sensitivity;
+static int Backup_joy_sensitivity;
+static int Backup_joy_deadzone;
+static float Backup_gamma;
+
 static bool Backup_briefing_voice_enabled;
 static bool Backup_use_mouse_to_fly;
 
@@ -249,8 +255,11 @@ static sound_handle Voice_vol_handle = sound_handle::invalid();
 UI_TIMESTAMP Options_notify_stamp;
 char Options_notify_string[200];
 
-// called whenever accept is hit
-// do any processing, etc in here.
+// Called whenever the options menu state is accepted, either via 
+// clicking the accept button or when navigating to the Controls or HUD screen.
+// The reasoning is that clicking a button means 'accept and move on' if it leads to a new state.
+// This behavior has always been the case for the main options and detail tabs, 
+// and now it is the same for the multi tab, too. --wookieejedi 
 void options_accept();
 void options_force_button_frame(int n, int frame_num);
 
@@ -351,7 +360,7 @@ void options_detail_init();
 void options_detail_hide_stuff();
 void options_detail_unhide_stuff();
 void options_detail_do_frame();
-void options_detail_set_level(int level);
+void options_detail_set_level(DefaultDetailPreset preset);
 
 // text
 #define OPTIONS_NUM_TEXT				49
@@ -660,6 +669,11 @@ void options_change_tab(int n)
 	Tab = n;
 	options_tab_setup(1);
 	gamesnd_play_iface(InterfaceSounds::SCREEN_MODE_PRESSED);
+
+	// adds scripting hook for 'On Options Tab Changed' --wookieejedi
+	if (scripting::hooks::OnOptionsTabChanged->isActive()) {
+		scripting::hooks::OnOptionsTabChanged->run(scripting::hook_param_list(scripting::hook_param("TabNumber", 'i', Tab)));
+	}
 }
 
 void options_cancel_exit()
@@ -667,6 +681,11 @@ void options_cancel_exit()
 	snd_set_effects_volume(Backup_sound_volume);
 	event_music_set_volume(Backup_music_volume);
 	snd_set_voice_volume(Backup_voice_volume);
+
+	Mouse_sensitivity = Backup_mouse_sensitivity ;
+	Joy_sensitivity = Backup_joy_sensitivity ;
+	Joy_dead_zone_size = Backup_joy_deadzone * 5;
+	gr_set_gamma(Backup_gamma);
 
 	if(!(Game_mode & GM_MULTIPLAYER)){
 		Game_skill_level = Backup_skill_level;
@@ -682,6 +701,11 @@ void options_cancel_exit()
 	// We have to discard in game options here
 	if (Using_in_game_options) {
 		options::OptionsManager::instance()->discardChanges();
+	}
+
+	// adds scripting hook for 'On Options Menu Closed' --wookieejedi
+	if (scripting::hooks::OnOptionsMenuClosed->isActive()) {
+		scripting::hooks::OnOptionsMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', false)));
 	}
 
 	gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
@@ -743,11 +767,14 @@ void options_button_pressed(int n)
 					// auto-accept mission outcome before quitting
 					debrief_maybe_auto_accept();
 				}
+				options_accept();
 				gameseq_post_event(GS_EVENT_QUIT_GAME);
+				return;
 			}
 			break;
 
 		case CONTROL_CONFIG_BUTTON:
+			options_accept();
 			gamesnd_play_iface(InterfaceSounds::SWITCH_SCREENS);
 			gameseq_post_event(GS_EVENT_CONTROL_CONFIG);
 			break;				
@@ -759,72 +786,74 @@ void options_button_pressed(int n)
 				options_add_notify(XSTR( "Cannot use HUD config when an observer!", 375));
 				break;
 			}
-
+			options_accept();
 			gamesnd_play_iface(InterfaceSounds::SWITCH_SCREENS);
 			gameseq_post_event(GS_EVENT_HUD_CONFIG);
 			break;
 
 		case ACCEPT_BUTTON:
 			options_accept();
+			gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
+			gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
 			break;		
 
 			// BEGIN - detail level tab buttons
 
 			// Target View Rendering is currently not handled by in-game options, assumes "On"
 		case HUD_TARGETVIEW_RENDER_ON:
-			Detail.targetview_model = 1;
+			Detail.targetview_model = true;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case HUD_TARGETVIEW_RENDER_OFF:
-			Detail.targetview_model = 0;
+			Detail.targetview_model = false;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 			// Planets is currently not handled by in-game options, assumes "On"
 		case PLANETS_ON:
-			Detail.planets_suns = 1;
+			Detail.planets_suns = true;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case PLANETS_OFF:
-			Detail.planets_suns = 0;
+			Detail.planets_suns = false;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 			// Weapon extras is currently not handled by in-game options, assumes "On"
 		case WEAPON_EXTRAS_ON:
-			Detail.weapon_extras = 1;
+			Detail.weapon_extras = true;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case WEAPON_EXTRAS_OFF:
-			Detail.weapon_extras = 0;
+			Detail.weapon_extras = false;
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;		
 
 		case LOW_DETAIL_N:
-			options_detail_set_level(0);
+			options_detail_set_level(DefaultDetailPreset::Low);
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case MEDIUM_DETAIL_N:
-			options_detail_set_level(1);
+			options_detail_set_level(DefaultDetailPreset::Medium);
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case HIGH_DETAIL_N:
-			options_detail_set_level(2);
+			options_detail_set_level(DefaultDetailPreset::High);
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case VERY_HIGH_DETAIL_N:
-			options_detail_set_level(3);
+			options_detail_set_level(DefaultDetailPreset::VeryHigh);
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 
 		case CUSTOM_DETAIL_N:
-			options_detail_set_level(-1);
+			options_detail_set_level(DefaultDetailPreset::Custom);
 			gamesnd_play_iface(InterfaceSounds::USER_SELECT);
 			break;
 			// END - detail level tab buttons
@@ -933,12 +962,17 @@ void options_accept()
 {
 	// apply the selected multiplayer options
 	if ( Options_multi_inited ) {
-		// if we've failed to provide a PXO password or username but have turned on PXO, we don't want to quit
-		if (!options_multi_accept()) {
-			gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
-			popup(PF_USE_AFFIRMATIVE_ICON, 1, POPUP_OK, "PXO is selected but password or username is missing");
-			return;
-		}
+		// commenting out old method, as we are using the new streamlined method
+		// which is justified via comment in the function itself
+		// --wookieejedi and confirmed with taylor
+
+		//if (!options_multi_accept()) {
+			//gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
+			//popup(PF_USE_AFFIRMATIVE_ICON, 1, POPUP_OK, "PXO is selected but password or username is missing");
+			//return false;
+		//}
+
+		options_multi_accept();
 	}
 
 	// We have to save in game options here
@@ -959,8 +993,13 @@ void options_accept()
 	// apply other options (display options, etc)
 	// note: return in here (and play failed sound) if they can't accept yet for some reason
 
-	gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
-	gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
+	// run posting events outside this function, 
+	// since they will vary depending on what button was clicked --wookieejedi
+
+	// adds scripting hook for 'On Options Menu Closed' --wookieejedi
+	if (scripting::hooks::OnOptionsMenuClosed->isActive()) {
+		scripting::hooks::OnOptionsMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', true)));
+	}
 }
 
 void options_load_background_and_mask(int tab)
@@ -1043,6 +1082,11 @@ void options_menu_init()
 	Backup_voice_volume = Master_voice_volume;
 	Backup_briefing_voice_enabled = Briefing_voice_enabled;
 	Backup_use_mouse_to_fly = Use_mouse_to_fly;
+
+	Backup_mouse_sensitivity = Mouse_sensitivity;
+	Backup_joy_sensitivity = Joy_sensitivity;
+	Backup_joy_deadzone = Joy_dead_zone_size / 5;
+	Backup_gamma = Gr_gamma;
 	
 	// create slider	
 	for ( i = 0; i < NUM_OPTIONS_SLIDERS; i++ ) {
@@ -1218,26 +1262,41 @@ void options_menu_do_frame(float  /*frametime*/)
 
 		case KEY_C:
 			if (Tab == OPTIONS_TAB) {
+				options_accept();
 				gamesnd_play_iface(InterfaceSounds::SWITCH_SCREENS);
 				gameseq_post_event(GS_EVENT_CONTROL_CONFIG);
+				return;
 			}
 
 			break;
 
 		case KEY_H:
 			if (Tab == OPTIONS_TAB) {
+				options_accept();
 				gamesnd_play_iface(InterfaceSounds::SWITCH_SCREENS);
 				gameseq_post_event(GS_EVENT_HUD_CONFIG);
+				return;
 			}
 
 			break;
 
 		case KEY_ESC:
-			options_cancel_exit();
+			if (escape_key_behavior_in_options == EscapeKeyBehaviorInOptions::SAVE) {
+				options_accept();
+				gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
+				gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
+				return;
+			} else {
+				options_cancel_exit();
+				return;
+			}
 			break;
 
 		case KEY_CTRLED | KEY_ENTER:
 			options_accept();
+			gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
+			gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
+			return;
 			break;
 
 		case KEY_DELETE:
@@ -1250,10 +1309,12 @@ void options_menu_do_frame(float  /*frametime*/)
 			if (Using_in_game_options) {
 				// Going into F3 Options needs to either discard or save the changes made here. 
 				// There's an argument to be made for both but I feel like saving is the better choice - Mjn
-				options::OptionsManager::instance()->persistChanges();
-
+				// This is also consistent with the protocols for saving options 
+				// when navigating to the Controls or HUD screens --wookieejedi
+				options_accept();
 				gamesnd_play_iface(InterfaceSounds::IFACE_MOUSE_CLICK);
 				gameseq_post_event(GS_EVENT_INGAME_OPTIONS);
+				return;
 			}
 			break;
 	}	
@@ -1529,7 +1590,7 @@ void options_detail_do_frame()
 		options_force_button_frame(HUD_TARGETVIEW_RENDER_ON, 0);
 	}
 
-	if ( Detail.planets_suns == 1 ) {
+	if ( Detail.planets_suns) {
 		options_force_button_frame(PLANETS_ON, 2);
 		options_force_button_frame(PLANETS_OFF, 0);
 	} else {
@@ -1545,14 +1606,9 @@ void options_detail_do_frame()
 		options_force_button_frame(WEAPON_EXTRAS_ON, 0);
 	}	
 
-	int current_detail;
+	DefaultDetailPreset current_preset = (Detail.setting != DefaultDetailPreset::Custom) ? current_detail_preset() : DefaultDetailPreset::Custom;
 
-	if ( Detail.setting >= 0 ) {
-		current_detail = current_detail_level();
-		Detail.setting = current_detail;
-	} else {
-		current_detail = -1;
-	}
+	Detail.setting = current_preset;
 
 	options_force_button_frame(LOW_DETAIL_N, 0);
 	options_force_button_frame(MEDIUM_DETAIL_N, 0);
@@ -1560,29 +1616,32 @@ void options_detail_do_frame()
 	options_force_button_frame(VERY_HIGH_DETAIL_N, 0);
 	options_force_button_frame(CUSTOM_DETAIL_N, 0);
 
-	switch ( current_detail ) {
-	case -1:
+	switch (current_preset) {
+	case DefaultDetailPreset::Custom:
 		options_force_button_frame(CUSTOM_DETAIL_N, 2);
 		break;
-	case 0:
+	case DefaultDetailPreset::Low:
 		options_force_button_frame(LOW_DETAIL_N, 2);
 		break;
-	case 1:
+	case DefaultDetailPreset::Medium:
 		options_force_button_frame(MEDIUM_DETAIL_N, 2);
 		break;
-	case 2:
+	case DefaultDetailPreset::High:
 		options_force_button_frame(HIGH_DETAIL_N, 2);
 		break;
-	case 3:
+	case DefaultDetailPreset::VeryHigh:
 		options_force_button_frame(VERY_HIGH_DETAIL_N, 2);
+		break;
+	default:
+		Assertion(false, "Invalid preset called for in Options menu");
 		break;
 	}
 }
 
 // Set all the detail settings to a predefined level
-void options_detail_set_level(int level)
+void options_detail_set_level(DefaultDetailPreset preset)
 {
-	detail_level_set(level);
+	detail_level_set(preset);
 	options_detail_synch_sliders();
 }
 

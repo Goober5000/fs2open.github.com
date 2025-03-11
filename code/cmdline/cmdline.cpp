@@ -417,8 +417,10 @@ int Cmdline_no_enhanced_sound = 0;
 
 // MOD related
 cmdline_parm mod_arg("-mod", "List of folders to overwrite/add-to the default data", AT_STRING, true);	// Cmdline_mod  -- DTP modsupport
+cmdline_parm campaign_arg("-campaign", "Set current campaign", AT_STRING);	// Cmdline_campaign
 
 char *Cmdline_mod = NULL; //DTP for mod argument
+char *Cmdline_campaign = nullptr; // for campaign argument
 
 // Multiplayer/Network related
 cmdline_parm almission_arg("-almission", "Autoload multiplayer mission", AT_STRING);		// Cmdline_almission  -- DTP for autoload Multi mission
@@ -547,7 +549,7 @@ int Cmdline_show_stats = 0;
 int Cmdline_save_render_targets = 0;
 int Cmdline_window = 0;
 int Cmdline_fullscreen_window = 0;
-tl::optional<std::pair<uint16_t, uint16_t>>Cmdline_window_res = tl::nullopt;
+std::optional<std::pair<uint16_t, uint16_t>>Cmdline_window_res = std::nullopt;
 char *Cmdline_res = 0;
 char *Cmdline_center_res = 0;
 int Cmdline_verify_vps = 0;
@@ -1874,6 +1876,14 @@ bool SetCmdlineParams()
 		Cmdline_mod = modlist;
 	}
 
+	if(campaign_arg.found()) {
+		Cmdline_campaign = campaign_arg.str();
+
+		// strip off blank space if it's there
+		if ( Cmdline_campaign[strlen(Cmdline_campaign)-1] == ' ' ) {
+			Cmdline_campaign[strlen(Cmdline_campaign)-1] = '\0';
+		}
+	}
 
 	if (fps_arg.found())
 	{

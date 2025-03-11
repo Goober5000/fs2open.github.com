@@ -237,6 +237,37 @@ void parse_hud_gauges_tbl(const char *filename)
 		read_file_text(filename, CF_TYPE_TABLES);
 		reset_parse();
 
+		if (optional_string("#HUD Config Settings")) {
+			if (optional_string("$Head Animation:")) {
+				stuff_string(HC_head_anim_filename, F_NAME);
+			}
+
+			if (optional_string("$Shield Gauge Ship:")) {
+				SCP_string temp;
+				stuff_string(temp, F_NAME);
+
+				bool found = false;
+
+				for (auto& ship : Ship_info) {
+					if (!stricmp(ship.name, temp.c_str())) {
+						HC_shield_gauge_ship = ship.name;
+						found = true;
+						break;
+					}
+				}
+
+				if (!found) {
+					Warning(LOCATION, "Shield gauge ship \"%s\" not found in ships.tbl!", temp.c_str());
+				}
+			}
+
+			if (optional_string("$Example Wing Names:")) {
+				stuff_string_list(HC_wingam_gauge_status_names, MAX_SQUADRON_WINGS);
+			}
+		}
+
+		optional_string("#HUD Global Settings");
+
 		if (optional_string("$Load Retail Configuration:")) {
 			stuff_boolean(&Hud_retail);
 		}
@@ -5520,7 +5551,13 @@ void load_gauge_scripting(gauge_settings* settings) {
 	SCP_string name;
 	stuff_string(name, F_NAME);
 
+	bool active_by_default = true;
+	if (optional_string("Active by default:")) {
+		stuff_boolean(&active_by_default);
+	}
+
 	hud_gauge->initName(std::move(name));
+	hud_gauge->initRenderStatus(active_by_default);
 
 	gauge_assign_common(settings, std::move(hud_gauge));
 }

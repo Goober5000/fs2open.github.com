@@ -43,7 +43,7 @@ namespace AI {
 		Dockee_index_valid,	// when set, index field for dockee is valid
 		Goal_on_hold,		// when set, this goal cannot currently be satisfied, although it could be in the future
 		Subsys_needs_fixup,	// when set, the subsystem index (for a destroy subsystem goal) is invalid and must be gotten from the subsys name stored in docker.name field!!
-		Goal_override,		// paired with AIG_TYPE_DYNAMIC to mean this goal overrides any other goal
+		Goal_override,		// paired with ai_goal_type::DYNAMIC to mean this goal overrides any other goal
 		Purge,				// purge this goal next time we process
 		Goals_purged,		// this goal has already caused other goals to get purged
 		Depart_sound_played,// Goober5000 - replacement for AL's hack ;)
@@ -141,10 +141,11 @@ namespace AI {
 		All_nonshielded_ships_can_manage_ets,
 		Fightercraft_nonshielded_ships_can_manage_ets,
 		Ships_playing_dead_dont_manage_ets,
-		Better_collision_avoidance,
+		Better_combat_collision_avoidance,
+		Better_guard_collision_avoidance,
 		Require_exact_los,
 		Improved_missile_avoidance,
-		Friendlies_use_countermeasure_firechance,
+		Unify_usage_countermeasure_firechance,
 		Improved_subsystem_attack_pathing,
 		Fixed_ship_weapon_collision,
 		No_shield_damage_from_ship_collisions,
@@ -169,6 +170,9 @@ namespace AI {
 		Debris_respects_big_damage,
 		Dont_limit_change_in_speed_due_to_physics_whack,
 		Guards_ignore_protected_attackers,
+		Standard_strafe_used_more,
+		Unify_usage_ai_shield_manage_delay,
+		Disable_ai_transferring_energy,
 
 		NUM_VALUES
 	};

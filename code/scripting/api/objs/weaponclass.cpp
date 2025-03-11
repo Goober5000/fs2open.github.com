@@ -9,6 +9,7 @@
 #include "mission/missioncampaign.h"
 #include "missionui/missionscreencommon.h"
 #include "model/modelrender.h"
+#include "utils/string_utils.h"
 
 namespace scripting {
 namespace api {
@@ -134,17 +135,11 @@ ADE_VIRTVAR(Description, l_Weaponclass, "string", "Weapon class description stri
 	weapon_info *wip = &Weapon_info[idx];
 
 	if(ADE_SETTING_VAR) {
-		vm_free(wip->desc);
-		if(s != nullptr) {
-			wip->desc = (char*)vm_malloc(strlen(s)+1);
-			strcpy(wip->desc, s);
-		} else {
-			wip->desc = nullptr;
-		}
+		wip->desc = util::unique_copy(s, true);
 	}
 
 	if(wip->desc != nullptr)
-		return ade_set_args(L, "s", wip->desc);
+		return ade_set_args(L, "s", wip->desc.get());
 	else
 		return ade_set_args(L, "s", "");
 }
@@ -234,17 +229,11 @@ ADE_VIRTVAR(TechDescription, l_Weaponclass, "string", "Weapon class tech descrip
 	weapon_info *wip = &Weapon_info[idx];
 
 	if(ADE_SETTING_VAR) {
-		vm_free(wip->tech_desc);
-		if(s != nullptr) {
-			wip->tech_desc = (char*)vm_malloc(strlen(s)+1);
-			strcpy(wip->tech_desc, s);
-		} else {
-			wip->tech_desc = nullptr;
-		}
+		wip->tech_desc = util::unique_copy(s, true);
 	}
 
 	if(wip->tech_desc != nullptr)
-		return ade_set_args(L, "s", wip->tech_desc);
+		return ade_set_args(L, "s", wip->tech_desc.get());
 	else
 		return ade_set_args(L, "s", "");
 }
@@ -822,7 +811,7 @@ ADE_VIRTVAR(heatEffectiveness,
 	"The heat effectiveness or -1 on error")
 {
 	int idx;
-	if (!ade_get_args(L, "o|f", l_Weaponclass.Get(&idx)))
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
 		return ade_set_args(L, "f", -1.0f);
 
 	if (idx < 0 || idx >= weapon_info_size())
@@ -830,7 +819,7 @@ ADE_VIRTVAR(heatEffectiveness,
 
 	weapon_info* info = &Weapon_info[idx];
 
-	if (info->wi_flags[Weapon::Info_Flags::Cmeasure])
+	if (!info->wi_flags[Weapon::Info_Flags::Cmeasure])
 		return ade_set_args(L, "f", -1.0f);
 
 	if (ADE_SETTING_VAR) {
@@ -848,7 +837,7 @@ ADE_VIRTVAR(aspectEffectiveness,
 	"The aspect effectiveness or -1 on error")
 {
 	int idx;
-	if (!ade_get_args(L, "o|f", l_Weaponclass.Get(&idx)))
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
 		return ade_set_args(L, "f", -1.0f);
 
 	if (idx < 0 || idx >= weapon_info_size())
@@ -856,7 +845,7 @@ ADE_VIRTVAR(aspectEffectiveness,
 
 	weapon_info* info = &Weapon_info[idx];
 
-	if (info->wi_flags[Weapon::Info_Flags::Cmeasure])
+	if (!info->wi_flags[Weapon::Info_Flags::Cmeasure])
 		return ade_set_args(L, "f", -1.0f);
 
 	if (ADE_SETTING_VAR) {
@@ -874,7 +863,7 @@ ADE_VIRTVAR(effectiveRange,
 	"The effective range or -1 on error")
 {
 	int idx;
-	if (!ade_get_args(L, "o|f", l_Weaponclass.Get(&idx)))
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
 		return ade_set_args(L, "f", -1.0f);
 
 	if (idx < 0 || idx >= weapon_info_size())
@@ -882,7 +871,7 @@ ADE_VIRTVAR(effectiveRange,
 
 	weapon_info* info = &Weapon_info[idx];
 
-	if (info->wi_flags[Weapon::Info_Flags::Cmeasure])
+	if (!info->wi_flags[Weapon::Info_Flags::Cmeasure])
 		return ade_set_args(L, "f", -1.0f);
 
 	if (ADE_SETTING_VAR) {
@@ -900,7 +889,7 @@ ADE_VIRTVAR(pulseInterval,
 	"The pulse interval or -1 on error")
 {
 	int idx;
-	if (!ade_get_args(L, "o|f", l_Weaponclass.Get(&idx)))
+	if (!ade_get_args(L, "o", l_Weaponclass.Get(&idx)))
 		return ade_set_args(L, "f", -1.0f);
 
 	if (idx < 0 || idx >= weapon_info_size())
@@ -908,7 +897,7 @@ ADE_VIRTVAR(pulseInterval,
 
 	weapon_info* info = &Weapon_info[idx];
 
-	if (info->wi_flags[Weapon::Info_Flags::Cmeasure])
+	if (!info->wi_flags[Weapon::Info_Flags::Cmeasure])
 		return ade_set_args(L, "f", -1.0f);
 
 	if (ADE_SETTING_VAR) {
@@ -1151,9 +1140,9 @@ ADE_FUNC(renderSelectModel,
 
 	int modelNum;
 	if (VALID_FNAME(wip->tech_model)) {
-		modelNum = model_load(wip->tech_model, 0, nullptr, 0);
+		modelNum = model_load(wip->tech_model, nullptr, ErrorType::WARNING);
 	} else if (wip->render_type != WRT_LASER) {
-		modelNum = model_load(wip->pofbitmap_name, 0, nullptr);
+		modelNum = model_load(wip->pofbitmap_name, nullptr, ErrorType::FATAL_ERROR);
 	} else {
 		return ade_set_args(L, "b", false);
 	}

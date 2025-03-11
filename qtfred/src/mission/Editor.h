@@ -236,7 +236,7 @@ class Editor : public QObject {
 	int invalidate_references(const char* name, sexp_ref_type type);
 
 	// DA 1/7/99 These ship names are not variables
-	int rename_ship(int ship, char* name);
+	int rename_ship(int ship, const char* name);
 
 	void delete_reinforcement(int num);
 
@@ -295,7 +295,7 @@ class Editor : public QObject {
 
 	int global_error_check_player_wings(int multi);
 
-	const char* get_order_name(int order);
+	static const char* get_order_name(ai_goal_mode order);
 
 	void updateStartingWingLoadoutUseCounts();
 };

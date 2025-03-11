@@ -25,6 +25,7 @@
 #include "asteroid/asteroid.h"
 #include "cfile/cfile.h"
 #include "gamesnd/eventmusic.h"
+#include "globalincs/alphacolors.h"
 #include "globalincs/linklist.h"
 #include "globalincs/version.h"
 #include "hud/hudsquadmsg.h"
@@ -1134,6 +1135,13 @@ int CFred_mission_save::save_briefing()
 				}
 			}
 
+			if (!gr_compare_color_values(bs->grid_color, Color_briefing_grid)) {
+				if (Mission_save_format != FSO_FORMAT_RETAIL) {
+					fout("\n$grid_color:");
+					fout("(%d, %d, %d, %d)", bs->grid_color.red, bs->grid_color.green, bs->grid_color.blue, bs->grid_color.alpha);
+				}
+			}
+
 			required_string_fred("$num_lines:");
 			parse_comments();
 			fout(" %d", bs->num_lines);
@@ -1390,6 +1398,19 @@ int CFred_mission_save::save_campaign_file(const char *pathname)
 		} else {
 			// save Bastion flag properly
 			fout(" %d", flags_to_save | ((Campaign.missions[m].main_hall != "") ? CMISSION_FLAG_BASTION : 0));
+		}
+
+		if (!Campaign.missions[m].substitute_main_hall.empty()) {
+			fso_comment_push(";;FSO 3.7.2;;");
+			if (optional_string_fred("+Substitute Main Hall:")) {
+				parse_comments(1);
+				fout(" %s", Campaign.missions[m].substitute_main_hall.c_str());
+			} else {
+				fout_version("\n+Substitute Main Hall: %s", Campaign.missions[m].substitute_main_hall.c_str());
+			}
+			fso_comment_pop();
+		} else {
+			bypass_comment(";;FSO 3.7.2;; +Substitute Main Hall:");
 		}
 
 		if (Campaign.missions[m].debrief_persona_index > 0) {
@@ -3150,7 +3171,16 @@ void CFred_mission_save::save_mission_internal(const char *pathname)
 	// Additional incremental version update for some features
 	auto version_23_3 = gameversion::version(23, 3);
 	auto version_24_1 = gameversion::version(24, 1);
-	if (MISSION_VERSION >= version_24_1)
+	auto version_24_3 = gameversion::version(24, 3);
+	if (MISSION_VERSION >= version_24_3)
+	{
+		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 24.3, the check_for_24_3_data(), the check_for_24_1_data() and check_for_23_3_data() code can be removed");
+	}
+	else if (check_for_24_3_data())
+	{
+		The_mission.required_fso_version = version_24_3;
+	}
+	else if (MISSION_VERSION >= version_24_1)
 	{
 		Warning(LOCATION, "Notify an SCP coder: now that the required mission version is at least 24.1, the check_for_24_1_data() and check_for_23_3_data() code can be removed");
 	}

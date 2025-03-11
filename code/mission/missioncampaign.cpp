@@ -540,15 +540,21 @@ int mission_campaign_load(const char* filename, const char* full_path, player* p
 			}
 
 			// Goober5000 - substitute main hall (like substitute music)
+			cm->substitute_main_hall = "";
 			if (optional_string("+Substitute Main Hall:")) {
 				stuff_string(temp, F_RAW, 32);
+				cm->substitute_main_hall = temp;
 
-				// see if this main hall exists
-				main_hall_defines *mhd = main_hall_get_pointer(temp);
-				if (mhd != NULL) {
-					cm->main_hall = temp;
-				} else {
-					mprintf(("Substitute main hall '%s' not found\n", temp));
+				// if we're running FRED, keep the halls separate (so we can save the campaign file),
+				// but if we're running FS, replace the main hall with the substitute right now
+				if (!Fred_running) {
+					// see if this main hall exists
+					main_hall_defines* mhd = main_hall_get_pointer(temp);
+					if (mhd != nullptr) {
+						cm->main_hall = temp;
+					} else {
+						mprintf(("Substitute main hall '%s' not found\n", temp));
+					}
 				}
 			}
 
@@ -1228,6 +1234,7 @@ void mission_campaign_clear()
 		Campaign.missions[i].pos = 0;
 		Campaign.missions[i].flags = 0;
 		Campaign.missions[i].main_hall = "";
+		Campaign.missions[i].substitute_main_hall = "";
 		Campaign.missions[i].debrief_persona_index = 0;
 
 		Campaign.missions[i].stats.init();
@@ -1557,13 +1564,46 @@ int mission_load_up_campaign(bool fall_back_from_current)
 	auto pl = Player;
 
 	// find best campaign to use:
-	//   1) last used
-	//   2) builtin
-	//   3) anything else
+	//   1) cmdline
+	//   2) last used
+	//   3) builtin
+	//   4) anything else
 	// Note that in each step we only fall back when the error is benign, e.g. ignored or missing;
 	// if there's some other real error with the campaign file, we report it.
 	// Also note that if we *have* a current campaign, we shouldn't fall back *at all*, lest we repeatedly
 	// reset what the current campaign is, *unless* we are starting a brand new session or loading a new pilot.
+
+	// cmdline...
+	if ( Cmdline_campaign != nullptr && strlen(Cmdline_campaign) ) {
+		char* campaign = Cmdline_campaign;
+
+		// Clear cmdline value
+		// * Only set campaign once from cmdline.
+		// * Prevent subsequent load failures.
+		// * On success, campaign becomes "last used".
+		Cmdline_campaign = nullptr;
+
+		bool has_last_used_campaign = strlen(pl->current_campaign) > 0;
+		bool campaign_already_set = has_last_used_campaign
+			&& (stricmp(campaign, pl->current_campaign) == 0);
+
+		if (has_last_used_campaign) {
+			mprintf(("Current campaign is '%s'\n", pl->current_campaign));
+		}
+
+		if (!campaign_already_set) {
+			rc = mission_campaign_load(campaign, nullptr, pl);
+
+			if (rc == 0) {
+				// update pilot with the new current campaign (becomes "last used")
+				strcpy_s(pl->current_campaign, Campaign.filename);
+				mprintf(("Set current campaign to '%s'\n", campaign));
+				return rc;
+			} else {
+				mprintf(("Failed to set current campaign to '%s'\n", campaign));
+			}
+		}
+	}
 
 	// last used...
 	if ( strlen(pl->current_campaign) ) {

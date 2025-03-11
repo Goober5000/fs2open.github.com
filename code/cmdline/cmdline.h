@@ -12,7 +12,7 @@
 #ifndef FS_CMDLINE_HEADER_FILE
 #define FS_CMDLINE_HEADER_FILE
 
-#include <tl/optional.hpp>
+#include <optional>
 
 int parse_cmdline(int argc, char *argv[]);
 
@@ -46,7 +46,7 @@ extern int Cmdline_use_last_pilot;
 extern int Cmdline_window;
 extern int Cmdline_fullscreen_window;
 extern char *Cmdline_res;
-extern tl::optional<std::pair<uint16_t, uint16_t>>Cmdline_window_res;
+extern std::optional<std::pair<uint16_t, uint16_t>>Cmdline_window_res;
 extern char *Cmdline_center_res;
 
 
@@ -92,6 +92,7 @@ extern int Cmdline_no_enhanced_sound;
 
 // MOD related
 extern char *Cmdline_mod;	 // DTP for mod support
+extern char *Cmdline_campaign;	 // for campaign support
 // Multiplayer/Network related
 extern char *Cmdline_almission;	// DTP for autoload mission (for multi only)
 extern int Cmdline_ingamejoin;

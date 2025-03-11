@@ -3,7 +3,7 @@
 #include "globalincs/pstypes.h"
 #include "libs/jansson.h"
 #include <memory>
-#include <tl/optional.hpp>
+#include <optional>
 
 namespace options {
 
@@ -19,6 +19,9 @@ class OptionsManager {
 
 	SCP_unordered_map<SCP_string, const OptionBase*> _optionsMapping;
 
+	// Enforced options are hidden from the player and do not load values from user settings
+	SCP_unordered_set<SCP_string> _enforcedOptions;
+
 	SCP_vector<std::shared_ptr<const OptionBase>> _options;
 	bool _optionsSorted = false;
 
@@ -27,7 +30,7 @@ class OptionsManager {
 
 	~OptionsManager();
 
-	tl::optional<std::unique_ptr<json_t>> getValueFromConfig(const SCP_string& key) const;
+	std::optional<std::unique_ptr<json_t>> getValueFromConfig(const SCP_string& key) const;
 
 	void setConfigValue(const SCP_string& key, std::unique_ptr<json_t>&& value);
 
@@ -38,6 +41,12 @@ class OptionsManager {
 	void removeOption(const std::shared_ptr<const OptionBase>& option);
 
 	const OptionBase* getOptionByKey(SCP_string name);
+
+	void enforceOption(const SCP_string& key);
+
+	void unenforceOption(const SCP_string& key);
+
+	bool isOptionEnforced(const SCP_string& key) const;
 
 	const SCP_vector<std::shared_ptr<const options::OptionBase>>& getOptions();
 

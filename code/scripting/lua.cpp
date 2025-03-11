@@ -77,6 +77,7 @@ extern "C" {
 #include "scripting/api/libs/cfile.h"
 #include "scripting/api/libs/controls.h"
 #include "scripting/api/libs/engine.h"
+#include "scripting/api/libs/globals.h"
 #include "scripting/api/libs/graphics.h"
 #include "scripting/api/libs/hookvars.h"
 #include "scripting/api/libs/hud.h"
@@ -270,7 +271,7 @@ static bool sort_table_entries(const ade_table_entry* left, const ade_table_entr
 		return false;
 	}
 
-	return lcase_lessthan(leftCmp, rightCmp);
+	return stricmp(leftCmp, rightCmp) < 0;
 }
 
 static bool sort_doc_entries(const ade_table_entry* left, const ade_table_entry* right) {

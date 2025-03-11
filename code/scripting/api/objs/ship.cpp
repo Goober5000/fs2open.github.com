@@ -32,9 +32,11 @@
 #include "object/objectdock.h"
 #include "parse/parselo.h"
 #include "playerman/player.h"
+#include "scripting/api/objs/message.h"
 #include "ship/ship.h"
 #include "ship/shipfx.h"
 #include "ship/shiphit.h"
+#include "waypoint.h"
 
 extern void ship_reset_disabled_physics(object *objp, int ship_class);
 extern bool sexp_check_flag_arrays(const char *flag_name, Object::Object_Flags &object_flag, Ship::Ship_Flags &ship_flags, Mission::Parse_Object_Flags &parse_obj_flag, AI::AI_Flags &ai_flag);
@@ -262,7 +264,7 @@ ADE_VIRTVAR(ImpactDamageClass, l_Ship, "string", "Current Impact Damage class", 
 	int damage_index;
 
 	if (ADE_SETTING_VAR && s != nullptr) {
-		damage_index = find_item_with_name(Damage_types, s);
+		damage_index = find_item_with_string(Damage_types, &DamageTypeStruct::name, s);
 		shipp->collision_damage_type_idx = damage_index;
 	} else {
 		damage_index = shipp->collision_damage_type_idx;
@@ -831,7 +833,7 @@ ADE_VIRTVAR(Team, l_Ship, "team", "Ship's team", "team", "Ship team, or invalid 
 	return ade_set_args(L, "o", l_Team.Set(shipp->team));
 }
 
-ADE_VIRTVAR(PersonaIndex, l_Ship, "number", "Persona index", "number", "The index of the persona from messages.tbl, 0 if no persona is set")
+ADE_VIRTVAR_DEPRECATED(PersonaIndex, l_Ship, "number", "Persona index", "number", "The index of the persona from messages.tbl, 0 if no persona is set", gameversion::version(25, 0), "Deprecated in favor of Persona")
 {
 	object_h *objh;
 	int p_index = -1;
@@ -849,6 +851,28 @@ ADE_VIRTVAR(PersonaIndex, l_Ship, "number", "Persona index", "number", "The inde
 	return ade_set_args(L, "i", shipp->persona_index + 1);
 }
 
+ADE_VIRTVAR(Persona, l_Ship, "persona", "The persona of the ship, if any", "persona", "Persona handle or invalid handle on error")
+{
+	object_h* objh;
+	int idx = -1;
+	if (!ade_get_args(L, "o|o", l_Ship.GetPtr(&objh), l_Persona.Get(&idx)))
+		return ade_set_error(L, "o", l_Persona.Set(-1));
+
+	if (!objh->isValid())
+		return ade_set_error(L, "o", l_Persona.Set(-1));
+
+	ship* shipp = &Ships[objh->objp()->instance];
+
+	if (ADE_SETTING_VAR && idx > -1) {
+		shipp->persona_index = idx;
+	}
+
+	if (!SCP_vector_inbounds(Personas, shipp->persona_index))
+		return ade_set_args(L, "o", l_Persona.Set(-1));
+	else
+		return ade_set_args(L, "o", l_Persona.Set(shipp->persona_index));
+}
+
 ADE_VIRTVAR(Textures, l_Ship, "modelinstancetextures", "Gets ship textures", "modelinstancetextures", "Ship textures, or invalid shiptextures handle if ship handle is invalid")
 {
 	object_h *sh = nullptr;
@@ -862,12 +886,8 @@ ADE_VIRTVAR(Textures, l_Ship, "modelinstancetextures", "Gets ship textures", "mo
 	polymodel_instance *dest = model_get_instance(Ships[dh->objp()->instance].model_instance_num);
 
 	if(ADE_SETTING_VAR && sh && sh->isValid()) {
-		polymodel_instance *src = model_get_instance(Ships[sh->objp()->instance].model_instance_num);
-
-		if (src->texture_replace != nullptr)
-		{
-			dest->texture_replace = std::make_shared<model_texture_replace>(*src->texture_replace);
-		}
+		dest->texture_replace = model_get_instance(Ships[sh->objp()->instance].model_instance_num)->texture_replace;
+		
 	}
 
 	return ade_set_args(L, "o", l_ModelInstanceTextures.Set(modelinstance_h(dest)));
@@ -1097,6 +1117,55 @@ ADE_VIRTVAR(WaypointSpeedCap, l_Ship, "number", "Waypoint speed cap", "number", 
 	return ade_set_args(L, "i", aip->waypoint_speed_cap);
 }
 
+int waypoint_getter(lua_State* L, auto predicate(lua_State*, ai_info*)->int)
+{
+	object_h* objh;
+	int speed_cap = -1;
+	if (!ade_get_args(L, "o|i", l_Ship.GetPtr(&objh), &speed_cap))
+		return ADE_RETURN_NIL;
+
+	if (!objh->isValid())
+		return ADE_RETURN_NIL;
+
+	ship* shipp = &Ships[objh->objp()->instance];
+	ai_info* aip = &Ai_info[shipp->ai_index];
+
+	return predicate(L, aip);
+}
+
+ADE_FUNC(getWaypointList, l_Ship, nullptr, "Waypoint list", "waypointlist", "The current waypoint path the ship is following, if any; or nil if the ship handle is invalid.  To set the waypoint list, use ship orders.")
+{
+	return waypoint_getter(L, [](lua_State* _L, ai_info* aip)
+		{
+			if (aip->mode == AIM_WAYPOINTS)
+				return ade_set_args(_L, "o", l_WaypointList.Set(waypointlist_h(aip->wp_list_index)));
+			else
+				return ade_set_args(_L, "o", l_WaypointList.Set(waypointlist_h()));
+		});
+}
+
+ADE_FUNC(getWaypointIndex, l_Ship, nullptr, "Waypoint index", "number", "The current waypoint index the ship is moving towards, if any; or nil if the ship handle is invalid.  To set the waypoint index, use ship orders.")
+{
+	return waypoint_getter(L, [](lua_State* _L, ai_info* aip)
+		{
+			if (aip->mode == AIM_WAYPOINTS)
+				return ade_set_args(_L, "i", aip->wp_index + 1);
+			else
+				return ade_set_args(_L, "i", 0);
+		});
+}
+
+ADE_FUNC(getWaypointsInReverse, l_Ship, nullptr, "Whether the waypoint path is being traveled in reverse", "boolean", "Whether the current waypoint path, if any, is being traveled in reverse; or nil if the ship handle is invalid.  To set this flag, use ship orders.")
+{
+	return waypoint_getter(L, [](lua_State* _L, ai_info* aip)
+		{
+			if (aip->mode == AIM_WAYPOINTS)
+				return ade_set_args(_L, "b", (aip->wp_flags & WPF_BACKTRACK) != 0);
+			else
+				return ADE_RETURN_NIL;
+		});
+}
+
 template <typename LOC>
 static int ship_getset_location_helper(lua_State* L, LOC ship::* field, const char* location_type, const char** location_names, size_t location_names_size)
 {
@@ -1293,7 +1362,9 @@ ADE_FUNC(kill, l_Ship, "[object Killer, vector Hitpos]", "Kills the ship. Set \"
 
 	// use the current hull percentage for damage-after-death purposes
 	// (note that this does not actually affect scoring)
-	float percent_killed = get_hull_pct(victim->objp());
+	float percent_killed = -get_hull_pct(victim->objp(), true);
+	if (percent_killed > 1.0f)
+		percent_killed = 1.0f;
 
 	ship_hit_kill(victim->objp(), killer ? killer->objp() : nullptr, hitpos, percent_killed, (killer && victim->sig == killer->sig), true);
 
@@ -1530,9 +1601,11 @@ ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem Ta
 
 	bool tgh_valid = tgh && tgh->isValid();
 	bool tgsh_valid = tgsh && tgsh->isValid();
-	int ai_mode = AI_GOAL_NONE;
+	ai_goal_mode ai_mode = AI_GOAL_NONE;
 	int ai_submode = -1234567;
 	const char *ai_shipname = NULL;
+	int int_data = 0;
+	float float_data = 0.0f;
 	switch(eh->index)
 	{
 		case LE_ORDER_ATTACK:
@@ -1564,24 +1637,18 @@ ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem Ta
 			break;
 		}
 		case LE_ORDER_WAYPOINTS:
-		{
-			if(tgh_valid && tgh->objp()->type == OBJ_WAYPOINT)
-			{
-				ai_mode = AI_GOAL_WAYPOINTS;
-				waypoint_list *wp_list = find_waypoint_list_with_instance(tgh->objp()->instance);
-				if(wp_list != NULL)
-					ai_shipname = wp_list->get_name();
-			}
-			break;
-		}
 		case LE_ORDER_WAYPOINTS_ONCE:
 		{
 			if(tgh_valid && tgh->objp()->type == OBJ_WAYPOINT)
 			{
-				ai_mode = AI_GOAL_WAYPOINTS_ONCE;
-				waypoint_list *wp_list = find_waypoint_list_with_instance(tgh->objp()->instance);
-				if(wp_list != NULL)
-					ai_shipname = wp_list->get_name();
+				ai_mode = eh->index == LE_ORDER_WAYPOINTS_ONCE ? AI_GOAL_WAYPOINTS_ONCE : AI_GOAL_WAYPOINTS;
+				int wp_list_index, wp_index;
+				calc_waypoint_indexes(tgh->objp()->instance, wp_list_index, wp_index);
+				if (wp_list_index >= 0 && wp_index >= 0)
+				{
+					ai_shipname = Waypoint_lists[wp_list_index].get_name();
+					int_data = wp_index;
+				}
 			}
 			break;
 		}
@@ -1776,7 +1843,7 @@ ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem Ta
 		return ade_set_error(L, "b", false);
 
 	//Fire off the goal
-	ai_add_ship_goal_scripting(ai_mode, ai_submode, (int)(priority*100.0f), ai_shipname, &Ai_info[Ships[objh->objp()->instance].ai_index]);
+	ai_add_ship_goal_scripting(ai_mode, ai_submode, (int)(priority*100.0f), ai_shipname, &Ai_info[Ships[objh->objp()->instance].ai_index], int_data, float_data);
 
 	return ADE_RETURN_TRUE;
 }
@@ -2068,7 +2135,7 @@ ADE_FUNC(updateSubmodelMoveable, l_Ship, "string name, table values",
 	if (!objh->isValid())
 		return ADE_RETURN_NIL;
 
-	SCP_vector<linb::any> valuesMoveable;
+	SCP_vector<std::any> valuesMoveable;
 
 	if (values.isValid()) {
 		for (const auto& object : values) {

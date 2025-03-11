@@ -5,7 +5,7 @@
 #include "Option.h"
 #include "mod_table/mod_table.h"
 #include "osapi/osregistry.h"
-#include <tl/optional.hpp>
+#include <optional>
 
 namespace {
 
@@ -37,7 +37,7 @@ OptionsManager* options::OptionsManager::instance()
 }
 
 //Gets the value of an option from the Config using the option key
-tl::optional<std::unique_ptr<json_t>> OptionsManager::getValueFromConfig(const SCP_string& key) const
+std::optional<std::unique_ptr<json_t>> OptionsManager::getValueFromConfig(const SCP_string& key) const
 {
 	auto override_iter = _config_overrides.find(key);
 	if (override_iter != _config_overrides.end()) {
@@ -64,7 +64,7 @@ tl::optional<std::unique_ptr<json_t>> OptionsManager::getValueFromConfig(const S
 
 	if (value == nullptr) {
 		// Signal that there is no value for this key
-		return tl::nullopt;
+		return std::nullopt;
 	}
 
 	json_error_t err;
@@ -123,6 +123,21 @@ const OptionBase* OptionsManager::getOptionByKey(SCP_string key)
 		}
 	}
 	return nullptr;
+}
+
+void OptionsManager::enforceOption(const SCP_string& key)
+{
+	_enforcedOptions.insert(key);
+}
+
+void OptionsManager::unenforceOption(const SCP_string& key)
+{
+	_enforcedOptions.erase(key);
+}
+
+bool OptionsManager::isOptionEnforced(const SCP_string& key) const
+{
+	return _enforcedOptions.count(key) > 0;
 }
 
 //Returns a table of all built-in options available
@@ -205,8 +220,20 @@ void OptionsManager::discardChanges() { _changed_values.clear(); }
 //Get the initial values of the option as stored on disk
 void OptionsManager::loadInitialValues()
 {
-	for (auto& opt : _options) {
-		opt->loadInitial();
+	// Collect options to remove in a separate container
+	SCP_vector<std::shared_ptr<const OptionBase>> optionsToRemove;
+
+	for (const auto& opt : _options) { // Iterate forward to collect
+		if (isOptionEnforced(opt->getConfigKey())) {
+			optionsToRemove.push_back(opt);
+		} else {
+			opt->loadInitial();
+		}
+	}
+
+	// Now remove the collected options.
+	for (const auto& optToRemove : optionsToRemove) {
+		removeOption(optToRemove);
 	}
 }
 

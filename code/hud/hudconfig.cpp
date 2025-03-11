@@ -22,6 +22,8 @@
 #include "parse/parselo.h"
 #include "playerman/player.h"
 #include "popup/popup.h"
+#include "scripting/scripting.h"
+#include "scripting/global_hooks.h"
 #include "ship/ship.h"
 #include "ui/ui.h"
 
@@ -180,6 +182,9 @@ int HUD_default_popup_mask2 =
 	0											// kills gauge
 };
 
+// Can be customized in hud_gauges.tbl
+char HC_wingam_gauge_status_names[MAX_SQUADRON_WINGS][32] = {"Alpha", "Beta", "Gamma", "Delta", "Epsilon"};
+
 int HC_select_all = 0;
 
 //////////////////////////////////////////////////////////////////////////////
@@ -310,6 +315,11 @@ int HC_gauge_description_coords[GR_NUM_RESOLUTIONS][3] = {
 	}
 };
 
+int HC_talking_head_frame = -1;
+SCP_string HC_head_anim_filename;
+SCP_string HC_shield_gauge_ship;
+
+int HC_resize_mode = GR_RESIZE_MENU;
 const char *HC_gauge_descriptions(int n)
 {
 	switch(n)	{
@@ -512,6 +522,8 @@ static UI_WINDOW					HC_ui_window;
 int							HC_gauge_hot;			// mouse is over this gauge
 int							HC_gauge_selected;	// gauge is selected
 float						HC_gauge_scale; // scale used for drawing the hud gauges
+int HC_gauge_coordinates[6]; // x1, x2, y1, y1, w, h of the example HUD render area. Used for calculating new gauge coordinates
+BoundingBox HC_gauge_mouse_coords[NUM_HUD_GAUGES];
 
 // HUD colors
 typedef struct hc_col {
@@ -605,6 +617,11 @@ void hud_config_init_ui(bool API_Access, int x, int y, int w)
 
 	HC_gauge_coords.clear();
 	HC_gauge_coords.resize(NUM_HUD_GAUGES);
+
+	// Clear the mouse coords array
+	for (auto& coord : HC_gauge_mouse_coords) {
+		coord = {-1, -1, -1, -1};
+	}
 
 	if (w < 0) {
 		HC_gauge_scale = 1.0f;
@@ -851,6 +868,134 @@ void hud_config_popup_flag_clear(int i)
 	}
 }
 
+void hud_config_set_mouse_coords(int gauge_config, int x1, int x2, int y1, int y2) {
+	HC_gauge_mouse_coords[gauge_config] = {x1, x2, y1, y2};
+}
+
+bool hud_config_set_mouse_coords_no_overlap(int gauge_config, int x1, int x2, int y1, int y2)
+{
+	BoundingBox newBox(x1, x2, y1, y2);
+
+	if (BoundingBox::isOverlappingAny(HC_gauge_mouse_coords, newBox, gauge_config)) {
+		return false;
+	} else {
+		HC_gauge_mouse_coords[gauge_config] = newBox;
+		return true;
+	}
+}
+
+// ETS gauge can render as one unified gauge or as three separate gauges using separate drawing functions
+// So this function provides a way to min/max the coords to make sure no matter what method is used, the
+// mouse box inclues all the relevant areas
+void hud_config_set_mouse_coords_ets(int gauge_config, int x1, int x2, int y1, int y2)
+{
+	HC_gauge_mouse_coords[gauge_config].x1 = std::min(HC_gauge_mouse_coords[gauge_config].x1, x1);
+	HC_gauge_mouse_coords[gauge_config].x2 = std::max(HC_gauge_mouse_coords[gauge_config].x2, x2);
+	HC_gauge_mouse_coords[gauge_config].y1 = std::min(HC_gauge_mouse_coords[gauge_config].y1, y1);
+	HC_gauge_mouse_coords[gauge_config].y2 = std::max(HC_gauge_mouse_coords[gauge_config].y2, y2);
+
+	// temporary stuff to show boxes
+	color clr = gr_screen.current_color;
+	color thisColor;
+	gr_init_alphacolor(&thisColor, 255, 255, 255, 80);
+	gr_set_color_fast(&thisColor);
+	// hud_config_draw_box(x1, x2, y1, y2);
+	gr_set_color_fast(&clr);
+}
+
+std::pair<int, int> hud_config_convert_coords(int x, int y, float scale)
+{
+	int outX = HC_gauge_coordinates[0] + static_cast<int>(x * scale);
+	int outY = HC_gauge_coordinates[2] + static_cast<int>(y * scale);
+
+	return std::make_pair(outX, outY);
+}
+
+std::pair<float, float> hud_config_convert_coords(float x, float y, float scale)
+{
+	float outX = HC_gauge_coordinates[0] + x * scale;
+	float outY = HC_gauge_coordinates[2] + y * scale;
+
+	return std::make_pair(outX, outY);
+}
+
+float hud_config_get_scale(int baseW, int baseH)
+{
+	// Determine the scaling factor
+	float scaleX = static_cast<float>(HC_gauge_coordinates[4]) / baseW;
+	float scaleY = static_cast<float>(HC_gauge_coordinates[5]) / baseH;
+
+	// Use the smallest scale factor
+	return std::min(scaleX, scaleY);
+}
+
+std::tuple<int, int, float> hud_config_convert_coord_sys(int x, int y, int baseW, int baseH)
+{
+	float scale = hud_config_get_scale(baseW, baseH);
+	auto coords = hud_config_convert_coords(x, y, scale);
+
+	return std::make_tuple(coords.first, coords.second, scale);
+}
+
+std::tuple<float, float, float> hud_config_convert_coord_sys(float x, float y, int baseW, int baseH)
+{
+	float scale = hud_config_get_scale(baseW, baseH);
+	auto coords = hud_config_convert_coords(x, y, scale);
+
+	return std::make_tuple(coords.first, coords.second, scale);
+}
+
+std::pair<float, float> hud_config_calc_coords_from_angle(float angle_degrees, int centerX, int centerY, float radius)
+{
+	// Convert angle to radians, adjust so 0 degrees is at the top (12 o'clock)
+	float angle_radians = (angle_degrees + 90.0f) * static_cast<float>(M_PI) / 180.0f;
+
+	// Offset to ensure the arrow points outward
+	float adjusted_radius = radius + 4.0f;
+
+	// Calculate offsets based on the adjusted radius and angle
+	float xOffset = -cos(angle_radians) * adjusted_radius; // Negate to mirror direction
+	float yOffset = sin(angle_radians) * adjusted_radius;
+
+	// Map to screen coordinates (centerX and centerY represent the center of the circle)
+	float screenX = centerX + xOffset;
+	float screenY = centerY - yOffset;
+
+	return {screenX, screenY};
+}
+
+float hud_config_find_valid_angle(int gauge_index, float initial_angle, int centerX, int centerY, float radius)
+{
+	const int max_iterations = 360; // Prevent infinite loops
+	float angle = initial_angle;
+	int x1, x2, y1, y2;
+
+	for (int i = 0; i < max_iterations; ++i) {
+		// Calculate coordinates for the current angle
+		auto [screenX, screenY] = hud_config_calc_coords_from_angle(angle, centerX, centerY, radius);
+		int boundingBoxSize = 10; // Guestimate
+		x1 = fl2i(screenX - boundingBoxSize);
+		x2 = fl2i(screenX + boundingBoxSize);
+		y1 = fl2i(screenY - boundingBoxSize);
+		y2 = fl2i(screenY + boundingBoxSize);
+
+		BoundingBox newBox = {x1, x2, y1, y2};
+
+		// Check for overlap
+		if (!BoundingBox::isOverlappingAny(HC_gauge_mouse_coords, newBox, gauge_index)) {
+			return angle;
+		}
+
+		// Increment angle and try again
+		angle += 10.0f; // Increment by 10 degrees
+		if (angle >= 360.0f) {
+			angle -= 360.0f;
+		}
+	}
+
+	return initial_angle; // No valid angle found
+}
+
 /*!
  * @brief render all the hud config gauges
  *
@@ -1078,6 +1223,11 @@ void hud_config_cancel(bool change_state)
 {
 	hud_config_restore();
 
+	// adds scripting hook for 'On HUD Config Menu Closed' --wookieejedi
+	if (scripting::hooks::OnHUDConfigMenuClosed->isActive()) {
+		scripting::hooks::OnHUDConfigMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', false)));
+	}
+
 	if (change_state) {
 		gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
 	}
@@ -1085,6 +1235,11 @@ void hud_config_cancel(bool change_state)
 
 void hud_config_commit()
 {
+	// adds scripting hook for 'On HUD Config Menu Closed' --wookieejedi
+	if (scripting::hooks::OnHUDConfigMenuClosed->isActive()) {
+		scripting::hooks::OnHUDConfigMenuClosed->run(scripting::hook_param_list(scripting::hook_param("OptionsAccepted", 'b', true)));
+	}
+
 	gamesnd_play_iface(InterfaceSounds::COMMIT_PRESSED);
 	gameseq_post_event(GS_EVENT_PREVIOUS_STATE);
 }
@@ -1121,7 +1276,11 @@ void hud_config_handle_keypresses(int k)
 {
 	switch(k) {
 	case KEY_ESC:
-		hud_config_cancel();
+		if (escape_key_behavior_in_options == EscapeKeyBehaviorInOptions::SAVE) {
+			hud_config_commit();
+		} else {
+			hud_config_cancel();
+		}
 		break;
 	case KEY_CTRLED+KEY_ENTER:
 		hud_config_commit();

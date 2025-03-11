@@ -5,11 +5,12 @@
 #include "libs/jansson.h"
 #include "options/OptionsManager.h"
 #include "localization/localize.h"
+#include "parse/parselo.h"
 
 #include <functional>
 #include <utility>
-#include <mpark/variant.hpp>
-#include <tl/optional.hpp>
+#include <variant>
+#include <optional>
 
 namespace options {
 
@@ -80,7 +81,7 @@ class OptionBase {
 
 	flagset<OptionFlags> _flags;
 
-	tl::optional<std::unique_ptr<json_t>> getConfigValue() const;
+	std::optional<std::unique_ptr<json_t>> getConfigValue() const;
 
 	OptionBase(SCP_string config_key, SCP_string title, SCP_string description);
 
@@ -120,6 +121,8 @@ class OptionBase {
 	virtual void setValueDescription(const ValueDescription& desc) const = 0;
 
 	virtual OptionType getType() const = 0;
+	
+	virtual void parseDefaultSetting() const = 0;
 
 	virtual SCP_vector<ValueDescription> getValidValues() const = 0;
 
@@ -151,6 +154,7 @@ template <typename T>
 using ValueInterpolator = std::function<T(float)>;
 template <typename T>
 using ValueDeinterpolator = std::function<float(const T&)>;
+using ValueParser = std::function<void()>;
 
 template <typename T>
 class ValueFunctor {
@@ -174,6 +178,9 @@ class Option : public OptionBase {
 	ValueChangeListener<T> _changeListener;
 	ValueInterpolator<T> _interpolator;
 	ValueDeinterpolator<T> _deinterpolator;
+	ValueParser _parser;
+
+	bool _hasCustomDefaultFunc = false;
 
 	OptionType _type = OptionType::Selection; // By default the generic type is always a selection
 
@@ -207,6 +214,17 @@ class Option : public OptionBase {
 
 	OptionType getType() const override { return _type; }
 	void setType(OptionType type) { _type = type; }
+
+	void parseDefaultSetting() const override
+	{
+		if (!_parser) {
+			Warning(LOCATION, "%s cannot set default values", _config_key.c_str());
+			skip_to_start_of_string_either("$Option Key:", "#END");
+		} else {
+			Assertion(_hasCustomDefaultFunc, "Option must have a default value function in order to use parser!");
+			_parser();
+		}
+	}
 
 	SCP_vector<ValueDescription> getValidValues() const override
 	{
@@ -248,7 +266,7 @@ class Option : public OptionBase {
 	T getValue() const
 	{
 		try {
-			tl::optional<std::unique_ptr<json_t>> config_value = getConfigValue();
+			std::optional<std::unique_ptr<json_t>> config_value = getConfigValue();
 			//missing keys are signalled via the optional
 			if (!config_value.has_value()) {
 				return _defaultValueFunc();
@@ -305,6 +323,8 @@ class Option : public OptionBase {
 	const DefaultValueFunctor<T>& getDefaultValueFunc() const { return _defaultValueFunc; }
 	void setDefaultValueFunc(const DefaultValueFunctor<T>& defaultValueFunc) { _defaultValueFunc = defaultValueFunc; }
 
+	void setHasCustomDefaultFunc(bool value) { _hasCustomDefaultFunc = value; }
+
 	const ValueDeserializer<T>& getDeserializer() const { return _deserializer; }
 	void setDeserializer(const ValueDeserializer<T>& converter) { _deserializer = converter; }
 
@@ -323,6 +343,8 @@ class Option : public OptionBase {
 
 	const ValueChangeListener<T>& getChangeListener() const { return _changeListener; }
 	void setChangeListener(const ValueChangeListener<T>& changeListener) { _changeListener = changeListener; }
+
+	void setParser(ValueParser parser) { _parser = std::move(parser); }
 
 	const ValueInterpolator<T>& getInterpolator() const { return _interpolator; }
 	const ValueDeinterpolator<T>& getDeinterpolator() const { return _deinterpolator; }
@@ -425,14 +447,14 @@ class OptionBuilder {
 	Option<T> _instance;
 
 	SCP_unordered_map<PresetKind, T> _preset_values;
-	const mpark::variant<SCP_string, std::pair<const char*, int>>&_title, &_description;
+	const std::variant<SCP_string, std::pair<const char*, int>>&_title, &_description;
 
   public:
-	  OptionBuilder(const SCP_string& config_key, const mpark::variant<SCP_string, std::pair<const char*, int>>& title, const mpark::variant<SCP_string, std::pair<const char*, int>>& description)
+	  OptionBuilder(const SCP_string& config_key, const std::variant<SCP_string, std::pair<const char*, int>>& title, const std::variant<SCP_string, std::pair<const char*, int>>& description)
 		  : _instance(
 			  config_key,
-			  mpark::holds_alternative<SCP_string>(title) ? mpark::get<SCP_string>(title) : mpark::get<std::pair<const char*, int>>(title).first,
-			  mpark::holds_alternative<SCP_string>(description) ? mpark::get<SCP_string>(description) : mpark::get<std::pair<const char*, int>>(description).first),
+			  std::holds_alternative<SCP_string>(title) ? std::get<SCP_string>(title) : std::get<std::pair<const char*, int>>(title).first,
+			  std::holds_alternative<SCP_string>(description) ? std::get<SCP_string>(description) : std::get<std::pair<const char*, int>>(description).first),
 		    _title(title),
 		    _description(description)
 	{
@@ -456,16 +478,18 @@ class OptionBuilder {
 		_instance.setExpertLevel(level);
 		return *this;
 	}
-	//Directly set the default value of an option
+	//Causes the default value of the option to be permanently set to a specific value
 	OptionBuilder& default_val(const T& val)
 	{
 		_instance.setDefaultValueFunc(ValueFunctor<T>(val));
+		_instance.setHasCustomDefaultFunc(false);
 		return *this;
 	}
-	//Function to find the default value of the option
+	//Causes the default value of the option to be set dynamically using a function
 	OptionBuilder& default_func(const DefaultValueFunctor<T>& func)
 	{
 		_instance.setDefaultValueFunc(func);
+		_instance.setHasCustomDefaultFunc(true);
 		return *this;
 	}
 	//Deserialize an option for persisting changes
@@ -480,7 +504,7 @@ class OptionBuilder {
 		_instance.setSerializer(serializer);
 		return *this;
 	}
-	//Builds an enum list of values for the optoin
+	//Builds an enum list of values for the option
 	OptionBuilder& enumerator(const ValueEnumerator<T>& enumerator)
 	{
 		_instance.setValueEnumerator(enumerator);
@@ -511,6 +535,12 @@ class OptionBuilder {
 	OptionBuilder& change_listener(const ValueChangeListener<T>& listener)
 	{
 		_instance.setChangeListener(listener);
+		return *this;
+	}
+	//The code to run in order to parse the default setting. Option must use default_func instead of defaul_val!
+	OptionBuilder& parser(const ValueParser& parser)
+	{
+		_instance.setParser(parser);
 		return *this;
 	}
 	//The global variable to bind the option to immediately.
@@ -569,13 +599,13 @@ class OptionBuilder {
 		}
 		auto opt_ptr = make_shared<Option<T>>(_instance);
 
-		if (mpark::holds_alternative<std::pair<const char*, int>>(_title)) {
-			const auto& xstr_info = mpark::get<std::pair<const char*, int>>(_title);
+		if (std::holds_alternative<std::pair<const char*, int>>(_title)) {
+			const auto& xstr_info = std::get<std::pair<const char*, int>>(_title);
 			lcl_delayed_xstr(opt_ptr->_title, xstr_info.first, xstr_info.second);
 		}
 
-		if (mpark::holds_alternative<std::pair<const char*, int>>(_description)) {
-			const auto& xstr_info = mpark::get<std::pair<const char*, int>>(_description);
+		if (std::holds_alternative<std::pair<const char*, int>>(_description)) {
+			const auto& xstr_info = std::get<std::pair<const char*, int>>(_description);
 			lcl_delayed_xstr(opt_ptr->_description, xstr_info.first, xstr_info.second);
 		}
 

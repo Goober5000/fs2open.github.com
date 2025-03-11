@@ -241,7 +241,7 @@ bool StartAutopilot()
 			// is support ship trying to rearm-repair
 			if ( ai_find_goal_index( support_ship_aip->goals, AI_GOAL_REARM_REPAIR ) == -1 ) {
 				// no, so tell it to depart
-				ai_add_ship_goal_player( AIG_TYPE_PLAYER_SHIP, AI_GOAL_WARP, -1, NULL, support_ship_aip );
+				ai_add_ship_goal_player( ai_goal_type::PLAYER_SHIP, AI_GOAL_WARP, -1, nullptr, support_ship_aip );
 			} else {
 				// yes
 				send_autopilot_msgID(NP_MSG_FAIL_SUPPORT_WORKING);
@@ -300,15 +300,16 @@ bool StartAutopilot()
 	autopilot_wings.clear();
 
 	// vars for usage w/ cinematic
-	vec3d pos, norm1, perp, tpos, rpos = Player_obj->pos, zero;
+	vec3d pos, perp, tpos, rpos = Player_obj->pos, zero;
 	memset(&zero, 0, sizeof(vec3d));
 
 
 	// instantly turn player toward tpos
 	if (The_mission.flags[Mission::Mission_Flags::Use_ap_cinematics])
 	{
-		vm_vec_sub(&norm1, Navs[CurrentNav].GetPosition(), &Player_obj->pos);
-		vm_vector_2_matrix(&Player_obj->orient, &norm1, NULL, NULL);
+		vec3d norm1;
+		vm_vec_normalized_dir(&norm1, Navs[CurrentNav].GetPosition(), &Player_obj->pos);
+		vm_vector_2_matrix_norm(&Player_obj->orient, &norm1, nullptr, nullptr);
 	}
 
 	for (i = 0; i < MAX_SHIPS; i++)
@@ -395,10 +396,12 @@ bool StartAutopilot()
 				radius = Objects[Ships[i].objnum].radius;
 			}
 
+			// instantly turn the ship to match the direction player is looking
 			if (The_mission.flags[Mission::Mission_Flags::Use_ap_cinematics])
-			{// instantly turn the ship to match the direction player is looking
-				//vm_vec_sub(&norm1, Navs[CurrentNav].GetPosition(), &Player_obj->pos);
-				vm_vector_2_matrix(&Objects[Ships[i].objnum].orient, &norm1, NULL, NULL);
+			{
+				vec3d norm1;
+				vm_vec_normalized_dir(&norm1, Navs[CurrentNav].GetPosition(), &Player_obj->pos);
+				vm_vector_2_matrix_norm(&Objects[Ships[i].objnum].orient, &norm1, nullptr, nullptr);
 			}
 
 			// snap wings into formation
@@ -464,12 +467,12 @@ bool StartAutopilot()
 			{ 
 				if (Navs[CurrentNav].flags & NP_WAYPOINT)
 				{
-					ai_add_ship_goal_player( AIG_TYPE_PLAYER_SHIP, AI_GOAL_WAYPOINTS_ONCE, 0, Waypoint_lists[Navs[CurrentNav].target_index].get_name(), &Ai_info[Ships[i].ai_index] );
+					ai_add_ship_goal_player( ai_goal_type::PLAYER_SHIP, AI_GOAL_WAYPOINTS_ONCE, 0, Waypoint_lists[Navs[CurrentNav].target_index].get_name(), &Ai_info[Ships[i].ai_index] );
 					//fixup has to wait until after wing goals
 				}
 				else
 				{
-					ai_add_ship_goal_player( AIG_TYPE_PLAYER_SHIP, AI_GOAL_FLY_TO_SHIP, 0, Ships[Objects[Navs[CurrentNav].target_index].instance].ship_name, &Ai_info[Ships[i].ai_index] );
+					ai_add_ship_goal_player( ai_goal_type::PLAYER_SHIP, AI_GOAL_FLY_TO_SHIP, 0, Ships[Objects[Navs[CurrentNav].target_index].instance].ship_name, &Ai_info[Ships[i].ai_index] );
 				}
 
 			}
@@ -485,15 +488,15 @@ bool StartAutopilot()
 			{	
 				//ai_add_ship_goal_player( int type, int mode, int submode, char *shipname, ai_info *aip );
 
-				//ai_add_wing_goal_player( AIG_TYPE_PLAYER_WING, AI_GOAL_STAY_NEAR_SHIP, 0, target_shipname, wingnum );
-				//ai_add_wing_goal_player( AIG_TYPE_PLAYER_WING, AI_GOAL_WAYPOINTS_ONCE, 0, target_shipname, wingnum );
+				//ai_add_wing_goal_player( ai_goal_type::PLAYER_WING, AI_GOAL_STAY_NEAR_SHIP, 0, target_shipname, wingnum );
+				//ai_add_wing_goal_player( ai_goal_type::PLAYER_WING, AI_GOAL_WAYPOINTS_ONCE, 0, target_shipname, wingnum );
 				//ai_clear_ship_goals( &(Ai_info[Ships[num].ai_index]) );
 				
 				ai_clear_wing_goals( &Wings[i] );
 				if (Navs[CurrentNav].flags & NP_WAYPOINT)
 				{
 					
-					ai_add_wing_goal_player( AIG_TYPE_PLAYER_WING, AI_GOAL_WAYPOINTS_ONCE, 0, Waypoint_lists[Navs[CurrentNav].target_index].get_name(), i );
+					ai_add_wing_goal_player( ai_goal_type::PLAYER_WING, AI_GOAL_WAYPOINTS_ONCE, 0, Waypoint_lists[Navs[CurrentNav].target_index].get_name(), i );
 
 					// "fix up" the goal
 					for (j = 0; j < MAX_AI_GOALS; j++)
@@ -507,7 +510,7 @@ bool StartAutopilot()
 				}
 				else
 				{
-					ai_add_wing_goal_player( AIG_TYPE_PLAYER_WING, AI_GOAL_FLY_TO_SHIP, 0, Ships[Objects[Navs[CurrentNav].target_index].instance].ship_name, i );
+					ai_add_wing_goal_player( ai_goal_type::PLAYER_WING, AI_GOAL_FLY_TO_SHIP, 0, Ships[Objects[Navs[CurrentNav].target_index].instance].ship_name, i );
 
 				}
 			}

@@ -170,6 +170,8 @@ SCP_vector<SCP_string> Parse_names;
 
 SCP_vector<texture_replace> Fred_texture_replacements;
 
+SCP_unordered_set<int> Fred_migrated_immobile_ships;
+
 int Num_path_restrictions;
 path_restriction_t Path_restrictions[MAX_PATH_RESTRICTIONS];
 
@@ -1519,6 +1521,14 @@ void parse_briefing(mission * /*pm*/, int flags)
 			if (optional_string("$no_grid"))
 				bs->draw_grid = false;
 
+			if (optional_string("$grid_color:")) {
+				int rgba[4] = {0, 0, 0, 0};
+				stuff_int_list(rgba, 4, RAW_INTEGER_TYPE);
+				gr_init_alphacolor(&bs->grid_color, rgba[0], rgba[1], rgba[2], rgba[3]);
+			} else {
+				bs->grid_color = Color_briefing_grid;
+			}
+
 			if ( optional_string("$num_lines:") ) {
 				stuff_int(&bs->num_lines);
 
@@ -2257,7 +2267,7 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 
 		// set up the ai goals for this object.
 		for (sexp = CDR(p_objp->ai_goals); sexp != -1; sexp = CDR(sexp))
-			ai_add_ship_goal_sexp(sexp, AIG_TYPE_EVENT_SHIP, aip);
+			ai_add_ship_goal_sexp(sexp, ai_goal_type::EVENT_SHIP, aip);
 
 		// free the sexpression nodes only for non-wing ships.  wing code will handle its own case
 		if (p_objp->wingnum < 0)
@@ -2461,9 +2471,9 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 	// with
 	if (Fred_running)
 	{
-		Objects[objnum].phys_info.speed = (float) p_objp->initial_velocity;
-		Objects[objnum].hull_strength = (float) p_objp->initial_hull;
-		Objects[objnum].shield_quadrant[0] = (float) p_objp->initial_shields;
+		Objects[objnum].phys_info.speed = i2fl(p_objp->initial_velocity);
+		Objects[objnum].hull_strength = i2fl(p_objp->initial_hull);
+		Objects[objnum].shield_quadrant[0] = i2fl(p_objp->initial_shields);
 
 	}
 	else
@@ -2471,10 +2481,9 @@ int parse_create_object_sub(p_object *p_objp, bool standalone_ship)
 		int max_allowed_sparks, num_sparks, iLoop;
 
 		Objects[objnum].hull_strength = p_objp->initial_hull * shipp->ship_max_hull_strength / 100.0f;
-		for (iLoop = 0; iLoop<Objects[objnum].n_quadrants; iLoop++)
-		{
-			Objects[objnum].shield_quadrant[iLoop] = (float) (shipp->max_shield_recharge * p_objp->initial_shields * shield_get_max_quad(&Objects[objnum]) / 100.0f);
-		}
+		float quad_strength = shipp->max_shield_recharge * p_objp->initial_shields * shield_get_max_quad(&Objects[objnum]) / 100.0f;
+		for (auto &quadrant : Objects[objnum].shield_quadrant)
+			quadrant = quad_strength;
 
 		// initial velocities now do not apply to ships which warp in after mission starts
 		// WMC - Make it apply for ships with IN_PLACE_ANIM type
@@ -2866,6 +2875,9 @@ void resolve_parse_flags(object *objp, flagset<Mission::Parse_Object_Flags> &par
         {
             objp->flags.set(Object::Object_Flags::Dont_change_position);
             objp->flags.set(Object::Object_Flags::Dont_change_orientation);
+
+            // keep track of migrated ships
+            Fred_migrated_immobile_ships.insert(objp->instance);
         }
         else
             objp->flags.set(Object::Object_Flags::Immobile);
@@ -3648,7 +3660,6 @@ int parse_object(mission *pm, int  /*flag*/, p_object *p_objp)
 void mission_parse_handle_late_arrivals(p_object *p_objp)
 {
 	ship_info *sip = NULL;
-	model_subsystem *subsystems = NULL;
 
 	// only for objects which show up after the start of a mission
 	if (p_objp->created_object != NULL)
@@ -3658,12 +3669,8 @@ void mission_parse_handle_late_arrivals(p_object *p_objp)
 
 	sip = &Ship_info[p_objp->ship_class];
 
-	if (sip->n_subsystems > 0) {
-		subsystems = &sip->subsystems[0];
-	}
-
 	// we need the model to process the texture set, so go ahead and load it now
-	sip->model_num = model_load(sip->pof_file, sip->n_subsystems, subsystems);
+	sip->model_num = model_load(sip->pof_file, sip);
 }
 
 // Goober5000 - I split this because 1) it's clearer; and 2) initially multiple docked ships would have been
@@ -4845,7 +4852,7 @@ void parse_wing(mission *pm)
 		// this will assign the goals to the wings as well as to any ships in the wing that have been
 		// already created.
 		for ( sexp = CDR(wing_goals); sexp != -1; sexp = CDR(sexp) )
-			ai_add_wing_goal_sexp(sexp, AIG_TYPE_EVENT_WING, wingp);  // used by Fred
+			ai_add_wing_goal_sexp(sexp, ai_goal_type::EVENT_WING, wingp);  // used by Fred
 
 		free_sexp2(wing_goals);  // free up sexp nodes for reuse, since they aren't needed anymore.
 	}
@@ -4969,7 +4976,7 @@ void resolve_path_masks(int anchor, int *path_mask)
 
 		// Load the anchor ship model with subsystems and all; it'll need to be done for this mission anyway
 		ship_info *sip = &Ship_info[parent_pobjp->ship_class];
-		modelnum = model_load(sip->pof_file, sip->n_subsystems, &sip->subsystems[0]);
+		modelnum = model_load(sip->pof_file, sip);
 
 		// resolve names to indexes
 		*path_mask = 0;
@@ -6656,6 +6663,20 @@ bool post_process_mission(mission *pm)
 
 	apply_default_custom_data(pm);
 
+	if (Preload_briefing_icon_models) {
+		int team = 0;
+		if (MULTI_TEAM) {
+			team = Net_player->p_info.team;
+		}
+		auto br = Briefings[team].stages;
+		for (i = 0; i < Briefings[team].num_stages; i++) {
+			auto stage = br[i];
+			for (int j = 0; j < stage.num_icons; j++) {
+				stage.icons[j].modelnum = model_load(Ship_info[stage.icons[j].ship_class].pof_file);
+			}
+		}
+	}
+
 	// success
 	return true;
 }
@@ -7623,8 +7644,8 @@ int mission_set_arrival_location(int anchor, ArrivalLocation location, int dist,
 		//
 		// calculate the new fvec of the ship arriving and use only that to get the matrix.  isn't a big
 		// deal not getting bank.
-		vm_vec_sub(&new_fvec, &anchor_pos, &Objects[objnum].pos );
-		vm_vector_2_matrix( &orient, &new_fvec, NULL, NULL );
+		vm_vec_normalized_dir(&new_fvec, &anchor_pos, &Objects[objnum].pos );
+		vm_vector_2_matrix_norm( &orient, &new_fvec, nullptr, nullptr );
 		Objects[objnum].orient = orient;
 	}
 
@@ -9100,9 +9121,18 @@ bool check_for_24_1_data()
 		}
 	}
 
-	if ((Asteroid_field.debris_genre == DG_DEBRIS && !Asteroid_field.field_debris_type.empty()) ||
-		(Asteroid_field.debris_genre == DG_ASTEROID && !Asteroid_field.field_asteroid_type.empty()))
-		return true;
+	return (Asteroid_field.debris_genre == DG_DEBRIS && !Asteroid_field.field_debris_type.empty()) ||
+		   (Asteroid_field.debris_genre == DG_ASTEROID && !Asteroid_field.field_asteroid_type.empty());
+}
 
+bool check_for_24_3_data()
+{
+	for (int i = 0; i < Num_teams; i++) {
+		for (int j = 0; j < Briefings[i].num_stages; j++) {
+			if (!gr_compare_color_values(Briefings[i].stages[j].grid_color, Color_briefing_grid)) {
+				return true;
+			}
+		}
+	}
 	return false;
 }
