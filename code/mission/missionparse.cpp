@@ -6406,6 +6406,10 @@ bool post_process_mission(mission *pm)
 
 	// the player_start_shipname had better exist at this point!
 	auto player_start_entry = ship_registry_get(Player_start_shipname);
+	if (!player_start_entry) {
+		Warning(LOCATION, "Player start ship '%s' does not exist!", Player_start_shipname);		// maybe the mission was hand-edited :P
+		return false;
+	}
 	Player_start_shipnum = player_start_entry->shipnum;
 	Assert( Player_start_shipnum != -1 );
 	Player_start_pobject = player_start_entry->p_objp();
@@ -6432,7 +6436,7 @@ bool post_process_mission(mission *pm)
 
 	// Kazan - player use AI at start?
 	if (pm->flags[Mission::Mission_Flags::Player_start_ai])
-		Player_use_ai = 1;
+		Player_use_ai = true;
 
 	// Assign squadron information
 	if (!Fred_running && (Player != nullptr) && (pm->squad_name[0] != '\0') && (Game_mode & GM_CAMPAIGN_MODE) && !(Game_mode & GM_MULTIPLAYER)) {

@@ -1085,6 +1085,8 @@ add_file_folder("Parse"
 	parse/encrypt.h
 	parse/generic_log.cpp
 	parse/generic_log.h
+	parse/md5_hash.cpp
+	parse/md5_hash.h
 	parse/parsehi.cpp
 	parse/parsehi.h
 	parse/parselo.cpp
@@ -1368,6 +1370,8 @@ add_file_folder("Scripting\\\\Api\\\\Objs"
 	scripting/api/objs/cmd_brief.h
 	scripting/api/objs/cockpit_display.cpp
 	scripting/api/objs/cockpit_display.h
+	scripting/api/objs/comm_order.cpp
+	scripting/api/objs/comm_order.h
 	scripting/api/objs/control_binding.cpp
 	scripting/api/objs/control_binding.h
 	scripting/api/objs/control_config.cpp

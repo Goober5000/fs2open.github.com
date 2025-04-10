@@ -390,7 +390,7 @@ int Test_begin = 0;
 extern int	Player_attacking_enabled;
 int Show_net_stats;
 
-bool Pre_player_entry;
+bool Pre_player_entry = false;
 
 int	Fred_running = 0;
 bool running_unittests = false;
@@ -879,7 +879,7 @@ static void game_flash_diminish(float frametime)
 		g = fl2i( Game_flash_green*128.0f );   
 		b = fl2i( Game_flash_blue*128.0f );  
 
-		if ( Sun_spot > 0.0f && !gr_lightshafts_enabled()) {
+		if ( Sun_spot > 0.0f && gr_sunglare_enabled() && !gr_lightshafts_enabled()) {
 			r += fl2i(Sun_spot*128.0f);
 			g += fl2i(Sun_spot*128.0f);
 			b += fl2i(Sun_spot*128.0f);
@@ -1811,7 +1811,6 @@ void game_init()
 		Cmdline_load_all_weapons = 0;
 
 		// Force some ingame options to off
-		Fireball_use_3d_warp = false;
 		options::OptionsManager::instance()->set_ingame_binary_option("Graphics.WarpFlash", false);
 
 		Use_3D_shockwaves = false;
