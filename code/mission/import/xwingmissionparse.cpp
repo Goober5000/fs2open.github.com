@@ -249,25 +249,25 @@ const char *xwi_determine_base_ship_class(const XWMFlightGroup *fg)
 		case XWMFlightGroupType::fg_Transport:
 			return "DX-9 Stormtrooper Transport";
 		case XWMFlightGroupType::fg_Shuttle:
-			return "Lambda-class T-4a Shuttle";
+			return "Lambda T-4a Shuttle";
 		case XWMFlightGroupType::fg_Tug:
-			return "DV-3 Cargo Freighter";
+			return "DV-3 Freighter";
 		case XWMFlightGroupType::fg_Container:
 			return "BFF-1 Container";
 		case XWMFlightGroupType::fg_Freighter:
-			return "BFF-1 Bulk Freighter";
+			return "BFF-1 Freighter";
 		case XWMFlightGroupType::fg_Calamari_Cruiser:
 			return "Liberty Type Star Cruiser";
 		case XWMFlightGroupType::fg_Nebulon_B_Frigate:
-			return "EF76 Nebulon-B Escort Frigate";
+			return "Nebulon-B Frigate";
 		case XWMFlightGroupType::fg_Corellian_Corvette:
-			return "CR90 Corvette";
+			return "CR90 Corvette#Reb";
 		case XWMFlightGroupType::fg_Imperial_Star_Destroyer:
 			return "Imperial Star Destroyer";
 		case XWMFlightGroupType::fg_TIE_Advanced:
 			return nullptr;
 		case XWMFlightGroupType::fg_B_Wing:
-			return "B-wing Starfighter";
+			return "ASF-01 B-wing";
 		default:
 			break;
 	}
