@@ -590,6 +590,7 @@ flag_def_list_new<Weapon::Info_Flags> ai_tgt_weapon_flags[] = {
 	{ "require exact los",			Weapon::Info_Flags::Require_exact_los,					true, false },
 	{ "multilock target dead subsys", Weapon::Info_Flags::Multilock_target_dead_subsys,		true, false },
 	{ "ignores countermeasures",	Weapon::Info_Flags::Ignores_countermeasures,			true, false },
+	{ "freespace 1 missile behavior",Weapon::Info_Flags::Freespace_1_missile_behavior,		true, false },
 };
 
 const int num_ai_tgt_weapon_info_flags = sizeof(ai_tgt_weapon_flags) / sizeof(flag_def_list_new<Weapon::Info_Flags>);
@@ -11750,6 +11751,10 @@ void change_ship_type(int n, int ship_type, int by_sexp)
 	ship_model_change(n, ship_type);
 	sp->ship_info_index = ship_type;
 
+	// get the before and after models (the new model may have only been loaded in ship_model_change)
+	auto pm = model_get(sip->model_num);
+	auto pm_orig = model_get(sip_orig->model_num);
+
 	// if we have the same warp parameters as the ship class, we will need to update them to point to the new class
 	if (sp->warpin_params_index == sip_orig->warpin_params_index) {
 		sp->warpin_params_index = sip->warpin_params_index;
@@ -11962,6 +11967,35 @@ void change_ship_type(int n, int ship_type, int by_sexp)
 	delete [] subsys_names;
 	delete [] subsys_pcts;
 
+	// Goober5000 - collect data about whatever is currently docked and compare the dockpoints on the two models
+	auto dock_ptr = objp->dock_list;
+	while (dock_ptr != nullptr)
+	{
+		auto next_ptr = dock_ptr->next;		// since we might remove the dock instance we are iterating on
+		int dockpoint_index = dock_ptr->dockpoint_used;
+		const char *dockpoint_name = pm_orig->docking_bays[dockpoint_index].name;
+
+		// if it's the same dockpoint index and name, do nothing
+		if (dockpoint_index < pm->n_docks && stricmp(dockpoint_name, pm->docking_bays[dockpoint_index].name) == 0)
+		{
+			dock_ptr = next_ptr;
+			continue;
+		}
+
+		// see if this dockpoint is found on the new model under a different name
+		int new_dockpoint_index = find_item_with_string(pm->docking_bays, pm->n_docks, &dock_bay::name, dockpoint_name);
+		if (new_dockpoint_index >= 0)
+		{
+			dock_ptr->dockpoint_used = new_dockpoint_index;
+			dock_ptr = next_ptr;
+			continue;
+		}
+
+		// it wasn't found, so undock these objects
+		ai_do_objects_undocked_stuff(objp, dock_ptr->docked_objp);
+		dock_ptr = next_ptr;
+	}
+
 	sp->afterburner_fuel = MAX(0.0f, sip->afterburner_fuel_capacity - (sip_orig->afterburner_fuel_capacity - sp->afterburner_fuel));
 
 	// handle countermeasure counts
@@ -12007,8 +12041,6 @@ void change_ship_type(int n, int ship_type, int by_sexp)
 	sp->ab_count = 0;
 	if (sip->flags[Ship::Info_Flags::Afterburner])
 	{
-		polymodel *pm = model_get(sip->model_num);
-
 		for (int h = 0; h < pm->n_thrusters; h++)
 		{
 			for (int j = 0; j < pm->thrusters[h].num_points; j++)
@@ -13733,6 +13765,8 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 	if(Ships[n].objnum != OBJ_INDEX(obj)){
 		return 0;
 	}
+
+	bool in_lab = (gameseq_get_state() == GS_STATE_LAB);
 	
 	shipp = &Ships[n];
 	swp = &shipp->weapons;
@@ -13825,7 +13859,7 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 	}
 
 	// Ensure if this is a "require-lock" missile, that a lock actually exists
-	if ( wip->wi_flags[Weapon::Info_Flags::No_dumbfire] ) {
+	if (wip->wi_flags[Weapon::Info_Flags::No_dumbfire] && !in_lab) {
 		if (!aip->current_target_is_locked && !ship_lock_present(shipp) && shipp->missile_locks_firing.empty() && aip->ai_missile_locks_firing.empty()) {
 			if (obj == Player_obj) {
 				if (!Weapon_energy_cheat) {
@@ -13857,7 +13891,7 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 		}
 	}
 
-	if (wip->wi_flags[Weapon::Info_Flags::Tagged_only])
+	if (wip->wi_flags[Weapon::Info_Flags::Tagged_only] && !in_lab)
 	{
 		if (!ship_is_tagged(&Objects[aip->target_objnum]))
 		{
@@ -13889,10 +13923,14 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 	if ( (wip->wi_flags[Weapon::Info_Flags::Swarm]) && !allow_swarm ) {
 		Assert(wip->swarm_count > 0);
 		if (wip->multi_lock) {
-			if(obj == Player_obj || (MULTIPLAYER_MASTER && obj->flags[Object::Object_Flags::Player_ship]))
-				shipp->num_swarm_missiles_to_fire = (int)shipp->missile_locks_firing.size();
-			else // AI ships
-				shipp->num_swarm_missiles_to_fire = (int)aip->ai_missile_locks_firing.size();
+			if (in_lab) {
+				shipp->num_swarm_missiles_to_fire = wip->max_seeking;
+			} else {
+				if (obj == Player_obj || (MULTIPLAYER_MASTER && obj->flags[Object::Object_Flags::Player_ship]))
+					shipp->num_swarm_missiles_to_fire = static_cast<int>(shipp->missile_locks_firing.size());
+				else // AI ships
+					shipp->num_swarm_missiles_to_fire = static_cast<int>(aip->ai_missile_locks_firing.size());
+			}
 		} else if(wip->swarm_count <= 0){
 			shipp->num_swarm_missiles_to_fire = SWARM_DEFAULT_NUM_MISSILES_FIRED;
 		} else {
@@ -13908,10 +13946,14 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 		//phreak 11-9-02 
 		//changed this from 4 to custom number defined in tables
 		if (wip->multi_lock) {
-			if (obj == Player_obj || (MULTIPLAYER_MASTER && obj->flags[Object::Object_Flags::Player_ship]))
-				shipp->num_corkscrew_to_fire = (ubyte)shipp->missile_locks_firing.size();
-			else // AI ships
-				shipp->num_corkscrew_to_fire = (ubyte)aip->ai_missile_locks_firing.size();
+			if (in_lab) {
+				shipp->num_corkscrew_to_fire = static_cast<ubyte>(wip->max_seeking);
+			} else {
+				if (obj == Player_obj || (MULTIPLAYER_MASTER && obj->flags[Object::Object_Flags::Player_ship]))
+					shipp->num_corkscrew_to_fire = static_cast<ubyte>(shipp->missile_locks_firing.size());
+				else // AI ships
+					shipp->num_corkscrew_to_fire = static_cast<ubyte>(aip->ai_missile_locks_firing.size());
+			}
 		} else {
 			shipp->num_corkscrew_to_fire = (ubyte)(shipp->num_corkscrew_to_fire + (ubyte)wip->cs_num_fired);
 		}
@@ -14013,7 +14055,7 @@ int ship_fire_secondary( object *obj, int allow_swarm, bool rollback_shot )
 		// and if I am a client in multiplayer
 		check_ammo = 1;
 
-		if ( MULTIPLAYER_CLIENT && (obj != Player_obj) ){
+		if (in_lab || (MULTIPLAYER_CLIENT && (obj != Player_obj))) {
 			check_ammo = 0;
 		}
 
@@ -14228,7 +14270,7 @@ done_secondary:
 
 	// if we are out of ammo in this bank then don't carry over firing swarm/corkscrew
 	// missiles to a new bank
-	if (!ship_secondary_has_ammo(swp, bank) || shipp->weapon_energy < wip->energy_consumed) {
+	if (!in_lab && (!ship_secondary_has_ammo(swp, bank) || shipp->weapon_energy < wip->energy_consumed)) {
 		// NOTE: these are set to 1 since they will get reduced by 1 in the
 		//       swarm/corkscrew code once this function returns
 
@@ -15194,9 +15236,15 @@ void object_get_eye(vec3d *eye_pos, matrix *eye_orient, const object *obj, bool 
 	// eye points are stored in an array -- the normal viewing position for a ship is the current_eye_index (now current_viewpoint) element.
 	auto &ep = pm->view_positions[current_viewpoint];
 
-	matrix eye_local_orient;
-	vm_vector_2_matrix_norm(&eye_local_orient, &ep.norm);
-	model_instance_local_to_global_point_orient(eye_pos, eye_orient, &ep.pnt, &eye_local_orient, pm, pmi, ep.parent, local_orient ? &vmd_identity_matrix : &obj->orient, local_pos ? &vmd_zero_vector : &obj->pos);
+	matrix eye_local_orient_buf;
+	const matrix *eye_local_orient;
+	if (Use_model_eyepoint_normals) {
+		vm_vector_2_matrix_norm(&eye_local_orient_buf, &ep.norm);
+		eye_local_orient = &eye_local_orient_buf;
+	} else {
+		eye_local_orient = &vmd_identity_matrix;
+	}
+	model_instance_local_to_global_point_orient(eye_pos, eye_orient, &ep.pnt, eye_local_orient, pm, pmi, ep.parent, local_orient ? &vmd_identity_matrix : &obj->orient, local_pos ? &vmd_zero_vector : &obj->pos);
 
 	//	Modify the orientation based on head orientation.
 	if (Viewer_obj == obj && do_slew) {

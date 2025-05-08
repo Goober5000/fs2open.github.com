@@ -250,9 +250,9 @@ void parse_hud_gauges_tbl(const char *filename)
 
 				bool found = false;
 
-				for (auto& ship : Ship_info) {
+				for (const auto& ship : Ship_info) {
 					if (!stricmp(ship.name, temp.c_str())) {
-						HC_shield_gauge_ship = ship.name;
+						HC_hud_shield_ships["default"][SHIELD_GAUGE_PLAYER] = ship.name;
 						found = true;
 						break;
 					}
@@ -261,6 +261,33 @@ void parse_hud_gauges_tbl(const char *filename)
 				if (!found) {
 					Warning(LOCATION, "Shield gauge ship \"%s\" not found in ships.tbl!", temp.c_str());
 				}
+			}
+
+			if (optional_string("$Shield Gauge Target Ship:")) {
+				SCP_string temp;
+				stuff_string(temp, F_NAME);
+
+				bool found = false;
+
+				for (const auto& ship : Ship_info) {
+					if (!stricmp(ship.name, temp.c_str())) {
+						HC_hud_shield_ships["default"][SHIELD_GAUGE_TARGET] = ship.name;
+						found = true;
+						break;
+					}
+				}
+
+				if (!found) {
+					Warning(LOCATION, "Shield gauge target ship \"%s\" not found in ships.tbl!", temp.c_str());
+				}
+			}
+
+			if (optional_string("$Primary Weapons:")) {
+				stuff_string_list(HC_hud_primary_weapons["default"]);
+			}
+
+			if (optional_string("$Secondary Weapons:")) {
+				stuff_string_list(HC_hud_secondary_weapons["default"]);
 			}
 
 			if (optional_string("$Example Wing Names:")) {
@@ -501,6 +528,52 @@ void parse_hud_gauges_tbl(const char *filename)
 					if (!show) {
 						HC_ignored_huds.insert(name);
 					}
+				}
+
+				if (optional_string("$Shield Gauge Ship:")) {
+					SCP_string temp;
+					stuff_string(temp, F_NAME);
+
+					bool found = false;
+
+					for (const auto& ship : Ship_info) {
+						if (!stricmp(ship.name, temp.c_str())) {
+							HC_hud_shield_ships[name][SHIELD_GAUGE_PLAYER] = temp;
+							found = true;
+							break;
+						}
+					}
+
+					if (!found) {
+						Warning(LOCATION, "Shield gauge ship \"%s\" not found in ships.tbl!", temp.c_str());
+					}
+				}
+
+				if (optional_string("$Shield Gauge Target Ship:")) {
+					SCP_string temp;
+					stuff_string(temp, F_NAME);
+
+					bool found = false;
+
+					for (const auto& ship : Ship_info) {
+						if (!stricmp(ship.name, temp.c_str())) {
+							HC_hud_shield_ships[name][SHIELD_GAUGE_TARGET] = ship.name;
+							found = true;
+							break;
+						}
+					}
+
+					if (!found) {
+						Warning(LOCATION, "Shield gauge target ship \"%s\" not found in ships.tbl!", temp.c_str());
+					}
+				}
+
+				if (optional_string("$Primary Weapons:")) {
+					stuff_string_list(HC_hud_primary_weapons[name]);
+				}
+
+				if (optional_string("$Secondary Weapons:")) {
+					stuff_string_list(HC_hud_secondary_weapons[name]);
 				}
 
 				if (optional_string("$Load Retail Configuration:")) {
@@ -3521,6 +3594,7 @@ void load_gauge_squad_message(gauge_settings* settings)
 	char fname_top[MAX_FILENAME_LEN] = "message1";
 	char fname_middle[MAX_FILENAME_LEN] = "message2";
 	char fname_bottom[MAX_FILENAME_LEN] = "message3";
+	int ship_name_max_w = 200;
 	
 	settings->origin[0] = 1.0f;
 	settings->origin[1] = 0.0f;
@@ -3586,6 +3660,9 @@ void load_gauge_squad_message(gauge_settings* settings)
 	if(optional_string("Page Down Offsets:")) {
 		stuff_int_list(Pgdn_offsets, 2);
 	}
+	if (optional_string("Ship Name Max Width:")) {
+		stuff_int(&ship_name_max_w);
+	}
 
 	hud_gauge->initBitmaps(fname_top, fname_middle, fname_bottom);
 	hud_gauge->initHiRes(fname_top);
@@ -3597,6 +3674,7 @@ void load_gauge_squad_message(gauge_settings* settings)
 	hud_gauge->initItemOffsetX(Item_offset_x);
 	hud_gauge->initPgUpOffsets(Pgup_offsets[0], Pgup_offsets[1]);
 	hud_gauge->initPgDnOffsets(Pgdn_offsets[0], Pgdn_offsets[1]);
+	hud_gauge->initShipNameMaxWidth(ship_name_max_w);
 
 	gauge_assign_common(settings, std::move(hud_gauge));
 }
@@ -4268,12 +4346,28 @@ void load_gauge_wingman_status(gauge_settings* settings)
 	}
 	
 	int grow_mode = 0; //By default, expand the gauge to the left (in -x direction)
+	int wingname_align_mode = 0; //By default, center wingnames when rendering
 
-	if(optional_string("Expansion Mode:")) {
-		if(optional_string("Right")) 
+	if (optional_string("Expansion Mode:")) {
+		if (optional_string("Left"))
+			grow_mode = 0;
+		else if (optional_string("Right"))
 			grow_mode = 1;
-		else if(optional_string("Down"))
+		else if (optional_string("Down"))
 			grow_mode = 2;
+		else
+			error_display(0, "\"Expansion Mode:\" is invalid, must be either Left, Right, or Down!  Discarding value.");
+	}
+
+	if (optional_string("Wingname Align Mode:")) {
+		if (optional_string("Center"))
+			wingname_align_mode = 0;
+		else if (optional_string("Left"))
+			wingname_align_mode = 1;
+		else if (optional_string("Right"))
+			wingname_align_mode = 2;
+		else
+			error_display(0, "\"Wingname Align Mode:\" is invalid, must be either Center, Left, or Right!  Discarding value.");
 	}
 
 	bool use_full_wingnames = false;
@@ -4303,6 +4397,7 @@ void load_gauge_wingman_status(gauge_settings* settings)
 	hud_gauge->initWingWidth(wing_width);
 	hud_gauge->initRightBgOffset(right_bg_offset);
 	hud_gauge->initGrowMode(grow_mode);
+	hud_gauge->initWingnameAlignMode(wingname_align_mode);
 	hud_gauge->initUseFullWingnames(use_full_wingnames);
 	hud_gauge->initUseExpandedColors(use_expanded_colors);
 

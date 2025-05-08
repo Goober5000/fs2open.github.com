@@ -35,6 +35,7 @@ bool Alternate_chaining_behavior;
 bool Fixed_chaining_to_repeat;
 bool Use_host_orientation_for_set_camera_facing;
 bool Use_model_eyepoint_for_set_camera_host;
+bool Use_model_eyepoint_normals;
 bool Always_show_directive_value_count;
 bool Use_3d_ship_select;
 bool Use_3d_ship_icons;
@@ -157,11 +158,13 @@ bool Contrails_use_absolute_speed;
 bool Use_new_scanning_behavior;
 bool Lua_API_returns_nil_instead_of_invalid_object;
 bool Dont_show_callsigns_in_escort_list;
+bool Hide_main_rearm_items_in_comms_gauge;
 bool Fix_scripted_velocity;
 color Overhead_line_colors[MAX_SHIP_SECONDARY_BANKS];
 bool Preload_briefing_icon_models;
 EscapeKeyBehaviorInOptions escape_key_behavior_in_options;
 bool Fix_asteroid_bounding_box_check;
+bool Disable_intro_movie;
 
 
 #ifdef WITH_DISCORD
@@ -467,6 +470,10 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Dont_show_callsigns_in_escort_list);
 			}
 
+			if (optional_string("$Hide main Rearm/Repair items in Comms Gauge:")) {
+				stuff_boolean(&Hide_main_rearm_items_in_comms_gauge);
+			}
+
 			optional_string("#SEXP SETTINGS");
 
 			if (optional_string("$Loop SEXPs Then Arguments:")) {
@@ -513,6 +520,15 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Use_model_eyepoint_for_set_camera_host);
 				if (Use_model_eyepoint_for_set_camera_host)
 					mprintf(("Game Settings Table: Use model eyepoint for set-camera-host\n"));
+			}
+
+			if (optional_string("$Use model eyepoint normals:"))
+			{
+				stuff_boolean(&Use_model_eyepoint_normals);
+				if (Use_model_eyepoint_normals)
+					mprintf(("Game Settings Table: Model eyepoints will respect eyepoint normals\n"));
+				else
+					mprintf(("Game Settings Table: Model eyepoints will use the model's orientation\n"));
 			}
 
 			if (optional_string("$Show-subtitle uses pixels:")) {
@@ -1484,6 +1500,10 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Fix_asteroid_bounding_box_check);
 			}
 
+			if (optional_string("$Disable intro cutscene:")) {
+				stuff_boolean(&Disable_intro_movie);
+			}
+
 			// end of options ----------------------------------------
 
 			// if we've been through once already and are at the same place, force a move
@@ -1576,6 +1596,7 @@ void mod_table_reset()
 	Fixed_chaining_to_repeat = false;
 	Use_host_orientation_for_set_camera_facing = false;
 	Use_model_eyepoint_for_set_camera_host = false;
+	Use_model_eyepoint_normals = false;
 	Always_show_directive_value_count = false;
 	Default_ship_select_effect = 2;
 	Default_weapon_select_effect = 2;
@@ -1700,6 +1721,7 @@ void mod_table_reset()
 	Use_new_scanning_behavior = false;
 	Lua_API_returns_nil_instead_of_invalid_object = false;
 	Dont_show_callsigns_in_escort_list = false;
+	Hide_main_rearm_items_in_comms_gauge = false;
 	Fix_scripted_velocity = false;
 	// These colors were taken from missionscreencommon.cpp line 591 which
 	// were the original colors used by the overhead ship loadout lines
@@ -1710,6 +1732,7 @@ void mod_table_reset()
 	Preload_briefing_icon_models = false;
 	escape_key_behavior_in_options = EscapeKeyBehaviorInOptions::DEFAULT;
 	Fix_asteroid_bounding_box_check = false;
+	Disable_intro_movie = false;
 }
 
 void mod_table_set_version_flags()
@@ -1733,6 +1756,7 @@ void mod_table_set_version_flags()
 	}
 	if (mod_supports_version(25, 0, 0)) {
 		Use_model_eyepoint_for_set_camera_host = true;
+		Use_model_eyepoint_normals = true;
 		Fix_asteroid_bounding_box_check = true;
 	}
 }
