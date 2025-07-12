@@ -16,6 +16,7 @@
 #include "pilotfile/pilotfile.h"
 #include "pilotfile/BinaryFileHandler.h"
 #include "pilotfile/JSONFileHandler.h"
+#include "pilotfile/plr_hudprefs.h"
 #include "playerman/managepilot.h"
 #include "playerman/player.h"
 #include "scripting/hook_api.h"
@@ -242,7 +243,11 @@ void pilotfile::plr_read_hud()
 		ReleaseWarning(LOCATION, "Player file has too many hud config errors, and is likely corrupted. Please verify and save your settings in the hud config menu.");
 	}
 
-	hud_config_set_color(HUD_config.main_color);
+	// This seemed to be previously used to ensure a valid color was set
+	// but under the new method we can rely on the getter to return a valid color
+	// in all cases. So comment this out to prevent forcing a default color on
+	// custom gauges that rely on color by their gauge type
+	//hud_config_set_color(HUD_config.main_color);
 
 	// gauge-specific colors
 	auto num_gauges = handler->startArrayRead("hud_gauges");
@@ -780,7 +785,7 @@ void pilotfile::plr_read_controls()
 		SCP_string buf = handler->readString("preset");
 
 		auto it = std::find_if(Control_config_presets.begin(), Control_config_presets.end(),
-							   [buf](const CC_preset& preset) { return preset.name == buf; });
+							   [&buf](const CC_preset& preset) { return preset.name == buf; });
 
 		if (it == Control_config_presets.end()) {
 			Assertion(!Control_config_presets.empty(), "[PLR] Error reading Controls! Control_config_presets empty! Get a coder!");
@@ -1035,7 +1040,7 @@ void pilotfile::plr_reset_data(bool reset_all)
 	scoring_special_t blank_score;
 
 	all_time_stats = blank_score;
-	multi_stats = blank_score;
+	multi_stats = std::move(blank_score);
 
 	// clear variables
 	p->variables.clear();
@@ -1105,7 +1110,7 @@ bool pilotfile::load_player(const char* callsign, player* _p, bool force_binary)
 		return false;
 	}
 
-	auto fp = cfopen(filename.c_str(), "rb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	auto fp = cfopen(filename.c_str(), "rb", CF_TYPE_PLAYERS, false,
 	                 CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 	if ( !fp ) {
 		mprintf(("PLR => Unable to open '%s' for reading!\n", filename.c_str()));
@@ -1215,6 +1220,9 @@ bool pilotfile::load_player(const char* callsign, player* _p, bool force_binary)
 	}
 	handler->endSectionRead();
 
+	mprintf(("HUDPREFS => Loading extended player HUD preferences...\n"));
+	hud_config_load_player_prefs(callsign); 
+
 	// Probably don't need to persist these to disk but it'll make sure on next boot we start with these player options set
 	// The github tests don't know what to do with the ini file so I guess we'll skip this for now
 	//options::OptionsManager::instance()->persistChanges();
@@ -1280,7 +1288,7 @@ bool pilotfile::save_player(player *_p)
 	filename += ".json";
 
 	// open it, hopefully...
-	auto fp = cfopen(filename.c_str(), "wb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	auto fp = cfopen(filename.c_str(), "wb", CF_TYPE_PLAYERS, false,
 	                 CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 
 	if ( !fp ) {
@@ -1331,6 +1339,9 @@ bool pilotfile::save_player(player *_p)
 
 	handler->flush();
 
+	mprintf(("HUDPREFS => Saving player HUD preferences (testing)...\n"));
+	hud_config_save_player_prefs(p->callsign);
+
 	// Done!
 	mprintf(("PLR => Saving complete!\n"));
 
@@ -1353,7 +1364,7 @@ bool pilotfile::verify(const char *fname, int *rank, char *valid_language, int* 
 		return false;
 	}
 
-	auto fp = cfopen(filename.c_str(), "rb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	auto fp = cfopen(filename.c_str(), "rb", CF_TYPE_PLAYERS, false,
 	                 CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 
 	if ( !fp ) {

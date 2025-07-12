@@ -449,7 +449,6 @@ int beam_fire(beam_fire_info *fire_info)
 	new_item->range = wip->b_info.range;
 	new_item->damage_threshold = wip->b_info.damage_threshold;
 	new_item->bank = fire_info->bank;
-	new_item->Beam_muzzle_stamp = -1;
 	new_item->beam_glow_frame = 0.0f;
 	new_item->firingpoint = (fire_info->bfi_flags & BFIF_FLOATING_BEAM) ? -1 : fire_info->turret->turret_next_fire_pos;
 	new_item->last_start = fire_info->starting_pos;
@@ -558,6 +557,38 @@ int beam_fire(beam_fire_info *fire_info)
 
 	// start the warmup phase
 	beam_start_warmup(new_item);
+
+	//Do particles
+	if (wip->b_info.beam_muzzle_effect.isValid()) {
+		auto source = particle::ParticleManager::get()->createSource(wip->b_info.beam_muzzle_effect);
+
+		std::unique_ptr<EffectHost> host;
+		if (new_item->objp == nullptr) {
+			vec3d beam_dir = new_item->last_shot - new_item->last_start;
+			matrix orient;
+			vm_vector_2_matrix(&orient, &beam_dir);
+
+			host = std::make_unique<EffectHostVector>(new_item->last_start, orient, vmd_zero_vector);
+		}
+		else if (new_item->subsys == nullptr || new_item->firingpoint < 0) {
+			vec3d beam_dir = new_item->last_shot - new_item->last_start;
+			matrix orient;
+			vm_vector_2_matrix(&orient, &beam_dir);
+
+			vec3d local_pos = new_item->last_start - new_item->objp->pos;
+			vm_vec_rotate(&local_pos, &local_pos, &new_item->objp->orient);
+			orient = new_item->objp->orient * orient;
+
+			host = std::make_unique<EffectHostObject>(new_item->objp, local_pos, orient);
+		}
+		else {
+			host = std::make_unique<EffectHostTurret>(new_item->objp, new_item->subsys->system_info->turret_gun_sobj, new_item->firingpoint);
+		}
+
+		source->setHost(std::move(host));
+		source->setTriggerRadius(wip->b_info.beam_muzzle_radius);
+		source->finishCreation();
+	}
 
 	return objnum;
 }
@@ -921,19 +952,27 @@ void beam_type_slashing_move(beam *b)
 // targeting type beams functions
 void beam_type_targeting_move(beam *b)
 {	
-	vec3d temp;
+	// If floating and targeting, synthesize orientation from known points
+	// because the object could be validly nullptr as when fired in the lab
+	if ((b->flags & BF_FLOATING_BEAM) && (b->flags & BF_TARGETING_COORDS)) {
+		// Compute forward vector from start to target
+		vec3d fvec;
+		vm_vec_sub(&fvec, &b->target_pos1, &b->last_start);
+		vm_vec_normalize_safe(&fvec);
 
-	// ugh
-	if ( (b->objp == NULL) || (b->objp->instance < 0) ) {
-		Int3();
-		return;
+		// Final beam endpoint
+		vm_vec_scale_add(&b->last_shot, &b->last_start, &fvec, b->range);
+	} else {
+		Assertion(b->objp != nullptr, "Targeting beam does not have a valid parent object!");
+		Assertion(b->objp->instance >= 0, "Targeting beam parent object instance is invalid!");
+
+		// Standard case: beam fired from a real object
+		// start point
+		vm_vec_unrotate(&b->last_start, &b->local_fire_postion, &b->objp->orient);
+		vm_vec_add2(&b->last_start, &b->objp->pos);
+		// end point
+		vm_vec_scale_add(&b->last_shot, &b->last_start, &b->objp->orient.vec.fvec, b->range);
 	}
-
-	// targeting type beams only last one frame so we never have to "move" them.			
-	temp = b->local_fire_postion;
-	vm_vec_unrotate(&b->last_start, &temp, &b->objp->orient);
-	vm_vec_add2(&b->last_start, &b->objp->pos);	
-	vm_vec_scale_add(&b->last_shot, &b->last_start, &b->objp->orient.vec.fvec, b->range);
 }
 
 // antifighter type beam functions
@@ -1004,13 +1043,22 @@ void beam_type_normal_move(beam *b)
 {
 	vec3d turret_norm;
 
-	if (b->subsys == NULL) {	// If we're a free-floating beam, there's nothing to calculate here.
-		return;
+	if (b->subsys == nullptr) {
+		// If we're a floating beam and targeting coords then we don't have a subsystem to get a normal from, so we'll calculate it.
+		if ((b->flags & BF_FLOATING_BEAM) && (b->flags & BF_TARGETING_COORDS)) {
+			// Build normal from target_pos1 and last_start
+			vm_vec_sub(&turret_norm, &b->target_pos1, &b->last_start);
+			vm_vec_normalize_safe(&turret_norm);
+		}
+		// Otherwise, there's nothing to calculate here.
+		else {
+			return;
+		}
+	} else {
+		// LEAVE THIS HERE OTHERWISE MUZZLE GLOWS DRAW INCORRECTLY WHEN WARMING UP OR DOWN
+		// get the "originating point" of the beam for this frame. essentially bashes last_start
+		beam_get_global_turret_gun_info(b->objp, b->subsys, &b->last_start, false, &turret_norm, true, nullptr, (b->flags & BF_IS_FIGHTER_BEAM) != 0);
 	}
-
-	// LEAVE THIS HERE OTHERWISE MUZZLE GLOWS DRAW INCORRECTLY WHEN WARMING UP OR DOWN
-	// get the "originating point" of the beam for this frame. essentially bashes last_start
-	beam_get_global_turret_gun_info(b->objp, b->subsys, &b->last_start, false, &turret_norm, true, nullptr, (b->flags & BF_IS_FIGHTER_BEAM) != 0);
 
 	// if the "warming up" timestamp has not expired
 	if((b->warmup_stamp != -1) || (b->warmdown_stamp != -1)){
@@ -1538,82 +1586,6 @@ void beam_render(beam *b, float u_offset)
 	//gr_set_cull(cull);
 }
 
-// generate particles for the muzzle glow
-int hack_time = 100;
-DCF(h_time, "Sets the hack time for beam muzzle glow (Default is 100)")
-{
-	dc_stuff_int(&hack_time);
-}
-
-void beam_generate_muzzle_particles(beam *b)
-{
-	int particle_count;
-	int idx;
-	weapon_info *wip;
-	vec3d turret_norm, turret_pos, particle_pos, particle_dir;
-	matrix m;
-
-	// if our hack stamp has expired
-	if(!((b->Beam_muzzle_stamp == -1) || timestamp_elapsed(b->Beam_muzzle_stamp))){
-		return;
-	}
-
-	// never generate anything past about 1/5 of the beam fire time	
-	if(b->warmup_stamp == -1){
-		return;
-	}
-
-	// get weapon info
-	wip = &Weapon_info[b->weapon_info_index];
-
-	// no specified particle for this beam weapon
-	if (wip->b_info.beam_particle_ani.first_frame < 0)
-		return;
-
-	
-	// reset the hack stamp
-	b->Beam_muzzle_stamp = timestamp(hack_time);
-
-	// randomly generate 10 to 20 particles
-	particle_count = Random::next(wip->b_info.beam_particle_count+1);
-
-	// get turret info - position and normal
-	turret_pos = b->last_start;
-	if (b->subsys != NULL) {
-		turret_norm = b->subsys->system_info->turret_norm;	
-	} else {
-		vm_vec_normalized_dir(&turret_norm, &b->last_shot, &b->last_start);
-	}
-
-	// randomly perturb a vector within a cone around the normal
-	vm_vector_2_matrix_norm(&m, &turret_norm, nullptr, nullptr);
-	for(idx=0; idx<particle_count; idx++){
-		// get a random point in the cone
-		vm_vec_random_cone(&particle_dir, &turret_norm, wip->b_info.beam_particle_angle, &m);
-		vm_vec_scale_add(&particle_pos, &turret_pos, &particle_dir, wip->b_info.beam_muzzle_radius * frand_range(0.75f, 0.9f));
-
-		// now generate some interesting values for the particle
-		float p_time_ref = wip->b_info.beam_life + ((float)wip->b_info.beam_warmup / 1000.0f);		
-		float p_life = frand_range(p_time_ref * 0.5f, p_time_ref * 0.7f);
-		float p_vel = (wip->b_info.beam_muzzle_radius / p_life) * frand_range(0.85f, 1.2f);
-		vm_vec_scale(&particle_dir, -p_vel);
-		if (b->objp != NULL) {
-			vm_vec_add2(&particle_dir, &b->objp->phys_info.vel);	//move along with our parent
-		}
-
-		particle::particle_info pinfo;
-		pinfo.pos = particle_pos;
-		pinfo.vel = particle_dir;
-		pinfo.lifetime = p_life;
-		pinfo.attached_objnum = -1;
-		pinfo.attached_sig = 0;
-		pinfo.rad = wip->b_info.beam_particle_radius;
-		pinfo.reverse = 1;
-		pinfo.bitmap = wip->b_info.beam_particle_ani.first_frame;
-		particle::create(&pinfo);
-	}
-}
-
 static float get_muzzle_glow_alpha(beam* b)
 {
 	float dist;
@@ -1662,7 +1634,8 @@ void beam_render_muzzle_glow(beam *b)
 	// don't show the muzzle glow for players in the cockpit unless show_ship_model is on, provided Render_player_mflash isn't on
 	bool in_cockpit_view = (Viewer_mode & (VM_EXTERNAL | VM_CHASE | VM_OTHER_SHIP | VM_WARP_CHASE)) == 0;
 	bool player_show_ship_model = (
-		b->objp == Player_obj  
+		b->objp != nullptr // Can validly be nullptr for floating beams!
+		&& b->objp == Player_obj  
 		&& Ship_info[Ships[b->objp->instance].ship_info_index].flags[Ship::Info_Flags::Show_ship_model] 
 		&& (!Show_ship_only_if_cockpits_enabled || Cockpit_active));
 	if ((b->flags & BF_IS_FIGHTER_BEAM) && (b->objp == Player_obj && !Render_player_mflash && in_cockpit_view && !player_show_ship_model)) {
@@ -1881,14 +1854,22 @@ void beam_render_all()
 		}
 
 		// render the muzzle glow
-		beam_render_muzzle_glow(moveup);		
-
-		// maybe generate some muzzle particles
-		beam_generate_muzzle_particles(moveup);
+		beam_render_muzzle_glow(moveup);
 
 		// next item
 		moveup = GET_NEXT(moveup);
 	}	
+}
+
+// Delete all active beams
+void beam_delete_all()
+{
+	beam* b = GET_FIRST(&Beam_used_list);
+	while (b != END_OF_LIST(&Beam_used_list)) {
+		beam* next = GET_NEXT(b);
+		beam_delete(b);
+		b = next;
+	}
 }
 
 // output top and bottom vectors
@@ -2442,7 +2423,9 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 	if(b->weapon_info_index < 0){
 		return;
 	}
-	bwi = &Weapon_info[b->weapon_info_index].b_info;
+
+	auto& wi = Weapon_info[b->weapon_info_index];
+	bwi = &wi.b_info;
 
 	// stuff num shots even though its only used for antifighter beam weapons
 	b->binfo.shot_count = (ubyte)num_shots;
@@ -2489,6 +2472,11 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 		// point 1
 		vm_vec_sub(&b->binfo.dir_a, &pos1, &turret_point);
 		vm_vec_normalize(&b->binfo.dir_a);
+
+		if (b->target && wi.beam_curves.has_curve(weapon_info::BeamCurveOutputs::END_POSITION_BY_VELOCITY)) {
+			float velocity_mult = wi.beam_curves.get_output(weapon_info::BeamCurveOutputs::END_POSITION_BY_VELOCITY, *b, &b->modular_curves_instance);
+			pos2 += b->target->phys_info.vel * velocity_mult;
+		}
 
 		// point 2
 		vm_vec_sub(&b->binfo.dir_b, &pos2, &turret_point);
@@ -2614,6 +2602,11 @@ void beam_get_binfo(beam *b, float accuracy, int num_shots, int burst_seed, floa
 				per_burst_rot_axis = b->target->pos;
 			if (bwi->t5info.burst_rot_axis == Type5BeamRotAxis::CENTER)
 				burst_rot_axis = b->target->pos;
+
+			if (wi.beam_curves.has_curve(weapon_info::BeamCurveOutputs::END_POSITION_BY_VELOCITY)) {
+				float velocity_mult = wi.beam_curves.get_output(weapon_info::BeamCurveOutputs::END_POSITION_BY_VELOCITY, *b, &b->modular_curves_instance);
+				pos2 += b->target->phys_info.vel * velocity_mult;
+			}
 			
 		} else { // No usable target
 			vec3d center = vm_vec_new(0.f, 0.f, 0.f);
@@ -2951,11 +2944,7 @@ void beam_aim(beam *b)
 		break;
 
 	case BeamType::TARGETING:
-		// start point
-		vm_vec_unrotate(&b->last_start, &b->local_fire_postion, &b->objp->orient);
-		vm_vec_add2(&b->last_start, &b->objp->pos);
-		// end point
-		vm_vec_scale_add(&b->last_shot, &b->last_start, &b->objp->orient.vec.fvec, b->range);
+		beam_type_targeting_move(b);
 		break;
 
 	case BeamType::NORMAL_FIRE:
@@ -4083,12 +4072,14 @@ void beam_handle_collisions(beam *b)
 
 							if (trgt->hull_strength < 0) {
 								Weapons[trgt->instance].weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
-								weapon_hit(trgt, NULL, &trgt->pos);
+								bool armed = weapon_hit(trgt, nullptr, &trgt->pos);
+								maybe_play_conditional_impacts({}, trgt, nullptr, armed, -1, &trgt->pos);
 							}
 						} else {
 							if (!(Game_mode & GM_MULTIPLAYER) || MULTIPLAYER_MASTER) {
 								Weapons[trgt->instance].weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
-								weapon_hit(&Objects[target], NULL, &Objects[target].pos);
+								bool armed = weapon_hit(trgt, nullptr, &trgt->pos);
+								maybe_play_conditional_impacts({}, trgt, nullptr, armed, -1, &trgt->pos);
 							}
 						}
 						
@@ -4100,7 +4091,8 @@ void beam_handle_collisions(beam *b)
 
 					if (!(Game_mode & GM_MULTIPLAYER) || MULTIPLAYER_MASTER) {
 						Weapons[Objects[target].instance].weapon_flags.set(Weapon::Weapon_Flags::Destroyed_by_weapon);
-						weapon_hit(&Objects[target], NULL, &Objects[target].pos);
+						bool armed = weapon_hit(&Objects[target], nullptr, &Objects[target].pos);
+						maybe_play_conditional_impacts({}, &Objects[target], nullptr, armed, -1, &Objects[target].pos);
 					}
 				}
 				break;

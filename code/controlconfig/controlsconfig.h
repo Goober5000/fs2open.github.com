@@ -297,6 +297,13 @@ enum IoActionId : int {
 	JOY_ABS_THROTTLE_AXIS							= 127,
 	JOY_REL_THROTTLE_AXIS							= 128,
 
+	//!< @n
+	//! Communication menu controls
+	//! ----------------------------
+	COMMS_MENU_MOVE_UP,
+	COMMS_MENU_MOVE_DOWN,
+	COMMS_MENU_SELECT,
+
 	TOGGLE_HUD_SHADOWS,
 
 	CYCLE_PRIMARY_WEAPON_PATTERN,
@@ -561,7 +568,7 @@ class CC_preset {
 public:
 	SCP_vector<CCB> bindings;
 	SCP_string name;
-	Preset_t type;
+	Preset_t type = Preset_t::hardcode;
 
 public:
 	CC_preset() = default;

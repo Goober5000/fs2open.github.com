@@ -3,7 +3,10 @@
 #include "particle/ParticleEffect.h"
 #include "particle/ParticleManager.h"
 
+#include "model/modelrender.h"
 #include "render/3d.h"
+
+#include <anl.h>
 
 namespace particle {
 
@@ -21,6 +24,8 @@ ParticleEffect::ParticleEffect(SCP_string name)
 	  m_keep_anim_length_if_available(false),
 	  m_vel_inherit_absolute(false),
 	  m_vel_inherit_from_position_absolute(false),
+	  m_reverseAnimation(false),
+	  m_ignore_velocity_inherit_if_has_parent(false),
 	  m_bitmap_list({}),
 	  m_bitmap_range(::util::UniformRange<size_t>(0)),
 	  m_delayRange(::util::UniformFloatRange(0.0f)),
@@ -31,12 +36,17 @@ ParticleEffect::ParticleEffect(SCP_string name)
 	  m_lifetime(::util::UniformFloatRange(0.0f)),
 	  m_length(::util::UniformFloatRange(0.0f)),
 	  m_vel_inherit(::util::UniformFloatRange(0.0f)),
-	  m_velocity_scaling(::util::UniformFloatRange(0.0f)),
+	  m_velocity_scaling(::util::UniformFloatRange(1.0f)),
+	  m_velocity_noise_scaling(::util::UniformFloatRange(1.0f)),
+	  m_position_noise_scaling(::util::UniformFloatRange(1.0f)),
 	  m_vel_inherit_from_orientation(std::nullopt),
 	  m_vel_inherit_from_position(std::nullopt),
 	  m_velocityVolume(nullptr),
 	  m_spawnVolume(nullptr),
+	  m_velocityNoise(nullptr),
+	  m_spawnNoise(nullptr),
 	  m_manual_offset (std::nullopt),
+	  m_manual_velocity_offset(std::nullopt),
 	  m_particleTrail(ParticleEffectHandle::invalid()),
 	  m_size_lifetime_curve(-1),
 	  m_vel_lifetime_curve (-1),
@@ -46,6 +56,9 @@ ParticleEffect::ParticleEffect(SCP_string name)
 
 ParticleEffect::ParticleEffect(SCP_string name,
 	::util::ParsedRandomFloatRange particleNum,
+	Duration duration,
+	::util::ParsedRandomFloatRange durationRange,
+	::util::ParsedRandomFloatRange particlesPerSecond,
 	ShapeDirection direction,
 	::util::ParsedRandomFloatRange vel_inherit,
 	bool vel_inherit_absolute,
@@ -60,11 +73,17 @@ ParticleEffect::ParticleEffect(SCP_string name,
 	bool affectedByDetail,
 	float distanceCulled,
 	bool disregardAnimationLength,
+	bool reverseAnimation,
+	bool parentLocal,
+	bool ignoreVelocityInheritIfParented,
+	bool velInheritFromPositionAbsolute,
+	std::optional<vec3d> velocityOffsetLocal,
+	std::optional<vec3d> offsetLocal,
 	::util::ParsedRandomFloatRange lifetime,
 	::util::ParsedRandomFloatRange radius,
 	int bitmap)
 	: m_name(std::move(name)),
-	  m_duration(Duration::ONETIME),
+	  m_duration(duration),
 	  m_rotation_type(RotationType::DEFAULT),
 	  m_direction(direction),
 	  m_velocity_directional_scaling(velocity_directional_scaling),
@@ -72,31 +91,52 @@ ParticleEffect::ParticleEffect(SCP_string name,
 	  m_parentLifetime(false),
 	  m_parentScale(false),
 	  m_hasLifetime(true),
-	  m_parent_local(false),
+	  m_parent_local(parentLocal),
 	  m_keep_anim_length_if_available(!disregardAnimationLength),
 	  m_vel_inherit_absolute(vel_inherit_absolute),
-	  m_vel_inherit_from_position_absolute(false),
+	  m_vel_inherit_from_position_absolute(velInheritFromPositionAbsolute),
+	  m_reverseAnimation(reverseAnimation),
+	  m_ignore_velocity_inherit_if_has_parent(ignoreVelocityInheritIfParented),
 	  m_bitmap_list({bitmap}),
 	  m_bitmap_range(::util::UniformRange<size_t>(0)),
 	  m_delayRange(::util::UniformFloatRange(0.0f)),
-	  m_durationRange(::util::UniformFloatRange(0.0f)),
-	  m_particlesPerSecond(::util::UniformFloatRange(-1.f)),
+	  m_durationRange(durationRange),
+	  m_particlesPerSecond(particlesPerSecond),
 	  m_particleNum(particleNum),
 	  m_radius(radius),
 	  m_lifetime(lifetime),
 	  m_length(::util::UniformFloatRange(0.0f)),
 	  m_vel_inherit(vel_inherit),
 	  m_velocity_scaling(velocity_scaling),
+	  m_velocity_noise_scaling(::util::UniformFloatRange(1.0f)),
+	  m_position_noise_scaling(::util::UniformFloatRange(1.0f)),
 	  m_vel_inherit_from_orientation(vel_inherit_from_orientation),
 	  m_vel_inherit_from_position(vel_inherit_from_position),
 	  m_velocityVolume(std::move(velocityVolume)),
 	  m_spawnVolume(std::move(spawnVolume)),
-	  m_manual_offset (std::nullopt),
+	  m_velocityNoise(nullptr),
+	  m_spawnNoise(nullptr),
+	  m_manual_offset(offsetLocal),
+	  m_manual_velocity_offset(velocityOffsetLocal),
 	  m_particleTrail(particleTrail),
 	  m_size_lifetime_curve(-1),
 	  m_vel_lifetime_curve (-1),
 	  m_particleChance(particleChance),
 	  m_distanceCulled(distanceCulled) {}
+
+float ParticleEffect::getApproximateVisualSize(const vec3d& pos) const {
+	float distance_to_eye = vm_vec_dist(&Eye_position, &pos);
+
+	return convert_distance_and_diameter_to_pixel_size(
+		distance_to_eye,
+		m_radius.avg() * 2.f,
+		fl_degrees(g3_get_hfov(Eye_fov)),
+		gr_screen.max_h);
+}
+
+float ParticleEffect::getCurrentFrequencyMult(decltype(modular_curves_definition)::input_type_t source) const {
+	return m_modular_curves.get_output(ParticleEffect::ParticleCurvesOutput::PARTICLE_FREQ_MULT, source);
+}
 
 matrix ParticleEffect::getNewDirection(const matrix& hostOrientation, const std::optional<vec3d>& normal) const {
 	switch (m_direction) {
@@ -120,10 +160,9 @@ matrix ParticleEffect::getNewDirection(const matrix& hostOrientation, const std:
 			// Compute reflect vector as R = V - 2*(V dot N)*N where N
 			// is the normal and V is the incoming direction
 
-			return vm_matrix_new(1.f - 2.f * normal->xyz.x * normal->xyz.x, -2.f * normal->xyz.x * normal->xyz.y, -2.f * normal->xyz.x * normal->xyz.z,
+			return hostOrientation * vm_matrix_new(1.f - 2.f * normal->xyz.x * normal->xyz.x, -2.f * normal->xyz.x * normal->xyz.y, -2.f * normal->xyz.x * normal->xyz.z,
 								 -2.f * normal->xyz.x * normal->xyz.y, 1.f - 2.f * normal->xyz.y * normal->xyz.y, -2.f * normal->xyz.y * normal->xyz.z,
-								 -2.f * normal->xyz.x * normal->xyz.z, -2.f * normal->xyz.y * normal->xyz.z, 1.f - 2.f * normal->xyz.z * normal->xyz.z)
-								 * hostOrientation;
+								 -2.f * normal->xyz.x * normal->xyz.z, -2.f * normal->xyz.y * normal->xyz.z, 1.f - 2.f * normal->xyz.z * normal->xyz.z);
 		}
 		case ShapeDirection::REVERSE: {
 			return vm_matrix_new(hostOrientation.vec.rvec * -1.f, hostOrientation.vec.uvec * -1.f, hostOrientation.vec.fvec * -1.f);
@@ -134,15 +173,59 @@ matrix ParticleEffect::getNewDirection(const matrix& hostOrientation, const std:
 	}
 }
 
-void ParticleEffect::processSource(float interp, const ParticleSource& source, size_t effectNumber, const vec3d& vel, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const {
-	const auto& [pos, hostOrientation] = source.m_host->getPositionAndOrientation(m_parent_local, interp, m_manual_offset);
+void ParticleEffect::sampleNoise(vec3d& noiseTarget, const matrix* orientation, std::pair<anl::CKernel, anl::CInstructionIndex>& noise, decltype(modular_curves_definition)::input_type_t source, ParticleCurvesOutput noiseMult, ParticleCurvesOutput noiseTimeMult, ParticleCurvesOutput noiseSeed) const {
+	auto& [kernel, instruction] = noise;
+	anl::CNoiseExecutor executor(kernel);
+	const auto& color = executor.evaluateColor(
+		ParticleSource::getEffectRunningTime(std::forward_as_tuple(std::get<0>(source), std::get<1>(source)))
+			* m_modular_curves.get_output(noiseTimeMult, source)
+			, m_modular_curves.get_output(noiseSeed, source), instruction);
+
+	vec3d noiseSampleLocal{{{ color.r, color.g, color.b }}};
+	noiseSampleLocal *= m_modular_curves.get_output(noiseMult, source);
+
+	vm_vec_unrotate(&noiseTarget, &noiseSampleLocal, orientation);
+}
+
+/*
+ * In persistent mode (should only ever be used by scripting, really), this function returns pointers to the persistent particles
+ * In non-persistent mode, this function returns the multiplier for the next spawn time. This is because the source cannot know about the curve evaluation that is required to get this factor
+ *
+ * */
+template<bool isPersistent>
+auto ParticleEffect::processSourceInternal(float interp, const ParticleSource& source, size_t effectNumber, const vec3d& velParent, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const {
+	using persistentParticlesList = std::conditional_t<isPersistent, SCP_vector<WeakParticlePtr>, bool>;
+	persistentParticlesList createdParticles;
+
+	if constexpr (!isPersistent)
+		SCP_UNUSED(createdParticles);
 
 	if (m_affectedByDetail){
 		if (Detail.num_particles > 0)
 			particle_percent *= (0.5f + (0.25f * static_cast<float>(Detail.num_particles - 1)));
-		else
-			return; //Will not emit on current detail settings, but may in the future.
+		else {
+			//Will not emit on current detail settings, but may in the future.
+			if constexpr (isPersistent)
+				return createdParticles;
+			else {
+				const auto& [pos, hostOrientation] = source.m_host->getPositionAndOrientation(m_parent_local, interp, m_manual_offset);
+				auto modularCurvesInput = std::forward_as_tuple(source, effectNumber, pos);
+				return getCurrentFrequencyMult(modularCurvesInput);
+			}
+		}
 	}
+
+	const auto& [pos, hostOrientation] = source.m_host->getPositionAndOrientation(m_parent_local, interp, m_manual_offset);
+
+	vec3d posGlobal = pos;
+	if (m_parent_local && parent >= 0) {
+		vm_vec_unrotate(&posGlobal, &posGlobal, &Objects[parent].orient);
+		vm_vec_add2(&posGlobal, &Objects[parent].pos);
+	}
+
+	auto modularCurvesInput = std::forward_as_tuple(source, effectNumber, posGlobal);
+
+	const auto& orientation = getNewDirection(hostOrientation, source.m_normal);
 
 	if (m_distanceCulled > 0.f) {
 		float min_dist = 125.0f;
@@ -151,9 +234,6 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 			particle_percent *= min_dist / dist;
 	}
 
-	const auto& orientation = getNewDirection(hostOrientation, source.m_normal);
-
-	auto modularCurvesInput = std::forward_as_tuple(source, effectNumber);
 	particle_percent *= m_particleChance * m_modular_curves.get_output(ParticleCurvesOutput::PARTICLE_NUM_MULT, modularCurvesInput);
 	float radiusMultiplier = m_modular_curves.get_output(ParticleCurvesOutput::RADIUS_MULT, modularCurvesInput);
 	float lengthMultiplier = m_modular_curves.get_output(ParticleCurvesOutput::LENGTH_MULT, modularCurvesInput);
@@ -162,6 +242,18 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 	float inheritVelocityMultiplier = m_modular_curves.get_output(ParticleCurvesOutput::INHERIT_VELOCITY_MULT, modularCurvesInput);
 	float positionInheritVelocityMultiplier = m_modular_curves.get_output(ParticleCurvesOutput::POSITION_INHERIT_VELOCITY_MULT, modularCurvesInput);
 	float orientationInheritVelocityMultiplier = m_modular_curves.get_output(ParticleCurvesOutput::ORIENTATION_INHERIT_VELOCITY_MULT, modularCurvesInput);
+
+	vec3d velNoise = ZERO_VECTOR;
+	if (m_velocityNoise != nullptr) {
+		sampleNoise(velNoise, &orientation, *m_velocityNoise, modularCurvesInput, ParticleCurvesOutput::VELOCITY_NOISE_MULT, ParticleCurvesOutput::VELOCITY_NOISE_TIME_MULT, ParticleCurvesOutput::VELOCITY_NOISE_SEED);
+		velNoise *= m_velocity_noise_scaling.next();
+	}
+
+	vec3d posNoise = ZERO_VECTOR;
+	if (m_spawnNoise != nullptr) {
+		sampleNoise(posNoise, &orientation, *m_spawnNoise, modularCurvesInput, ParticleCurvesOutput::SPAWN_POSITION_NOISE_MULT, ParticleCurvesOutput::SPAWN_POSITION_NOISE_TIME_MULT, ParticleCurvesOutput::SPAWN_POSITION_NOISE_SEED);
+		posNoise *= m_position_noise_scaling.next();
+	}
 
 	float num = m_particleNum.next() * particle_percent;
 	unsigned int num_spawn;
@@ -174,10 +266,13 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 	}
 
 	for (uint i = 0; i < num_spawn; ++i) {
+		float particleFraction = static_cast<float>(i) / static_cast<float>(num_spawn);
+
 		particle_info info;
 
+		info.reverse = m_reverseAnimation;
 		info.pos = pos;
-		info.vel = vel;
+		info.vel = velParent;
 
 		if (m_parent_local) {
 			info.attached_objnum = parent;
@@ -189,45 +284,49 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 		}
 
 		if (m_vel_inherit_absolute)
-			vm_vec_normalize_quick(&info.vel);
+			vm_vec_normalize_safe(&info.vel, true);
 
-		info.vel *= m_vel_inherit.next() * inheritVelocityMultiplier;
+		info.vel *= (m_ignore_velocity_inherit_if_has_parent && parent >= 0) ? 0.f : m_vel_inherit.next() * inheritVelocityMultiplier;
 
-		vec3d velocity = ZERO_VECTOR;
-		vec3d localPos = ZERO_VECTOR;
+		vec3d localVelocity = velNoise;
+		vec3d localPos = posNoise;
 
 		if (m_spawnVolume != nullptr) {
-			localPos += m_spawnVolume->sampleRandomPoint(orientation, modularCurvesInput);
+			localPos += m_spawnVolume->sampleRandomPoint(orientation, modularCurvesInput, particleFraction);
 		}
 
 		if (m_velocityVolume != nullptr) {
-			velocity += m_velocityVolume->sampleRandomPoint(orientation, modularCurvesInput) * (m_velocity_scaling.next() * velocityVolumeMultiplier);
+			localVelocity += m_velocityVolume->sampleRandomPoint(orientation, modularCurvesInput, particleFraction) * (m_velocity_scaling.next() * velocityVolumeMultiplier);
+		}
+
+		if (m_manual_velocity_offset.has_value()) {
+			localVelocity += *m_manual_velocity_offset;
 		}
 
 		if (m_vel_inherit_from_orientation.has_value()) {
-			velocity += orientation.vec.fvec * (m_vel_inherit_from_orientation->next() * orientationInheritVelocityMultiplier);
+			localVelocity += orientation.vec.fvec * (m_vel_inherit_from_orientation->next() * orientationInheritVelocityMultiplier);
 		}
 
 		if (m_vel_inherit_from_position.has_value()) {
 			vec3d velFromPos = localPos;
 			if (m_vel_inherit_from_position_absolute)
 				vm_vec_normalize_safe(&velFromPos);
-			velocity += velFromPos * (m_vel_inherit_from_position->next() * positionInheritVelocityMultiplier);
+			localVelocity += velFromPos * (m_vel_inherit_from_position->next() * positionInheritVelocityMultiplier);
 		}
 
 		if (m_velocity_directional_scaling != VelocityScaling::NONE) {
-			// Scale the vector with a random velocity sample and also multiply that with cos(angle between
-			// info.vel and sourceDir) That should produce good looking directions where the maximum velocity is
+			// Scale the vector with a random localVelocity sample and also multiply that with cos(angle between
+			// info.vel and sourceDir) That should produce good looking directions where the maximum localVelocity is
 			// only achieved when the particle travels directly on the normal/reflect vector
 			vec3d normalizedVelocity;
-			vm_vec_copy_normalize_safe(&normalizedVelocity, &velocity);
+			vm_vec_copy_normalize_safe(&normalizedVelocity, &localVelocity);
 			float dot = vm_vec_dot(&normalizedVelocity, &orientation.vec.fvec);
-			vm_vec_scale(&velocity,
+			vm_vec_scale(&localVelocity,
 				m_velocity_directional_scaling == VelocityScaling::DOT ? dot : 1.f / std::max(0.001f, dot));
 		}
 
-		info.pos += localPos;
-		info.vel += velocity;
+		info.vel += localVelocity;
+		info.pos += localPos + info.vel * (interp * f2fl(Frametime));
 
 		info.bitmap = m_bitmap_list[m_bitmap_range.next()];
 
@@ -266,6 +365,9 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 		if (m_particleTrail.isValid()) {
 			auto part = createPersistent(&info);
 
+			if constexpr (isPersistent)
+				createdParticles.push_back(part);
+
 			// There are some possibilities where we can get a null pointer back. Those are very rare but we
 			// still shouldn't crash in those circumstances.
 			if (!part.expired()) {
@@ -274,10 +376,29 @@ void ParticleEffect::processSource(float interp, const ParticleSource& source, s
 				trailSource->finishCreation();
 			}
 		} else {
-			// We don't have a trail so we don't need a persistent particle
-			create(&info);
+			if constexpr (isPersistent){
+				auto part = createPersistent(&info);
+				createdParticles.push_back(part);
+			}
+			else {
+				// We don't have a trail so we don't need a persistent particle
+				create(&info);
+			}
 		}
 	}
+
+	if constexpr (isPersistent)
+		return createdParticles;
+	else
+		return getCurrentFrequencyMult(modularCurvesInput);
+}
+
+float ParticleEffect::processSource(float interp, const ParticleSource& source, size_t effectNumber, const vec3d& velParent, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const {
+	return processSourceInternal<false>(interp, source, effectNumber, velParent, parent, parent_sig, parentLifetime, parentRadius, particle_percent);
+}
+
+SCP_vector<WeakParticlePtr> ParticleEffect::processSourcePersistent(float interp, const ParticleSource& source, size_t effectNumber, const vec3d& velParent, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const {
+	return processSourceInternal<true>(interp, source, effectNumber, velParent, parent, parent_sig, parentLifetime, parentRadius, particle_percent);
 }
 
 void ParticleEffect::pageIn() {

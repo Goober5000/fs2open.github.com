@@ -77,6 +77,10 @@ class RandomRange {
 	ValueType m_minValue;
 	ValueType m_maxValue;
 
+	//Sampling a random_device is REALLY expensive.
+	//Instead of sampling one for each seed, create a pseudorandom seeder which is initialized ONCE from a random_device.
+	inline static thread_local std::mt19937 seeder {std::random_device()()};
+
   public:
 	template <typename T, typename... Ts, typename = typename std::enable_if<(sizeof... (Ts) >=1 || !std::is_convertible<T, ValueType>::value) && !std::is_same_v<std::decay_t<T>, RandomRange>, int>::type>
 	explicit RandomRange(T&& distributionFirstParameter, Ts&&... distributionParameters)
@@ -469,9 +473,7 @@ using CurveFloatRange = RandomRange<float, CurveNumberDistribution, std::minstd_
 inline CurveFloatRange parseCurveFloatRange(float min = std::numeric_limits<float>::lowest()/2.1f, float max = std::numeric_limits<float>::max()/2.1f) {
 	CurveNumberDistribution::param_type curve_params;
 
-	SCP_string curve_name;
-	stuff_string(curve_name, F_NAME);
-	curve_params.curve = curve_get_by_name(curve_name);
+	curve_params.curve = curve_parse(" Random distributions using this curve will return 0.");
 
 	optional_string("(");
 	stuff_float_optional(&curve_params.min);
@@ -479,7 +481,6 @@ inline CurveFloatRange parseCurveFloatRange(float min = std::numeric_limits<floa
 	optional_string(")");
 
 	if (curve_params.curve < 0) {
-		error_display(0, "Curve %s not found! Random distributions using this curve will return 0.", curve_name.c_str());
 		return CurveFloatRange{curve_params};
 	} else {
 		bool y_below_0 = false;
@@ -496,13 +497,13 @@ inline CurveFloatRange parseCurveFloatRange(float min = std::numeric_limits<floa
 
 		if (y_below_0) {
 			error_display(0,
-				"Curve %s goes below zero along the Y axis. Random distributions using this curve will return 0.", curve_name.c_str());
+				"Curve %s goes below zero along the Y axis. Random distributions using this curve will return 0.", Curves[curve_params.curve].name.c_str());
 			curve_params.curve = -1;
 			return CurveFloatRange{curve_params};
 		}
 		if (no_y_above_0) {
 			error_display(0,
-				"Curve %s has no values above zero along the Y axis. Random distributions using this curve will return 0.", curve_name.c_str());
+				"Curve %s has no values above zero along the Y axis. Random distributions using this curve will return 0.", Curves[curve_params.curve].name.c_str());
 			curve_params.curve = -1;
 			return CurveFloatRange{curve_params};
 		}
@@ -510,7 +511,7 @@ inline CurveFloatRange parseCurveFloatRange(float min = std::numeric_limits<floa
 
 	if (fl_is_nan(curve_params.min) || fl_is_nan(curve_params.max)) {
 		if (!fl_is_nan(curve_params.min)) {
-			error_display(0, "Minimum value but no maximum value specified for curve distribution %s!", curve_name.c_str());
+			error_display(0, "Minimum value but no maximum value specified for curve distribution %s!", Curves[curve_params.curve].name.c_str());
 		}
 		curve_params.min = Curves[curve_params.curve].keyframes.front().pos.x;
 		curve_params.max = Curves[curve_params.curve].keyframes.back().pos.x;

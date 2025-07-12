@@ -50,7 +50,7 @@ jobs:
     name: Linux
     needs: create_release   # Don't run this job until create_release is done and successful
     runs-on: ${{ matrix.os }}
-    container: ghcr.io/scp-fs2open/linux_build:sha-1ff82e8
+    container: ghcr.io/scp-fs2open/linux_build:sha-71099c9
     steps:
       - uses: actions/checkout@v1
         # checks-out your repository under $GITHUB_WORKSPACE, so your workflow can access it.
@@ -155,7 +155,7 @@ jobs:
         simd: [SSE2, AVX]
     needs: create_release
     name: Windows
-    runs-on: windows-2019
+    runs-on: windows-2022
     steps:
       - uses: actions/checkout@v1
         # Checkout repo
@@ -211,13 +211,13 @@ jobs:
                   -DFSO_USE_VOICEREC="ON" -DFORCED_SIMD_INSTRUCTIONS="$SIMD" \
                   -DFSO_BUILD_QTFRED=OFF -DFSO_BUILD_TESTS=ON \
                   -DFSO_INSTALL_DEBUG_FILES="ON" -DFSO_BUILD_WITH_VULKAN="OFF" -A "$ARCHITECTURE" \
-                  -G "Visual Studio 16 2019" -T "v142" ..
+                  -G "Visual Studio 17 2022" -T "v143" -DCMAKE_BUILD_TYPE=$CONFIGURATION ..
           else
               cmake -DCMAKE_INSTALL_PREFIX="$(pwd)/install" -DFSO_USE_SPEECH="ON" \
                   -DFSO_USE_VOICEREC="ON" -DFORCED_SIMD_INSTRUCTIONS="$SIMD" \
                   -DFSO_BUILD_QTFRED=OFF -DFSO_BUILD_TESTS=ON \
                   -DFSO_INSTALL_DEBUG_FILES="ON" -A "$ARCHITECTURE" \
-                  -G "Visual Studio 16 2019" -T "v142" ..
+                  -G "Visual Studio 17 2022" -T "v143" -DCMAKE_BUILD_TYPE=$CONFIGURATION ..
           fi
       - name: Compile
         working-directory: ./build

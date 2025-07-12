@@ -756,17 +756,19 @@ int optional_string_fred(const char *pstr, const char *end, const char *end2)
  * @details Advances the Mp until a string is found or exceeds RS_MAX_TRIES. Once a string is found, Mp is located at
  * the start of the found string.
  */
-int required_string_either(const char *str1, const char *str2)
+int required_string_either(const char *str1, const char *str2, bool advance)
 {
 	ignore_white_space();
 
 	for (int count = 0; count < RS_MAX_TRIES; ++count) {
 		if (strnicmp(str1, Mp, strlen(str1)) == 0) {
-			// Mp += strlen(str1);
+			if (advance)
+				Mp += strlen(str1);
 			diag_printf("Found required string [%s]\n", token_found = str1);
 			return 0;
 		} else if (strnicmp(str2, Mp, strlen(str2)) == 0) {
-			// Mp += strlen(str2);
+			if (advance)
+				Mp += strlen(str2);
 			diag_printf("Found required string [%s]\n", token_found = str2);
 			return 1;
 		}
@@ -1868,20 +1870,23 @@ size_t maybe_convert_foreign_characters(const char *in, char *out, bool add_null
 }
 
 // Goober5000
-void maybe_convert_foreign_characters(SCP_string &text)
+SCP_string maybe_convert_foreign_characters(const SCP_string &text)
 {
-	if (!Fred_running) {
-		for (SCP_string::iterator ii = text.begin(); ii != text.end(); ++ii) {
-			text.reserve(get_converted_string_length(text));
+	if (Fred_running)
+		return text;
 
-			if (*ii == SHARP_S) {
-				text.replace(ii, ii + 1, "ss");
-				++ii;
-			} else if (!Lcl_pl) {
-				*ii = (char) maybe_convert_foreign_character(*ii);
-			}
-		}
+	SCP_string new_text;
+	for (auto ch: text)
+	{
+		if (ch == SHARP_S)
+			new_text += "ss";
+		else if (!Lcl_pl)
+			new_text += i2ch(maybe_convert_foreign_character(ch));
+		else
+			new_text += ch;
 	}
+
+	return new_text;
 }
 
 // Yarn - Returns what the length of the text will be after it's processed by
@@ -2364,7 +2369,7 @@ void read_raw_file_text(const char *filename, int mode, char *raw_text)
 	if (!filename)
 		throw parse::FileOpenException("Filename must not be null!");
 
-	mf = cfopen(filename, "rb", CFILE_NORMAL, mode);
+	mf = cfopen(filename, "rb", mode);
 	if (mf == NULL)
 	{
 		nprintf(("Error", "Wokka!  Error opening file (%s)!\n", filename));
@@ -2430,7 +2435,7 @@ void read_raw_file_text(const char *filename, int mode, char *raw_text)
 
 				// Compare filename by lowercase string
 				SCP_string key = filename;
-				std::transform(key.begin(), key.end(), key.begin(), ::tolower);
+				SCP_tolower(key);
 
 				// Check for a hash
 				auto it = retail_hashes.find(key);
@@ -2641,7 +2646,7 @@ void read_file_bytes(const char *filename, int mode, char *raw_bytes)
 		Error(LOCATION, "ERROR: raw_bytes may not be NULL when parsing is paused!!\n");
 	}
 
-	mf = cfopen(filename, "rb", CFILE_NORMAL, mode);
+	mf = cfopen(filename, "rb", mode);
 	if (mf == nullptr)
 	{
 		nprintf(("Error", "Wokka!  Error opening file (%s)!\n", filename));
@@ -4001,7 +4006,7 @@ SCP_vector<std::pair<size_t, size_t>> str_wrap_to_width(const SCP_string& source
 			lines.emplace_back(pos_start, 0);
 		} else {
 			auto sublines = str_wrap_to_width(source_string, max_pixel_width, strip_leading_whitespace, pos_start, (newline_at - pos_start));
-			lines.reserve(lines.size() + sublines.size());
+			lines.reserve(lines.size() + sublines.size());	// coverity[inefficient_reserve:FALSE]
 			std::move(sublines.begin(), sublines.end(), std::back_inserter(lines));
 		}
 
@@ -4029,7 +4034,7 @@ SCP_vector<std::pair<size_t, size_t>> str_wrap_to_width(const SCP_string& source
 			size_t search_min = 0;
 			size_t search_max = stringlen;
 			size_t center = 0;
-			while ((search_max - search_min) > 0) {
+			while (search_max > search_min) {
 				center = search_min + ((search_max - search_min) / 2);
 				gr_get_string_size(&line_width, nullptr, source_string.c_str() + pos_start, 1.0f, center);
 				if (line_width == max_pixel_width) {
@@ -4104,7 +4109,7 @@ SCP_vector<std::pair<size_t, size_t>> str_wrap_to_width(const char* source_strin
 				for (auto& subline : sublines)
 					subline.first += (ch_start - source_string);
 
-			lines.reserve(lines.size() + sublines.size());
+			lines.reserve(lines.size() + sublines.size());	// coverity[inefficient_reserve:FALSE]
 			std::move(sublines.begin(), sublines.end(), std::back_inserter(lines));
 		}
 
@@ -4132,7 +4137,7 @@ SCP_vector<std::pair<size_t, size_t>> str_wrap_to_width(const char* source_strin
 			size_t search_min = 0;
 			size_t search_max = stringlen;
 			size_t center = 0;
-			while ((search_max - search_min) > 0) {
+			while (search_max > search_min) {
 				center = search_min + ((search_max - search_min) / 2);
 				gr_get_string_size(&line_width, nullptr, ch_start, 1.0f, center);
 				if (line_width == max_pixel_width) {

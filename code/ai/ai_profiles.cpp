@@ -669,6 +669,8 @@ void parse_ai_profiles_tbl(const char *filename)
 
 				set_flag(profile, "$fix avoid-shockwave bugs:", AI::Profile_Flags::Fix_avoid_shockwave_bugs);
 
+				set_flag(profile, "$fix standard strafe:", AI::Profile_Flags::Fix_standard_strafe);
+
 				set_flag(profile, "$standard strafe used more:", AI::Profile_Flags::Standard_strafe_used_more);
 
 				if (optional_string("$standard strafe triggers under this speed:")) {
@@ -699,9 +701,18 @@ void parse_ai_profiles_tbl(const char *filename)
 
 				set_flag(profile, "$unify usage of AI Shield Manage Delay:", AI::Profile_Flags::Unify_usage_ai_shield_manage_delay);
 
+				set_flag(profile, "$fix AI shield management bug:", AI::Profile_Flags::Fix_AI_shield_management_bug);
+
+				set_flag(profile, "$AI balances shields instead of directs when attacked:", AI::Profile_Flags::AI_balances_shields_when_attacked);
+
 				set_flag(profile, "$disable AI transferring energy:", AI::Profile_Flags::Disable_ai_transferring_energy);
 
 				set_flag(profile, "$enable freespace 1 style missile behavior:", AI::Profile_Flags::Freespace_1_missile_behavior);
+
+				set_flag(profile, "$ETS uses ship class power output:", AI::Profile_Flags::ETS_uses_power_output);
+
+				set_flag(profile, "$ETS energy same regardless of system presence:", AI::Profile_Flags::ETS_energy_same_regardless_of_system_presence);
+
 
 				// end of options ----------------------------------------
 

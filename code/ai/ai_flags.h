@@ -170,10 +170,15 @@ namespace AI {
 		Debris_respects_big_damage,
 		Dont_limit_change_in_speed_due_to_physics_whack,
 		Guards_ignore_protected_attackers,
+		Fix_standard_strafe,
 		Standard_strafe_used_more,
 		Unify_usage_ai_shield_manage_delay,
+		Fix_AI_shield_management_bug,
+		AI_balances_shields_when_attacked,
 		Disable_ai_transferring_energy,
 		Freespace_1_missile_behavior,
+		ETS_uses_power_output,
+		ETS_energy_same_regardless_of_system_presence,
 
 		NUM_VALUES
 	};

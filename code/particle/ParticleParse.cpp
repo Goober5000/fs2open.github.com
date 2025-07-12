@@ -1,7 +1,11 @@
 #include "particle/ParticleManager.h"
 #include "particle/ParticleEffect.h"
 #include "particle/volumes/ConeVolume.h"
+#include "particle/volumes/PointVolume.h"
+#include "particle/volumes/RingVolume.h"
 #include "particle/volumes/SpheroidVolume.h"
+
+#include <anl.h>
 
 namespace particle {
 
@@ -14,6 +18,12 @@ namespace particle {
 			if (internal::required_string_if_new("+Filename:", false)) {
 				effect.m_bitmap_list = internal::parseAnimationList(true);
 				effect.m_bitmap_range = ::util::UniformRange<size_t>(0, effect.m_bitmap_list.size() - 1);
+			}
+		}
+
+		static void parseBitmapReversed(ParticleEffect &effect) {
+			if (optional_string("+Animation Reversed:")) {
+				stuff_boolean(&effect.m_reverseAnimation);
 			}
 		}
 
@@ -71,6 +81,10 @@ namespace particle {
 			if (optional_string(modern ? "+Position Offset:" : "+Offset:")) {
 				stuff_vec3d(&effect.m_manual_offset.emplace());
 			}
+
+			if (optional_string("+Velocity Offset:")) {
+				stuff_vec3d(&effect.m_manual_velocity_offset.emplace());
+			}
 		}
 
 		static void parseParentLocal(ParticleEffect& effect) {
@@ -106,7 +120,7 @@ namespace particle {
 
 		static std::shared_ptr<ParticleVolume> parseVolume() {
 
-			int type = required_string_one_of(2, "Spheroid", "Cone"); //... and future volumes
+			int type = required_string_one_of(4, "Spheroid", "Cone", "Ring", "Point"); //... and future volumes
 			std::shared_ptr<ParticleVolume> volume;
 
 			switch (type) {
@@ -117,6 +131,14 @@ namespace particle {
 				case 1:
 					required_string("Cone");
 					volume = std::make_shared<ConeVolume>();
+					break;
+				case 2:
+					required_string("Ring");
+					volume = std::make_shared<RingVolume>();
+					break;
+				case 3:
+					required_string("Point");
+					volume = std::make_shared<PointVolume>();
 					break;
 				default:
 					UNREACHABLE("Invalid volume type specified!");
@@ -133,6 +155,10 @@ namespace particle {
 				effect.m_vel_inherit = ::util::ParsedRandomFloatRange::parseRandomRange();
 				effect.m_vel_inherit_absolute = true;
 			}
+
+			if (optional_string("+Ignore Velocity Inherit If Parented:")) {
+				stuff_boolean(&effect.m_ignore_velocity_inherit_if_has_parent);
+			}
 		}
 
 		static void parseVelocityVolume(ParticleEffect &effect) {
@@ -141,9 +167,30 @@ namespace particle {
 			}
 		}
 
+		static void parseVelocityNoise(ParticleEffect &effect) {
+			if (optional_string("+Velocity Noise:")) {
+				SCP_string func;
+				stuff_string(func, F_RAW);
+				anl::CKernel kernel;
+				anl::CExpressionBuilder builder(kernel);
+				anl::CInstructionIndex instruction = builder.eval(func);
+				effect.m_velocityNoise = std::make_shared<std::pair<anl::CKernel, anl::CInstructionIndex>>(std::move(kernel), std::move(instruction));
+			}
+			if (optional_string("+Velocity Noise Scale:")) {
+				effect.m_velocity_noise_scaling = ::util::ParsedRandomFloatRange::parseRandomRange();
+			}
+		}
+
 		template<bool modern = true> static void parseVelocityVolumeScale(ParticleEffect &effect) {
-			if (internal::required_string_if_new(modern ? "+Velocity Volume Scale:" : "+Velocity:", false)) {
-				effect.m_velocity_scaling = ::util::ParsedRandomFloatRange::parseRandomRange();
+			if constexpr (modern) {
+				if (optional_string("+Velocity Volume Scale:")) {
+					effect.m_velocity_scaling = ::util::ParsedRandomFloatRange::parseRandomRange();
+				}
+			}
+			else {
+				if (internal::required_string_if_new("+Velocity:", false)) {
+					effect.m_velocity_scaling = ::util::ParsedRandomFloatRange::parseRandomRange();
+				}
 			}
 		}
 
@@ -167,6 +214,20 @@ namespace particle {
 		static void parsePositionVolume(ParticleEffect &effect) {
 			if (optional_string("+Spawn Position Volume:")) {
 				effect.m_spawnVolume = parseVolume();
+			}
+		}
+
+		static void parsePositionNoise(ParticleEffect &effect) {
+			if (optional_string("+Spawn Position Noise:")) {
+				SCP_string func;
+				stuff_string(func, F_RAW);
+				anl::CKernel kernel;
+				anl::CExpressionBuilder builder(kernel);
+				anl::CInstructionIndex instruction = builder.eval(func);
+				effect.m_spawnNoise = std::make_shared<std::pair<anl::CKernel, anl::CInstructionIndex>>(std::move(kernel), std::move(instruction));
+			}
+			if (optional_string("+Spawn Position Noise Scale:")) {
+				effect.m_position_noise_scaling = ::util::ParsedRandomFloatRange::parseRandomRange();
 			}
 		}
 
@@ -228,14 +289,8 @@ namespace particle {
 				required_string(output == 0 ? "Radius" : "Velocity");
 				int& curve = output == 0 ? effect.m_size_lifetime_curve : effect.m_vel_lifetime_curve;
 
-				required_string("+Curve Name:");
-				SCP_string buf;
-				stuff_string(buf, F_NAME);
-				curve = curve_get_by_name(buf);
-
-				if (curve < 0) {
-					error_display(0, "Could not find curve '%s'", buf.c_str());
-				}
+				required_string_either("+Curve Name:", "+Curve:", true);
+				curve = curve_parse(" Unknown curve requested for modular curves!");
 			}
 		}
 
@@ -271,6 +326,7 @@ namespace particle {
 
 			//Particle Settings
 			parseBitmaps(effect);
+			parseBitmapReversed(effect);
 			parseRotationType(effect);
 			parseRadius(effect);
 			parseLength(effect);
@@ -283,8 +339,10 @@ namespace particle {
 			parseDirection(effect);
 			parseOffset(effect);
 			parsePositionVolume(effect);
+			parsePositionNoise(effect);
 			parseVelocityVolume(effect);
 			parseVelocityVolumeScale(effect);
+			parseVelocityNoise(effect);
 			parseVelocityDirectionScale(effect);
 			parseVelocityInheritFromPosition(effect);
 			parseVelocityInheritFromOrientation(effect);
@@ -305,25 +363,13 @@ namespace particle {
 
 		static void parseSizeLifetimeCurve(ParticleEffect &effect) {
 			if (optional_string("+Size over lifetime curve:")) {
-				SCP_string buf;
-				stuff_string(buf, F_NAME);
-				effect.m_size_lifetime_curve = curve_get_by_name(buf);
-
-				if (effect.m_size_lifetime_curve < 0) {
-					error_display(0, "Could not find curve '%s'", buf.c_str());
-				}
+				effect.m_size_lifetime_curve = curve_parse("");
 			}
 		}
 
 		static void parseVelocityLifetimeCurve(ParticleEffect &effect) {
 			if (optional_string("+Velocity scalar over lifetime curve:")) {
-				SCP_string buf;
-				stuff_string(buf, F_NAME);
-				effect.m_vel_lifetime_curve = curve_get_by_name(buf);
-
-				if (effect.m_vel_lifetime_curve < 0) {
-					error_display(0, "Could not find curve '%s'", buf.c_str());
-				}
+				effect.m_vel_lifetime_curve = curve_parse("");
 			}
 		}
 

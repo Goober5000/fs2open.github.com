@@ -209,7 +209,6 @@ typedef struct beam {
 	beam_info binfo;
 	int bank;
 
-	int Beam_muzzle_stamp;
 	int firingpoint;
 	float		beam_collide_width;
 	float		beam_light_width;
@@ -288,6 +287,9 @@ void beam_move_all_post();
 
 // render all beam weapons
 void beam_render_all();
+
+// delete all active beams
+void beam_delete_all();
 
 // early-out function for when adding object collision pairs, return 1 if the pair should be ignored
 int beam_collide_early_out(object *a, object *b);

@@ -15,6 +15,7 @@
 #include "options/OptionsManager.h"
 #include "parse/sexp_container.h"
 #include "pilotfile/pilotfile.h"
+#include "pilotfile/plr_hudprefs.h"
 #include "playerman/player.h"
 #include "ship/ship.h"
 #include "sound/audiostr.h"
@@ -142,7 +143,8 @@ void pilotfile::csg_read_info()
 	Campaign.next_mission = cfread_int(cfp);
 
 	// check that the next mission won't be greater than the total number of missions
-	if (Campaign.next_mission >= Campaign.num_missions) {
+	// though ensure we only flag if campaign exists and has been loaded
+	if (Campaign.num_missions > 0 && Campaign.next_mission >= Campaign.num_missions) {
 		Campaign.next_mission = 0; // Prevent trying to load from invalid mission data downstream
 		m_data_invalid = true; // Causes a warning popup to be displayed
 	}
@@ -1379,7 +1381,7 @@ void pilotfile::csg_read_controls()
 		cfread_string(buf, sizeof(buf), cfp);
 
 		auto it = std::find_if(Control_config_presets.begin(), Control_config_presets.end(),
-		                       [buf](const CC_preset& preset) { return preset.name == buf; });
+		                       [&buf](const CC_preset& preset) { return preset.name == buf; });
 
 		if (it == Control_config_presets.end()) {
 			Assertion(!Control_config_presets.empty(), "[CSG] Error reading CSG! Control_config_presets empty; Get a coder!");
@@ -1691,7 +1693,7 @@ bool pilotfile::load_savefile(player *_p, const char *campaign)
 	m_data_invalid = false;
 
 	// open it, hopefully...
-	cfp = cfopen(filename.c_str(), "rb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	cfp = cfopen(filename.c_str(), "rb", CF_TYPE_PLAYERS, false,
 	             CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 
 	if ( !cfp ) {
@@ -1824,6 +1826,9 @@ bool pilotfile::load_savefile(player *_p, const char *campaign)
 		}
 	}
 
+	mprintf(("HUDPREFS => Loading extended player HUD preferences...\n"));
+	hud_config_load_player_prefs(p->callsign); 
+
 	// Probably don't need to persist these to disk but it'll make sure on next boot we start with these campaign options set
 	// The github tests don't know what to do with the ini file so I guess we'll skip this for now
 	//options::OptionsManager::instance()->persistChanges();
@@ -1877,7 +1882,7 @@ bool pilotfile::save_savefile()
 	Assertion(Red_alert_wing_status.size() <= MAX_WINGS, "Invalid number of Red_alert_wing_status entries: " SIZE_T_ARG "\n", Red_alert_wing_status.size());
 
 	// open it, hopefully...
-	cfp = cfopen(filename.c_str(), "wb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	cfp = cfopen(filename.c_str(), "wb", CF_TYPE_PLAYERS, false,
 	             CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 
 	if ( !cfp ) {
@@ -1923,6 +1928,9 @@ bool pilotfile::save_savefile()
 	mprintf(("CSG => Saving:  Containers...\n"));
 	csg_write_containers();
 
+	mprintf(("HUDPREFS => Saving player HUD preferences (testing)...\n"));
+	hud_config_save_player_prefs(p->callsign);
+
 	// Done!
 	mprintf(("CSG => Saving complete!\n"));
 
@@ -1956,7 +1964,7 @@ bool pilotfile::get_csg_rank(int *rank)
 	p = &t_csg;
 
 	// filename has already been set
-	cfp = cfopen(filename.c_str(), "rb", CFILE_NORMAL, CF_TYPE_PLAYERS, false,
+	cfp = cfopen(filename.c_str(), "rb", CF_TYPE_PLAYERS, false,
 	             CF_LOCATION_ROOT_USER | CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT);
 
 	if ( !cfp ) {

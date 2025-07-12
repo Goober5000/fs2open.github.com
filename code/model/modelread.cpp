@@ -70,6 +70,8 @@ SCP_vector<polymodel_instance*> Polygon_model_instances;
 
 SCP_vector<bsp_collision_tree> Bsp_collision_tree_list;
 
+const ubyte* Macro_ubyte_bounds = nullptr;
+
 static int model_initted = 0;
 
 #ifndef NDEBUG
@@ -1370,16 +1372,24 @@ void determine_submodel_movement(bool is_rotation, const char *filename, bsp_inf
 		if (in(p, props, axis_string))
 		{
 			if (get_user_vec3d_value(p + 20, movement_axis, true, sm->name, filename))
-				vm_vec_normalize(movement_axis);
+			{
+				if (!fl_near_zero(vm_vec_mag(movement_axis)))
+					vm_vec_normalize(movement_axis);
+				else
+				{
+					Warning(LOCATION, "%s on submodel '%s' on ship %s has a magnitude near zero!", axis_string, sm->name, filename);
+					*movement_type = MOVEMENT_TYPE_NONE;
+				}
+			}
 			else
 			{
-				Warning(LOCATION, "Failed to parse %s on subsystem '%s' on ship %s!", axis_string, sm->name, filename);
+				Warning(LOCATION, "Failed to parse %s on submodel '%s' on ship %s!", axis_string, sm->name, filename);
 				*movement_type = MOVEMENT_TYPE_NONE;
 			}
 		}
 		else
 		{
-			Warning(LOCATION, "A %s was not specified for subsystem '%s' on ship %s!", axis_string, sm->name, filename);
+			Warning(LOCATION, "A %s was not specified for submodel '%s' on ship %s!", axis_string, sm->name, filename);
 			*movement_type = MOVEMENT_TYPE_NONE;
 		}
 	}
@@ -1483,8 +1493,9 @@ void do_movement_sanity_checks(bsp_info *sm, bsp_info *parent_sm, const char *fi
 
 	extract_movement_info(sm, is_rotation, movement_axis_id, movement_axis, movement_type);
 
-	// make sure this is a validly normalized axis
-	if (vm_vec_mag(movement_axis) < 0.999f || vm_vec_mag(movement_axis) > 1.001f)
+	// make sure this is a validly normalized axis - also catch axes that are unspecified or 0,0,0
+	// (it would be nice to warn here, but the signal to noise ratio is extremely poor)
+	if (!vm_vec_is_normalized(movement_axis))
 		*movement_type = MOVEMENT_TYPE_NONE;
 
 	// maybe use the FOR to manipulate the axes
@@ -1605,7 +1616,7 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 
 		_splitpath(filename, NULL, NULL, bname, NULL);
 		sprintf(debug_name, "%s.subsystems", bname);
-		ss_fp = cfopen(debug_name, "wb", CFILE_NORMAL, CF_TYPE_TABLES );
+		ss_fp = cfopen(debug_name, "wb", CF_TYPE_TABLES );
 		if ( !ss_fp )	{
 			mprintf(( "Can't open debug file for writing subsystems for %s\n", filename));
 		} else {
@@ -2055,45 +2066,38 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 				}
 
 				// KeldorKatarn, with modifications
-				if (in(p, props, "$uvec")) {
-					matrix submodel_orient;
+				{
+					bool has_fvec = false, has_uvec = false, has_rvec = false;
+					vec3d fvec, uvec, rvec;
 
-					if (get_user_vec3d_value(p + 5, &submodel_orient.vec.uvec, false, sm->name, pm->filename)) {
-
-						if (in(p, props, "$fvec")) {
-
-							if (get_user_vec3d_value(p + 5, &submodel_orient.vec.fvec, false, sm->name, pm->filename)) {
-
-								vm_vec_normalize(&submodel_orient.vec.uvec);
-								vm_vec_normalize(&submodel_orient.vec.fvec);
-
-								vm_vec_cross(&submodel_orient.vec.rvec, &submodel_orient.vec.uvec, &submodel_orient.vec.fvec);
-								vm_vec_cross(&submodel_orient.vec.fvec, &submodel_orient.vec.rvec, &submodel_orient.vec.uvec);
-
-								vm_vec_normalize(&submodel_orient.vec.fvec);
-								vm_vec_normalize(&submodel_orient.vec.rvec);
-
-								vm_orthogonalize_matrix(&submodel_orient);
-
-								sm->frame_of_reference = submodel_orient;
-
-							} else {
-								Warning(LOCATION,
-									"Submodel '%s' of model '%s' has an improperly formatted $fvec declaration in its properties."
-									"\n\n$fvec should be followed by 3 numbers separated with commas.",
-									sm->name, filename);
-							}
-						} else {
-							Warning(LOCATION, "Improper custom orientation matrix for subsystem %s; you must define both an up vector and a forward vector", sm->name);
-						}
-					} else {
-						Warning(LOCATION,
-							"Submodel '%s' of model '%s' has an improperly formatted $uvec declaration in its properties."
-							"\n\n$uvec should be followed by 3 numbers separated with commas.",
-							sm->name, filename);
-					}
-				} else {
+					// default
 					sm->frame_of_reference = parent_sm ? parent_sm->frame_of_reference : vmd_identity_matrix;
+
+					// parse what we can
+					auto vectors = { std::make_tuple("$fvec", &fvec, &has_fvec), std::make_tuple("$uvec", &uvec, &has_uvec), std::make_tuple("$rvec", &rvec, &has_rvec) };
+					for (auto &item : vectors)
+					{
+						if (in(p, props, std::get<0>(item)))
+						{
+							if (get_user_vec3d_value(p + 5, std::get<1>(item), false, sm->name, pm->filename))
+								*std::get<2>(item) = true;
+							else
+								Warning(LOCATION, "Submodel '%s' of model '%s' has an improperly formatted %s declaration in its properties.\n\n%s should be followed by 3 numbers separated with commas.", sm->name, filename, std::get<0>(item), std::get<0>(item));
+						}
+					}
+
+					// make a matrix if we have at least the fvec
+					if (has_fvec)
+					{
+						vm_vector_2_matrix(&sm->frame_of_reference, &fvec, has_uvec ? &uvec : nullptr, has_rvec ? &rvec : nullptr);
+
+						// if the look_at_offset is still the default value (hasn't been set by submodel properties), assume that
+						// by specifying the submodel orientation matrix we are also specifying the "looking" direction
+						if (sm->look_at_offset == -1.0f)
+							sm->look_at_offset = 0.0f;
+					}
+					else if (has_uvec || has_rvec)
+						Warning(LOCATION, "Improper custom orientation matrix for subsystem %s; you must define an $fvec", sm->name);
 				}
 
 				{
@@ -2108,7 +2112,7 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 				{
 					sm->bsp_data_size = cfread_int(fp);
 					if (sm->bsp_data_size > 0) {
-						sm->bsp_data = (ubyte*)vm_malloc(sm->bsp_data_size);
+						sm->bsp_data = reinterpret_cast<ubyte*>(vm_malloc(sm->bsp_data_size));
 						cfread(sm->bsp_data, 1, sm->bsp_data_size, fp);
 						swap_bsp_data(pm, sm->bsp_data);
 					}
@@ -2121,7 +2125,7 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 					sm->bsp_data_size = cfread_int(fp);
 
 					if (sm->bsp_data_size > 0) {
-						auto bsp_data = reinterpret_cast<ubyte *>(vm_malloc(sm->bsp_data_size));
+						auto bsp_data = reinterpret_cast<ubyte*>(vm_malloc(sm->bsp_data_size));
 
 						cfread(bsp_data, 1, sm->bsp_data_size, fp);
 
@@ -2939,6 +2943,7 @@ modelread_status read_model_file_no_subsys(polymodel * pm, const char* filename,
 
 			// if we couldn't find it, we shouldn't move
 			if (sm->look_at_submodel < 0) {
+				Warning(LOCATION, "Could not find $look_at target for %s %s!", pm->filename, sm->name);
 				sm->rotation_type = MOVEMENT_TYPE_NONE;
 			}
 			// are we navel-gazing?
@@ -3552,7 +3557,10 @@ int model_load(const  char* filename, ship_info* sip, ErrorType error_type, bool
 	for (i = 0; i < pm->n_models; ++i) {
 		pm->submodel[i].collision_tree_index = model_create_bsp_collision_tree();
 		bsp_collision_tree* tree             = model_get_bsp_collision_tree(pm->submodel[i].collision_tree_index);
+
+		Macro_ubyte_bounds = pm->submodel[i].bsp_data + pm->submodel[i].bsp_data_size;
 		model_collide_parse_bsp(tree, pm->submodel[i].bsp_data, pm->version);
+		Macro_ubyte_bounds = nullptr;
 	}
 
 	// Find the core_radius... the minimum of 
@@ -3890,6 +3898,11 @@ polymodel * model_get(int model_num)
 		return NULL;
 
 	return Polygon_models[num];
+}
+
+int num_model_instances()
+{
+	return static_cast<int>(Polygon_model_instances.size());
 }
 
 polymodel_instance* model_get_instance(int model_instance_num)
@@ -5192,17 +5205,17 @@ void model_do_intrinsic_motions(object *objp)
 	}
 }
 
-void model_instance_clear_arcs(polymodel *pm, polymodel_instance *pmi)
+void model_instance_clear_arcs(const polymodel *pm, polymodel_instance *pmi)
 {
 	Assert(pm->id == pmi->model_num);
 
 	for (int i = 0; i < pm->n_models; ++i) {
-		pmi->submodel[i].num_arcs = 0;		// Turn off any electric arcing effects
+		pmi->submodel[i].electrical_arcs.clear();		// Turn off any electric arcing effects
 	}
 }
 
 // Adds an electrical arcing effect to a submodel
-void model_instance_add_arc(polymodel *pm, polymodel_instance *pmi, int sub_model_num, vec3d *v1, vec3d *v2, int arc_type, color *primary_color_1, color *primary_color_2, color *secondary_color, float width )
+void model_instance_add_arc(const polymodel *pm, polymodel_instance *pmi, int sub_model_num, const vec3d *v1, const vec3d *v2, const SCP_vector<vec3d> *persistent_arc_points, ubyte arc_type, const color *primary_color_1, const color *primary_color_2, const color *secondary_color, float width, ubyte segment_depth)
 {
 	Assert(pm->id == pmi->model_num);
 
@@ -5217,19 +5230,20 @@ void model_instance_add_arc(polymodel *pm, polymodel_instance *pmi, int sub_mode
 	if ( sub_model_num >= pm->n_models ) return;
 	auto smi = &pmi->submodel[sub_model_num];
 
-	if ( smi->num_arcs < MAX_ARC_EFFECTS )	{
-		smi->arc_type[smi->num_arcs] = (ubyte)arc_type;
-		smi->arc_pts[smi->num_arcs][0] = *v1;
-		smi->arc_pts[smi->num_arcs][1] = *v2;
+	smi->electrical_arcs.emplace_back();
+	auto &new_arc = smi->electrical_arcs.back();
 
-		if (arc_type == MARC_TYPE_SHIP || arc_type == MARC_TYPE_SCRIPTED) {
-			smi->arc_primary_color_1[smi->num_arcs] = *primary_color_1;
-			smi->arc_primary_color_2[smi->num_arcs] = *primary_color_2;
-			smi->arc_secondary_color[smi->num_arcs] = *secondary_color;
-			smi->arc_width[smi->num_arcs] = width;
-		}
+	new_arc.type = arc_type;
+	new_arc.endpoint_1 = *v1;
+	new_arc.endpoint_2 = *v2;
+	new_arc.persistent_arc_points = persistent_arc_points;
+	new_arc.segment_depth = segment_depth;
 
-		smi->num_arcs++;
+	if (arc_type == MARC_TYPE_SHIP || arc_type == MARC_TYPE_SCRIPTED) {
+		new_arc.primary_color_1 = *primary_color_1;
+		new_arc.primary_color_2 = *primary_color_2;
+		new_arc.secondary_color = *secondary_color;
+		new_arc.width = width;
 	}
 }
 
@@ -5716,6 +5730,7 @@ void swap_bsp_data( polymodel * pm, void * model_ptr )
 				Int3();		// Bad chunk type!
 			return;
 		}
+		if (end) break;
 
 		p += chunk_size;
 		chunk_type = INTEL_INT( w(p));	//tigital
@@ -5887,7 +5902,7 @@ void parse_glowpoint_table(const char *filename)
 			}
 
 			if (optional_string("$Texture:")) {
-				char glow_texture_name[32];
+				char glow_texture_name[NAME_LENGTH];
 				stuff_string(glow_texture_name, F_NAME, NAME_LENGTH);
 
 				gpo.glow_bitmap_override = true;
@@ -5904,10 +5919,18 @@ void parse_glowpoint_table(const char *filename)
 						nprintf(("Model", "Glowpoint preset %s texture num is %d\n", gpo.name, gpo.glow_bitmap));
 					}
 
-					char glow_texture_neb_name[256];
-					strncpy(glow_texture_neb_name, glow_texture_name, 256);
-					strcat(glow_texture_neb_name, "-neb");
-					gpo.glow_neb_bitmap = bm_load(glow_texture_neb_name);
+					if (strlen(glow_texture_name) > MAX_FILENAME_LEN - 4 - 1)
+					{
+						nprintf(("Model", "Texture '%s' referenced by glowpoint preset '%s' is too long for the -neb suffix!\n", glow_texture_name, gpo.name));
+						gpo.glow_neb_bitmap = -1;
+					}
+					else
+					{
+						char glow_texture_neb_name[MAX_FILENAME_LEN];
+						strcpy_s(glow_texture_neb_name, glow_texture_name);
+						strcat_s(glow_texture_neb_name, "-neb");
+						gpo.glow_neb_bitmap = bm_load(glow_texture_neb_name);
+					}
 
 					if (gpo.glow_neb_bitmap < 0)
 					{
@@ -6235,8 +6258,8 @@ uint align_bsp_data(ubyte* bsp_in, ubyte* bsp_out, uint bsp_size)
 		}
 
 		//Chunk size validation, if fails change it to copy the remaining data in chain
-		auto max_size = end - bsp_in;
-		if (bsp_chunk_size > max_size) {
+		std::ptrdiff_t max_size = end - bsp_in;
+		if (static_cast<std::ptrdiff_t>(bsp_chunk_size) > max_size) {
 			Warning(LOCATION, "Invalid BSP Chunk size detected during BSP data align: Chunk Type: %d, Chunk Size: %d, Max Size: %d", bsp_chunk_type, bsp_chunk_size, static_cast<uint>(max_size));
 			bsp_chunk_size = static_cast<uint>(max_size);
 		}

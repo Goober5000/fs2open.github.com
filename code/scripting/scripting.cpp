@@ -19,6 +19,7 @@
 #include "parse/parselo.h"
 #include "scripting/doc_html.h"
 #include "scripting/doc_json.h"
+#include "scripting/doc_luastub.h"
 #include "scripting/global_hooks.h"
 #include "scripting/scripting_doc.h"
 #include "ship/ship.h"
@@ -32,6 +33,7 @@ using namespace scripting;
 script_state Script_system("FS2_Open Scripting");
 bool Output_scripting_meta = false;
 bool Output_scripting_json = false;
+bool Output_scripting_luastub = false;
 bool Scripting_game_init_run = false;
 
 flag_def_list Script_conditions[] = 
@@ -117,7 +119,7 @@ void script_parse_table(const char* filename)
 void script_parse_lua_script(const char *filename) {
 	using namespace luacpp;
 
-	CFILE *cfp = cfopen(filename, "rb", CFILE_NORMAL, CF_TYPE_TABLES);
+	CFILE *cfp = cfopen(filename, "rb", CF_TYPE_TABLES);
 	if(cfp == nullptr)
 	{
 		Warning(LOCATION, "Could not open lua script file '%s'", filename);
@@ -154,7 +156,7 @@ void script_init()
 	mprintf(("SCRIPTING: Beginning Lua initialization...\n"));
 	Script_system.CreateLuaState();
 
-	if (Output_scripting_meta || Output_scripting_json) {
+	if (Output_scripting_meta || Output_scripting_json || Output_scripting_luastub) {
 		const auto doc = Script_system.OutputDocumentation([](const SCP_string& error) {
 			mprintf(("Scripting documentation: Error while parsing\n%s(This is only relevant for coders)\n\n",
 				error.c_str()));
@@ -168,6 +170,10 @@ void script_init()
 			mprintf(("SCRIPTING: Outputting scripting metadata in JSON format...\n"));
 			scripting::output_json_doc(doc, "scripting.json");
 		}
+		if (Output_scripting_luastub) {
+			mprintf(("SCRIPTING: Outputting scripting metadata in LUA Stub format...\n"));
+			scripting::output_luastub_doc(doc, "scripting.lua");
+		}
 	}
 
 	mprintf(("SCRIPTING: Beginning main hook parse sequence....\n"));
@@ -175,7 +181,7 @@ void script_init()
 	parse_modular_table(NOX("*-sct.tbm"), script_parse_table);
 	mprintf(("SCRIPTING: Parsing pure Lua scripts\n"));
 	parse_modular_table(NOX("*-sct.lua"), script_parse_lua_script);
-	mprintf(("SCRIPTING: Inititialization complete.\n"));
+	mprintf(("SCRIPTING: Initialization complete.\n"));
 }
 /*
 //WMC - Doesn't work as debug console interferes with any non-alphabetic chars.
@@ -630,7 +636,7 @@ void script_state::ParseChunkSub(script_function& script_func, const char* debug
 		char *filename = alloc_block("[[", "]]");
 
 		//Load from file
-		CFILE *cfp = cfopen(filename, "rb", CFILE_NORMAL, CF_TYPE_SCRIPTS );
+		CFILE *cfp = cfopen(filename, "rb", CF_TYPE_SCRIPTS );
 
 		//WMC - use filename instead of debug_str so that the filename gets passed.
 		function_name = filename;
@@ -931,7 +937,7 @@ bool script_state::ParseCondition(const char *filename)
 			bool found = false;
 			pause_parse();
 			SCP_vm_unique_ptr<char> parse{ vm_strdup(local_condition.c_str()) };
-			reset_parse(parse.get());
+			reset_parse(parse.get());	// coverity[escape:FALSE] - this is okay because the pointer escape only lasts until unpause_parse() restores the old state
 			for (const auto& potential_condition : currHook->_conditions) {
 				SCP_string bufCond;
 				sprintf(bufCond, "$%s:", potential_condition.first.c_str());

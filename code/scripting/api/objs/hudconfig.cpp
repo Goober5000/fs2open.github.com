@@ -110,7 +110,7 @@ ADE_VIRTVAR(Color, l_HUD_Color_Preset, nullptr, "The name of this preset", "colo
 		LuaError(L, "This property is read only.");
 	}
 
-	auto preset = HC_colors[current.getIndex()];
+	const auto &preset = HC_colors[current.getIndex()];
 
 	color c;
 	gr_init_color(&c, preset.r, preset.g, preset.b);
@@ -355,6 +355,33 @@ ADE_VIRTVAR(UsesIffForColor,
 	}
 
 	if (!current.getGauge()->getConfigUseIffColor()) {
+		return ADE_RETURN_FALSE;
+	}
+
+	return ADE_RETURN_TRUE;
+}
+
+ADE_VIRTVAR(isCustomGauge,
+	l_Gauge_Config,
+	nullptr,
+	"Gets whether or not the gauge is a custom gauge.",
+	"boolean",
+	"True if custom, false otherwise")
+{
+	gauge_config_h current;
+	if (!ade_get_args(L, "o", l_Gauge_Config.Get(&current))) {
+		return ADE_RETURN_NIL;
+	}
+
+	if (!current.isValid()) {
+		return ade_set_error(L, "b", false);
+	}
+
+	if (ADE_SETTING_VAR) {
+		LuaError(L, "This property is read only.");
+	}
+
+	if (!current.getGauge()->isCustom()) {
 		return ADE_RETURN_FALSE;
 	}
 

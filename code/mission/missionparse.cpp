@@ -6672,9 +6672,9 @@ bool post_process_mission(mission *pm)
 		if (MULTI_TEAM) {
 			team = Net_player->p_info.team;
 		}
-		auto br = Briefings[team].stages;
+		const auto &br = Briefings[team].stages;
 		for (i = 0; i < Briefings[team].num_stages; i++) {
-			auto stage = br[i];
+			const auto &stage = br[i];
 			for (int j = 0; j < stage.num_icons; j++) {
 				stage.icons[j].modelnum = model_load(Ship_info[stage.icons[j].ship_class].pof_file);
 			}
@@ -6923,7 +6923,7 @@ bool parse_main(const char *mission_name, int flags)
 	do {
 		// don't do this for imports
 		if (!(flags & MPF_IMPORT_FSM)) {
-			CFILE *ftemp = cfopen(mission_name, "rt", CFILE_NORMAL, CF_TYPE_MISSIONS);
+			CFILE *ftemp = cfopen(mission_name, "rt", CF_TYPE_MISSIONS);
 
 			// fail situation.
 			if (!ftemp) {

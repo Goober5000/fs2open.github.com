@@ -387,6 +387,28 @@ int CFred_mission_save::fout_version(const char* format, ...)
 	return 0;
 }
 
+void CFred_mission_save::fout_raw_comment(const char *comment_start)
+{
+	Assertion(comment_start <= raw_ptr, "This function assumes the beginning of the comment precedes the current raw pointer!");
+
+	// the current character is \n, so either set it to 0, or set the preceding \r (if there is one) to 0
+	if (*(raw_ptr - 1) == '\r') {
+		*(raw_ptr - 1) = '\0';
+	} else {
+		*raw_ptr = '\0';
+	}
+
+	// save the comment, which will write all characters up to the 0 we just set
+	fout("%s\n", comment_start);
+
+	// restore the overwritten character
+	if (*(raw_ptr - 1) == '\0') {
+		*(raw_ptr - 1) = '\r';
+	} else {
+		*raw_ptr = '\n';
+	}
+}
+
 void CFred_mission_save::parse_comments(int newlines)
 {
 	char* comment_start = NULL;
@@ -499,30 +521,15 @@ void CFred_mission_save::parse_comments(int newlines)
 					if (first_comment && !flag) {
 						fout("\t\t");
 					}
+					fout_raw_comment(comment_start);
 
-					*raw_ptr = 0;
-					fout("%s\n", comment_start);
-					*raw_ptr = '\n';
 					state = first_comment = same_line = flag = 0;
 				} else if (state == 4) {
 					same_line = newlines - 2 + same_line;
 					while (same_line-- > 0) {
 						fout("\n");
 					}
-
-					if (*(raw_ptr - 1) == '\r') {
-						*(raw_ptr - 1) = '\0';
-					} else {
-						*raw_ptr = 0;
-					}
-
-					fout("%s\n", comment_start);
-
-					if (*(raw_ptr - 1) == '\0') {
-						*(raw_ptr - 1) = '\r';
-					} else {
-						*raw_ptr = '\n';
-					}
+					fout_raw_comment(comment_start);
 
 					state = first_comment = same_line = flag = 0;
 				}
@@ -2304,7 +2311,7 @@ int CFred_mission_save::save_campaign_file(const char *pathname)
 	fred_parse_flag = 0;
 
 	pathname = cf_add_ext(pathname, FS_CAMPAIGN_FILE_EXT);
-	fp = cfopen(pathname, "wt", CFILE_NORMAL, CF_TYPE_MISSIONS);
+	fp = cfopen(pathname, "wt", CF_TYPE_MISSIONS);
 	if (!fp) {
 		nprintf(("Error", "Can't open campaign file to save.\n"));
 		return -1;
@@ -3103,7 +3110,7 @@ void CFred_mission_save::save_mission_internal(const char* pathname)
 	raw_ptr = Parse_text_raw;
 	fred_parse_flag = 0;
 
-	fp = cfopen(pathname, "wt", CFILE_NORMAL, CF_TYPE_MISSIONS);
+	fp = cfopen(pathname, "wt", CF_TYPE_MISSIONS);
 	if (!fp) {
 		nprintf(("Error", "Can't open mission file to save.\n"));
 		err = -1;
@@ -4938,8 +4945,13 @@ int CFred_mission_save::save_containers()
 					fout("\n+Strictly Typed Data");
 				}
 
+				SCP_vector<std::pair<SCP_string, SCP_string>> sorted_data(container.map_data.begin(), container.map_data.end());
+				std::stable_sort(sorted_data.begin(), sorted_data.end(),
+					[](const std::pair<SCP_string, SCP_string> &a, const std::pair<SCP_string, SCP_string> &b)
+					{ return a.first < b.first; });
+
 				fout("\n$Data: ( ");
-				for (const auto &map_entry : container.map_data) {
+				for (const auto &map_entry : sorted_data) {
 					fout("\"%s\" \"%s\" ", map_entry.first.c_str(), map_entry.second.c_str());
 				}
 

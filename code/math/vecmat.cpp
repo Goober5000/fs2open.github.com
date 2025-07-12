@@ -500,7 +500,7 @@ float vm_vec_normalize(vec3d *v)
 // If vector is 0,0,0, return 1.0f, and change v to 1,0,0.
 // Otherwise return the magnitude.
 // No warning() generated for null vector, as it is expected that some vectors may be null.
-float vm_vec_copy_normalize_safe(vec3d *dest, const vec3d *src)
+float vm_vec_copy_normalize_safe(vec3d *dest, const vec3d *src, bool fallbackToZeroVec)
 {
 	float m;
 
@@ -508,10 +508,18 @@ float vm_vec_copy_normalize_safe(vec3d *dest, const vec3d *src)
 
 	//	Mainly here to trap attempts to normalize a null vector.
 	if (fl_near_zero(m)) {
-		dest->xyz.x = 1.0f;
-		dest->xyz.y = 0.0f;
-		dest->xyz.z = 0.0f;
-		return 1.0f;
+		if (fallbackToZeroVec) {
+			dest->xyz.x = 0.0f;
+			dest->xyz.y = 0.0f;
+			dest->xyz.z = 0.0f;
+			return 0.0f;
+		}
+		else {
+			dest->xyz.x = 1.0f;
+			dest->xyz.y = 0.0f;
+			dest->xyz.z = 0.0f;
+			return 1.0f;
+		}
 	}
 
 	float im = 1.0f / m;
@@ -527,9 +535,9 @@ float vm_vec_copy_normalize_safe(vec3d *dest, const vec3d *src)
 // If vector is 0,0,0, return 1.0f, and change v to 1,0,0.
 // Otherwise return the magnitude.
 // No warning() generated for null vector.
-float vm_vec_normalize_safe(vec3d *v)
+float vm_vec_normalize_safe(vec3d *v, bool fallbackToZeroVec)
 {
-	return vm_vec_copy_normalize_safe(v,v);
+	return vm_vec_copy_normalize_safe(v,v, fallbackToZeroVec);
 }
 
 //return the normalized direction vector between two points
@@ -1707,10 +1715,10 @@ float vm_closest_angle_to_matrix(const matrix* mat, const vec3d* rot_axis, float
 		//If we support IEEE float handling, we don't need this, the div by 0 will be handled correctly with the INF. If not, do this:
 		const float yz_recip = (!std::numeric_limits<float>::is_iec559 && y * z < 0.001f) ? FLT_MAX : 1.0f / (y * z);
 
-		solutions = { 2 * atan2(-sr_neg * (y * y + sr) * yz_recip, -2 * sr_neg),
-					  2 * atan2(sr_neg * (y * y + sr) * yz_recip, 2 * sr_neg),
-					  2 * atan2(-sr_pos * (y * y - sr) * yz_recip, -2 * sr_pos),
-					  2 * atan2(sr_pos * (y * y - sr) * yz_recip, 2 * sr_pos) };
+		solutions = { 2.0f * atan2f(-sr_neg * (y * y + sr) * yz_recip, -2.0f * sr_neg),
+					  2.0f * atan2f(sr_neg * (y * y + sr) * yz_recip, 2.0f * sr_neg),
+					  2.0f * atan2f(-sr_pos * (y * y - sr) * yz_recip, -2.0f * sr_pos),
+					  2.0f * atan2f(sr_pos * (y * y - sr) * yz_recip, 2.0f * sr_pos) };
 	}
 	float value = -2.0f;
 	float correct = 0;

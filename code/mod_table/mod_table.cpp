@@ -133,6 +133,8 @@ float Min_pixel_size_beam;
 float Min_pizel_size_muzzleflash;
 float Min_pixel_size_trail;
 float Min_pixel_size_laser;
+float Do_not_render_lasers_below_length;
+float Do_not_render_lasers_below_radius;
 bool Supernova_hits_at_zero;
 bool Show_subtitle_uses_pixels;
 int Show_subtitle_screen_base_res[2];
@@ -150,8 +152,11 @@ bool SCPUI_loads_hi_res_animations;
 bool Auto_assign_personas;
 bool Countermeasures_use_capacity;
 bool Play_thruster_sounds_for_player;
+bool Unify_minimum_engine_sound;
+bool Disabled_or_disrupted_engines_silent;
 std::array<std::tuple<float, float>, 6> Fred_spacemouse_nonlinearity;
 bool Randomize_particle_rotation;
+bool Disable_shield_effects;
 bool Calculate_subsystem_hitpoints_after_parsing;
 bool Disable_internal_loadout_restoration_system;
 bool Contrails_use_absolute_speed;
@@ -165,6 +170,8 @@ bool Preload_briefing_icon_models;
 EscapeKeyBehaviorInOptions escape_key_behavior_in_options;
 bool Fix_asteroid_bounding_box_check;
 bool Disable_intro_movie;
+bool Show_locked_status_scramble_missions;
+bool Disable_expensive_turret_target_check;
 
 
 #ifdef WITH_DISCORD
@@ -929,6 +936,14 @@ void parse_mod_table(const char *filename)
 				stuff_float(&Min_pixel_size_laser);
 			}
 
+			if (optional_string("$Do Not Render Lasers Below Length:")) {
+				stuff_float(&Do_not_render_lasers_below_length);
+			}
+
+			if (optional_string("$Do Not Render Lasers Below Radius:")) {
+				stuff_float(&Do_not_render_lasers_below_radius);
+			}
+
 			if (optional_string("$Thruster easing value:")) {
 				stuff_float(&Thruster_easing);
 				if (Thruster_easing <= 0.0f) {
@@ -967,6 +982,10 @@ void parse_mod_table(const char *filename)
 
 			if (optional_string("$Randomize particle rotation:")) {
 				stuff_boolean(&Randomize_particle_rotation);
+			}
+
+			if (optional_string("$Disable shield effects:")) {
+				stuff_boolean(&Disable_shield_effects);
 			}
 
 			optional_string("#NETWORK SETTINGS");
@@ -1025,6 +1044,14 @@ void parse_mod_table(const char *filename)
 
 			if (optional_string("$Play thruster sounds for the player:")) {
 				stuff_boolean(&Play_thruster_sounds_for_player);
+			}
+
+			if (optional_string("$Unify minimum engine sound:")) {
+				stuff_boolean(&Unify_minimum_engine_sound);
+			}
+
+			if (optional_string("$Disabled or disrupted engines are silent:")) {
+				stuff_boolean(&Disabled_or_disrupted_engines_silent);
 			}
 
 			optional_string("#FRED SETTINGS");
@@ -1504,6 +1531,14 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Disable_intro_movie);
 			}
 
+			if (optional_string("$Show locked status for scramble missions:")) {
+				stuff_boolean(&Show_locked_status_scramble_missions);
+			}
+
+			if (optional_string("$Disable expensive turret target check:")) {
+				stuff_boolean(&Disable_expensive_turret_target_check);
+			}
+
 			// end of options ----------------------------------------
 
 			// if we've been through once already and are at the same place, force a move
@@ -1687,6 +1722,8 @@ void mod_table_reset()
 	Min_pizel_size_muzzleflash = 0.0f;
 	Min_pixel_size_trail = 0.0f;
 	Min_pixel_size_laser = 0.0f;
+	Do_not_render_lasers_below_length = 0.0001f;
+	Do_not_render_lasers_below_radius = 0.0001f;
 	Supernova_hits_at_zero = false;
 	Show_subtitle_uses_pixels = false;
 	Show_subtitle_screen_base_res[0] = -1;
@@ -1706,6 +1743,8 @@ void mod_table_reset()
 	Auto_assign_personas = true;
 	Countermeasures_use_capacity = false;
 	Play_thruster_sounds_for_player = false;
+	Unify_minimum_engine_sound = false;
+	Disabled_or_disrupted_engines_silent = false;
 	Fred_spacemouse_nonlinearity = std::array<std::tuple<float, float>, 6>{{
 			std::tuple<float, float>{ 1.0f, 1.0f },
 			std::tuple<float, float>{ 1.0f, 1.0f },
@@ -1715,6 +1754,7 @@ void mod_table_reset()
 			std::tuple<float, float>{ 1.0f, 1.0f }
 		}};
 	Randomize_particle_rotation = false;
+	Disable_shield_effects = false;
 	Calculate_subsystem_hitpoints_after_parsing = false;
 	Disable_internal_loadout_restoration_system = false;
 	Contrails_use_absolute_speed = false;
@@ -1733,6 +1773,8 @@ void mod_table_reset()
 	escape_key_behavior_in_options = EscapeKeyBehaviorInOptions::DEFAULT;
 	Fix_asteroid_bounding_box_check = false;
 	Disable_intro_movie = false;
+	Show_locked_status_scramble_missions = false;
+	Disable_expensive_turret_target_check = false;
 }
 
 void mod_table_set_version_flags()
@@ -1758,5 +1800,6 @@ void mod_table_set_version_flags()
 		Use_model_eyepoint_for_set_camera_host = true;
 		Use_model_eyepoint_normals = true;
 		Fix_asteroid_bounding_box_check = true;
+		Disable_expensive_turret_target_check = true;
 	}
 }

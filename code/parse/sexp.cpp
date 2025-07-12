@@ -364,8 +364,8 @@ SCP_vector<sexp_oper> Operators = {
 	{ "map-has-data-item",				OP_MAP_HAS_DATA_ITEM,					2,	3,			SEXP_INTEGER_OPERATOR, }, // Karajorma
 
 	//Other Sub-Category
-	{ "script-eval-bool",				OP_SCRIPT_EVAL_BOOL,					1,	1,			SEXP_BOOLEAN_OPERATOR, },
-	{ "script-eval-num",				OP_SCRIPT_EVAL_NUM,						1,	1,			SEXP_INTEGER_OPERATOR,	},
+	{ "script-eval-bool",				OP_SCRIPT_EVAL_BOOL,					1,	INT_MAX,	SEXP_BOOLEAN_OPERATOR, },
+	{ "script-eval-num",				OP_SCRIPT_EVAL_NUM,						1,	INT_MAX,	SEXP_INTEGER_OPERATOR, },
 
 	//Time Category
 	{ "time-ship-destroyed",			OP_TIME_SHIP_DESTROYED,					1,	1,			SEXP_INTEGER_OPERATOR,	},
@@ -15228,8 +15228,8 @@ void sexp_send_message(int n)
 
 ship* get_builtin_message_sender(const char* name) {
 	auto ship_entry = ship_registry_get(name);
-	if (ship_entry && ship_entry->has_shipp()) {
-		return ship_entry->shipp();
+	if (ship_entry) {
+		return ship_entry->shipp_or_null();
 	}
 	
 	auto wing_index = wing_lookup(name);
@@ -20516,7 +20516,7 @@ int sexp_gse_recharge_pct(int node, int op_num)
 		return SEXP_NAN_FOREVER;
 
 	// recharge pct
-	return (int)(100.0f * Energy_levels[index]);
+	return (int)(100.0f * ets_power_factor(ship_entry->objp(), false) * Energy_levels[index]);
 }
 
 /*
@@ -25208,8 +25208,8 @@ void sexp_set_training_context_fly_path(int node)
 {
 	bool is_nan, is_nan_forever;
 
-	waypoint_list *wp_list = find_matching_waypoint_list(CTEXT(node));
-	if (wp_list == nullptr)
+	int wp_list = find_matching_waypoint_list_index(CTEXT(node));
+	if (wp_list < 0)
 		return;
 
 	int distance = eval_num(CDR(node), is_nan, is_nan_forever);
@@ -25217,7 +25217,7 @@ void sexp_set_training_context_fly_path(int node)
 		return;
 
 	Training_context |= TRAINING_CONTEXT_FLY_PATH;
-	Training_context_waypoint_path = find_index_of_waypoint_list(wp_list);
+	Training_context_waypoint_path = wp_list;
 	Training_context_distance = static_cast<float>(distance);
 	Training_context_goal_waypoint = 0;
 	Training_context_at_waypoint = -1;
@@ -26764,27 +26764,35 @@ int sexp_script_eval(int node, int return_type, bool concat_args = false)
 	switch(return_type)
 	{
 		case OPR_BOOL:
-			{
-				auto s = CTEXT(n);
-				bool r = false;
-				bool success = Script_system.EvalStringWithReturn(s, "|b", &r);
+		{
+			SCP_string script_cmd;
+			for (; n != -1; n = CDR(n))
+				script_cmd.append(CTEXT(n));
 
-				if(!success)
-					Warning(LOCATION, "sexp-script-eval failed to evaluate string \"%s\"; check your syntax", s);
+			bool r = false;
+			bool success = Script_system.EvalStringWithReturn(script_cmd.c_str(), "|b", &r);
 
-				return r ? SEXP_TRUE : SEXP_FALSE;
-			}
+			if (!success)
+				Warning(LOCATION, "sexp-script-eval failed to evaluate string \"%s\"; check your syntax", script_cmd.c_str());
+
+			return r ? SEXP_TRUE : SEXP_FALSE;
+		}
+
 		case OPR_NUMBER:
-			{
-				auto s = CTEXT(n);
-				int r = -1;
-				bool success = Script_system.EvalStringWithReturn(s, "|i", &r);
+		{
+			SCP_string script_cmd;
+			for (; n != -1; n = CDR(n))
+				script_cmd.append(CTEXT(n));
 
-				if(!success)
-					Warning(LOCATION, "sexp-script-eval failed to evaluate string \"%s\"; check your syntax", s);
+			int r = -1;
+			bool success = Script_system.EvalStringWithReturn(script_cmd.c_str(), "|i", &r);
 
-				return r;
-			}
+			if (!success)
+				Warning(LOCATION, "sexp-script-eval failed to evaluate string \"%s\"; check your syntax", script_cmd.c_str());
+
+			return r;
+		}
+
 		case OPR_STRING:
 			{
 				const char* ret = nullptr;
@@ -26827,7 +26835,7 @@ int sexp_script_eval(int node, int return_type, bool concat_args = false)
 
 					if (concat_args)
 					{
-						script_cmd.append(CTEXT(n));
+						script_cmd.append(s);
 					}
 					else
 					{
@@ -30719,38 +30727,104 @@ int run_sexp(const char* sexpression, bool run_eval_num, bool *is_nan_or_nan_for
 	return sexp_val;
 }
 
-DCF(sexpc, "Always runs the given sexp command (Warning! There is no undo for this!)")
+DCF(sexpc, "Runs the given sexp command, wrapped as an action of a when-true condition")
 {
 	SCP_string sexp;
-	SCP_string sexp_always;
+	SCP_string sexp_wrapped;
 	
 	if (dc_optional_string_either("help", "--help")) {
-		dc_printf( "Usage: sexpc sexpression\n. Always runs the given sexp as '( when ( true ) ( sexp ) )' .\n" );
+		dc_printf( "Usage: sexpc <sexpression>\n. Runs the given sexp as '( when ( true ) ( sexpression ) )' .\n" );
 		return;
 	}
 
 	dc_stuff_string(sexp);
 
-	sexp_always = "( when ( true ) ( " + sexp + " ) )";
+	sexp_wrapped = "( when ( true ) ( " + sexp + " ) )";
 
-	int sexp_val = run_sexp(sexp_always.c_str());
-	dc_printf("SEXP '%s' run, sexp_val = %d\n", sexp_always.c_str(), sexp_val);
+	int sexp_val = run_sexp(sexp_wrapped.c_str());
+	dc_printf("SEXP '%s' run; sexp_val = %d\n", sexp_wrapped.c_str(), sexp_val);
 }
 
-
-DCF(sexp,"Runs the given sexp")
+DCF(sexp, "Runs the given sexp")
 {
 	SCP_string sexp;
 
 	if (dc_optional_string_either("help", "--help")) {
-		dc_printf( "Usage: sexp 'sexpression'\n. Runs the given sexp.\n");
+		dc_printf( "Usage: sexp <sexpression>\n. Runs the given sexp.\n");
 		return;
 	}
 
 	dc_stuff_string(sexp);
 
 	int sexp_val = run_sexp(sexp.c_str());
-	dc_printf("SEXP '%s' run, sexp_val = %d\n", sexp.c_str(), sexp_val);
+	dc_printf("Result = %d\n", sexp_val);
+}
+
+DCF(script, "Runs the given script, without regard to its return value")
+{
+	SCP_string script;
+
+	if (dc_optional_string_either("help", "--help")) {
+		dc_printf( "Usage: script <script code>\n. Runs the given script.\n");
+		return;
+	}
+
+	dc_stuff_string(script);
+
+	bool success = Script_system.EvalString(script.c_str());
+	dc_printf("Script %s\n", success ? "successful" : "unsuccessful");
+}
+
+template <typename T>
+void script_eval_with_return(const char *help_text, const char *format, void (*to_scp_string)(T, SCP_string&))
+{
+	SCP_string script;
+
+	if (dc_optional_string_either("help", "--help")) {
+		dc_printf("%s", help_text);
+		return;
+	}
+
+	dc_stuff_string(script);
+
+	T result{};
+	SCP_string result_string;
+
+	bool success = Script_system.EvalStringWithReturn(script.c_str(), format, &result);
+	to_scp_string(result, result_string);
+	dc_printf("Script %s.  Result = %s\n", success ? "successful" : "unsuccessful", result_string.c_str());
+}
+
+DCF(script_eval_bool, "Evaluates the given script, returning a boolean result")
+{
+	script_eval_with_return<bool>("Usage: script_eval_bool <script code>\n. Runs the given script, returning a boolean result.\n",
+		"|b",
+		[](bool b, SCP_string& str) { str = b ? "true" : "false"; }
+	);
+}
+
+DCF(script_eval_int, "Evaluates the given script, returning an integer result")
+{
+	script_eval_with_return<int>("Usage: script_eval_int <script code>\n. Runs the given script, returning an integer result.\n",
+		"|i",
+		[](int i, SCP_string& str) { sprintf(str, "%d", i); }
+	);
+}
+
+DCF(script_eval_float, "Evaluates the given script, returning a float result")
+{
+	script_eval_with_return<float>("Usage: script_eval_float <script code>\n. Runs the given script, returning a float result.\n",
+		"|f",
+		[](float f, SCP_string& str) { sprintf(str, "%f", f); }
+	);
+}
+
+DCF(script_eval_string, "Evaluates the given script, returning a string result")
+{
+	script_eval_with_return<const char*>("Usage: script_eval_string <script code>\n. Runs the given script, returning a string result.\n",
+		"|s",
+		[](const char* s, SCP_string& str) { sprintf(str, "'%s'", s ? s : ""); }
+	);
 }
 
 bool map_opf_to_opr(sexp_opf_t opf_type, sexp_opr_t &opr_type)
@@ -41873,15 +41947,15 @@ SCP_vector<sexp_help_struct> Sexp_help = {
 	},
 
 	{OP_SCRIPT_EVAL_BOOL, "script-eval-bool\r\n"
-		"\tEvaluates script to return a boolean"
-		"Takes 1 argument...\r\n"
-		"\t1:\tScript\r\n"
+		"\tEvaluates the concatenation of all arguments as a single script that returns a boolean"
+		"Takes at least 1 argument...\r\n"
+		"\tAll:\tScript\r\n"
 	},
 
 	{OP_SCRIPT_EVAL_NUM, "script-eval-num\r\n"
-		"\tEvaluates script to return a number"
-		"Takes 1 argument...\r\n"
-		"\t1:\tScript\r\n"
+		"\tEvaluates the concatenation of all arguments as a single script that returns a number"
+		"Takes at least 1 argument...\r\n"
+		"\tAll:\tScript\r\n"
 	},
 
 	{ OP_DISABLE_ETS, "disable-ets\r\n"

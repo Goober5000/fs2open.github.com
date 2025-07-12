@@ -542,6 +542,19 @@ void garbage_collect_path_points()
 
 }
 
+void reset_ai_path_points()
+{
+	memset(Path_points, 0, sizeof(Path_points)); // optional: zero out for safety
+	Ppfp = Path_points;
+
+	// Also clear any AI path state
+	for (int i = 0; i < MAX_SHIPS; ++i) {
+		Ai_info[i].path_start = -1;
+		Ai_info[i].path_cur = -1;
+		Ai_info[i].path_length = 0;
+	}
+}
+
 /**
  * Hash two values together, return result.
  *	Hash function: curval shifted right circular by one, newval xored in.
@@ -924,6 +937,8 @@ void parse_ai_class()
 	set_aic_flag(aicp, "$use actual primary range:", AI::Profile_Flags::Use_actual_primary_range);
 
 	set_aic_flag(aicp, "$firing requires exact los:", AI::Profile_Flags::Require_exact_los);
+
+	set_aic_flag(aicp, "$AI balances shields instead of directs when attacked:", AI::Profile_Flags::AI_balances_shields_when_attacked);
 }
 
 void reset_ai_class_names()
@@ -2097,7 +2112,7 @@ float get_wing_lowest_av_ab_speed(object *objp)
 	}
 	else
 	{
-		recharge_scale = Energy_levels[shipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
+		recharge_scale = ets_power_factor(objp) * Energy_levels[shipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
 		recharge_scale = sip->afterburner_recover_rate * recharge_scale / (sip->afterburner_burn_rate + sip->afterburner_recover_rate * recharge_scale);
 		lowest_max_av_ab_speed = recharge_scale * (objp->phys_info.afterburner_max_vel.xyz.z - objp->phys_info.max_vel.xyz.z) + objp->phys_info.max_vel.xyz.z;
 	}
@@ -2125,7 +2140,7 @@ float get_wing_lowest_av_ab_speed(object *objp)
 			}
 			else
 			{
-				recharge_scale = Energy_levels[shipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
+				recharge_scale = ets_power_factor(o) * Energy_levels[oshipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
 				recharge_scale = osip->afterburner_recover_rate * recharge_scale / (osip->afterburner_burn_rate + osip->afterburner_recover_rate * recharge_scale);
 				cur_max = recharge_scale * (o->phys_info.afterburner_max_vel.xyz.z - o->phys_info.max_vel.xyz.z) + o->phys_info.max_vel.xyz.z;
 			}
@@ -3534,6 +3549,13 @@ void ai_start_waypoints(object *objp, int wp_list_index, int wp_flags, int start
 		wp_list = find_waypoint_list_at_index(wp_list_index);
 	}
 
+	if (wp_list->get_waypoints().empty())
+	{
+		Warning(LOCATION, "Waypoint list '%s' is empty!", wp_list->get_name());
+		aip->mode = AIM_NONE;
+		return;
+	}
+
 	auto wp = find_waypoint_at_index(wp_list, start_index);
 	if (!wp)
 	{
@@ -4789,7 +4811,7 @@ void ai_fly_to_target_position(const vec3d* target_pos, bool* pl_done_p=NULL, bo
 		max_allowed_speed = 0.9f * get_wing_lowest_max_speed(Pl_objp);
 		max_allowed_ab_speed = 0.95f * get_wing_lowest_av_ab_speed(Pl_objp);
 		if (ab_allowed) {
-			float self_ab_scale = Energy_levels[shipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
+			float self_ab_scale = ets_power_factor(Pl_objp) * Energy_levels[shipp->engine_recharge_index] * 2.0f * The_mission.ai_profile->afterburner_recharge_scale[Game_skill_level];
 			self_ab_scale = sip->afterburner_recover_rate * self_ab_scale / (sip->afterburner_burn_rate + sip->afterburner_recover_rate * self_ab_scale);
 			self_ab_speed = 0.95f * (self_ab_scale * (Pl_objp->phys_info.afterburner_max_vel.xyz.z - Pl_objp->phys_info.max_vel.xyz.z) + Pl_objp->phys_info.max_vel.xyz.z);
 		}
@@ -7656,7 +7678,7 @@ void mabs_pick_goal_point(object *objp, object *big_objp, vec3d *collision_point
 /**
  * Return true if a large ship is being ignored.
  */
-int maybe_avoid_big_ship(object *objp, object *ignore_objp, ai_info *aip, vec3d *goal_point, float delta_time, float time_scale = 1.f)
+bool maybe_avoid_big_ship(object *objp, object *ignore_objp, ai_info *aip, vec3d *goal_point, float delta_time, float time_scale = 1.f)
 {
 	if (timestamp_elapsed(aip->avoid_check_timestamp)) {
 		float		distance;
@@ -7691,10 +7713,30 @@ int maybe_avoid_big_ship(object *objp, object *ignore_objp, ai_info *aip, vec3d 
 		if (ai_willing_to_afterburn_hard(aip) && dot > 0.99f)
 			ai_afterburn_hard(Pl_objp, aip);
 
-		return 1;
+		return true;
 	}
 
-	return 0;
+	return false;
+}
+
+/**
+ * Return true if small ship and it will likely collide with large ship
+ * developed by Asteroth
+ */
+bool better_collision_avoidance_triggered(bool flag_to_check, float avoidance_aggression, object* pl_objp, object* en_objp)
+{
+	ship* shipp = &Ships[pl_objp->instance];
+	ship_info* sip = &Ship_info[shipp->ship_info_index];
+
+	if ((flag_to_check) && sip->is_small_ship()) {
+		vec3d collide_vec = pl_objp->phys_info.vel * (avoidance_aggression / (PI2 / sip->srotation_time));
+		float radius_contribution = (pl_objp->phys_info.speed + pl_objp->radius) / pl_objp->phys_info.speed;
+		collide_vec *= radius_contribution;
+
+		collide_vec += pl_objp->pos;
+		return (maybe_avoid_big_ship(pl_objp, en_objp, &Ai_info[shipp->ai_index], &collide_vec, 0.f, 0.1f));
+	}
+	return false;
 }
 
 /**
@@ -8919,14 +8961,11 @@ void ai_chase()
 		return;
 	}
 
-	if ((The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoidance]) && sip->is_small_ship()) {
-		vec3d collide_vec = Pl_objp->phys_info.vel * (The_mission.ai_profile->better_collision_avoid_aggression_combat / (PI2 / sip->srotation_time));
-		float radius_contribution = (Pl_objp->phys_info.speed + Pl_objp->radius) / Pl_objp->phys_info.speed;
-		collide_vec *= radius_contribution;
-
-		collide_vec += Pl_objp->pos;
-		if (maybe_avoid_big_ship(Pl_objp, En_objp, aip, &collide_vec, 0.f, 0.1f))
-			return;
+	if (better_collision_avoidance_triggered(
+			The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoidance],
+			The_mission.ai_profile->better_collision_avoid_aggression_combat,
+			Pl_objp, En_objp)) {
+		return;
 	}
 
 	if (enemy_sip_flags.any_set()) {
@@ -10840,16 +10879,11 @@ void ai_guard()
 		return;
 	}
 
-	ship_info* sip = &Ship_info[shipp->ship_info_index];
-	if ((The_mission.ai_profile->flags[AI::Profile_Flags::Better_guard_collision_avoidance]) && sip->is_small_ship()) {
-
-		vec3d collide_vec = Pl_objp->phys_info.vel * (The_mission.ai_profile->better_collision_avoid_aggression_guard / (PI2 / sip->srotation_time));
-		float radius_contribution = (Pl_objp->phys_info.speed + Pl_objp->radius) / Pl_objp->phys_info.speed;
-		collide_vec *= radius_contribution;
-
-		collide_vec += Pl_objp->pos;
-		if (maybe_avoid_big_ship(Pl_objp, En_objp, aip, &collide_vec, 0.f, 0.1f))
-			return;
+	if (better_collision_avoidance_triggered(
+			The_mission.ai_profile->flags[AI::Profile_Flags::Better_guard_collision_avoidance],
+			The_mission.ai_profile->better_collision_avoid_aggression_guard,
+			Pl_objp, En_objp)) {
+		return;
 	}
 
 	// handler for guard object with BIG radius
@@ -11467,7 +11501,7 @@ void ai_stay_near()
 	else if (aip->submode_parm0 != 0) {
 		vec3d rand_vec, center_to_goal, center_to_objp;
 		auto goal_objp = &Objects[goal_objnum];
-		float max_dist = aip->submode_float0;
+		float max_dist = std::max(aip->submode_float0, 1.0f);
 
 		// Figure out a goal point to fly to
 		//	Make not all ships pursue same point.
@@ -11498,7 +11532,7 @@ void ai_stay_near()
 	else {
 		vec3d	rand_vec, goal_pos, vec_to_goal;
 		auto goal_objp = &Objects[goal_objnum];
-		float max_dist = aip->submode_float0;
+		float max_dist = std::max(aip->submode_float0, 1.0f);
 
 		//	Make not all ships pursue same point.
 		//	Calculate the seed from both shipnums so the same Pl_objp doesn't always choose the same spot
@@ -13313,8 +13347,8 @@ void ai_manage_shield(object *objp, ai_info *aip)
 		aip->shield_manage_timestamp = timestamp((int) (delay * 1000.0f));
 
 		if (sip->is_small_ship() || (aip->ai_profile_flags[AI::Profile_Flags::All_ships_manage_shields])) {
-			if (Missiontime - aip->last_hit_time < F1_0*10)
-				ai_transfer_shield(objp, aip->last_hit_quadrant);
+			if ((Missiontime - aip->last_hit_time < F1_0 * 10) && !((aip->ai_profile_flags[AI::Profile_Flags::AI_balances_shields_when_attacked])))
+				ai_transfer_shield(objp, aip->danger_shield_quadrant);
 			else
 				ai_balance_shield(objp);
 		}
@@ -14131,7 +14165,12 @@ void ai_execute_behavior(ai_info *aip)
 	case AIM_STRAFE:
 		if (En_objp) {
 			Assert(En_objp->type == OBJ_SHIP);
-			ai_big_strafe();	// strafe a big ship
+			if (!(better_collision_avoidance_triggered(
+					The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoidance],
+					The_mission.ai_profile->better_collision_avoid_aggression_combat,
+					Pl_objp, En_objp))) {
+				ai_big_strafe();	// strafe a big ship
+			}
 		} else {
 			aip->mode = AIM_NONE;
 		}
@@ -14433,6 +14472,8 @@ void ai_warp_out(object *objp)
 	// Goober5000 - make sure the flag is clear (if it was previously set)
 	aip->ai_flags.remove(AI::AI_Flags::Trying_unsuccessfully_to_warp);
 
+	WarpParams* warp_params = &Warp_params[shipp->warpout_params_index];
+
 	switch (aip->submode) {
 	case AIS_WARP_1:
 		aip->force_warp_time = timestamp(10*1000);	//	Try to avoid a collision for up to ten seconds.
@@ -14441,9 +14482,9 @@ void ai_warp_out(object *objp)
 		break;
 	case AIS_WARP_2:			//	Make sure won't collide with any object.
 		if (timestamp_elapsed(aip->force_warp_time)
-			|| (!collide_predict_large_ship(objp, objp->radius*2.0f + 100.0f)
-			|| (Warp_params[shipp->warpout_params_index].warp_type == WT_HYPERSPACE
-				&& !collide_predict_large_ship(objp, 100000.0f)))) {
+			|| (warp_params->warp_type == WT_SWEEPER)
+			|| (warp_params->warp_type == WT_IN_PLACE_ANIM)
+			|| (!collide_predict_large_ship(objp, objp->radius * 2.0f + 100.0f))) {
 			aip->submode = AIS_WARP_3;
 			aip->submode_start_time = Missiontime;
 
@@ -14485,7 +14526,7 @@ void ai_warp_out(object *objp)
 		break;
 	case AIS_WARP_4: {
 		// Only lets the ship warp after waiting for the warpout engage time
-		if ( (Missiontime / 100) >= (aip->submode_start_time / 100 + Warp_params[shipp->warpout_params_index].warpout_engage_time) ) {
+		if ( (Missiontime / 100) >= (aip->submode_start_time / 100 + warp_params->warpout_engage_time) ) {
 			shipfx_warpout_start(objp);
 			aip->submode = AIS_WARP_5;
 			aip->submode_start_time = Missiontime;
@@ -15552,7 +15593,7 @@ void init_ai_object(int objnum)
 	aip->time_enemy_near = 0.0f;
 	aip->last_attack_time = 0;
 	aip->last_hit_time = 0;
-	aip->last_hit_quadrant = 0;
+	aip->danger_shield_quadrant = 0;
 	aip->hitter_objnum = -1;
 	aip->hitter_signature = -1;
 	aip->resume_goal_time = -1;

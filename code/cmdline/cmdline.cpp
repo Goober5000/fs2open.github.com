@@ -261,6 +261,7 @@ Flag exe_params[] =
 	{ "-output_sexps",		"Output SEXPs to sexps.html",				true,	0,									EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-output_sexps", },
 	{ "-output_scripting",	"Output scripting to scripting.html",		true,	0,									EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-output_scripting", },
 	{ "-output_script_json",	"Output scripting doc to scripting.json",	true,	0,								EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-output_script_json", },
+	{ "-output_script_lua",	"Output scripting doc to scripting.lua",	true,	0,								EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-output_script_luastub", },
 	{ "-controlconfig_tbl",	"Save control presets to table",			true,	0,									EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-controlconfig_tbl", },
 	{ "-save_render_target",	"Save render targets to file",			true,	0,									EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-save_render_target", },
 	{ "-verify_vps",		"Spew VP CRCs to vp_crcs.txt",				true,	0,									EASY_DEFAULT,					"Dev Tool",		"http://www.hard-light.net/wiki/index.php/Command-Line_Reference#-verify_vps", },
@@ -533,6 +534,7 @@ cmdline_parm luadev_arg("-luadev", "Make lua errors non-fatal", AT_NONE);	// Cmd
 cmdline_parm override_arg("-override_data", "Enable override directory", AT_NONE);	// Cmdline_override_data
 cmdline_parm imgui_debug_arg("-imgui_debug", nullptr, AT_NONE);
 cmdline_parm vulkan("-vulkan", nullptr, AT_NONE);
+cmdline_parm multithreading("-threads", nullptr, AT_INT);
 
 char *Cmdline_start_mission = NULL;
 int Cmdline_dis_collisions = 0;
@@ -571,12 +573,14 @@ bool Cmdline_lua_devmode = false;
 bool Cmdline_override_data = false;
 bool Cmdline_show_imgui_debug = false;
 bool Cmdline_vulkan = false;
+int Cmdline_multithreading = 1;
 
 // Other
 cmdline_parm get_flags_arg(GET_FLAGS_STRING, "Output the launcher flags file", AT_STRING);
 cmdline_parm output_sexp_arg("-output_sexps", NULL, AT_NONE); //WMC - outputs all SEXPs to sexps.html
 cmdline_parm output_scripting_arg("-output_scripting", NULL, AT_NONE);	//WMC
 cmdline_parm output_script_json_arg("-output_script_json", nullptr, AT_NONE);	// m!m
+cmdline_parm output_script_luastub_arg("-output_script_lua", nullptr, AT_NONE); // mjnmixael
 cmdline_parm generate_controlconfig_arg("-controlconfig_tbl", nullptr, AT_NONE);	
 
 // Deprecated flags - CommanderDJ
@@ -2075,6 +2079,9 @@ bool SetCmdlineParams()
 	if (output_script_json_arg.found() )
 		Output_scripting_json = true;
 
+	if (output_script_luastub_arg.found())
+		Output_scripting_luastub = true;
+
 	if (output_sexp_arg.found() ) {
 		Cmdline_output_sexp_info = true;
 	}
@@ -2399,6 +2406,14 @@ bool SetCmdlineParams()
 		}
 		else {
 			Warning(LOCATION,"-seed must be an integer greater than 0. Invalid input seed will be disregarded.");
+		}
+	}
+
+	if (multithreading.found()) {
+		Cmdline_multithreading = abs(multithreading.get_int());
+		if (Cmdline_multithreading < 1) {
+			Cmdline_multithreading = 1;
+			Warning(LOCATION,"-threads must be an integer greater or equal to 1. Invalid thread count will be disregarded.");
 		}
 	}
 

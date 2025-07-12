@@ -15,6 +15,14 @@ class EffectHost;
 
 //Due to parsing shenanigans in weapons, this needs a forward-declare here
 int parse_weapon(int, bool, const char*);
+namespace scripting::api {
+	particle::ParticleEffectHandle getLegacyScriptingParticleEffect(int bitmap, bool reversed);
+}
+
+namespace anl {
+	class CKernel;
+	class CInstructionIndex;
+}
 
 namespace particle {
 
@@ -64,6 +72,12 @@ public:
 		INHERIT_VELOCITY_MULT,
 		POSITION_INHERIT_VELOCITY_MULT,
 		ORIENTATION_INHERIT_VELOCITY_MULT,
+		VELOCITY_NOISE_MULT,
+		VELOCITY_NOISE_TIME_MULT,
+		VELOCITY_NOISE_SEED,
+		SPAWN_POSITION_NOISE_MULT,
+		SPAWN_POSITION_NOISE_TIME_MULT,
+		SPAWN_POSITION_NOISE_SEED,
 
 		NUM_VALUES
 	};
@@ -72,6 +86,8 @@ public:
 	friend struct ParticleParse;
 
 	friend int ::parse_weapon(int, bool, const char*);
+
+	friend ParticleEffectHandle scripting::api::getLegacyScriptingParticleEffect(int bitmap, bool reversed);
 
 	SCP_string m_name; //!< The name of this effect
 
@@ -88,6 +104,8 @@ public:
 	bool m_keep_anim_length_if_available;
 	bool m_vel_inherit_absolute;
 	bool m_vel_inherit_from_position_absolute;
+	bool m_reverseAnimation;
+	bool m_ignore_velocity_inherit_if_has_parent;
 
 	SCP_vector<int> m_bitmap_list;
 	::util::UniformRange<size_t> m_bitmap_range;
@@ -101,6 +119,8 @@ public:
 	::util::ParsedRandomFloatRange m_length;
 	::util::ParsedRandomFloatRange m_vel_inherit;
 	::util::ParsedRandomFloatRange m_velocity_scaling;
+	::util::ParsedRandomFloatRange m_velocity_noise_scaling;
+	::util::ParsedRandomFloatRange m_position_noise_scaling;
 
 	std::optional<::util::ParsedRandomFloatRange> m_vel_inherit_from_orientation;
 	std::optional<::util::ParsedRandomFloatRange> m_vel_inherit_from_position;
@@ -108,7 +128,11 @@ public:
 	std::shared_ptr<::particle::ParticleVolume> m_velocityVolume;
 	std::shared_ptr<::particle::ParticleVolume> m_spawnVolume;
 
+	std::shared_ptr<std::pair<anl::CKernel, anl::CInstructionIndex>> m_velocityNoise;
+	std::shared_ptr<std::pair<anl::CKernel, anl::CInstructionIndex>> m_spawnNoise;
+
 	std::optional<vec3d> m_manual_offset;
+	std::optional<vec3d> m_manual_velocity_offset;
 
 	ParticleEffectHandle m_particleTrail;
 
@@ -119,7 +143,10 @@ public:
 	float m_distanceCulled; //Kinda deprecated. Only used by the oldest of legacy effects.
 
 	matrix getNewDirection(const matrix& hostOrientation, const std::optional<vec3d>& normal) const;
- public:
+
+	template<bool isPersistent>
+	auto processSourceInternal(float interp, const ParticleSource& source, size_t effectNumber, const vec3d& velParent, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const;
+  public:
 	/**
 	 * @brief Initializes the base ParticleEffect
 	 * @param name The name this effect should have
@@ -132,6 +159,9 @@ public:
 	// Parsing the deprecated -part.tbm effects uses the simple constructor + parseLegacy() instead!
 	explicit ParticleEffect(SCP_string name,
 							::util::ParsedRandomFloatRange particleNum,
+							Duration duration,
+							::util::ParsedRandomFloatRange durationRange,
+							::util::ParsedRandomFloatRange particlesPerSecond,
 							ShapeDirection direction,
 							::util::ParsedRandomFloatRange vel_inherit,
 							bool vel_inherit_absolute,
@@ -146,12 +176,19 @@ public:
 							bool affectedByDetail,
 							float distanceCulled,
 							bool disregardAnimationLength,
+							bool reverseAnimation,
+							bool parentLocal,
+							bool ignoreVelocityInheritIfParented,
+							bool velInheritFromPositionAbsolute,
+							std::optional<vec3d> velocityOffsetLocal,
+							std::optional<vec3d> offsetLocal,
 							::util::ParsedRandomFloatRange lifetime,
 							::util::ParsedRandomFloatRange radius,
 							int bitmap
 	);
 
-	void processSource(float interp, const ParticleSource& host, size_t effectNumber, const vec3d& vel, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const;
+	float processSource(float interp, const ParticleSource& host, size_t effectNumber, const vec3d& vel, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const;
+	SCP_vector<WeakParticlePtr> processSourcePersistent(float interp, const ParticleSource& host, size_t effectNumber, const vec3d& vel, int parent, int parent_sig, float parentLifetime, float parentRadius, float particle_percent) const;
 
 	void pageIn();
 
@@ -163,6 +200,8 @@ public:
 
 	bool isOnetime() const { return m_duration == Duration::ONETIME; }
 
+	float getApproximateVisualSize(const vec3d& pos) const;
+
 	constexpr static auto modular_curves_definition = make_modular_curve_definition<ParticleSource, ParticleCurvesOutput>(
 		std::array {
 			std::pair {"Particle Number Mult", ParticleCurvesOutput::PARTICLE_NUM_MULT},
@@ -173,7 +212,13 @@ public:
 			std::pair {"Velocity Volume Mult", ParticleCurvesOutput::VOLUME_VELOCITY_MULT},
 			std::pair {"Velocity Inherit Mult", ParticleCurvesOutput::INHERIT_VELOCITY_MULT},
 			std::pair {"Velocity Position Inherit Mult", ParticleCurvesOutput::POSITION_INHERIT_VELOCITY_MULT},
-			std::pair {"Velocity Orientation Inherit Mult", ParticleCurvesOutput::ORIENTATION_INHERIT_VELOCITY_MULT}
+			std::pair {"Velocity Orientation Inherit Mult", ParticleCurvesOutput::ORIENTATION_INHERIT_VELOCITY_MULT},
+			std::pair {"Velocity Noise Mult", ParticleCurvesOutput::VELOCITY_NOISE_MULT},
+			std::pair {"Velocity Noise Time Mult", ParticleCurvesOutput::VELOCITY_NOISE_TIME_MULT},
+			std::pair {"Velocity Noise Seed", ParticleCurvesOutput::VELOCITY_NOISE_SEED},
+			std::pair {"Spawn Position Noise Mult", ParticleCurvesOutput::SPAWN_POSITION_NOISE_MULT},
+			std::pair {"Spawn Position Noise Time Mult", ParticleCurvesOutput::SPAWN_POSITION_NOISE_TIME_MULT},
+			std::pair {"Spawn Position Noise Seed", ParticleCurvesOutput::SPAWN_POSITION_NOISE_SEED}
 		},
 		std::pair {"Trigger Radius", modular_curves_submember_input<&ParticleSource::m_triggerRadius>{}},
 		std::pair {"Trigger Velocity", modular_curves_submember_input<&ParticleSource::m_triggerVelocity>{}},
@@ -184,11 +229,18 @@ public:
 		    modular_curves_submember_input<&ParticleSource::m_effect_is_running, &decltype(ParticleSource::m_effect_is_running)::count>,
 			modular_curves_submember_input<&ParticleSource::getEffect, &SCP_vector<ParticleEffect>::size>,
 			ModularCurvesMathOperators::division>{}})
-	.derive_modular_curves_input_only_subset<size_t>(
-		std::pair {"Spawntime Left", modular_curves_functional_full_input<&ParticleSource::getEffectRemainingTime>{}}
+	.derive_modular_curves_input_only_subset<size_t>( //Effect Number
+		std::pair {"Spawntime Left", modular_curves_functional_full_input<&ParticleSource::getEffectRemainingTime>{}},
+		std::pair {"Time Running", modular_curves_functional_full_input<&ParticleSource::getEffectRunningTime>{}})
+	.derive_modular_curves_input_only_subset<vec3d>( //Sampled spawn position
+		std::pair {"Apparent Visual Size At Emitter", modular_curves_functional_full_input<&ParticleSource::getEffectVisualSize>{}}
 		);
 
 	MODULAR_CURVE_SET(m_modular_curves, modular_curves_definition);
+
+  private:
+	float getCurrentFrequencyMult(decltype(modular_curves_definition)::input_type_t source) const;
+	void sampleNoise(vec3d& noiseTarget, const matrix* orientation, std::pair<anl::CKernel, anl::CInstructionIndex>& noise, decltype(modular_curves_definition)::input_type_t source, ParticleCurvesOutput noiseMult, ParticleCurvesOutput noiseTimeMult, ParticleCurvesOutput noiseSeed) const;
 };
 
 }

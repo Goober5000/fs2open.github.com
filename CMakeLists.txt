@@ -1,5 +1,5 @@
 
-CMAKE_MINIMUM_REQUIRED(VERSION 3.9)
+CMAKE_MINIMUM_REQUIRED(VERSION 3.21)
 set_property(GLOBAL PROPERTY USE_FOLDERS ON)
 
 # Make sure the source and binary directory are not the sample
@@ -8,12 +8,12 @@ if ("${CMAKE_CURRENT_SOURCE_DIR}" STREQUAL "${CMAKE_CURRENT_BINARY_DIR}")
 endif()
 
 include(cmake/util.cmake)
-include(cmake/embed_file.cmake)
 
 # Set a few policies
 set_policy(CMP0051 NEW)
 set_policy(CMP0053 NEW)
 set_policy(CMP0054 NEW)
+set_policy(CMP0091 NEW) # Enable use of CMAKE_MSVC_RUNTIME_LIBRARY
 
 SET(FSO_PROJECT_DESCRIPTION "Open source project based on the original FreeSpace 2 source code.")
 
@@ -47,11 +47,6 @@ endif()
 
 PROJECT(FS2_Open LANGUAGES ${FSO_LANGUAGES})
 
-IF(CMAKE_CROSSCOMPILING)
-	SET(IMPORT_EXE_DIR "IMPORT_EXE_DIR-NOTFOUND" CACHE FILEPATH "Required for a cross compiling build, point to binary directory of a cmake build for the real OS")
-	INCLUDE(${IMPORT_EXE_DIR}/ImportExecutables.cmake)
-ENDIF(CMAKE_CROSSCOMPILING)
-
 # Check if the external modules exists
 IF(NOT IS_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/cmake/external/rpavlik-cmake-modules/launcher-templates")
 	message(FATAL_ERROR "External submodules could not be found. Please make sure you have updated your submodules.")
@@ -61,6 +56,10 @@ LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake")
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/finder")
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/external/rpavlik-cmake-modules")
 LIST(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/cmake/external/cotire")
+
+INCLUDE(globals)
+INCLUDE(toolchain)
+include(embed_file)
 
 IF(RESET_INSTALL_PREFIX)
 	IF(NOT $ENV{FS2PATH} STREQUAL "")
@@ -161,11 +160,6 @@ mark_as_advanced(FORCE FSO_BUILD_WITH_VULKAN)
 mark_as_advanced(FORCE FSO_BUILD_WITH_OPENXR)
 mark_as_advanced(FORCE FSO_BUILD_WITH_OPENXR_DEBUG)
 
-# Include cotire file from https://github.com/sakra/cotire/
-include(cotire)
-
-INCLUDE(globals)
-INCLUDE(toolchain)
 INCLUDE(platforms)
 include(version)
 

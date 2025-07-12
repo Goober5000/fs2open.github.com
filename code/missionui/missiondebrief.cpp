@@ -1721,6 +1721,9 @@ void debrief_setup_ship_kill_stats(int  /*stage_num*/)
 
 	auto stats_type = ( Current_stage == DEBRIEF_MISSION_KILLS ) ? StatsType::MISSION_STATS : StatsType::ALL_TIME_EVER_STATS;
 
+	// wookieejedi - Show kills by ship type, but if using display name
+	// then consolidate values for similarly named entries
+	std::map<SCP_string, int, SCP_string_lcase_less_than> kill_map;
 	Num_text_lines = 0;
 	i = 0;
 	for ( auto it = Ship_info.begin(); it != Ship_info.end(); i++, ++it ) {
@@ -1732,12 +1735,16 @@ void debrief_setup_ship_kill_stats(int  /*stage_num*/)
 			continue;
 		}
 
+		// wookieejedi - consolidate by display name or ship class name
+		const char* name_key = it->get_display_name();
+		kill_map[name_key] += num_kills;
+	}
 
+	// wookieejedi - now copy into Debrief_stats_kills[] for display
+	for (const auto& [name, count] : kill_map) {
 		kill_info = &Debrief_stats_kills[Num_text_lines++];
-
-		kill_info->num = num_kills;
-
-		strcpy_s(kill_info->text, it->name);
+		kill_info->num = count;
+		strcpy_s(kill_info->text, name.c_str());
 		strcat_s(kill_info->text, NOX(":"));
 	}
 
@@ -2203,7 +2210,7 @@ void debrief_draw_award_text()
 	curr_y = start_y;
 
 	// draw the strings
-	for (i=0; i<Debrief_award_text_num_lines; i++) {
+	for (i=0; i<Debrief_award_text_num_lines && i < AWARD_TEXT_MAX_LINES; i++) {
 		gr_get_string_size(&sw, NULL, Debrief_award_text[i]);
 		x = (Medal_bitmap < 0) ? (Debrief_award_text_coords[gr_screen.res][0] + (field_width - sw) / 2) : Debrief_award_text_coords[gr_screen.res][0];
 		if (i==AWARD_TEXT_MAX_LINES-1) x += 7;				// hack because of the shape of the box

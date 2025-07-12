@@ -79,7 +79,8 @@ gr_capability_def gr_capabilities[] = {
 	GR_CAPABILITY_ENTRY(SEPARATE_BLEND_FUNCTIONS),
 	GR_CAPABILITY_ENTRY(PERSISTENT_BUFFER_MAPPING),
 	gr_capability_def {gr_capability::CAPABILITY_BPTC, "BPTC Texture Compression"}, //This one had a different parse string already!
-	GR_CAPABILITY_ENTRY(LARGE_SHADER)
+	GR_CAPABILITY_ENTRY(LARGE_SHADER),
+	GR_CAPABILITY_ENTRY(INSTANCED_RENDERING),
 };
 
 const size_t gr_capabilities_num = sizeof(gr_capabilities) / sizeof(gr_capabilities[0]);
@@ -89,6 +90,8 @@ const size_t gr_capabilities_num = sizeof(gr_capabilities) / sizeof(gr_capabilit
 const char* Resolution_prefixes[GR_NUM_RESOLUTIONS] = {"", "2_"};
 
 screen gr_screen;
+
+lua_screen gr_lua_screen;
 
 color_gun Gr_red, Gr_green, Gr_blue, Gr_alpha;
 color_gun Gr_t_red, Gr_t_green, Gr_t_blue, Gr_t_alpha;
@@ -1842,7 +1845,7 @@ bool gr_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, int d_mode, 
 		}
 	}
 
-	if (!gr_is_viewport_window() && !Cmdline_window_res.has_value()) {
+	if (!Fred_running && !Cmdline_window_res.has_value()) {
 		// For whatever reason, it seems that a combination of Win 11 and presumably NVidia GPU's causes weird artifacts.
 		// These artifacts do not appear in windowed mode, or with an attached renderdoc / nvidia nsight.
 		// Similarly using the -window_res command line parameter prevents this.
@@ -1850,6 +1853,8 @@ bool gr_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps, int d_mode, 
 		// (be that a window, a render overlay from nsight, or an FSO-internal buffer) instead of directly rendering to the OS-provided direct screen backbuffer.
 		// As the cost of -window_res is one single blit of a fullscreen buffer, it's probably an acceptable compromise to get rid of render artifacts.
 		// As such, forcibly enable -window_res at the screen resolution here, if we're in fullscreen.
+
+		// Additionally, SDL3+ doesn't work when reading from the GL_FRONT buffers, so we need our own intermediate buffers.
 		Cmdline_window_res.emplace(static_cast<uint16_t>(width), static_cast<uint16_t>(height));
 	}
 
@@ -2115,7 +2120,11 @@ void gr_set_color( int r, int g, int b )
 
 void gr_set_color_fast(const color *dst)
 {
-	gr_screen.current_color = *dst;
+	if (gr_lua_context_active()) {
+		gr_lua_screen.current_color = *dst;
+	} else {
+		gr_screen.current_color = *dst;
+	}
 }
 
 //Compares the RGBA values of two colors. Returns true if the colors are identical
@@ -3064,7 +3073,7 @@ size_t hash<vertex_layout>::operator()(const vertex_layout& data) const {
 bool vertex_layout::resident_vertex_format(vertex_format_data::vertex_format format_type) const {
 	return ( Vertex_mask & vertex_format_data::mask(format_type) ) ? true : false;
 }
-void vertex_layout::add_vertex_component(vertex_format_data::vertex_format format_type, size_t stride, size_t offset) {
+void vertex_layout::add_vertex_component(vertex_format_data::vertex_format format_type, size_t stride, size_t offset, size_t divisor, size_t buffer_number ) {
 	// A stride value of 0 is not handled consistently by the graphics API so we must enforce that that does not happen
 	Assertion(stride != 0, "The stride of a vertex component may not be zero!");
 
@@ -3073,15 +3082,16 @@ void vertex_layout::add_vertex_component(vertex_format_data::vertex_format forma
 		return;
 	}
 
-	if (Vertex_mask == 0) {
+	auto stride_it = Vertex_stride.find(buffer_number);
+	if (stride_it == Vertex_stride.end()) {
 		// This is the first element so we need to initialize the global stride here
-		Vertex_stride = stride;
+		stride_it = Vertex_stride.emplace(buffer_number, stride).first;
 	}
 
-	Assertion(Vertex_stride == stride, "The strides of all elements must be the same in a vertex layout!");
+	Assertion(stride_it->second == stride, "The strides of all elements must be the same in a vertex layout!");
 
 	Vertex_mask |= (1 << format_type);
-	Vertex_components.push_back(vertex_format_data(format_type, stride, offset));
+	Vertex_components.emplace_back(format_type, stride, offset, divisor, buffer_number);
 }
 bool vertex_layout::operator==(const vertex_layout& other) const {
 	if (Vertex_mask != other.Vertex_mask) {
@@ -3286,4 +3296,12 @@ bool gr_is_viewport_window()
 	}
 
 	return false;
+}
+
+bool gr_lua_context_active() {
+	if (gr_lua_screen.force_fso_context) {
+		return false;
+	}
+
+	return gr_lua_screen.active;
 }

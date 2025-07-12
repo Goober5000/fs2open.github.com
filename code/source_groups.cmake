@@ -1149,6 +1149,10 @@ add_file_folder("Particle\\\\Volumes"
 	particle/volumes/ConeVolume.h
 	particle/volumes/LegacyAACuboidVolume.cpp
 	particle/volumes/LegacyAACuboidVolume.h
+	particle/volumes/PointVolume.cpp
+	particle/volumes/PointVolume.h
+	particle/volumes/RingVolume.cpp
+	particle/volumes/RingVolume.h
 	particle/volumes/SpheroidVolume.cpp
 	particle/volumes/SpheroidVolume.h
 )
@@ -1182,6 +1186,8 @@ add_file_folder("PilotFile"
 	pilotfile/pilotfile_convert.h
 	pilotfile/plr.cpp
 	pilotfile/plr_convert.cpp
+	pilotfile/plr_hudprefs.cpp
+	pilotfile/plr_hudprefs.h
 )
 
 # Playerman files
@@ -1274,6 +1280,8 @@ add_file_folder("Scripting"
 	scripting/doc_html.h
 	scripting/doc_json.cpp
 	scripting/doc_json.h
+	scripting/doc_luastub.cpp
+	scripting/doc_luastub.h
 	scripting/doc_parser.cpp
 	scripting/doc_parser.h
 	scripting/global_hooks.cpp
@@ -1705,6 +1713,8 @@ add_file_folder("Utils"
 	utils/string_utils.cpp
 	utils/string_utils.h
 	utils/strings.h
+	utils/threading.cpp
+	utils/threading.h
 	utils/tuples.h
 	utils/unicode.cpp
 	utils/unicode.h

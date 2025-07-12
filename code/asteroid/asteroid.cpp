@@ -33,7 +33,7 @@
 #include "object/object.h"
 #include "parse/parselo.h"
 #include "scripting/global_hooks.h"
-#include "particle/particle.h"
+#include "particle/hosts/EffectHostVector.h"
 #include "render/3d.h"
 #include "ship/ship.h"
 #include "ship/shipfx.h"
@@ -63,8 +63,7 @@ asteroid			Asteroids[MAX_ASTEROIDS];
 asteroid_field	Asteroid_field;
 
 
-static int		Asteroid_impact_explosion_ani;
-static float	Asteroid_impact_explosion_radius;
+static particle::ParticleEffectHandle 		Asteroid_impact_explosion_ani;
 char	Asteroid_icon_closeup_model[NAME_LENGTH];
 vec3d	Asteroid_icon_closeup_position;
 float	Asteroid_icon_closeup_zoom;	
@@ -534,7 +533,7 @@ void asteroid_sub_create(object *parent_objp, int asteroid_type, vec3d *relvec)
 /**
  * Load in an asteroid model
  */
-static void asteroid_load(int asteroid_info_index, int asteroid_subtype)
+void asteroid_load(int asteroid_info_index, int asteroid_subtype)
 {
 	int i;
 	asteroid_info	*asip;
@@ -1492,8 +1491,54 @@ void asteroid_render(object * obj, model_draw_list *scene)
 
 		model_render_params render_info;
 
+		uint64_t render_flags = MR_IS_ASTEROID;
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_light])
+			render_flags |= MR_NO_LIGHTING;
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Glowmaps_disabled]) {
+			render_flags |= MR_NO_GLOWMAPS;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Draw_as_wireframe]) {
+			render_flags |= MR_SHOW_OUTLINE_HTL | MR_NO_POLYS | MR_NO_TEXTURING;
+			render_info.set_color(Wireframe_color);
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_full_detail]) {
+			render_flags |= MR_FULL_DETAIL;
+		}
+
+		uint debug_flags = render_info.get_debug_flags();
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_diffuse]) {
+			debug_flags |= MR_DEBUG_NO_DIFFUSE;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_glowmap]) {
+			debug_flags |= MR_DEBUG_NO_GLOW;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_normalmap]) {
+			debug_flags |= MR_DEBUG_NO_NORMAL;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_ambientmap]) {
+			debug_flags |= MR_DEBUG_NO_AMBIENT;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_specmap]) {
+			debug_flags |= MR_DEBUG_NO_SPEC;
+		}
+
+		if (asp->render_flags[Object::Raw_Pof_Flags::Render_without_reflectmap]) {
+			debug_flags |= MR_DEBUG_NO_REFLECT;
+		}
+
 		render_info.set_object_number( OBJ_INDEX(obj) );
-		render_info.set_flags(MR_IS_ASTEROID);
+
+		render_info.set_flags(render_flags);
+		render_info.set_debug_flags(debug_flags);
 		if (asp->model_instance_num >= 0)
 			render_info.set_replacement_textures(model_get_instance(asp->model_instance_num)->texture_replace);
 
@@ -1706,7 +1751,9 @@ void asteroid_hit( object * pasteroid_obj, object * other_obj, vec3d * hitpos, f
 			wip = &Weapon_info[Weapons[other_obj->instance].weapon_info_index];
 			// If the weapon didn't play any impact animation, play custom asteroid impact animation
 			if (!wip->impact_weapon_expl_effect.isValid()) {
-				particle::create( hitpos, &vmd_zero_vector, 0.0f, Asteroid_impact_explosion_radius, Asteroid_impact_explosion_ani );
+				auto source = particle::ParticleManager::get()->createSource(Asteroid_impact_explosion_ani);
+				source->setHost(std::make_unique<EffectHostVector>(*hitpos, vmd_identity_matrix, vmd_zero_vector));
+				source->finishCreation();
 			}
 		}
 	}
@@ -2192,6 +2239,16 @@ static void asteroid_parse_section()
 		asteroid_p->type = ASTEROID_TYPE_DEBRIS;
 	}
 
+	auto insert_or_replace_subtype_pof = [](SCP_vector<asteroid_subtype_info>& subtypes, const asteroid_subtype_info& new_subtype) {
+		for (auto& subtype : subtypes) {
+			if (lcase_equal(subtype.type_name, new_subtype.type_name)) {
+				strcpy_s(subtype.pof_filename, new_subtype.pof_filename);
+				return;
+			}
+		}
+		subtypes.push_back(new_subtype);
+	};
+
 	if (optional_string("$POF file1:")) {
 		asteroid_subtype_info thisType;
 
@@ -2201,7 +2258,7 @@ static void asteroid_parse_section()
 
 		thisType.model_number = -1;
 
-		asteroid_p->subtypes.push_back(thisType);
+		insert_or_replace_subtype_pof(asteroid_p->subtypes, thisType);
 	}
 
 	if (optional_string("$POF file2:")) {
@@ -2212,7 +2269,7 @@ static void asteroid_parse_section()
 
 		thisType.model_number = -1;
 
-		asteroid_p->subtypes.push_back(thisType);
+		insert_or_replace_subtype_pof(asteroid_p->subtypes, thisType);
 	}
 
 	if (optional_string("$POF file3:")) {
@@ -2223,7 +2280,7 @@ static void asteroid_parse_section()
 
 		thisType.model_number = -1;
 
-		asteroid_p->subtypes.push_back(thisType);
+		insert_or_replace_subtype_pof(asteroid_p->subtypes, thisType);
 	}
 
 	// For asteroid types we can have unlimited subtypes
@@ -2405,18 +2462,52 @@ static void asteroid_parse_tbl(const char* filename)
 
 		required_string("#End");
 
-		if (optional_string("$Impact Explosion:")) {
-			char impact_ani_file[MAX_FILENAME_LEN];
-			stuff_string(impact_ani_file, F_NAME, MAX_FILENAME_LEN);
-
-			if (VALID_FNAME(impact_ani_file)) {
-				int num_frames;
-				Asteroid_impact_explosion_ani = bm_load_animation(impact_ani_file, &num_frames, nullptr, nullptr, nullptr, true);
-			}
+		if (optional_string("$Impact Explosion Effect:")) {
+			Asteroid_impact_explosion_ani = particle::util::parseEffect();
 		}
+		else {
+			char impact_ani_file[MAX_FILENAME_LEN];
+			float Asteroid_impact_explosion_radius;
+			int num_frames;
 
-		if (optional_string("$Impact Explosion Radius:")) {
-			stuff_float(&Asteroid_impact_explosion_radius);
+			if (optional_string("$Impact Explosion:")) {
+				stuff_string(impact_ani_file, F_NAME, MAX_FILENAME_LEN);
+			}
+			if (optional_string("$Impact Explosion Radius:")) {
+				stuff_float(&Asteroid_impact_explosion_radius);
+			}
+
+			if(VALID_FNAME(impact_ani_file)) {
+				Asteroid_impact_explosion_ani = particle::ParticleManager::get()->addEffect(particle::ParticleEffect(
+						"", //Name
+						::util::UniformFloatRange(1.f), //Particle num
+						particle::ParticleEffect::Duration::ONETIME, //Single Particle Emission
+						::util::UniformFloatRange(), //No duration
+						::util::UniformFloatRange(-1.f), //Single particle only
+						particle::ParticleEffect::ShapeDirection::ALIGNED, //Particle direction
+						::util::UniformFloatRange(), //Velocity Inherit
+						false, //Velocity Inherit absolute?
+						nullptr, //Velocity volume
+						::util::UniformFloatRange(), //Velocity volume multiplier
+						particle::ParticleEffect::VelocityScaling::NONE, //Velocity directional scaling
+						std::nullopt, //Orientation-based velocity
+						std::nullopt, //Position-based velocity
+						nullptr, //Position volume
+						particle::ParticleEffectHandle::invalid(), //Trail
+						1.f, //Chance
+						false, //Affected by detail
+						-1.f, //Culling range multiplier
+						false, //Disregard Animation Length. Must be true for everything using particle::Anim_bitmap_X
+						false, //Don't reverse animation
+						false, //parent local
+						false, //ignore velocity inherit if parented
+						false, //position velocity inherit absolute?
+						std::nullopt, //Local velocity offset
+						std::nullopt, //Local offset
+						::util::UniformFloatRange(-1.f), //Lifetime
+						::util::UniformFloatRange(Asteroid_impact_explosion_radius), //Radius
+						bm_load_animation(impact_ani_file, &num_frames, nullptr, nullptr, nullptr, true))); //Bitmap
+			}
 		}
 
 		if (optional_string("$Briefing Icon Closeup Model:")) {
@@ -2566,8 +2657,7 @@ static void verify_asteroid_list()
  */
 void asteroid_init()
 {
-	Asteroid_impact_explosion_ani = -1;
-	Asteroid_impact_explosion_radius = 20.0;							// retail value
+	Asteroid_impact_explosion_ani = particle::ParticleEffectHandle::invalid();
 	Asteroid_icon_closeup_model[0] = '\0';
 	vm_vec_make(&Asteroid_icon_closeup_position, 0.0f, 0.0f, -334.0f);	// magic numbers from retail
 	Asteroid_icon_closeup_zoom = 0.5f;									// magic number from retail
@@ -2588,7 +2678,7 @@ void asteroid_init()
 	// now that Asteroid_info is filled in we can verify the asteroid splits and set their indecies
 	verify_asteroid_splits();
 
-	if (Asteroid_impact_explosion_ani == -1) {
+	if (!Asteroid_impact_explosion_ani.isValid()) {
 		Error(LOCATION, "Missing valid asteroid impact explosion definition in asteroid.tbl!");
 	}
 

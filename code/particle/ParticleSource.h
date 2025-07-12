@@ -54,6 +54,7 @@ using ParticleEffectHandle = ::util::ID<particle_effect_tag, ptrdiff_t, -1>;
  * 
  */
 struct SourceTiming {
+	TIMESTAMP m_startTimestamp;
 	TIMESTAMP m_nextCreation;
 	TIMESTAMP m_endTimestamp;
 };
@@ -87,6 +88,10 @@ class ParticleSource {
 	friend class ParticleEffect;
 
 	static float getEffectRemainingTime(const std::tuple<const ParticleSource&, const size_t&>& source);
+
+	static float getEffectRunningTime(const std::tuple<const ParticleSource&, const size_t&>& source);
+
+	static float getEffectVisualSize(const std::tuple<const ParticleSource&, const size_t&, const vec3d&>& source);
  public:
 	ParticleSource();
 
