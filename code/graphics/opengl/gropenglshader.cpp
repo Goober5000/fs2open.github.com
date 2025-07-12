@@ -57,7 +57,7 @@ SCP_vector<opengl_vert_attrib> GL_vertex_attrib_info =
 		{ opengl_vert_attrib::MODEL_ID,		"vertModelID",		{{{ 0.0f, 0.0f, 0.0f, 0.0f }}} },
 		{ opengl_vert_attrib::RADIUS,		"vertRadius",		{{{ 1.0f, 0.0f, 0.0f, 0.0f }}} },
 		{ opengl_vert_attrib::UVEC,			"vertUvec",			{{{ 0.0f, 1.0f, 0.0f, 0.0f }}} },
-		{ opengl_vert_attrib::WORLD_MATRIX,	"vertWorldMatrix",	{{{ 1.0f, 0.0f, 0.0f, 0.0f }}} },
+		{ opengl_vert_attrib::MODEL_MATRIX,	"vertModelMatrix",	{{{ 1.0f, 0.0f, 0.0f, 0.0f }}} },
 	};
 
 struct opengl_uniform_block_binding {
@@ -141,7 +141,7 @@ static opengl_shader_type_t GL_shader_types[] = {
 		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::TEXCOORD }, "NanoVG shader", false },
 
 	{ SDR_TYPE_DECAL, "decal-v.sdr", "decal-f.sdr", nullptr,
-		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::WORLD_MATRIX }, "Decal rendering", false },
+		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::MODEL_MATRIX }, "Decal rendering", false },
 
 	{ SDR_TYPE_SCENE_FOG, "post-v.sdr", "fog-f.sdr", nullptr,
 		{ opengl_vert_attrib::POSITION, opengl_vert_attrib::TEXCOORD }, "Scene fogging", false },
@@ -884,7 +884,7 @@ void opengl_compile_shader_actual(shader_type sdr, const uint &flags, opengl_sha
 
 	// initialize the attributes
 	for (auto& attr : sdr_info->attributes) {
-		new_shader.program->initAttribute(GL_vertex_attrib_info[attr].name, GL_vertex_attrib_info[attr].attribute_id, GL_vertex_attrib_info[attr].default_value);
+		new_shader.program->initAttribute(GL_vertex_attrib_info[attr].name, GL_vertex_attrib_info[attr].default_value);
 	}
 
 	for (auto& uniform_block : GL_uniform_blocks) {
@@ -904,7 +904,7 @@ void opengl_compile_shader_actual(shader_type sdr, const uint &flags, opengl_sha
 		if (sdr_info->type_id == variant.type_id && variant.flag & flags) {
 			for (auto& attr : variant.attributes) {
 				auto& attr_info = GL_vertex_attrib_info[attr];
-				new_shader.program->initAttribute(attr_info.name, attr_info.attribute_id, attr_info.default_value);
+				new_shader.program->initAttribute(attr_info.name, attr_info.default_value);
 			}
 
 			nprintf(("shaders","	%s\n", variant.description));
@@ -1074,19 +1074,6 @@ void opengl_shader_init()
 	gr_opengl_maybe_create_shader(SDR_TYPE_PASSTHROUGH_RENDER, 0);
 
 	nprintf(("shaders","\n"));
-}
-
-/**
- * Get the internal OpenGL location for a given attribute. Requires that the Current_shader global variable is valid
- *
- * @param attribute_text	Name of the attribute
- * @return					Internal OpenGL location for the attribute
- */
-GLint opengl_shader_get_attribute(opengl_vert_attrib::attrib_id attribute)
-{
-	Assertion(Current_shader != nullptr, "Current shader may not be null!");
-
-	return Current_shader->program->getAttributeLocation(attribute);
 }
 
 void opengl_shader_set_passthrough(bool textured, bool hdr)

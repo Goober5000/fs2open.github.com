@@ -1012,6 +1012,7 @@ SCP_set<int> model_get_textures_used(const polymodel* pm, int submodel);
 // Returns a pointer to the polymodel structure for model 'n'
 polymodel *model_get(int model_num);
 
+int num_model_instances();
 polymodel_instance* model_get_instance(int model_instance_num);
 
 // routine to copy subsystems.  Must be called when subsystems sets are the same -- see ship.cpp
@@ -1365,7 +1366,7 @@ typedef struct mc_info {
 */
 
 int model_collide(mc_info *mc_info_obj);
-void model_collide_parse_bsp(bsp_collision_tree *tree, void *model_ptr, int version);
+void model_collide_parse_bsp(bsp_collision_tree *tree, ubyte *bsp_data, int version);
 
 bsp_collision_tree *model_get_bsp_collision_tree(int tree_index);
 void model_remove_bsp_collision_tree(int tree_index);

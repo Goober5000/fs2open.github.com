@@ -1227,6 +1227,7 @@ public:
 	particle::ParticleEffectHandle		split_particles;
 	particle::ParticleEffectHandle		knossos_end_particles;
 	particle::ParticleEffectHandle		regular_end_particles;
+	particle::ParticleEffectHandle 		debris_flame_particles;
 
 	//Debris stuff
 	float			debris_min_lifetime;
@@ -1471,7 +1472,7 @@ public:
 	float emp_resistance_mod;
 
 	float piercing_damage_draw_limit;
-	int shield_impact_explosion_anim;
+	particle::ParticleEffectHandle shield_impact_explosion_anim;
 
 	int damage_lightning_type;
 
@@ -1765,7 +1766,7 @@ extern void create_shield_explosion(int objnum, int model_num, matrix *orient, v
 extern void shield_hit_init();
 extern void create_shield_explosion_all(object *objp);
 extern void shield_frame_init();
-extern void add_shield_point(int objnum, int tri_num, vec3d *hit_pos, float radius_override);
+extern void add_shield_point(int objnum, int tri_num, const vec3d *hit_pos, float radius_override);
 extern void add_shield_point_multi(int objnum, int tri_num, vec3d *hit_pos);
 extern void shield_point_multi_setup();
 extern void shield_hit_close();
@@ -1803,6 +1804,7 @@ bool ship_subsys_has_instance_name(const ship_subsys *ss);
 void ship_subsys_set_name(ship_subsys* ss, const char* n_name);
 
 const char *ship_subsys_get_name_on_hud(const ship_subsys *ss);
+const char *ship_subsys_get_canonical_name(const ship_subsys *ss);
 
 // subsys disruption
 extern int ship_subsys_disrupted(const ship_subsys *ss);
