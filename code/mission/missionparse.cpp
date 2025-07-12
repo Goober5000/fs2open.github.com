@@ -6922,7 +6922,7 @@ bool parse_main(const char *mission_name, int flags)
 	
 	do {
 		// don't do this for imports
-		if (!(flags & MPF_IMPORT_FSM)) {
+		if (!(flags & MPF_IMPORT_FSM) && !(flags & MPF_IMPORT_XWI)) {
 			CFILE *ftemp = cfopen(mission_name, "rt", CF_TYPE_MISSIONS);
 
 			// fail situation.
