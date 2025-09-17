@@ -836,15 +836,6 @@ add_file_folder("Mission"
 	mission/mission_flags.h
 )
 
-add_file_folder("Mission\\\\Import"
-	mission/import/xwingbrflib.cpp
-	mission/import/xwingbrflib.h
-	mission/import/xwinglib.cpp
-	mission/import/xwinglib.h
-	mission/import/xwingmissionparse.cpp
-	mission/import/xwingmissionparse.h
-)
-
 # MissionUI files
 add_file_folder("MissionUI"
 	missionui/chatbox.cpp
