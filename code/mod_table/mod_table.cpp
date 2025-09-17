@@ -27,6 +27,7 @@
 
 int Directive_wait_time;
 bool True_loop_argument_sexps;
+bool Skybox_internal_depth_consistency;
 bool Fixed_turret_collisions;
 bool Fixed_missile_detonation;
 bool Damage_impacted_subsystem_first;
@@ -45,6 +46,10 @@ bool Use_3d_overhead_ship;
 overhead_style Default_overhead_ship_style;
 int Default_ship_select_effect;
 int Default_weapon_select_effect;
+color Default_fs2_effect_grid_color;
+color Default_fs2_effect_scanline_color;
+color Default_fs2_effect_wireframe_color;
+int Default_fs2_effect_grid_density;
 int Default_fiction_viewer_ui;
 bool Enable_external_shaders;
 bool Enable_external_default_scripts;
@@ -172,6 +177,8 @@ bool Fix_asteroid_bounding_box_check;
 bool Disable_intro_movie;
 bool Show_locked_status_scramble_missions;
 bool Disable_expensive_turret_target_check;
+float Shield_percent_skips_damage;
+float Min_radius_for_persistent_debris;
 
 
 #ifdef WITH_DISCORD
@@ -1135,6 +1142,10 @@ void parse_mod_table(const char *filename)
 
 			}
 
+			if (optional_string("$Skybox internal depth consistency:")) {
+				stuff_boolean(&Skybox_internal_depth_consistency);
+			}
+
 			optional_string("#OTHER SETTINGS");
 
 			if (optional_string("$Fixed Turret Collisions:")) {
@@ -1208,6 +1219,44 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Use_3d_weapon_icons);
 				if (Use_3d_weapon_icons)
 					mprintf(("Game Settings Table: Using 3D weapon icons\n"));
+			}
+
+			if (optional_string("$FS2 effect grid color:")) {
+				int rgb[3];
+				stuff_int_list(rgb, 3);
+				CLAMP(rgb[0], 0, 255);
+				CLAMP(rgb[1], 0, 255);
+				CLAMP(rgb[2], 0, 255);
+				gr_init_color(&Default_fs2_effect_grid_color, rgb[0], rgb[1], rgb[2]);
+			}
+
+			if (optional_string("$FS2 effect scanline color:")) {
+				int rgb[3];
+				stuff_int_list(rgb, 3);
+				CLAMP(rgb[0], 0, 255);
+				CLAMP(rgb[1], 0, 255);
+				CLAMP(rgb[2], 0, 255);
+				gr_init_color(&Default_fs2_effect_scanline_color, rgb[0], rgb[1], rgb[2]);
+			}
+
+			if (optional_string("$FS2 effect grid density:")) {
+				int tmp;
+				stuff_int(&tmp);
+				// only set value if it is above 0
+				if (tmp > 0) {
+					Default_fs2_effect_grid_density = tmp;
+				} else {
+					Warning(LOCATION, "The $FS2 effect grid density must be above 0.\n");
+				}
+			}
+
+			if (optional_string("$FS2 effect wireframe color:")) {
+				int rgb[3];
+				stuff_int_list(rgb, 3);
+				CLAMP(rgb[0], 0, 255);
+				CLAMP(rgb[1], 0, 255);
+				CLAMP(rgb[2], 0, 255);
+				gr_init_color(&Default_fs2_effect_wireframe_color, rgb[0], rgb[1], rgb[2]);
 			}
 
 			if (optional_string("$Use 3d overhead ship:")) {
@@ -1539,6 +1588,21 @@ void parse_mod_table(const char *filename)
 				stuff_boolean(&Disable_expensive_turret_target_check);
 			}
 
+			if (optional_string("$Threshold below which shield skips damage:")) {
+				float threshold;
+				stuff_float(&threshold);
+				if ((threshold >= 0.0f) && (threshold <= 1.0f)) {
+					Shield_percent_skips_damage = threshold;
+				} else {
+					mprintf(("Game Settings Table: '$Threshold below which shield skips damage' value of %.2f is not between 0 and 1. Using default value of 0.10.\n", threshold));
+					Shield_percent_skips_damage = 0.1f;
+				}
+			}
+
+			if (optional_string("$Minimum ship radius for persistent debris:")) {
+				stuff_float(&Min_radius_for_persistent_debris);
+			}
+
 			// end of options ----------------------------------------
 
 			// if we've been through once already and are at the same place, force a move
@@ -1623,6 +1687,7 @@ void mod_table_reset()
 {
 	Directive_wait_time = 3000;
 	True_loop_argument_sexps = false;
+	Skybox_internal_depth_consistency = false;
 	Fixed_turret_collisions = false;
 	Fixed_missile_detonation = false;
 	Damage_impacted_subsystem_first = false;
@@ -1635,6 +1700,10 @@ void mod_table_reset()
 	Always_show_directive_value_count = false;
 	Default_ship_select_effect = 2;
 	Default_weapon_select_effect = 2;
+	gr_init_color(&Default_fs2_effect_grid_color, 0, 200, 0);
+	gr_init_color(&Default_fs2_effect_scanline_color, 0, 255, 0);
+	Default_fs2_effect_grid_density = 7; // Default original value
+	gr_init_color(&Default_fs2_effect_wireframe_color, 80, 49, 160);
 	Default_overhead_ship_style = OH_TOP_VIEW;
 	Default_fiction_viewer_ui = -1;
 	Enable_external_shaders = false;
@@ -1775,6 +1844,8 @@ void mod_table_reset()
 	Disable_intro_movie = false;
 	Show_locked_status_scramble_missions = false;
 	Disable_expensive_turret_target_check = false;
+	Shield_percent_skips_damage = 0.1f;
+	Min_radius_for_persistent_debris = 50.0f;
 }
 
 void mod_table_set_version_flags()
@@ -1801,5 +1872,6 @@ void mod_table_set_version_flags()
 		Use_model_eyepoint_normals = true;
 		Fix_asteroid_bounding_box_check = true;
 		Disable_expensive_turret_target_check = true;
+		Skybox_internal_depth_consistency = true;
 	}
 }

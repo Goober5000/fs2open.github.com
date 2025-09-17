@@ -136,6 +136,7 @@ public:
 	SCP_vector<sexp_variable> red_alert_variables;		// state of the variables in the previous mission of a Red Alert scenario.
 	SCP_vector<sexp_container> persistent_containers;	// These containers will be saved at the end of a mission
 	SCP_vector<sexp_container> red_alert_containers;		// state of the containers in the previous mission of a Red Alert scenario.
+	SCP_map<SCP_string, SCP_string> custom_data;        // Custom data for the campaign
 
 	campaign()
 		: desc(nullptr), num_missions(0)
@@ -213,7 +214,7 @@ extern void mission_campaign_save_persistent( int type, int index );
 // execute the corresponding mission_campaign_savefile functions.
 
 // get name and type of specified campaign file
-int mission_campaign_get_info(const char *filename, char *name, int *type, int *max_players, char **desc = nullptr, char **first_mission = nullptr);
+bool mission_campaign_get_info(const char *filename, SCP_string &name, int *type, int *max_players, char **desc = nullptr, char **first_mission = nullptr);
 
 // get a listing of missions in a campaign
 int mission_campaign_get_mission_list(const char *filename, char **list, int max);

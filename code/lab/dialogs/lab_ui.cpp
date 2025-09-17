@@ -138,21 +138,15 @@ void LabUi::build_debris_list()
 				continue;
 			}
 
-			int subtype_idx = 0;
-			for (const auto& subtype : info.subtypes) {
-				SCP_string node_label;
-				sprintf(node_label, "##DebrisClassIndex%i_%i", debris_idx, subtype_idx);
-				TreeNodeEx(node_label.c_str(),
-					ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen,
-					"%s (%s)",
-					info.name,
-					subtype.type_name.c_str());
+			SCP_string node_label;
+			sprintf(node_label, "##DebrisClassIndex%i", debris_idx);
+			TreeNodeEx(node_label.c_str(),
+				ImGuiTreeNodeFlags_Leaf | ImGuiTreeNodeFlags_NoTreePushOnOpen,
+				"%s",
+				info.name);
 
-				if (IsItemClicked() && !IsItemToggledOpen()) {
-					getLabManager()->changeDisplayedObject(LabMode::Asteroid, debris_idx, subtype_idx);
-				}
-
-				subtype_idx++;
+			if (IsItemClicked() && !IsItemToggledOpen()) {
+				getLabManager()->changeDisplayedObject(LabMode::Asteroid, debris_idx, 0); // Debris subtype is always 0
 			}
 
 			debris_idx++;
@@ -1035,37 +1029,10 @@ void LabUi::build_secondary_weapon_combobox(SCP_string& text, weapon_info* wip, 
 	}
 }
 
-void LabUi::reset_animations(ship* shipp, ship_info* sip) const
+void LabUi::reset_animations()
 {
-	polymodel_instance* shipp_pmi = model_get_instance(shipp->model_instance_num);
-
-	for (auto i = 0; i < MAX_SHIP_PRIMARY_BANKS; ++i) {
-		if (triggered_primary_banks[i]) {
-			sip->animations.getAll(shipp_pmi, animation::ModelAnimationTriggerType::PrimaryBank, i)
-				.start(animation::ModelAnimationDirection::RWD);
-			triggered_primary_banks[i] = false;
-		}
-	}
-
-	for (auto i = 0; i < MAX_SHIP_SECONDARY_BANKS; ++i) {
-		if (triggered_secondary_banks[i]) {
-			sip->animations.getAll(shipp_pmi, animation::ModelAnimationTriggerType::SecondaryBank, i)
-				.start(animation::ModelAnimationDirection::RWD);
-			triggered_secondary_banks[i] = false;
-		}
-	}
-
-	for (auto& entry : manual_animations) {
-		if (entry.second) {
-			sip->animations.getAll(shipp_pmi, entry.first).start(animation::ModelAnimationDirection::RWD);
-			entry.second = false;
-		}
-	}
-
-	for (const auto& entry : manual_animation_triggers) {
-		auto animation_type = entry.first;
-		sip->animations.getAll(shipp_pmi, animation_type).start(animation::ModelAnimationDirection::RWD);
-	}
+	// With full animation support for docking stages and fighter bays it's honestly just easier to reload the current object
+	getLabManager()->changeDisplayedObject(getLabManager()->CurrentMode, getLabManager()->CurrentClass, getLabManager()->CurrentSubtype);
 }
 
 void LabUi::maybe_show_animation_category(const SCP_vector<animation::ModelAnimationSet::RegisteredTrigger>& anim_triggers,
@@ -1076,10 +1043,35 @@ void LabUi::maybe_show_animation_category(const SCP_vector<animation::ModelAnima
 		})) {
 		with_TreeNode(label.c_str())
 		{
+			int count = 1;
 			for (const auto& anim_trigger : anim_triggers) {
 				if (anim_trigger.type == trigger_type) {
 
-					if (Button(anim_trigger.name.c_str())) {
+					SCP_string button_label = anim_trigger.name;
+					switch (trigger_type) {
+					case animation::ModelAnimationTriggerType::DockBayDoor:
+						button_label += "Trigger Bay Door Animation " + std::to_string(count++);
+						break;
+					case animation::ModelAnimationTriggerType::Docking_Stage1:
+						button_label += "Trigger Docking Stage 1 Animation " + std::to_string(count++);
+						break;
+					case animation::ModelAnimationTriggerType::Docking_Stage2:
+						button_label += "Trigger Docking Stage 2 Animation " + std::to_string(count++);
+						break;
+					case animation::ModelAnimationTriggerType::Docking_Stage3:
+						button_label += "Trigger Docking Stage 3 Animation " + std::to_string(count++);
+						break;
+					case animation::ModelAnimationTriggerType::Docked:
+						button_label += "Trigger Docked Animation " + std::to_string(count++);
+						break;
+					default:
+						// We really shouldn't be here, but just in case
+						Assertion(false, "Unexpected animation trigger type %d", static_cast<int>(trigger_type));
+						button_label += "Trigger Animation " + std::to_string(count++);
+						break;
+					}
+
+					if (Button(button_label.c_str())) {
 						auto& scripted_triggers = manual_animation_triggers[trigger_type];
 						auto direction = scripted_triggers[anim_trigger.name];
 						do_triggered_anim(trigger_type,
@@ -1094,6 +1086,182 @@ void LabUi::maybe_show_animation_category(const SCP_vector<animation::ModelAnima
 	}
 }
 
+void LabUi::build_dock_test_options(ship* shipp)
+{
+	with_TreeNode("Docking Tests")
+	{
+		auto dockee_dock_map = get_docking_point_map(Ship_info[shipp->ship_info_index].model_num);
+
+		if (!dockee_dock_map.empty()) {
+
+			if (ImGui::BeginCombo("Docker Ship Class", Ship_info[getLabManager()->DockerClass].name)) {
+				for (size_t i = 0; i < Ship_info.size(); ++i) {
+					bool is_selected = (static_cast<int>(i) == getLabManager()->DockerClass);
+					if (ImGui::Selectable(Ship_info[i].name, is_selected)) {
+						getLabManager()->DockerClass = static_cast<int>(i);
+						// Load model if needed
+						auto& dsip = Ship_info[getLabManager()->DockerClass];
+						if (dsip.model_num < 0) {
+							dsip.model_num = model_load(dsip.pof_file, &dsip);
+						}
+						auto new_dock_map = get_docking_point_map(dsip.model_num);
+
+						// Auto-select first available dockpoint (or clear if none)
+						if (!new_dock_map.empty()) {
+							getLabManager()->DockerDockPoint = new_dock_map.begin()->second;
+						} else {
+							getLabManager()->DockerDockPoint.clear();
+						}
+					}
+					if (is_selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+
+			auto& dsip = Ship_info[getLabManager()->DockerClass];
+			if (dsip.model_num < 0) {
+				dsip.model_num = model_load(dsip.pof_file, &dsip);
+			}
+			auto dock_map = get_docking_point_map(dsip.model_num);
+
+			// Ensure DockerDockPoint is initialized once based on the current DockerClass
+			if (getLabManager()->DockerDockPoint.empty()) {
+				if (!dock_map.empty()) {
+					getLabManager()->DockerDockPoint = dock_map.begin()->second;
+				}
+			}
+
+			const char* docker_label = getLabManager()->DockerDockPoint.c_str();
+
+			if (ImGui::BeginCombo("Docker Dockpoint", docker_label)) {
+				if (!dock_map.empty()) {
+					for (const auto& [index, name] : dock_map) {
+						bool is_selected = (name == getLabManager()->DockerDockPoint);
+						if (ImGui::Selectable(name.c_str(), is_selected)) {
+							getLabManager()->DockerDockPoint = name;
+						}
+						if (is_selected) {
+							ImGui::SetItemDefaultFocus();
+						}
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			// Auto-select first dockpoint if none currently selected
+			if (getLabManager()->DockeeDockPoint.empty()) {
+				getLabManager()->DockeeDockPoint = dockee_dock_map.begin()->second;
+			}
+
+			const char* dockee_label = getLabManager()->DockeeDockPoint.c_str();
+
+			if (ImGui::BeginCombo("Dockee Dockpoint", dockee_label)) {
+				for (const auto& [index, name] : dockee_dock_map) {
+					bool is_selected = (name == getLabManager()->DockeeDockPoint);
+					if (ImGui::Selectable(name.c_str(), is_selected)) {
+						getLabManager()->DockeeDockPoint = name;
+					}
+					if (is_selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			if (Button("Begin Docking Test")) {
+				getLabManager()->beginDockingTest();
+			}
+
+			if (Button("Begin Undocking Test")) {
+				getLabManager()->beginUndockingTest();
+			}
+		}
+	}
+}
+
+void LabUi::build_bay_test_options(ship_info* sip)
+{
+	with_TreeNode("Fighterbay Tests")
+	{
+		auto bay_paths_map = get_bay_paths_map(sip->model_num);
+
+		if (!bay_paths_map.empty()) {
+
+			if (ImGui::BeginCombo("Bay Arrival/Departure Ship Class", Ship_info[getLabManager()->BayClass].name)) {
+				for (size_t i = 0; i < Ship_info.size(); ++i) {
+					bool is_selected = (static_cast<int>(i) == getLabManager()->BayClass);
+					if (ImGui::Selectable(Ship_info[i].name, is_selected)) {
+						getLabManager()->BayClass = static_cast<int>(i);
+					}
+					if (is_selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+
+			auto& bsip = Ship_info[getLabManager()->BayClass];
+
+			// Load the model
+			if (bsip.model_num < 0) {
+				bsip.model_num = model_load(bsip.pof_file, &bsip);
+			}
+
+			// Pick the first entry in bay_paths_map if it's set to 0
+			if (getLabManager()->BayPathMask == 0) {
+				int first_idx = bay_paths_map.begin()->first;
+				getLabManager()->BayPathMask = (1u << first_idx);
+			}
+
+			// Get the preview label by finding the one bit that's set
+			const char* path_label = "??";
+			for (const auto& [idx, name] : bay_paths_map) {
+				if (getLabManager()->BayPathMask & (1u << idx)) {
+					path_label = name.c_str();
+					break;
+				}
+			}
+
+			if (ImGui::BeginCombo("Bay Path", path_label)) {
+				for (const auto& [idx, name] : bay_paths_map) {
+					bool is_selected = (getLabManager()->BayPathMask & (1u << idx)) != 0;
+					if (ImGui::Selectable(name.c_str(), is_selected)) {
+						getLabManager()->BayPathMask = (1u << idx);
+					}
+					if (is_selected) {
+						ImGui::SetItemDefaultFocus();
+					}
+				}
+				ImGui::EndCombo();
+			}
+
+			static const char* mode_names[] = {"Arrival", "Departure"};
+			int mode_idx = static_cast<int>(getLabManager()->BayTestMode);
+
+			Assertion(mode_idx == 0 || mode_idx == 1, "Bay test mode is not valid!"); // only two valid modes
+
+			if (ImGui::BeginCombo("Bay Test Mode", mode_names[mode_idx])) {
+				// Arrival
+				if (ImGui::Selectable("Arrival", getLabManager()->BayTestMode == BayMode::Arrival)) {
+					getLabManager()->BayTestMode = BayMode::Arrival;
+				}
+
+				// Departure
+				if (ImGui::Selectable("Departure", getLabManager()->BayTestMode == BayMode::Departure)) {
+					getLabManager()->BayTestMode = BayMode::Departure;
+				}
+
+				ImGui::SetItemDefaultFocus();
+				ImGui::EndCombo();
+			}
+
+			if (Button("Begin Bay Path Test")) {
+				getLabManager()->beginBayTest();
+			}
+		}
+	}
+}
+
 void LabUi::build_animation_options(ship* shipp, ship_info* sip) const
 {
 	with_TreeNode("Animations")
@@ -1101,7 +1269,7 @@ void LabUi::build_animation_options(ship* shipp, ship_info* sip) const
 		const auto& anim_triggers = sip->animations.getRegisteredTriggers();
 
 		if (Button("Reset animations")) {
-			reset_animations(shipp, sip);
+			reset_animations();
 		}
 
 		if (shipp->weapons.num_primary_banks > 0) {
@@ -1141,6 +1309,9 @@ void LabUi::build_animation_options(ship* shipp, ship_info* sip) const
 		maybe_show_animation_category(anim_triggers,
 			animation::ModelAnimationTriggerType::Docking_Stage3,
 			"Docking stage 3##anims");
+		maybe_show_animation_category(anim_triggers,
+			animation::ModelAnimationTriggerType::Docked,
+			"Docked animations##anims");
 	}
 }
 
@@ -1233,8 +1404,8 @@ void LabUi::show_object_options() const
 				if (getLabManager()->isSafeForShips()) {
 					if (Button("Destroy ship")) {
 						if (Objects[getLabManager()->CurrentObject].type == OBJ_SHIP) {
-							// If we have an undocker, delete it before destroying the current ship
-							getLabManager()->deleteDockerObject();
+							// If we have testing objects, delete them
+							getLabManager()->deleteTestObjects();
 
 							auto obj = &Objects[getLabManager()->CurrentObject];
 
@@ -1243,95 +1414,9 @@ void LabUi::show_object_options() const
 						}
 					}
 
-					const ship* dockee_shipp = &Ships[Objects[getLabManager()->CurrentObject].instance];
-					auto dockee_dock_map = get_docking_point_map(Ship_info[dockee_shipp->ship_info_index].model_num);
+					build_dock_test_options(shipp);
 
-					if (!dockee_dock_map.empty()) {
-
-						if (ImGui::BeginCombo("Docker Ship Class", Ship_info[getLabManager()->DockerClass].name)) {
-							for (size_t i = 0; i < Ship_info.size(); ++i) {
-								bool is_selected = (static_cast<int>(i) == getLabManager()->DockerClass);
-								if (ImGui::Selectable(Ship_info[i].name, is_selected)) {
-									getLabManager()->DockerClass = static_cast<int>(i);
-									// Load model if needed
-									auto& dsip = Ship_info[getLabManager()->DockerClass];
-									if (dsip.model_num < 0) {
-										dsip.model_num = model_load(dsip.pof_file, &dsip);
-									}
-									auto new_dock_map = get_docking_point_map(dsip.model_num);
-
-									// Auto-select first available dockpoint (or clear if none)
-									if (!new_dock_map.empty()) {
-										getLabManager()->DockerDockPoint = new_dock_map.begin()->second;
-									} else {
-										getLabManager()->DockerDockPoint.clear();
-									}
-								}
-								if (is_selected)
-									ImGui::SetItemDefaultFocus();
-							}
-							ImGui::EndCombo();
-						}
-
-						auto& dsip = Ship_info[getLabManager()->DockerClass];
-						if (dsip.model_num < 0) {
-							dsip.model_num = model_load(dsip.pof_file, &dsip);
-						}
-						auto dock_map = get_docking_point_map(dsip.model_num);
-
-						// Ensure DockerDockPoint is initialized once based on the current DockerClass
-						if (getLabManager()->DockerDockPoint.empty()) {
-							if (!dock_map.empty()) {
-								getLabManager()->DockerDockPoint = dock_map.begin()->second;
-							}
-						}
-
-						const char* docker_label = getLabManager()->DockerDockPoint.c_str();
-
-						if (ImGui::BeginCombo("Docker Dockpoint", docker_label)) {
-							if (!dock_map.empty()) {
-								for (const auto& [index, name] : dock_map) {
-									bool is_selected = (name == getLabManager()->DockerDockPoint);
-									if (ImGui::Selectable(name.c_str(), is_selected)) {
-										getLabManager()->DockerDockPoint = name;
-									}
-									if (is_selected) {
-										ImGui::SetItemDefaultFocus();
-									}
-								}
-							}
-							ImGui::EndCombo();
-						}
-
-						// Auto-select first dockpoint if none currently selected
-						if (getLabManager()->DockeeDockPoint.empty()) {
-							getLabManager()->DockeeDockPoint = dockee_dock_map.begin()->second;
-						}
-
-						const char* dockee_label = getLabManager()->DockeeDockPoint.c_str();
-
-						if (ImGui::BeginCombo("Dockee Dockpoint", dockee_label)) {
-							for (const auto& [index, name] : dockee_dock_map) {
-								bool is_selected = (name == getLabManager()->DockeeDockPoint);
-								if (ImGui::Selectable(name.c_str(), is_selected)) {
-									getLabManager()->DockeeDockPoint = name;
-								}
-								if (is_selected) {
-									ImGui::SetItemDefaultFocus();
-								}
-							}
-							ImGui::EndCombo();
-						}
-
-						if (Button("Begin Docking Test")) {
-							getLabManager()->beginDockingTest();
-						}
-
-						if (Button("Begin Undocking Test")) {
-							getLabManager()->beginUndockingTest();
-						}
-					}
-
+					build_bay_test_options(sip);
 
 					build_animation_options(shipp, sip);
 				}

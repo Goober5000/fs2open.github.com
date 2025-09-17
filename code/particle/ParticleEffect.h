@@ -3,11 +3,13 @@
 #pragma once
 
 #include "globalincs/pstypes.h"
+#include "globalincs/systemvars.h"
 #include "particle/ParticleVolume.h"
 #include "particle/ParticleSource.h"
 #include "utils/RandomRange.h"
 #include "utils/id.h"
 #include "utils/modular_curves.h"
+#include "graphics/2d.h"
 
 #include <optional>
 
@@ -82,14 +84,24 @@ public:
 		NUM_VALUES
 	};
 
+	enum class ParticleLifetimeCurvesOutput : uint8_t {
+		VELOCITY_MULT,
+		RADIUS_MULT,
+		LENGTH_MULT,
+		ANIM_STATE,
+
+		NUM_VALUES
+	};
+
  private:
 	friend struct ParticleParse;
-
+	friend class ParticleManager;
 	friend int ::parse_weapon(int, bool, const char*);
-
 	friend ParticleEffectHandle scripting::api::getLegacyScriptingParticleEffect(int bitmap, bool reversed);
 
 	SCP_string m_name; //!< The name of this effect
+
+	ParticleSubeffectHandle m_self;
 
 	Duration m_duration;
 	RotationType m_rotation_type;
@@ -135,9 +147,6 @@ public:
 	std::optional<vec3d> m_manual_velocity_offset;
 
 	ParticleEffectHandle m_particleTrail;
-
-	int m_size_lifetime_curve; //This is a curve of the particle, not of the particle effect, as such, it should not be part of the curve set
-	int m_vel_lifetime_curve; //This is a curve of the particle, not of the particle effect, as such, it should not be part of the curve set
 
 	float m_particleChance; //Deprecated. Use particle num random ranges instead.
 	float m_distanceCulled; //Kinda deprecated. Only used by the oldest of legacy effects.
@@ -200,7 +209,7 @@ public:
 
 	bool isOnetime() const { return m_duration == Duration::ONETIME; }
 
-	float getApproximateVisualSize(const vec3d& pos) const;
+	float getApproximatePixelSize(const vec3d& pos) const;
 
 	constexpr static auto modular_curves_definition = make_modular_curve_definition<ParticleSource, ParticleCurvesOutput>(
 		std::array {
@@ -228,15 +237,49 @@ public:
 		std::pair {"Effects Running", modular_curves_math_input<
 		    modular_curves_submember_input<&ParticleSource::m_effect_is_running, &decltype(ParticleSource::m_effect_is_running)::count>,
 			modular_curves_submember_input<&ParticleSource::getEffect, &SCP_vector<ParticleEffect>::size>,
+			ModularCurvesMathOperators::division>{}},
+		std::pair {"Total Particle Count", modular_curves_global_submember_input<get_particle_count>{}},
+		std::pair {"Particle Usage Score", modular_curves_math_input<
+		    modular_curves_global_submember_input<get_particle_count>,
+			modular_curves_global_submember_input<Detail, &detail_levels::num_particles>,
+			ModularCurvesMathOperators::division>{}},
+		std::pair {"Nebula Usage Score", modular_curves_math_input<
+		    modular_curves_global_submember_input<get_particle_count>,
+			modular_curves_global_submember_input<Detail, &detail_levels::nebula_detail>,
 			ModularCurvesMathOperators::division>{}})
 	.derive_modular_curves_input_only_subset<size_t>( //Effect Number
 		std::pair {"Spawntime Left", modular_curves_functional_full_input<&ParticleSource::getEffectRemainingTime>{}},
 		std::pair {"Time Running", modular_curves_functional_full_input<&ParticleSource::getEffectRunningTime>{}})
 	.derive_modular_curves_input_only_subset<vec3d>( //Sampled spawn position
-		std::pair {"Apparent Visual Size At Emitter", modular_curves_functional_full_input<&ParticleSource::getEffectVisualSize>{}}
+		std::pair {"Pixel Size At Emitter", modular_curves_functional_full_input<&ParticleSource::getEffectPixelSize>{}},
+		std::pair {"Apparent Size At Emitter", modular_curves_math_input<
+			modular_curves_functional_full_input<&ParticleSource::getEffectPixelSize>,
+			modular_curves_global_submember_input<gr_screen, &screen::max_w>,
+			ModularCurvesMathOperators::division>{}}
+		);
+
+	constexpr static auto modular_curves_lifetime_definition = make_modular_curve_definition<particle, ParticleLifetimeCurvesOutput>(
+		std::array {
+				std::pair {"Radius", ParticleLifetimeCurvesOutput::RADIUS_MULT},
+				std::pair {"Velocity", ParticleLifetimeCurvesOutput::VELOCITY_MULT},
+				std::pair {"Length", ParticleLifetimeCurvesOutput::LENGTH_MULT},
+				std::pair {"Anim State", ParticleLifetimeCurvesOutput::ANIM_STATE},
+		},
+		//Should you ever need to access something from the effect as a modular curve input:
+		//std::pair {"", modular_curves_submember_input<&particle::parent_effect, &ParticleSubeffectHandle::getParticleEffect, &ParticleEffect::>{}}
+		std::pair {"Age", modular_curves_submember_input<&particle::age>{}},
+		std::pair {"Lifetime", modular_curves_math_input<
+		     modular_curves_submember_input<&particle::age>,
+			 modular_curves_submember_input<&particle::max_life>,
+			 ModularCurvesMathOperators::division>{}},
+		std::pair {"Radius", modular_curves_submember_input<&particle::radius>{}},
+		std::pair {"Velocity", modular_curves_submember_input<&particle::velocity, &vm_vec_mag_quick>{}})
+	.derive_modular_curves_input_only_subset<float>(
+		std::pair {"Post-Curves Velocity", modular_curves_self_input{}}
 		);
 
 	MODULAR_CURVE_SET(m_modular_curves, modular_curves_definition);
+	MODULAR_CURVE_SET(m_lifetime_curves, modular_curves_lifetime_definition);
 
   private:
 	float getCurrentFrequencyMult(decltype(modular_curves_definition)::input_type_t source) const;

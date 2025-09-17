@@ -38,6 +38,7 @@
 #include "network/multiutil.h"
 #include "object/objcollide.h"
 #include "object/objectdock.h"
+#include "object/objectshield.h"
 #include "object/objectsnd.h"
 #include "parse/parsehi.h"
 #include "parse/parselo.h"
@@ -124,7 +125,8 @@ const size_t Num_burst_fire_flags = sizeof(Burst_fire_flags)/sizeof(flag_def_lis
 
 flag_def_list_new<Weapon::Beam_Info_Flags> Beam_info_flags[] = {
 	{ "burst shares random target",		Weapon::Beam_Info_Flags::Burst_share_random,		        true, false },
-	{ "track own texture tiling",       Weapon::Beam_Info_Flags::Track_own_texture_tiling,          true, false }
+	{ "track own texture tiling",       Weapon::Beam_Info_Flags::Track_own_texture_tiling,          true, false },
+	{ "direct fire lead target",        Weapon::Beam_Info_Flags::Direct_fire_lead_target,           true, false }
 };
 
 const size_t Num_beam_info_flags = sizeof(Beam_info_flags) / sizeof(flag_def_list_new<Weapon::Beam_Info_Flags>);
@@ -617,6 +619,11 @@ void parse_shockwave_info(shockwave_create_info *sci, const char *pre_char)
 		sci->rot_defined = true;
 	}
 
+	sprintf(buf, "%sShockwave Rotation Is Relative To Parent:", pre_char);
+	if(optional_string(buf.c_str())) {
+		stuff_boolean(&sci->rot_parent_relative);
+	}
+
 	sprintf(buf, "%sShockwave Model:", pre_char);
 	if(optional_string(buf.c_str())) {
 		stuff_string(sci->pof_name, F_NAME, MAX_FILENAME_LEN);
@@ -680,7 +687,7 @@ static particle::ParticleEffectHandle convertLegacyPspewBuffer(const pspew_legac
 
 	switch (pspew_buffer.particle_spew_type) {
 		case PSPEW_DEFAULT:
-			position_vol = std::make_unique<particle::ConeVolume>(::util::UniformFloatRange(-PI_2, PI_2), 3.f * pspew_buffer.particle_spew_scale);
+			position_vol = std::make_unique<particle::ConeVolume>(::util::UniformFloatRange(-PI_2, PI_2), powf(pspew_buffer.particle_spew_scale, 3.0f));
 			direction = particle::ParticleEffect::ShapeDirection::REVERSE;
 			break;
 		case PSPEW_HELIX: {
@@ -769,7 +776,7 @@ static particle::ParticleEffectHandle convertLegacyPspewBuffer(const pspew_legac
 			IS_VEC_NULL(&pspew_buffer.particle_spew_offset) ? std::nullopt : std::optional(pspew_buffer.particle_spew_offset), //Local offset
 			::util::UniformFloatRange(pspew_buffer.particle_spew_lifetime), //Lifetime
 			::util::UniformFloatRange(pspew_buffer.particle_spew_radius), //Radius
-			hasAnim ? bm_load_animation(pspew_buffer.particle_spew_anim.c_str()) : particle::Anim_bitmap_id_smoke)); //Bitmap
+			hasAnim ? bm_load_either(pspew_buffer.particle_spew_anim.c_str()) : particle::Anim_bitmap_id_smoke)); //Bitmap or Anim
 }
 
 /**
@@ -990,6 +997,10 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 	// Weapon fadein effect, used when no ani is specified or weapon_select_3d is active
 	if (first_time) {
 		wip->selection_effect = Default_weapon_select_effect; // By default, use the FS2 effect
+		wip->fs2_effect_grid_color = Default_fs2_effect_grid_color;
+		wip->fs2_effect_scanline_color = Default_fs2_effect_scanline_color;
+		wip->fs2_effect_grid_density = Default_fs2_effect_grid_density;
+		wip->fs2_effect_wireframe_color = Default_fs2_effect_wireframe_color;
 	}
 	if(optional_string("$Selection Effect:")) {
 		char effect[NAME_LENGTH];
@@ -1001,6 +1012,44 @@ int parse_weapon(int subtype, bool replace, const char *filename)
 		else if (!stricmp(effect, "off"))
 			wip->selection_effect = 0;
 	}	
+
+	if (optional_string("$FS2 effect grid color:")) {
+		int rgb[3];
+		stuff_int_list(rgb, 3);
+		CLAMP(rgb[0], 0, 255);
+		CLAMP(rgb[1], 0, 255);
+		CLAMP(rgb[2], 0, 255);
+		gr_init_color(&wip->fs2_effect_grid_color, rgb[0], rgb[1], rgb[2]);
+	}
+
+	if (optional_string("$FS2 effect scanline color:")) {
+		int rgb[3];
+		stuff_int_list(rgb, 3);
+		CLAMP(rgb[0], 0, 255);
+		CLAMP(rgb[1], 0, 255);
+		CLAMP(rgb[2], 0, 255);
+		gr_init_color(&wip->fs2_effect_scanline_color, rgb[0], rgb[1], rgb[2]);
+	}
+
+	if (optional_string("$FS2 effect grid density:")) {
+		int tmp;
+		stuff_int(&tmp);
+		// only set value if it is above 0
+		if (tmp > 0) {
+			wip->fs2_effect_grid_density = tmp;
+		} else {
+			Warning(LOCATION, "The $FS2 effect grid density must be above 0.\n");
+		}
+	}
+
+	if (optional_string("$FS2 effect wireframe color:")) {
+		int rgb[3];
+		stuff_int_list(rgb, 3);
+		CLAMP(rgb[0], 0, 255);
+		CLAMP(rgb[1], 0, 255);
+		CLAMP(rgb[2], 0, 255);
+		gr_init_color(&wip->fs2_effect_wireframe_color, rgb[0], rgb[1], rgb[2]);
+	}
 
 	//Check for the HUD image string
 	if(optional_string("$HUD Image:")) {
@@ -6075,6 +6124,19 @@ static void weapon_set_state(weapon_info* wip, weapon* wp, WeaponState state)
 		source->setHost(make_unique<EffectHostObject>(&Objects[wp->objnum], vmd_zero_vector));
 		source->finishCreation();
 	}
+
+	if (wip->wi_flags[Weapon::Info_Flags::Particle_spew]) {
+		for (const auto& effect : wip->particle_spewers) {
+			if (!effect.isValid())
+				continue;
+
+			auto source = particle::ParticleManager::get()->createSource(effect);
+			auto host = std::make_unique<EffectHostObject>(&Objects[wp->objnum], vmd_zero_vector);
+			source->setHost(std::move(host));
+			source->finishCreation();
+		}
+	}
+
 }
 
 static void weapon_update_state(weapon* wp)
@@ -7251,7 +7313,7 @@ void spawn_child_weapons(object *objp, int spawn_index_override)
 				// fire the beam
 				beam_fire(&fire_info);
 			} else {
-				vm_vector_2_matrix_norm(&orient, &tvec, nullptr, nullptr);
+				vm_vector_2_matrix_norm(&orient, &tvec, &objp->orient.vec.uvec, &objp->orient.vec.rvec);
 				weapon_objnum = weapon_create(&pos, &orient, child_id, parent_num, -1, wp->weapon_flags[Weapon::Weapon_Flags::Locked_when_fired], true);
 
 				//if the child inherits parent target, do it only if the parent weapon was locked to begin with
@@ -7328,8 +7390,6 @@ void weapon_play_impact_sound(const weapon_info *wip, const vec3d *hitpos, bool 
  */
 void weapon_hit_do_sound(const object *hit_obj, const weapon_info *wip, const vec3d *hitpos, bool is_armed, int quadrant)
 {
-	float shield_str;
-
 	// If non-missiles (namely lasers) expire without hitting a ship, don't play impact sound
 	if	( wip->subtype != WP_MISSILE ) {		
 		if ( !hit_obj ) {
@@ -7366,14 +7426,16 @@ void weapon_hit_do_sound(const object *hit_obj, const weapon_info *wip, const ve
 
 	if ( timestamp_elapsed(Weapon_impact_timer) ) {
 
+		float shield_percent;
+
 		if ( hit_obj->type == OBJ_SHIP && quadrant >= 0 ) {
-			shield_str = ship_quadrant_shield_strength(hit_obj, quadrant);
+			shield_percent = shield_get_quad_percent(hit_obj, quadrant);
 		} else {
-			shield_str = 0.0f;
+			shield_percent = 0.0f;
 		}
 
-		// play a shield hit if shields are above 10% max in this quadrant
-		if ( shield_str > 0.1f ) {
+		// play a shield hit if shields are above X% max in this quadrant
+		if ( shield_percent > Shield_percent_skips_damage ) {
 			// Play a shield impact sound effect
 			if ( !(Use_weapon_class_sounds_for_hits_to_player) && (hit_obj == Player_obj)) {
 				snd_play_3d( gamesnd_get_game_sound(GameSounds::SHIELD_HIT_YOU), hitpos, &Eye_position );
@@ -7949,7 +8011,7 @@ void maybe_play_conditional_impacts(const std::array<std::optional<ConditionData
 	}
 	
 	if (!valid_conditional_impact && wip->impact_weapon_expl_effect.isValid() && armed_weapon) {
-              		auto particleSource = particle::ParticleManager::get()->createSource(wip->impact_weapon_expl_effect);
+    	auto particleSource = particle::ParticleManager::get()->createSource(wip->impact_weapon_expl_effect);
 
 		particleSource->setHost(weapon_hit_make_effect_host(weapon_objp, impacted_objp, submodel, hitpos, local_hitpos));
 		particleSource->setTriggerRadius(weapon_objp->radius * radius_mult);
@@ -7973,7 +8035,7 @@ void maybe_play_conditional_impacts(const std::array<std::optional<ConditionData
 		particleSource->finishCreation();
 	}
 
-	if (impacted_objp != nullptr && impact_data[static_cast<std::underlying_type_t<HitType>>(HitType::SHIELD)].has_value() && (!valid_conditional_impact && wip->piercing_impact_effect.isValid() && armed_weapon)) {
+	if (impacted_objp != nullptr && !impact_data[static_cast<std::underlying_type_t<HitType>>(HitType::SHIELD)].has_value() && (!valid_conditional_impact && wip->piercing_impact_effect.isValid() && armed_weapon)) {
 		if ((impacted_objp->type == OBJ_SHIP) || (impacted_objp->type == OBJ_DEBRIS)) {
 
 			int ok_to_draw = 1;
@@ -8877,8 +8939,13 @@ void weapon_render(object* obj, model_draw_list *scene)
 			float offset_z_mult = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_OFFSET_Z_MULT, *wp, &wp->modular_curves_instance);
 			float switch_ang_mult = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_HEADON_SWITCH_ANG_MULT, *wp, &wp->modular_curves_instance);
 			float switch_rate_mult = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_HEADON_SWITCH_RATE_MULT, *wp, &wp->modular_curves_instance);
-			bool anim_has_curve = wip->weapon_curves.has_curve(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE);
-			float anim_state = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE, *wp, &wp->modular_curves_instance);
+			bool anim_has_curve = wip->weapon_curves.has_curve(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE) || wip->weapon_curves.has_curve(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE_ADD);
+			// We'll be using both anim_state and anim_state_add if either one has a curve defined, even if the other doesn't,
+			// so we need to make sure they've got sensible defaults, which in this case means 0.
+			float anim_state = 0.f;
+			if (wip->weapon_curves.has_curve(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE)) {
+				anim_state = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE, *wp, &wp->modular_curves_instance);
+			}
 			float anim_state_add = 0.f;
 			if (wip->weapon_curves.has_curve(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE_ADD)) {
 				anim_state_add = wip->weapon_curves.get_output(weapon_info::WeaponCurveOutputs::LASER_ANIM_STATE_ADD, *wp, &wp->modular_curves_instance);
@@ -9484,6 +9551,10 @@ void weapon_info::reset()
 	memset(this->icon_filename, 0, sizeof(this->icon_filename));
 	memset(this->anim_filename, 0, sizeof(this->anim_filename));
 	this->selection_effect = Default_weapon_select_effect;
+	this->fs2_effect_grid_color = Default_fs2_effect_grid_color;
+	this->fs2_effect_scanline_color = Default_fs2_effect_scanline_color;
+	this->fs2_effect_grid_density = Default_fs2_effect_grid_density;
+	this->fs2_effect_wireframe_color = Default_fs2_effect_wireframe_color;
 
 	this->shield_impact_effect_radius = -1.0f;
 	this->shield_impact_explosion_radius = 1.0f;
@@ -10194,7 +10265,7 @@ float weapon_get_apparent_size(const weapon& wp) {
 	
 	return convert_distance_and_diameter_to_pixel_size(
 		dist,
-		wep_objp->radius,
-		fl_degrees(g3_get_hfov(Eye_fov)),
-		gr_screen.max_h) / i2fl(gr_screen.max_h);
+		wep_objp->radius * 2.0f,
+		g3_get_hfov(Eye_fov),
+		gr_screen.max_w) / i2fl(gr_screen.max_w);
 }

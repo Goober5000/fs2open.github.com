@@ -269,6 +269,8 @@ BEGIN_MESSAGE_MAP(CFREDView, CView)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_OUTLINES_ON_SELECTED, OnUpdateViewOutlinesOnSelected)
 	ON_COMMAND(ID_VIEW_OUTLINE_AT_WARPIN, OnViewOutlineAtWarpin)
 	ON_UPDATE_COMMAND_UI(ID_VIEW_OUTLINE_AT_WARPIN, OnUpdateViewOutlineAtWarpin)
+	ON_COMMAND(ID_ALWAYS_SAVE_DISPLAY_NAMES, OnAlwaysSaveDisplayNames)
+	ON_UPDATE_COMMAND_UI(ID_ALWAYS_SAVE_DISPLAY_NAMES, OnUpdateAlwaysSaveDisplayNames)
 	ON_COMMAND(ID_ERROR_CHECKER_CHECKS_POTENTIAL_ISSUES, OnErrorCheckerChecksPotentialIssues)
 	ON_UPDATE_COMMAND_UI(ID_ERROR_CHECKER_CHECKS_POTENTIAL_ISSUES, OnUpdateErrorCheckerChecksPotentialIssues)
 	ON_UPDATE_COMMAND_UI(ID_NEW_SHIP_TYPE, OnUpdateNewShipType)
@@ -3482,6 +3484,7 @@ char *error_check_initial_orders(ai_goal *goals, int ship, int wing)
 			case AI_GOAL_NONE:
 			case AI_GOAL_CHASE_ANY:
 			case AI_GOAL_CHASE_SHIP_CLASS:
+			case AI_GOAL_CHASE_SHIP_TYPE:
 			case AI_GOAL_UNDOCK:
 			case AI_GOAL_KEEP_SAFE_DISTANCE:
 			case AI_GOAL_PLAY_DEAD:
@@ -3827,6 +3830,18 @@ void CFREDView::OnViewOutlineAtWarpin()
 void CFREDView::OnUpdateViewOutlineAtWarpin(CCmdUI* pCmdUI)
 {
 	pCmdUI->SetCheck(Draw_outline_at_warpin_position);
+}
+
+void CFREDView::OnAlwaysSaveDisplayNames()
+{
+	Always_save_display_names = !Always_save_display_names;
+	theApp.write_ini_file();
+	Update_window = 1;
+}
+
+void CFREDView::OnUpdateAlwaysSaveDisplayNames(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(Always_save_display_names);
 }
 
 void CFREDView::OnErrorCheckerChecksPotentialIssues()

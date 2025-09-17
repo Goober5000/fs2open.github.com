@@ -9,6 +9,7 @@
 #include "gropengltnl.h"
 
 #include "graphics/2d.h"
+#include "graphics/light.h"
 #include "graphics/matrix.h"
 #include "graphics/util/UniformAligner.h"
 #include "graphics/util/UniformBuffer.h"
@@ -189,16 +190,19 @@ static bool override_fog = false;
 graphics::deferred_light_data*
 
 // common conversion operations to translate a game light data structure into a render-ready light uniform.
-prepare_light_uniforms(light& l, graphics::util::UniformAligner& uniformAligner)
+prepare_light_uniforms(light& l, graphics::util::UniformAligner& uniformAligner, const ltp::profile* lp)
 {
 	graphics::deferred_light_data* light_data = uniformAligner.addTypedElement<graphics::deferred_light_data>();
 
 	light_data->lightType = static_cast<int>(l.type);
 
+	float intensity =
+		(Lighting_mode == lighting_mode::COCKPIT) ? lp->cockpit_light_intensity_modifier.handle(l.intensity) : l.intensity;
+
 	vec3d diffuse;
-	diffuse.xyz.x = l.r * l.intensity;
-	diffuse.xyz.y = l.g * l.intensity;
-	diffuse.xyz.z = l.b * l.intensity;
+	diffuse.xyz.x = l.r * intensity;
+	diffuse.xyz.y = l.g * intensity;
+	diffuse.xyz.z = l.b * intensity;
 
 	light_data->diffuseLightColor = diffuse;
 
@@ -223,7 +227,7 @@ void gr_opengl_deferred_lighting_finish()
 	// GL_state.DepthFunc(GL_GREATER);
 	// GL_state.DepthMask(GL_FALSE);
 
-	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DEFERRED_LIGHTING, 0));
+	opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_DEFERRED_LIGHTING, ENVMAP > 0 ? SDR_FLAG_ENV_MAP : 0));
 
 	// Render on top of the composite buffer texture
 	glDrawBuffer(GL_COLOR_ATTACHMENT5);
@@ -247,6 +251,16 @@ void gr_opengl_deferred_lighting_finish()
 		GL_state.Texture.Enable(4, GL_TEXTURE_2D_ARRAY, Shadow_map_texture);
 	}
 
+	if (ENVMAP > 0) {
+		Current_shader->program->Uniforms.setTextureUniform("sEnvmap", 5);
+		Current_shader->program->Uniforms.setTextureUniform("sIrrmap", 6);
+		float u_scale, v_scale;
+		uint32_t array_index;
+		gr_opengl_tcache_set(ENVMAP, TCACHE_TYPE_CUBEMAP, &u_scale, &v_scale, &array_index, 5);
+		gr_opengl_tcache_set(IRRMAP, TCACHE_TYPE_CUBEMAP, &u_scale, &v_scale, &array_index, 6);
+		Assertion(array_index == 0, "Cube map arrays are not supported yet!");
+	}
+
 	// We need to use stable sorting here to make sure that the relative ordering of the same light types is the same as
 	// the rest of the code. Otherwise the shadow mapping would be applied while rendering the wrong light which would
 	// lead to flickering lights in some circumstances
@@ -254,7 +268,7 @@ void gr_opengl_deferred_lighting_finish()
 	using namespace graphics;
 
 	// We need to precompute how many elements we are going to need
-	size_t num_data_elements = Lights.size();
+	size_t num_data_elements = Lights.size() + 1;
 
 	// Get a uniform buffer for our data
 	auto light_buffer = gr_get_uniform_buffer(uniform_block_type::Lights, num_data_elements);
@@ -286,6 +300,8 @@ void gr_opengl_deferred_lighting_finish()
 		case Light_Type::Tube:
 			cylinder_lights.push_back(l);
 			break;
+		case Light_Type::Ambient:
+			UNREACHABLE("Multiple ambient lights are not supported!");
 		}
 	}
 	{
@@ -312,38 +328,54 @@ void gr_opengl_deferred_lighting_finish()
 		header->invScreenHeight = 1.0f / gr_screen.max_h;
 		header->nearPlane = gr_near_plane;
 
+		{
+			//Prepare ambient light
+			light& l = full_frame_lights.emplace_back();
+			vec3d ambient;
+			gr_get_ambient_light(&ambient);
+			l.r = ambient.xyz.x;
+			l.g = ambient.xyz.y;
+			l.b = ambient.xyz.z;
+			l.type = Light_Type::Ambient;
+			l.intensity = 1.f;
+			l.source_radius = 0.f;
+		}
+
 		// Only the first directional light uses shaders so we need to know when we already saw that light
 		bool first_directional = true;
 
 		for (auto& l : full_frame_lights) {
-			auto light_data = prepare_light_uniforms(l, light_uniform_aligner);
-			if (Shadow_quality != ShadowQuality::Disabled) {
-				light_data->enable_shadows = first_directional ? 1 : 0;
+			auto light_data = prepare_light_uniforms(l, light_uniform_aligner, lp);
+
+			if (l.type == Light_Type::Directional ) {
+				if (Shadow_quality != ShadowQuality::Disabled) {
+					light_data->enable_shadows = first_directional ? 1 : 0;
+				}
+
+				// Global light direction should match shadow light direction
+				if (first_directional) {
+					global_light = &l;
+					global_light_diffuse = light_data->diffuseLightColor;
+
+					first_directional = false;
+				}
+
+				vec4 light_dir;
+				light_dir.xyzw.x = -l.vec.xyz.x;
+				light_dir.xyzw.y = -l.vec.xyz.y;
+				light_dir.xyzw.z = -l.vec.xyz.z;
+				light_dir.xyzw.w = 0.0f;
+				vec4 view_dir;
+
+				vm_vec_transform(&view_dir, &light_dir, &gr_view_matrix);
+
+				light_data->lightDir.xyz.x = view_dir.xyzw.x;
+				light_data->lightDir.xyz.y = view_dir.xyzw.y;
+				light_data->lightDir.xyz.z = view_dir.xyzw.z;
 			}
-
-			// Global light direction should match shadow light direction
-			if (first_directional) {
-				global_light = &l;
-				global_light_diffuse = light_data->diffuseLightColor;
-			}
-
-			vec4 light_dir;
-			light_dir.xyzw.x = -l.vec.xyz.x;
-			light_dir.xyzw.y = -l.vec.xyz.y;
-			light_dir.xyzw.z = -l.vec.xyz.z;
-			light_dir.xyzw.w = 0.0f;
-			vec4 view_dir;
-
-			vm_vec_transform(&view_dir, &light_dir, &gr_view_matrix);
-
-			light_data->lightDir.xyz.x = view_dir.xyzw.x;
-			light_data->lightDir.xyz.y = view_dir.xyzw.y;
-			light_data->lightDir.xyz.z = view_dir.xyzw.z;
-
-			first_directional = false;
 		}
 		for (auto& l : sphere_lights) {
-			auto light_data = prepare_light_uniforms(l, light_uniform_aligner);
+			auto light_data = prepare_light_uniforms(l, light_uniform_aligner, lp);
 
 			if (l.type == Light_Type::Cone) {
 				light_data->dualCone = (l.flags & LF_DUAL_CONE) ? 1.0f : 0.0f;
@@ -355,6 +387,7 @@ void gr_opengl_deferred_lighting_finish()
 							? lp->cockpit_light_radius_modifier.handle(MAX(l.rada, l.radb))
 							: MAX(l.rada, l.radb);
 			light_data->lightRadius = rad;
+
 			// A small padding factor is added to guard against potentially clipping the edges of the light with facets
 			// of the volume mesh.
 			light_data->scale.xyz.x = rad * 1.05f;
@@ -362,11 +395,12 @@ void gr_opengl_deferred_lighting_finish()
 			light_data->scale.xyz.z = rad * 1.05f;
 		}
 		for (auto& l : cylinder_lights) {
-			auto light_data = prepare_light_uniforms(l, light_uniform_aligner);
+			auto light_data = prepare_light_uniforms(l, light_uniform_aligner, lp);
 			float rad =
 				(Lighting_mode == lighting_mode::COCKPIT) ? lp->cockpit_light_radius_modifier.handle(l.radb) : l.radb;
 
 			light_data->lightRadius = rad;
+
 			light_data->lightType = LT_TUBE;
 
 			vec3d a;
@@ -389,7 +423,8 @@ void gr_opengl_deferred_lighting_finish()
 	{
 		for (size_t i = 0; i<full_frame_lights.size(); i++) {
 			// just keeping things aligned really.
-			matrix_uniform_aligner.addTypedElement<graphics::matrix_uniforms>();
+			auto matrix_data = matrix_uniform_aligner.addTypedElement<graphics::matrix_uniforms>();
+			matrix_data->modelViewMatrix = gr_env_texture_matrix;
 		}
 		for (auto& l : sphere_lights) {
 			auto matrix_data = matrix_uniform_aligner.addTypedElement<graphics::matrix_uniforms>();
@@ -494,7 +529,10 @@ void gr_opengl_deferred_lighting_finish()
 	// Now reset back to drawing into the color buffer
 	glDrawBuffer(GL_COLOR_ATTACHMENT0);
 
-	if (The_mission.flags[Mission::Mission_Flags::Fullneb] && Neb2_render_mode != NEB2_RENDER_NONE && !override_fog) {
+	bool bDrawFullNeb = The_mission.flags[Mission::Mission_Flags::Fullneb] && Neb2_render_mode != NEB2_RENDER_NONE && !override_fog;
+	bool bDrawNebVolumetrics = The_mission.volumetrics && The_mission.volumetrics->get_enabled() && !override_fog;
+
+	if (bDrawFullNeb) {
 		GL_state.SetAlphaBlendMode(ALPHA_BLEND_NONE);
 		gr_zbuffer_set(GR_ZBUFF_NONE);
 		opengl_shader_set_current(gr_opengl_maybe_create_shader(SDR_TYPE_SCENE_FOG, 0));
@@ -521,8 +559,26 @@ void gr_opengl_deferred_lighting_finish()
 		});
 
 		opengl_draw_full_screen_textured(0.0f, 0.0f, 1.0f, 1.0f);
-	}
-	else if (The_mission.volumetrics && The_mission.volumetrics->get_enabled() && !override_fog) {
+
+		if (bDrawNebVolumetrics) {
+			glReadBuffer(GL_COLOR_ATTACHMENT0);
+			glDrawBuffer(GL_COLOR_ATTACHMENT5);
+			glBlitFramebuffer(0,
+				0,
+				gr_screen.max_w,
+				gr_screen.max_h,
+				0,
+				0,
+				gr_screen.max_w,
+				gr_screen.max_h,
+				GL_COLOR_BUFFER_BIT,
+				GL_NEAREST);
+			glDrawBuffer(GL_COLOR_ATTACHMENT0);
+			glReadBuffer(GL_COLOR_ATTACHMENT0);
+		}
+		
+	} 
+	if (bDrawNebVolumetrics) {
 		GR_DEBUG_SCOPE("Volumetric Nebulae");
 		TRACE_SCOPE(tracing::Volumetrics);
 
@@ -602,7 +658,8 @@ void gr_opengl_deferred_lighting_finish()
 		gr_end_view_matrix();
 		gr_end_proj_matrix();
 	}
-	else {
+
+	if(!bDrawFullNeb && !bDrawNebVolumetrics) {
 		// Transfer the resolved lighting back to the color texture
 		// TODO: Maybe this could be improved so that it doesn't require the copy back operation?
 		glReadBuffer(GL_COLOR_ATTACHMENT5);

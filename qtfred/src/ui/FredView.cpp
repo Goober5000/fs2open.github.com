@@ -12,18 +12,23 @@
 #include <qevent.h>
 #include <FredApplication.h>
 #include <ui/dialogs/ShipEditor/ShipEditorDialog.h>
-#include <ui/dialogs/EventEditorDialog.h>
+#include <ui/dialogs/WingEditorDialog.h>
+#include <ui/dialogs/MissionEventsDialog.h>
 #include <ui/dialogs/AsteroidEditorDialog.h>
+#include <ui/dialogs/VolumetricNebulaDialog.h>
 #include <ui/dialogs/BriefingEditorDialog.h>
 #include <ui/dialogs/WaypointEditorDialog.h>
+#include <ui/dialogs/JumpNodeEditorDialog.h>
 #include <ui/dialogs/CampaignEditorDialog.h>
 #include <ui/dialogs/MissionGoalsDialog.h>
 #include <ui/dialogs/ObjectOrientEditorDialog.h>
 #include <ui/dialogs/MissionSpecDialog.h>
+#include <ui/dialogs/MissionCutscenesDialog.h>
 #include <ui/dialogs/FormWingDialog.h>
 #include <ui/dialogs/AboutDialog.h>
 #include <ui/dialogs/BackgroundEditorDialog.h>
 #include <ui/dialogs/ShieldSystemDialog.h>
+#include <ui/dialogs/GlobalShipFlagsDialog.h>
 #include <ui/dialogs/VoiceActingManager.h>
 #include <globalincs/linklist.h>
 #include <ui/dialogs/SelectionDialog.h>
@@ -31,6 +36,9 @@
 #include <ui/dialogs/CommandBriefingDialog.h>
 #include <ui/dialogs/ReinforcementsEditorDialog.h>
 #include <ui/dialogs/LoadoutDialog.h>
+#include <ui/dialogs/VariableDialog.h>
+#include <ui/dialogs/MusicPlayerDialog.h>
+#include <ui/dialogs/RelativeCoordinatesDialog.h>
 #include <iff_defs/iff_defs.h>
 
 #include "mission/Editor.h"
@@ -135,6 +143,7 @@ void FredView::setEditor(Editor* editor, EditorViewport* viewport) {
 			[this]() { ui->actionRestore_Camera_Pos->setEnabled(!IS_VEC_NULL(&_viewport->saved_cam_orient.vec.fvec)); });
 
 	connect(this, &FredView::viewIdle, this, [this]() { ui->actionMove_Ships_When_Undocking->setChecked(_viewport->Move_ships_when_undocking); });
+	connect(this, &FredView::viewIdle, this, [this]() { ui->actionAlways_Save_Display_Names->setChecked(_viewport->Always_save_display_names); });
 	connect(this, &FredView::viewIdle, this, [this]() { ui->actionError_Checker_Checks_Potential_Issues->setChecked(_viewport->Error_checker_checks_potential_issues); });
 }
 
@@ -703,10 +712,16 @@ void FredView::keyReleaseEvent(QKeyEvent* event) {
 
 	_inKeyReleaseHandler = false;
 }
-void FredView::on_actionEvents_triggered(bool) {
-	auto eventEditor = new dialogs::EventEditorDialog(this, _viewport);
+void FredView::on_actionMission_Events_triggered(bool) {
+	auto eventEditor = new dialogs::MissionEventsDialog(this, _viewport);
 	eventEditor->setAttribute(Qt::WA_DeleteOnClose);
 	eventEditor->show();
+}
+void FredView::on_actionMission_Cutscenes_triggered(bool)
+{
+	auto cutsceneEditor = new dialogs::MissionCutscenesDialog(this, _viewport);
+	cutsceneEditor->setAttribute(Qt::WA_DeleteOnClose);
+	cutsceneEditor->show();
 }
 void FredView::on_actionSelectionLock_triggered(bool enabled) {
 	_viewport->Selection_lock = enabled;
@@ -725,6 +740,12 @@ void FredView::on_actionAsteroid_Field_triggered(bool) {
 	asteroidFieldEditor->setAttribute(Qt::WA_DeleteOnClose);
 	asteroidFieldEditor->show();
 }
+void FredView::on_actionVolumetric_Nebula_triggered(bool)
+{
+	auto volumetricNebulaEditor = new dialogs::VolumetricNebulaDialog(this, _viewport);
+	volumetricNebulaEditor->setAttribute(Qt::WA_DeleteOnClose);
+	volumetricNebulaEditor->show();
+}
 void FredView::on_actionBriefing_triggered(bool) {
 	auto eventEditor = new dialogs::BriefingEditorDialog(this);
 	eventEditor->setAttribute(Qt::WA_DeleteOnClose);
@@ -740,12 +761,40 @@ void FredView::on_actionWaypoint_Paths_triggered(bool) {
 	editorDialog->setAttribute(Qt::WA_DeleteOnClose);
 	editorDialog->show();
 }
-void FredView::on_actionShips_triggered(bool)
+void FredView::on_actionJump_Nodes_triggered(bool)
 {
-	auto editorDialog = new dialogs::ShipEditorDialog(this, _viewport);
+	auto editorDialog = new dialogs::JumpNodeEditorDialog(this, _viewport);
 	editorDialog->setAttribute(Qt::WA_DeleteOnClose);
 	editorDialog->show();
+}
+void FredView::on_actionShips_triggered(bool)
+{
+	if (!_shipEditorDialog) {
+		_shipEditorDialog = new dialogs::ShipEditorDialog(this, _viewport);
+		_shipEditorDialog->setAttribute(Qt::WA_DeleteOnClose);
+		// When the user closes it, reset our pointer so we can open a new one later
+		connect(_shipEditorDialog, &QObject::destroyed, this, [this]() {
+			_shipEditorDialog = nullptr;
+		});
+		_shipEditorDialog->show();
+	} else {
+		_shipEditorDialog->raise();
+		_shipEditorDialog->activateWindow();
+	}
 
+}
+void FredView::on_actionWings_triggered(bool)
+{
+	if (!_wingEditorDialog) {
+		_wingEditorDialog = new dialogs::WingEditorDialog(this, _viewport);
+		_wingEditorDialog->setAttribute(Qt::WA_DeleteOnClose);
+		// When the user closes it, reset our pointer so we can open a new one later
+		connect(_wingEditorDialog, &QObject::destroyed, this, [this]() { _wingEditorDialog = nullptr; });
+		_wingEditorDialog->show();
+	} else {
+		_wingEditorDialog->raise();
+		_wingEditorDialog->activateWindow();
+	}
 }
 void FredView::on_actionCampaign_triggered(bool) {
 	//TODO: Save if Changes
@@ -771,6 +820,11 @@ void FredView::on_actionLoadout_triggered(bool) {
 	editorDialog->setAttribute(Qt::WA_DeleteOnClose);
 	editorDialog->show();
 }
+void FredView::on_actionVariables_triggered(bool) {
+	auto editorDialog = new dialogs::VariableDialog(this, _viewport);
+	editorDialog->show();
+}
+
 DialogButton FredView::showButtonDialog(DialogType type,
 										const SCP_string& title,
 										const SCP_string& message,
@@ -850,7 +904,12 @@ void FredView::handleObjectEditor(int objNum) {
 			fred->selectObject(objNum);
 
 			// Use the existing slot for this to avoid duplicating code
-			on_actionWaypoint_Paths_triggered(false);
+			if (Objects[objNum].type == OBJ_JUMP_NODE) {
+				on_actionJump_Nodes_triggered(false);
+			} else if (Objects[objNum].type == OBJ_WAYPOINT) {
+				// If this is a waypoint, we need to show the waypoint editor
+				on_actionWaypoint_Paths_triggered(false);
+			}
 		} else if (Objects[objNum].type == OBJ_POINT) {
 			return;
 		} else {
@@ -1126,6 +1185,9 @@ void FredView::on_actionCancel_Subsystem_triggered(bool) {
 void FredView::on_actionMove_Ships_When_Undocking_triggered(bool) {
 	_viewport->Move_ships_when_undocking = !_viewport->Move_ships_when_undocking;
 }
+void FredView::on_actionAlways_Save_Display_Names_triggered(bool) {
+	_viewport->Always_save_display_names = !_viewport->Always_save_display_names;
+}
 void FredView::on_actionError_Checker_Checks_Potential_Issues_triggered(bool) {
 	_viewport->Error_checker_checks_potential_issues = !_viewport->Error_checker_checks_potential_issues;
 }
@@ -1150,13 +1212,32 @@ void FredView::on_actionShield_System_triggered(bool) {
 	dialog->show();
 }
 
+void FredView::on_actionSet_Global_Ship_Flags_triggered(bool) {
+	auto dialog = new dialogs::GlobalShipFlagsDialog(this, _viewport);
+	dialog->setAttribute(Qt::WA_DeleteOnClose);
+	dialog->show();
+}
+
 void FredView::on_actionVoice_Acting_Manager_triggered(bool) {
 	auto dialog = new dialogs::VoiceActingManager(this, _viewport);
 	dialog->setAttribute(Qt::WA_DeleteOnClose);
 	dialog->show();
 }
-void FredView::on_actionMission_Objectives_triggered(bool) {
+void FredView::on_actionMission_Goals_triggered(bool) {
 	auto dialog = new dialogs::MissionGoalsDialog(this, _viewport);
+	dialog->setAttribute(Qt::WA_DeleteOnClose);
+	dialog->show();
+}
+
+void FredView::on_actionMusic_Player_triggered(bool)
+{
+	auto dialog = new dialogs::MusicPlayerDialog(this, _viewport);
+	dialog->setAttribute(Qt::WA_DeleteOnClose);
+	dialog->show();
+}
+
+void FredView::on_actionCalculate_Relative_Coordinates_triggered(bool) {
+	auto dialog = new dialogs::RelativeCoordinatesDialog(this, _viewport);
 	dialog->setAttribute(Qt::WA_DeleteOnClose);
 	dialog->show();
 }

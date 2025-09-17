@@ -678,6 +678,10 @@ void CFred_mission_save::save_ai_goals(ai_goal* goalp, int ship)
 					str = "ai-chase-ship-class";
 					break;
 
+				case AI_GOAL_CHASE_SHIP_TYPE:
+					str = "ai-chase-ship-type";
+					break;
+				
 				case AI_GOAL_GUARD:
 					str = "ai-guard";
 					break;
@@ -2347,6 +2351,24 @@ int CFred_mission_save::save_campaign_file(const char *pathname)
 		fout(" %d\n", Campaign.flags);
 	}
 
+	if (save_format != MissionFormat::RETAIL && !Campaign.custom_data.empty()) {
+		if (optional_string_fred("$begin_custom_data_map")) {
+			parse_comments(2);
+		} else {
+			fout("\n$begin_custom_data_map");
+		}
+
+		for (const auto& pair : Campaign.custom_data) {
+			fout("\n   +Val: %s %s", pair.first.c_str(), pair.second.c_str());
+		}
+
+		if (optional_string_fred("$end_custom_data_map")) {
+			parse_comments();
+		} else {
+			fout("\n$end_custom_data_map");
+		}
+	}
+
 	// write out the ships and weapons which the player can start the campaign with
 	optional_string_fred("+Starting Ships: (");
 	parse_comments(2);
@@ -2684,6 +2706,7 @@ int CFred_mission_save::save_mission_info()
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT("+Steps:", 1, ";;FSO 23.1.0;;", 15, " %d", The_mission.volumetrics->steps);
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT("+Resolution:", 1, ";;FSO 23.1.0;;", 6, " %d", The_mission.volumetrics->resolution);
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT("+Oversampling:", 1, ";;FSO 23.1.0;;", 2, " %d", The_mission.volumetrics->oversampling);
+			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT("+Smoothing:", 1, ";;FSO 25.0.0;;", 0.f, " %f", The_mission.volumetrics->smoothing);
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT_F("+Heyney Greenstein Coefficient:", 1, ";;FSO 23.1.0;;", 0.2f, " %f", The_mission.volumetrics->henyeyGreensteinCoeff);
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT_F("+Sun Falloff Factor:", 1, ";;FSO 23.1.0;;", 1.0f, " %f", The_mission.volumetrics->globalLightDistanceFactor);
 			FRED_ENSURE_PROPERTY_VERSION_WITH_DEFAULT("+Sun Steps:", 1, ";;FSO 23.1.0;;", 6, " %d", The_mission.volumetrics->globalLightSteps);
@@ -2721,6 +2744,7 @@ int CFred_mission_save::save_mission_info()
 			bypass_comment(";;FSO 23.1.0;; +Steps:");
 			bypass_comment(";;FSO 23.1.0;; +Resolution:");
 			bypass_comment(";;FSO 23.1.0;; +Oversampling:");
+			bypass_comment(";;FSO 25.0.0;; +Smoothing:");
 			bypass_comment(";;FSO 23.1.0;; +Heyney Greenstein Coefficient:");
 			bypass_comment(";;FSO 23.1.0;; +Sun Falloff Factor:");
 			bypass_comment(";;FSO 23.1.0;; +Sun Steps:");
@@ -3474,15 +3498,19 @@ int CFred_mission_save::save_objects()
 
 		// Display name
 		// The display name is only written if there was one at the start to avoid introducing inconsistencies
-		if (save_format != MissionFormat::RETAIL && shipp->has_display_name()) {
+		if (save_format != MissionFormat::RETAIL && (_viewport->Always_save_display_names || shipp->has_display_name())) {
 			char truncated_name[NAME_LENGTH];
 			strcpy_s(truncated_name, shipp->ship_name);
 			end_string_at_first_hash_symbol(truncated_name);
 
 			// Also, the display name is not written if it's just the truncation of the name at the hash
-			if (strcmp(shipp->get_display_name(), truncated_name) != 0) {
-				fout("\n$Display name:");
-				fout_ext(" ", "%s", shipp->display_name.c_str());
+			if (_viewport->Always_save_display_names || strcmp(shipp->get_display_name(), truncated_name) != 0) {
+				if (optional_string_fred("$Display name:", "$Class:")) {
+					parse_comments();
+				} else {
+					fout("\n$Display name:");
+				}
+				fout_ext(" ", "%s", shipp->get_display_name());
 			}
 		}
 
@@ -3510,12 +3538,22 @@ int CFred_mission_save::save_objects()
 
 		// optional alternate type name
 		if (strlen(Fred_alt_names[i])) {
-			fout("\n$Alt: %s\n", Fred_alt_names[i]);
+			if (optional_string_fred("$Alt:", "$Team:")) {
+				parse_comments();
+			} else {
+				fout("\n$Alt:");
+			}
+			fout(" %s", Fred_alt_names[i]);
 		}
 
 		// optional callsign
 		if (save_format != MissionFormat::RETAIL && strlen(Fred_callsigns[i])) {
-			fout("\n$Callsign: %s\n", Fred_callsigns[i]);
+			if (optional_string_fred("$Callsign:", "$Team:")) {
+				parse_comments();
+			} else {
+				fout("\n$Callsign:");
+			}
+			fout(" %s", Fred_callsigns[i]);
 		}
 
 		required_string_fred("$Team:");
@@ -3931,7 +3969,18 @@ int CFred_mission_save::save_objects()
 
 			fout(" %d", shipp->escort_priority);
 		}
+		// Custom Guardian Thrshold
+		if (save_format != MissionFormat::RETAIL) {
+			if (shipp->ship_guardian_threshold != 0) {
+				if (optional_string_fred("+Guardian Threshold:", "$Name:")) {
+					parse_comments();
+				} else {
+					fout("\n+Guardian Threshold:");
+				}
 
+				fout(" %d", shipp->ship_guardian_threshold);
+			}
+		}
 		// special explosions
 		if (save_format != MissionFormat::RETAIL) {
 			if (shipp->use_special_explosion) {
@@ -5015,13 +5064,13 @@ int CFred_mission_save::save_waypoints()
 		if (save_format != MissionFormat::RETAIL) {
 			
 			// The display name is only written if there was one at the start to avoid introducing inconsistencies
-			if (jnp->HasDisplayName()) {
+			if (_viewport->Always_save_display_names || jnp->HasDisplayName()) {
 				char truncated_name[NAME_LENGTH];
 				strcpy_s(truncated_name, jnp->GetName());
 				end_string_at_first_hash_symbol(truncated_name);
 
 				// Also, the display name is not written if it's just the truncation of the name at the hash
-				if (strcmp(jnp->GetDisplayName(), truncated_name) != 0) {
+				if (_viewport->Always_save_display_names || strcmp(jnp->GetDisplayName(), truncated_name) != 0) {
 					if (optional_string_fred("+Display Name:", "$Jump Node:")) {
 						parse_comments();
 					} else {
@@ -5336,39 +5385,48 @@ int CFred_mission_save::save_wings()
 			fout("\n+Flags: (");
 		}
 
+		auto get_flag_name = [](Ship::Wing_Flags flag) -> const char* {
+			for (size_t k = 0; k < Num_parse_wing_flags; ++k) {
+				if (Parse_wing_flags[k].def == flag) {
+					return Parse_wing_flags[k].name;
+				}
+			}
+			return nullptr;
+		};
+
 		if (Wings[i].flags[Ship::Wing_Flags::Ignore_count]) {
-			fout(" \"ignore-count\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::Ignore_count));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::Reinforcement]) {
-			fout(" \"reinforcement\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::Reinforcement));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_arrival_music]) {
-			fout(" \"no-arrival-music\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_arrival_music));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_arrival_message]) {
-			fout(" \"no-arrival-message\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_arrival_message));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_first_wave_message]) {
-			fout(" \"no-first-wave-message\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_first_wave_message));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_arrival_warp]) {
-			fout(" \"no-arrival-warp\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_arrival_warp));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_departure_warp]) {
-			fout(" \"no-departure-warp\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_departure_warp));
 		}
 		if (Wings[i].flags[Ship::Wing_Flags::No_dynamic]) {
-			fout(" \"no-dynamic\"");
+			fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::No_dynamic));
 		}
 		if (save_format != MissionFormat::RETAIL) {
 			if (Wings[i].flags[Ship::Wing_Flags::Nav_carry]) {
-				fout(" \"nav-carry-status\"");
+				fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::Nav_carry));
 			}
 			if (Wings[i].flags[Ship::Wing_Flags::Same_arrival_warp_when_docked]) {
-				fout(" \"same-arrival-warp-when-docked\"");
+				fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::Same_arrival_warp_when_docked));
 			}
 			if (Wings[i].flags[Ship::Wing_Flags::Same_departure_warp_when_docked]) {
-				fout(" \"same-departure-warp-when-docked\"");
+				fout(" \"%s\"", get_flag_name(Ship::Wing_Flags::Same_departure_warp_when_docked));
 			}
 		}
 

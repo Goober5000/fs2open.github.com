@@ -13,8 +13,10 @@
 #include "ship.h"
 #include "ship_bank.h"
 #include "shipclass.h"
+#include "shiptype.h"
 #include "subsystem.h"
 #include "team.h"
+#include "team_colors.h"
 #include "texture.h"
 #include "vecmath.h"
 #include "weaponclass.h"
@@ -867,6 +869,39 @@ ADE_VIRTVAR(Team, l_Ship, "team", "Ship's team", "team", "Ship team, or invalid 
 	return ade_set_args(L, "o", l_Team.Set(shipp->team));
 }
 
+ADE_VIRTVAR(TeamColor, l_Ship, "teamcolor", "The team color. Note that setting the team color here is instant. If you need a fade, then use the sexp.", "teamcolor", "The team color handle or nil if not set or invalid.")
+{
+	object_h* oh = nullptr;
+	int idx = -1;
+	if (!ade_get_args(L, "o|o", l_Ship.GetPtr(&oh), l_TeamColor.Get(&idx)))
+		return ADE_RETURN_NIL;
+
+	if (!oh->isValid())
+		return ADE_RETURN_NIL;
+
+	ship* shipp = &Ships[oh->objp()->instance];
+
+	//Set team color
+	if (ADE_SETTING_VAR && SCP_vector_inbounds(Team_Names, idx)) {
+		// Verify
+		const auto& it = Team_Colors.find(Team_Names[idx]);
+		if (it == Team_Colors.end()) {
+			mprintf(("Invalid team color specified in mission file for ship %s. Not setting!\n", shipp->ship_name));
+		} else {
+			shipp->team_name = Team_Names[idx];
+		}
+	}
+
+	// look up by name
+	for (int i = 0; i < static_cast<int>(Team_Names.size()); ++i) {
+		if (lcase_equal(Team_Names[i], shipp->team_name)) {
+			return ade_set_args(L, "o", l_TeamColor.Set(i));
+		}
+	}
+
+	return ADE_RETURN_NIL;
+}
+
 ADE_VIRTVAR_DEPRECATED(PersonaIndex, l_Ship, "number", "Persona index", "number", "The index of the persona from messages.tbl, 0 if no persona is set", gameversion::version(25, 0), "Deprecated in favor of Persona")
 {
 	object_h *objh;
@@ -1612,15 +1647,16 @@ ADE_FUNC(clearOrders, l_Ship, NULL, "Clears a ship's orders list", "boolean", "T
 	return ADE_RETURN_TRUE;
 }
 
-ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem TargetSubsystem=nil, number Priority=1.0, shipclass TargetShipclass=nil]", "Uses the goal code to execute orders", "boolean", "True if order was given, otherwise false or nil")
+ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem TargetSubsystem=nil, number Priority=1.0, shipclass TargetShipclass=nil, shiptype TargetShiptype=nil]", "Uses the goal code to execute orders", "boolean", "True if order was given, otherwise false or nil")
 {
 	object_h *objh = NULL;
 	enum_h *eh = NULL;
 	float priority = 1.0f;
 	int sclass = -1;
+	int stype = -1;
 	object_h *tgh = NULL;
 	ship_subsys_h *tgsh = NULL;
-	if(!ade_get_args(L, "oo|oofo", l_Object.GetPtr(&objh), l_Enum.GetPtr(&eh), l_Object.GetPtr(&tgh), l_Subsystem.GetPtr(&tgsh), &priority, l_Shipclass.Get(&sclass)))
+	if(!ade_get_args(L, "oo|oofoo", l_Object.GetPtr(&objh), l_Enum.GetPtr(&eh), l_Object.GetPtr(&tgh), l_Subsystem.GetPtr(&tgsh), &priority, l_Shipclass.Get(&sclass), l_Shiptype.Get(&stype)))
 		return ADE_RETURN_NIL;
 
 	if(!objh->isValid() || !eh->isValid())
@@ -1864,6 +1900,16 @@ ADE_FUNC(giveOrder, l_Ship, "enumeration Order, [object Target=nil, subsystem Ta
 			{
 				ai_mode = AI_GOAL_CHASE_SHIP_CLASS;
 				ai_shipname = Ship_info[sclass].name;
+				ai_submode = SM_ATTACK;
+			}
+			break;
+		}
+		case LE_ORDER_ATTACK_SHIP_TYPE: 
+		{
+			if (stype >= 0) 
+			{
+				ai_mode = AI_GOAL_CHASE_SHIP_TYPE;
+				ai_shipname = Ship_types[stype].name;
 				ai_submode = SM_ATTACK;
 			}
 			break;

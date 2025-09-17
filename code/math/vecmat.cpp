@@ -276,6 +276,19 @@ vec3d *vm_vec_avg_n(vec3d *dest, int n, const vec3d src[])
 	return dest;
 }
 
+//Calculates the componentwise minimum of the two vectors
+void vm_vec_min(vec3d* dest, const vec3d* src0, const vec3d* src1) {
+	dest->xyz.x = std::min(src0->xyz.x, src1->xyz.x);
+	dest->xyz.y = std::min(src0->xyz.y, src1->xyz.y);
+	dest->xyz.z = std::min(src0->xyz.z, src1->xyz.z);
+}
+
+//Calculates the componentwise maximum of the two vectors
+void vm_vec_max(vec3d* dest, const vec3d* src0, const vec3d* src1) {
+	dest->xyz.x = std::max(src0->xyz.x, src1->xyz.x);
+	dest->xyz.y = std::max(src0->xyz.y, src1->xyz.y);
+	dest->xyz.z = std::max(src0->xyz.z, src1->xyz.z);
+}
 
 //averages two vectors. returns ptr to dest
 //dest can equal either source
@@ -2975,7 +2988,7 @@ void vm_interpolate_matrices(matrix* out_orient, const matrix* curr_orient, cons
 	matrix rot_matrix;
 
 	vm_quaternion_rotate(&rot_matrix, t * theta, &rot_axis); // get the matrix that rotates current to our interpolated matrix
-	vm_matrix_x_matrix(out_orient, &rot_matrix, curr_orient); // do the final rotation
+	vm_matrix_x_matrix(out_orient, curr_orient, &rot_matrix); // do the final rotation
 	
 }
 

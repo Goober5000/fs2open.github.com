@@ -126,6 +126,7 @@ ai_goal_list Ai_goal_list[] = {
 	{ "Attack",					AI_GOAL_CHASE_WING,			0 },	// duplicate needed because we can no longer use bitwise operators
 	{ "Attack any ship",		AI_GOAL_CHASE_ANY,			0 },
 	{ "Attack ship class",		AI_GOAL_CHASE_SHIP_CLASS,	0 },
+	{ "Attack ship type",		AI_GOAL_CHASE_SHIP_TYPE,	0 },
 	{ "Guard",					AI_GOAL_GUARD,				0 },
 	{ "Guard",					AI_GOAL_GUARD_WING,			0 },	// duplicate needed because we can no longer use bitwise operators
 	{ "Disable ship",			AI_GOAL_DISABLE_SHIP,		0 },
@@ -232,6 +233,20 @@ void lcl_fred_replace_stuff(CString &text)
 	text.Replace(";", "$semicolon");
 	text.Replace("/", "$slash");
 	text.Replace("\\", "$backslash");
+}
+
+CString get_display_name_for_text_box(const char *orig_name)
+{
+	auto p = get_pointer_to_first_hash_symbol(orig_name);
+	if (p)
+	{
+		// use the same logic as in end_string_at_first_hash_symbol, but rewritten for CString
+		CString display_name(orig_name, static_cast<int>(p - orig_name));
+		display_name.TrimRight();
+		return display_name;
+	}
+	else
+		return "<none>";
 }
 
 void fred_preload_all_briefing_icons()
@@ -421,7 +436,7 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	strcpy_s(Voice_abbrev_message, "");
 	strcpy_s(Voice_abbrev_mission, "");
 	Voice_no_replace_filenames = false;
-	strcpy_s(Voice_script_entry_format, "Sender: $sender\r\nPersona: $persona\r\nFile: $filename\r\nMessage: $message");
+	strcpy_s(Voice_script_entry_format, Voice_script_default_string.c_str());
 	Voice_export_selection = 0;
 
 	Show_waypoints = TRUE;

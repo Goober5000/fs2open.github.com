@@ -532,15 +532,12 @@ int required_string(const char *pstr)
 	return 1;
 }
 
-int check_for_eof_raw()
+bool check_for_eof_raw()
 {
-	if (*Mp == '\0')
-		return 1;
-
-	return 0;
+	return (*Mp == '\0');
 }
 
-int check_for_eof()
+bool check_for_eof()
 {
 	ignore_white_space();
 
@@ -548,37 +545,28 @@ int check_for_eof()
 }
 
 /**
-Returns 1 if it finds a newline character precded by any amount of grayspace.
+Returns true if it finds a newline character precded by any amount of grayspace.
 */
-int check_for_eoln()
+bool check_for_eoln()
 {
 	ignore_gray_space();
 
-	if(*Mp == EOLN)
-		return 1;
-	else
-		return 0;
+	return (*Mp == EOLN);
 }
 
 // similar to optional_string, but just checks if next token is a match.
 // It doesn't advance Mp except to skip past white space.
-int check_for_string(const char *pstr)
+bool check_for_string(const char *pstr)
 {
 	ignore_white_space();
 
-	if (!strnicmp(pstr, Mp, strlen(pstr)))
-		return 1;
-
-	return 0;
+	return check_for_string_raw(pstr);
 }
 
 // like check for string, but doesn't skip past any whitespace
-int check_for_string_raw(const char *pstr)
+bool check_for_string_raw(const char *pstr)
 {
-	if (!strnicmp(pstr, Mp, strlen(pstr)))
-		return 1;
-
-	return 0;
+	return (strnicmp(pstr, Mp, strlen(pstr)) == 0);
 }
 
 int string_lookup(const char* str1, const SCP_vector<SCP_string>& strlist, const char* description, bool say_errors, bool print_list)
@@ -972,7 +960,7 @@ char* alloc_text_until(const char* instr, const char* endstr)
 
 	if(foundstr == NULL)
 	{
-        Error(LOCATION, "Missing [%s] in file", endstr);
+        error_display(1, "Looking for [%s], but never found it.\n", endstr);
         throw parse::ParseException("End string not found");
 	}
 	else
@@ -1006,7 +994,7 @@ void copy_text_until(char *outstr, const char *instr, const char *endstr, int ma
 	auto foundstr = stristr(instr, endstr);
 
 	if (foundstr == NULL) {
-        nprintf(("Error", "Error.  Looking for [%s], but never found it.\n", endstr));
+        error_display(1, "Looking for [%s], but never found it.\n", endstr);
         throw parse::ParseException("End string not found");
 	}
 
@@ -1015,9 +1003,8 @@ void copy_text_until(char *outstr, const char *instr, const char *endstr, int ma
 		outstr[foundstr - instr] = 0;
 
 	} else {
-		nprintf(("Error", "Error.  Too much text (" SIZE_T_ARG " chars, %i allowed) before %s\n",
-			foundstr - instr + strlen(endstr), max_chars, endstr));
-
+		error_display(1, "Too much text (" SIZE_T_ARG " chars, %i allowed) before %s\n",
+			foundstr - instr + strlen(endstr), max_chars, endstr);
         throw parse::ParseException("Too much text found");
 	}
 
@@ -1032,7 +1019,7 @@ void copy_text_until(SCP_string &outstr, const char *instr, const char *endstr)
 	auto foundstr = stristr(instr, endstr);
 
 	if (foundstr == NULL) {
-        nprintf(("Error", "Error.  Looking for [%s], but never found it.\n", endstr));
+        error_display(1, "Looking for [%s], but never found it.\n", endstr);
         throw parse::ParseException("End string not found");
 	}
 
@@ -1129,7 +1116,7 @@ char* alloc_block(const char* startstr, const char* endstr, int extra_chars)
 	//Check that we left the file
 	if(level > 0)
 	{
-        Error(LOCATION, "Unclosed pair of \"%s\" and \"%s\" on line %d in file", startstr, endstr, get_line_num());
+        error_display(1, "Unclosed pair of \"%s\" and \"%s\"", startstr, endstr);
         throw parse::ParseException("End string not found");
 	}
 	else
@@ -4445,7 +4432,7 @@ const char *get_pointer_to_first_hash_symbol(const char *src, bool ignore_double
 }
 
 // Goober5000
-int get_index_of_first_hash_symbol(SCP_string &src, bool ignore_doubled_hash)
+int get_index_of_first_hash_symbol(const SCP_string &src, bool ignore_doubled_hash)
 {
 	if (ignore_doubled_hash)
 	{
@@ -4456,7 +4443,7 @@ int get_index_of_first_hash_symbol(SCP_string &src, bool ignore_doubled_hash)
 				if ((ch + 1) != src.end() && *(ch + 1) == '#')
 					++ch;
 				else
-					return (int)std::distance(src.begin(), ch);
+					return static_cast<int>(std::distance(src.begin(), ch));
 			}
 		}
 		return -1;

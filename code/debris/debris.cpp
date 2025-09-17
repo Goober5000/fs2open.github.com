@@ -37,7 +37,6 @@
 #include "utils/Random.h"
 #include "weapon/weapon.h"
 
-constexpr int MIN_RADIUS_FOR_PERSISTENT_DEBRIS = 50;	// ship radius at which debris from it becomes persistant
 constexpr int DEBRIS_SOUND_DELAY = 2000;				// time to start debris sound after created
 
 int Num_hull_pieces;	// number of hull pieces in existence
@@ -67,23 +66,46 @@ debris_electrical_arc *debris_find_or_create_electrical_arc_slot(debris *db, boo
  */
 static void debris_start_death_roll(object *debris_obj, debris *debris_p, vec3d *hitpos = nullptr)
 {
+	auto sip = &Ship_info[debris_p->ship_info_index];
 	if (debris_p->is_hull)	{
 		// tell everyone else to blow up the piece of debris
 		if( MULTIPLAYER_MASTER )
 			send_debris_update_packet(debris_obj,DEBRIS_UPDATE_NUKE);
 
-		int fireball_type = fireball_ship_explosion_type(&Ship_info[debris_p->ship_info_index]);
-		if(fireball_type < 0) {
-			fireball_type = FIREBALL_EXPLOSION_LARGE1 + Random::next(FIREBALL_NUM_LARGE_EXPLOSIONS);
+		if (sip->debris_end_particles.isValid()) {
+			auto source = particle::ParticleManager::get()->createSource(sip->debris_end_particles);
+
+			// Use the position since the object is going to be invalid soon
+			auto host = std::make_unique<EffectHostVector>(debris_obj->pos, debris_obj->orient, debris_obj->phys_info.vel);
+			host->setRadius(debris_obj->radius);
+			source->setHost(std::move(host));
+			source->setNormal(debris_obj->orient.vec.uvec);
+			source->finishCreation();
+		} else {
+			int fireball_type = fireball_ship_explosion_type(sip);
+			if(fireball_type < 0) {
+				fireball_type = FIREBALL_EXPLOSION_LARGE1 + Random::next(FIREBALL_NUM_LARGE_EXPLOSIONS);
+			}
+			fireball_create( &debris_obj->pos, fireball_type, FIREBALL_LARGE_EXPLOSION, OBJ_INDEX(debris_obj), debris_obj->radius*1.75f);
 		}
-		fireball_create( &debris_obj->pos, fireball_type, FIREBALL_LARGE_EXPLOSION, OBJ_INDEX(debris_obj), debris_obj->radius*1.75f);
 
 		// only play debris destroy sound if hull piece and it has been around for at least 2 seconds
 		if ( Missiontime > debris_p->time_started + 2*F1_0 ) {
-			auto snd_id = Ship_info[debris_p->ship_info_index].debris_explosion_sound;
+			auto snd_id = sip->debris_explosion_sound;
 			if (snd_id.isValid()) {
 				snd_play_3d( gamesnd_get_game_sound(snd_id), &debris_obj->pos, &View_position, debris_obj->radius );
 			}
+		}
+	} else {
+		if (sip->shrapnel_end_particles.isValid()) {
+			auto source = particle::ParticleManager::get()->createSource(sip->shrapnel_end_particles);
+
+			// Use the position since the object is going to be invalid soon
+			auto host = std::make_unique<EffectHostVector>(debris_obj->pos, debris_obj->orient, debris_obj->phys_info.vel);
+			host->setRadius(debris_obj->radius);
+			source->setHost(std::move(host));
+			source->setNormal(debris_obj->orient.vec.uvec);
+			source->finishCreation();
 		}
 	}
 
@@ -428,8 +450,26 @@ object *debris_create(object *source_obj, int model_num, int submodel_num, const
 		debris_create_set_velocity(&Debris[obj->instance], shipp, exp_center, exp_force, source_subsys);
 		debris_create_fire_hook(obj, source_obj);
 		const auto& sip = Ship_info[Ships[source_obj->instance].ship_info_index];
-		if (sip.debris_flame_particles.isValid()) {
-			auto source = particle::ParticleManager::get()->createSource(sip.debris_flame_particles);
+		particle::ParticleEffectHandle flame_effect;
+		if (source_subsys != nullptr) {
+			if (hull_flag) {
+				if (source_subsys->system_info->debris_flame_particles.isValid()) {
+					flame_effect = source_subsys->system_info->debris_flame_particles;
+				} else {
+					flame_effect = sip.default_subsys_debris_flame_particles;
+				}
+			} else {
+				if (source_subsys->system_info->shrapnel_flame_particles.isValid()) {
+					flame_effect = source_subsys->system_info->shrapnel_flame_particles;
+				} else {
+					flame_effect = sip.default_subsys_shrapnel_flame_particles;
+				}
+			}
+		} else {
+			flame_effect = hull_flag ? sip.debris_flame_particles : sip.shrapnel_flame_particles;
+		}
+		if (flame_effect.isValid()) {
+			auto source = particle::ParticleManager::get()->createSource(flame_effect);
 			source->setHost(std::make_unique<EffectHostObject>(obj, vmd_zero_vector));
 			source->setTriggerRadius(source_obj->radius);
 			source->setTriggerVelocity(vm_vec_mag_quick(&source_obj->phys_info.vel));
@@ -567,22 +607,10 @@ object *debris_create_only(int parent_objnum, int parent_ship_class, int alt_typ
 	}
 
 	// Create Debris piece n!
-	if ( hull_flag ) {
-		if (Random::next() < (Random::MAX_VALUE/6))	// Make some pieces blow up shortly after explosion.
-			db->lifeleft = 2.0f * (frand()) + 0.5f;
-		else {
-			db->flags.set(Debris_Flags::DoNotExpire);
-			db->lifeleft = -1.0f;		// large hull pieces stay around forever
-		}
-	} else {
-		// small non-hull pieces should stick around longer the larger they are
-		// sqrtf should make sure its never too crazy long
-		db->lifeleft = (frand() * 2.0f + 0.1f) * sqrtf(radius);
-	}
-
-	//WMC - Oh noes, we may need to change lifeleft
 	if(hull_flag)
 	{
+		// set lifeleft based on tabled entries if they are not negative 
+		// coded originally by WMC then clean-up added by wookieejedi
 		if(sip->debris_min_lifetime >= 0.0f && sip->debris_max_lifetime >= 0.0f)
 		{
 			db->lifeleft = (( sip->debris_max_lifetime - sip->debris_min_lifetime ) * frand()) + sip->debris_min_lifetime;
@@ -597,6 +625,22 @@ object *debris_create_only(int parent_objnum, int parent_ship_class, int alt_typ
 			if(db->lifeleft > sip->debris_max_lifetime)
 				db->lifeleft = sip->debris_max_lifetime;
 		}
+		// By default, make some pieces blow up shortly after explosion.
+		else if (Random::next() < (Random::MAX_VALUE / 6)) 
+		{
+			db->lifeleft = 2.0f * (frand()) + 0.5f;
+		}
+		else 
+		{
+			db->flags.set(Debris_Flags::DoNotExpire);
+			db->lifeleft = -1.0f; // large hull pieces stay around forever
+		}
+	} 
+	else 
+	{
+		// small non-hull pieces should stick around longer the larger they are
+		// sqrtf should make sure its never too crazy long
+		db->lifeleft = (frand() * 2.0f + 0.1f) * sqrtf(radius);
 	}
 
 	// increase lifetime for vaporized debris
@@ -698,7 +742,7 @@ object *debris_create_only(int parent_objnum, int parent_ship_class, int alt_typ
 			db->arc_timeout = TIMESTAMP::immediate();
 		}
 
-		if (parent_objnum >= 0 && Objects[parent_objnum].radius >= MIN_RADIUS_FOR_PERSISTENT_DEBRIS) {
+		if (parent_objnum >= 0 && Objects[parent_objnum].radius >= Min_radius_for_persistent_debris) {
 			db->flags.set(Debris_Flags::DoNotExpire);
 		} else {
 			debris_add_to_hull_list(db);

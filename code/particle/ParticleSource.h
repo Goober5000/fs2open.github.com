@@ -3,6 +3,7 @@
 #pragma once
 
 #include "globalincs/pstypes.h"
+#include "globalincs/systemvars.h"
 #include "object/object.h"
 #include "particle/particle.h"
 #include "io/timer.h"
@@ -18,23 +19,6 @@ struct weapon_info;
 enum class WeaponState: uint32_t;
 
 namespace particle {
-/**
- * The origin type
- */
-enum class SourceOriginType {
-	NONE, //!< Invalid origin
-	VECTOR, //!< World-space offset
-	BEAM, //!< A beam
-	OBJECT, //!< An object
-	SUBOBJECT, //!< A subobject
-	TURRET, //!< A turret
-	PARTICLE //!< A particle
-};
-
-class ParticleEffect;
-struct particle_effect_tag {
-};
-using ParticleEffectHandle = ::util::ID<particle_effect_tag, ptrdiff_t, -1>;
 
 /**
  * @brief The orientation of a particle source
@@ -91,7 +75,9 @@ class ParticleSource {
 
 	static float getEffectRunningTime(const std::tuple<const ParticleSource&, const size_t&>& source);
 
-	static float getEffectVisualSize(const std::tuple<const ParticleSource&, const size_t&, const vec3d&>& source);
+	static float getEffectPixelSize(const std::tuple<const ParticleSource&, const size_t&, const vec3d&>& source);
+
+	static float getEffectApparentSize(const std::tuple<const ParticleSource&, const size_t&, const vec3d&>& source);
  public:
 	ParticleSource();
 
@@ -100,7 +86,7 @@ class ParticleSource {
 	const SCP_vector<ParticleEffect>& getEffect() const;
 
 	inline void setEffect(ParticleEffectHandle eff) {
-		Assert(eff.isValid());
+		Assert(eff.isValid() || Is_standalone);
 		m_effect = eff;
 	}
 

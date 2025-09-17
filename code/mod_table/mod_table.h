@@ -41,6 +41,7 @@ struct splash_screen {
 
 extern int Directive_wait_time;
 extern bool True_loop_argument_sexps;
+extern bool Skybox_internal_depth_consistency;
 extern bool Fixed_turret_collisions;
 extern bool Fixed_missile_detonation;
 extern bool Damage_impacted_subsystem_first;
@@ -58,6 +59,10 @@ extern bool Use_3d_weapon_select;
 extern int Default_weapon_select_effect;
 extern bool Use_3d_weapon_icons;
 extern bool Use_3d_overhead_ship;
+extern color Default_fs2_effect_grid_color;
+extern color Default_fs2_effect_scanline_color;
+extern color Default_fs2_effect_wireframe_color;
+extern int Default_fs2_effect_grid_density;
 extern overhead_style Default_overhead_ship_style;
 extern int Default_fiction_viewer_ui;
 extern bool Enable_external_shaders;
@@ -187,6 +192,8 @@ extern bool Fix_asteroid_bounding_box_check;
 extern bool Disable_intro_movie;
 extern bool Show_locked_status_scramble_missions;
 extern bool Disable_expensive_turret_target_check;
+extern float Shield_percent_skips_damage;
+extern float Min_radius_for_persistent_debris;
 
 void mod_table_init();
 void mod_table_post_process();

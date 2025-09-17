@@ -2229,6 +2229,7 @@ typedef struct eval_nearest_objnum {
 	object *trial_objp;
 	int	enemy_team_mask;
 	int enemy_ship_info_index;
+	int enemy_class_type;
 	int	enemy_wing;
 	float	range;
 	int	max_attackers;
@@ -2260,6 +2261,10 @@ void evaluate_object_as_nearest_objnum(eval_nearest_objnum *eno)
 
 			//	If only supposed to attack ships of a certain ship class, don't attack other ships.
 			if ((eno->enemy_ship_info_index >= 0) && (shipp->ship_info_index != eno->enemy_ship_info_index))
+				return;
+
+			//	If only supposed to attack ships of a certain ship type, don't attack other ships.
+			if ((eno->enemy_class_type >= 0) && (Ship_info[shipp->ship_info_index].class_type != eno->enemy_class_type))
 				return;
 
 			//	Don't keep firing at a ship that is in its death throes.
@@ -2350,8 +2355,9 @@ void evaluate_object_as_nearest_objnum(eval_nearest_objnum *eno)
  * @param range				Ship must be within range "range".
  * @param max_attackers		Don't attack a ship that already has at least max_attackers attacking it.
  * @param ship_info_index	If >=0, the enemy object must be of the specified ship class
+ * @param class_type		If >=0, the enemy object must be of the specified ship type
  */
-int get_nearest_objnum(int objnum, int enemy_team_mask, int enemy_wing, float range, int max_attackers, int ship_info_index)
+int get_nearest_objnum(int objnum, int enemy_team_mask, int enemy_wing, float range, int max_attackers, int ship_info_index, int class_type)
 {
 	object	*danger_weapon_objp;
 	ai_info	*aip;
@@ -2361,6 +2367,7 @@ int get_nearest_objnum(int objnum, int enemy_team_mask, int enemy_wing, float ra
 	eval_nearest_objnum eno;
 	eno.enemy_team_mask = enemy_team_mask;
 	eno.enemy_ship_info_index = ship_info_index;
+	eno.enemy_class_type = class_type;
 	eno.enemy_wing = enemy_wing;
 	eno.max_attackers = max_attackers;
 	eno.objnum = objnum;
@@ -2406,7 +2413,7 @@ int get_nearest_objnum(int objnum, int enemy_team_mask, int enemy_wing, float ra
 	//	If only looking for target in certain wing and couldn't find anything in
 	//	that wing, look for any object.
 	if ((eno.nearest_objnum == -1) && (enemy_wing != -1)) {
-		return get_nearest_objnum(objnum, enemy_team_mask, -1, range, max_attackers, ship_info_index);
+		return get_nearest_objnum(objnum, enemy_team_mask, -1, range, max_attackers, ship_info_index, class_type);
 	}
 
 	return eno.nearest_objnum;
@@ -2510,13 +2517,15 @@ int get_enemy_timestamp()
 /**
  * Return objnum if enemy found, else return -1;
  *
- * @param objnum		Object number
- * @param range			Range within which to look
- * @param max_attackers Don't attack a ship that already has at least max_attackers attacking it.
+ * @param objnum         Object number
+ * @param range          Range within which to look
+ * @param max_attackers  Don't attack a ship that already has at least max_attackers attacking it.
+ * @param ship_info_index  If specified, restrict the search to enemies with this ship class
+ * @param class_type     If specified, restrict the search to enemies with this ship type
  */
-int find_enemy(int objnum, float range, int max_attackers, int ship_info_index)
+int find_enemy(int objnum, float range, int max_attackers, int ship_info_index, int class_type)
 {
-	int	enemy_team_mask;
+	int enemy_team_mask;
 
 	if (objnum < 0)
 		return -1;
@@ -2524,19 +2533,25 @@ int find_enemy(int objnum, float range, int max_attackers, int ship_info_index)
 	enemy_team_mask = iff_get_attackee_mask(obj_team(&Objects[objnum]));
 
 	//	if target_objnum != -1, use that as goal.
-	ai_info	*aip = &Ai_info[Ships[Objects[objnum].instance].ai_index];
+	ai_info* aip = &Ai_info[Ships[Objects[objnum].instance].ai_index];
 	if (timestamp_elapsed(aip->choose_enemy_timestamp)) {
 		aip->choose_enemy_timestamp = timestamp(get_enemy_timestamp());
+
 		if (aip->target_objnum != -1) {
-			int	target_objnum = aip->target_objnum;
+			int target_objnum = aip->target_objnum;
 
 			// DKA don't undo object as target in nebula missions.
-			// This could cause attack on ship on fringe on nebula to stop if attackee moves our of nebula range.  (BAD)
-			if ( Objects[target_objnum].signature == aip->target_signature ) {
-				if (iff_matches_mask(Ships[Objects[target_objnum].instance].team, enemy_team_mask)) {
-					if (ship_info_index < 0 || ship_info_index == Ships[Objects[target_objnum].instance].ship_info_index) {
-						if (!(Objects[target_objnum].flags[Object::Object_Flags::Protected])) {
-							return target_objnum;
+			// This could cause attack on ship on fringe on nebula to stop if attackee moves out of nebula range.  (BAD)
+			if (Objects[target_objnum].signature == aip->target_signature) {
+				ship* target_shipp = (Objects[target_objnum].type == OBJ_SHIP) ? &Ships[Objects[target_objnum].instance] : nullptr;
+
+				if (target_shipp && iff_matches_mask(target_shipp->team, enemy_team_mask)) {
+					if (ship_info_index < 0 || ship_info_index == target_shipp->ship_info_index) {
+						if (class_type < 0 || (target_shipp->ship_info_index >= 0 &&
+							class_type == Ship_info[target_shipp->ship_info_index].class_type)) {
+							if (!(Objects[target_objnum].flags[Object::Object_Flags::Protected])) {
+								return target_objnum;
+							}
 						}
 					}
 				}
@@ -2545,9 +2560,8 @@ int find_enemy(int objnum, float range, int max_attackers, int ship_info_index)
 				aip->target_signature = -1;
 			}
 		}
-		
-		return get_nearest_objnum(objnum, enemy_team_mask, aip->enemy_wing, range, max_attackers, ship_info_index);
-		
+
+		return get_nearest_objnum(objnum, enemy_team_mask, aip->enemy_wing, range, max_attackers, ship_info_index, class_type);
 	} else {
 		aip->target_objnum = -1;
 		aip->target_signature = -1;
@@ -2588,7 +2602,7 @@ void force_avoid_player_check(object *objp, ai_info *aip)
  * If attacked == NULL, then attack any enemy object.
  * Attack point *rel_pos on object.  This is for supporting attacking subsystems.
  */
-void ai_attack_object(object* attacker, object* attacked, int ship_info_index)
+void ai_attack_object(object* attacker, object* attacked, int ship_info_index, int class_type)
 {
 	int temp;
 	ai_info* aip;
@@ -2621,7 +2635,7 @@ void ai_attack_object(object* attacker, object* attacked, int ship_info_index)
 	if (attacked == nullptr) {
 		aip->choose_enemy_timestamp = timestamp(0);
 		// nebula safe
-		set_target_objnum(aip, find_enemy(OBJ_INDEX(attacker), 99999.9f, 4, ship_info_index));
+		set_target_objnum(aip, find_enemy(OBJ_INDEX(attacker), 99999.9f, 4, ship_info_index, class_type));
 	} else {
 		// check if we can see attacked in nebula
 		if (aip->target_objnum != OBJ_INDEX(attacked)) {
@@ -7697,7 +7711,7 @@ bool maybe_avoid_big_ship(object *objp, object *ignore_objp, ai_info *aip, vec3d
 			aip->ai_flags.remove(AI::AI_Flags::Avoiding_small_ship);
 			aip->avoid_ship_num = -1;
 			next_check_time = (int) (1500 * time_scale);
-			aip->avoid_check_timestamp = timestamp(1500);
+			aip->avoid_check_timestamp = timestamp(next_check_time);
 		}
 	}
 	
@@ -7723,7 +7737,7 @@ bool maybe_avoid_big_ship(object *objp, object *ignore_objp, ai_info *aip, vec3d
  * Return true if small ship and it will likely collide with large ship
  * developed by Asteroth
  */
-bool better_collision_avoidance_triggered(bool flag_to_check, float avoidance_aggression, object* pl_objp, object* en_objp)
+bool better_collision_avoidance_triggered(bool flag_to_check, float avoidance_aggression, object* pl_objp, object* ignore_objp)
 {
 	ship* shipp = &Ships[pl_objp->instance];
 	ship_info* sip = &Ship_info[shipp->ship_info_index];
@@ -7734,7 +7748,7 @@ bool better_collision_avoidance_triggered(bool flag_to_check, float avoidance_ag
 		collide_vec *= radius_contribution;
 
 		collide_vec += pl_objp->pos;
-		return (maybe_avoid_big_ship(pl_objp, en_objp, &Ai_info[shipp->ai_index], &collide_vec, 0.f, 0.1f));
+		return (maybe_avoid_big_ship(pl_objp, ignore_objp, &Ai_info[shipp->ai_index], &collide_vec, 0.f, 0.1f));
 	}
 	return false;
 }
@@ -8964,7 +8978,8 @@ void ai_chase()
 	if (better_collision_avoidance_triggered(
 			The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoidance],
 			The_mission.ai_profile->better_collision_avoid_aggression_combat,
-			Pl_objp, En_objp)) {
+			Pl_objp, 
+			The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoid_includes_target] ? nullptr : En_objp)) {
 		return;
 	}
 
@@ -10882,7 +10897,8 @@ void ai_guard()
 	if (better_collision_avoidance_triggered(
 			The_mission.ai_profile->flags[AI::Profile_Flags::Better_guard_collision_avoidance],
 			The_mission.ai_profile->better_collision_avoid_aggression_guard,
-			Pl_objp, En_objp)) {
+			Pl_objp, 
+			En_objp)) {
 		return;
 	}
 
@@ -12125,9 +12141,11 @@ void ai_process_subobjects(int objnum)
 
 	bool in_lab = gameseq_get_state() == GS_STATE_LAB;
 
-	// non-player ships that are playing dead do not process subsystems or turrets
-	if ((!(objp->flags[Object::Object_Flags::Player_ship]) || Player_use_ai) && aip->mode == AIM_PLAY_DEAD)
-		return;
+	// non-player ships that are playing dead do not process subsystems or turrets unless we're in the lab
+	if (gameseq_get_state() != GS_STATE_LAB) {
+		if ((!(objp->flags[Object::Object_Flags::Player_ship]) || Player_use_ai) && aip->mode == AIM_PLAY_DEAD)
+			return;
+	}
 
 	polymodel_instance *pmi = model_get_instance(shipp->model_instance_num);
 	polymodel *pm = model_get(pmi->model_num);
@@ -13228,8 +13246,6 @@ static void ai_preprocess_ignore_objnum(ai_info *aip)
 		aip->target_objnum = -1;
 }
 
-#define	CHASE_CIRCLE_DIST		100.0f
-
 void ai_chase_circle(object *objp)
 {
 	float		dist_to_goal;
@@ -13250,11 +13266,11 @@ void ai_chase_circle(object *objp)
 	if (aip->ignore_objnum == UNUSED_OBJNUM) {
 		dist_to_goal = vm_vec_dist_quick(&aip->goal_point, &objp->pos);
 
-		if (dist_to_goal > 2*CHASE_CIRCLE_DIST) {
+		if (dist_to_goal > 2 * The_mission.ai_profile->attack_any_idle_circle_distance) {
 			vec3d	vec_to_goal;
 			//	Too far from circle goal, create a new goal point.
 			vm_vec_normalized_dir(&vec_to_goal, &aip->goal_point, &objp->pos);
-			vm_vec_scale_add(&aip->goal_point, &objp->pos, &vec_to_goal, CHASE_CIRCLE_DIST);
+			vm_vec_scale_add(&aip->goal_point, &objp->pos, &vec_to_goal, The_mission.ai_profile->attack_any_idle_circle_distance);
 		}
 
 		goal_point = aip->goal_point;
@@ -14032,20 +14048,28 @@ void ai_bay_depart()
 		return;
 	}
 
+	ship* shipp;
+
 	// check if parent ship valid; if not, abort depart
-	auto anchor_ship_entry = ship_registry_get(Parse_names[Ships[Pl_objp->instance].departure_anchor]);
-	if (!anchor_ship_entry || !ship_useful_for_departure(anchor_ship_entry->shipnum, Ships[Pl_objp->instance].departure_path_mask))
-	{
-		mprintf(("Aborting bay departure!\n"));
-		aip->mode = AIM_NONE;
-		
-        Ships[Pl_objp->instance].flags.remove(Ship::Ship_Flags::Depart_dockbay);
-		return;
+	if (gameseq_get_state() != GS_STATE_LAB) {
+		auto anchor_ship_entry = ship_registry_get(Parse_names[Ships[Pl_objp->instance].departure_anchor]);
+		if (!anchor_ship_entry ||
+			!ship_useful_for_departure(anchor_ship_entry->shipnum, Ships[Pl_objp->instance].departure_path_mask)) {
+			mprintf(("Aborting bay departure!\n"));
+			aip->mode = AIM_NONE;
+
+			Ships[Pl_objp->instance].flags.remove(Ship::Ship_Flags::Depart_dockbay);
+			return;
+		}
+
+		shipp = anchor_ship_entry->shipp();
+	} else {
+		shipp = &Ships[Objects[aip->goal_objnum].instance];
 	}
 
 	ai_manage_bay_doors(Pl_objp, aip, false);
 
-	if ( anchor_ship_entry->shipp()->bay_doors_status != MA_POS_READY )
+	if ( shipp->bay_doors_status != MA_POS_READY )
 		return;
 
 	// follow the path to the final point
@@ -14168,7 +14192,8 @@ void ai_execute_behavior(ai_info *aip)
 			if (!(better_collision_avoidance_triggered(
 					The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoidance],
 					The_mission.ai_profile->better_collision_avoid_aggression_combat,
-					Pl_objp, En_objp))) {
+					Pl_objp, 
+					The_mission.ai_profile->flags[AI::Profile_Flags::Better_combat_collision_avoid_includes_target] ? nullptr : En_objp))) {
 				ai_big_strafe();	// strafe a big ship
 			}
 		} else {

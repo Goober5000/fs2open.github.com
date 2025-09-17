@@ -20,7 +20,7 @@
      <x>0</x>
      <y>0</y>
      <width>926</width>
-     <height>21</height>
+     <height>22</height>
     </rect>
    </property>
    <widget class="QMenu" name="menuFile">
@@ -168,20 +168,28 @@
     <addaction name="actionWings"/>
     <addaction name="actionObjects"/>
     <addaction name="actionWaypoint_Paths"/>
-    <addaction name="actionMission_Objectives"/>
-    <addaction name="actionEvents"/>
-    <addaction name="actionLoadout"/>
-    <addaction name="actionBackground"/>
-    <addaction name="actionReinforcements"/>
-    <addaction name="actionAsteroid_Field"/>
+    <addaction name="actionJump_Nodes"/>
+    <addaction name="separator"/>
     <addaction name="actionMission_Specs"/>
+    <addaction name="actionMission_Goals"/>
+    <addaction name="actionMission_Events"/>
+    <addaction name="actionVariables"/>
+    <addaction name="actionMission_Cutscenes"/>
+    <addaction name="actionVoice_Acting_Manager"/>
+    <addaction name="separator"/>
+    <addaction name="actionFiction_Viewer"/>
+    <addaction name="actionCommand_Briefing"/>
+    <addaction name="actionLoadout"/>
     <addaction name="actionBriefing"/>
     <addaction name="actionDebriefing"/>
-    <addaction name="actionCommand_Briefing"/>
-    <addaction name="actionFiction_Viewer"/>
+    <addaction name="separator"/>
+    <addaction name="actionBackground"/>
+    <addaction name="actionAsteroid_Field"/>
+    <addaction name="actionVolumetric_Nebula"/>
+    <addaction name="separator"/>
+    <addaction name="actionReinforcements"/>
     <addaction name="actionShield_System"/>
     <addaction name="actionSet_Global_Ship_Flags"/>
-    <addaction name="actionVoice_Acting_Manager"/>
     <addaction name="separator"/>
     <addaction name="actionCampaign"/>
    </widget>
@@ -231,9 +239,12 @@
     <addaction name="separator"/>
     <addaction name="actionMark_Wing"/>
     <addaction name="actionAdjust_Grid"/>
+    <addaction name="actionCalculate_Relative_Coordinates"/>
     <addaction name="actionMove_Ships_When_Undocking"/>
     <addaction name="actionMission_Statistics"/>
     <addaction name="separator"/>
+    <addaction name="actionAlways_Save_Display_Names"/>
+    <addaction name="actionMusic_Player"/>
     <addaction name="actionError_Checker_Checks_Potential_Issues"/>
     <addaction name="actionError_Checker"/>
    </widget>
@@ -1124,9 +1135,9 @@
     <string>Shift+Y</string>
    </property>
   </action>
-  <action name="actionEvents">
+  <action name="actionMission_Events">
    <property name="text">
-    <string>&amp;Events</string>
+    <string>Mission &amp;Events</string>
    </property>
    <property name="shortcut">
     <string>Shift+E</string>
@@ -1439,6 +1450,14 @@
     <string>Ctrl+Shift+D</string>
    </property>
   </action>
+  <action name="actionAlways_Save_Display_Names">
+   <property name="checkable">
+    <bool>true</bool>
+   </property>
+   <property name="text">
+    <string>Always save Display Names</string>
+   </property>
+  </action>
   <action name="actionError_Checker_Checks_Potential_Issues">
    <property name="checkable">
     <bool>true</bool>
@@ -1489,12 +1508,54 @@
     <string>&amp;Empty</string>
    </property>
   </action>
-  <action name="actionMission_Objectives">
+  <action name="actionMission_Goals">
    <property name="text">
-    <string>Mission Objectives</string>
+    <string>Mission Goals</string>
    </property>
    <property name="shortcut">
     <string>Shift+G</string>
+   </property>
+  </action>
+  <action name="actionVariables">
+   <property name="text">
+    <string>&amp;Variables</string>
+   </property>
+   <property name="toolTip">
+    <string>Open Variables and Containers Editor</string>
+   </property>
+   <property name="shortcut">
+    <string>Shift+V</string>
+   </property>
+  </action>
+  <action name="actionJump_Nodes">
+   <property name="text">
+    <string>Jump &amp;Nodes</string>
+   </property>
+   <property name="shortcut">
+    <string>Shift+J</string>
+   </property>
+  </action>
+  <action name="actionMission_Cutscenes">
+   <property name="text">
+    <string>Mission Cutscenes</string>
+   </property>
+   <property name="shortcut">
+    <string>Shift+X</string>
+   </property>
+  </action>
+  <action name="actionMusic_Player">
+   <property name="text">
+    <string>Music Player</string>
+   </property>
+  </action>
+  <action name="actionVolumetric_Nebula">
+   <property name="text">
+    <string>Volumetric Nebula</string>
+   </property>
+  </action>
+  <action name="actionCalculate_Relative_Coordinates">
+   <property name="text">
+    <string>Calculate Relative Coordinates</string>
    </property>
   </action>
  </widget>

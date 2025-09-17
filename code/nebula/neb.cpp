@@ -204,8 +204,13 @@ void parse_nebula_table(const char* filename)
 		read_file_text(filename, CF_TYPE_TABLES);
 		reset_parse();
 
+		// allow modular tables to not define bitmaps
+		bool skip_background_bitmaps = false;
+		if (Parsing_modular_table && (check_for_string("+Poof:") || check_for_string("$Name:")))
+			skip_background_bitmaps = true;
+
 		// background bitmaps
-		while (!optional_string("#end")) {
+		while (!skip_background_bitmaps && !optional_string("#end")) {
 			// nebula
 			optional_string("+Nebula:");
 			stuff_string(name, F_NAME, MAX_FILENAME_LEN);
@@ -222,7 +227,7 @@ void parse_nebula_table(const char* filename)
 		if (Parsing_modular_table && check_for_eof())
 			return;
 
-		// poofs
+		// poofs (see also check_for_string above)
 		while (required_string_one_of(3, "#end", "+Poof:", "$Name:")) {
 			bool create_if_not_found = true;
 			poof_info pooft;
@@ -1138,15 +1143,24 @@ float neb2_get_fog_visibility(const vec3d *pos, float distance_mult)
 }
 
 bool nebula_handle_alpha(float& alpha, const vec3d* pos, float distance_mult) {
-	if (The_mission.flags[Mission::Mission_Flags::Fullneb]) {
-		alpha *= neb2_get_fog_visibility(pos, distance_mult);
-		return true;
+
+	bool bHasNebula = false;
+	float fAlphaMult = 1.0f;
+
+	if (The_mission.flags[Mission::Mission_Flags::Fullneb])
+	{
+		fAlphaMult *= neb2_get_fog_visibility(pos, distance_mult);
+		bHasNebula = true;
 	}
-	else if (The_mission.volumetrics) {
-		alpha *= The_mission.volumetrics->getAlphaToPos(*pos, distance_mult);
-		return true;
+
+	if (The_mission.volumetrics)
+	{
+		fAlphaMult *= The_mission.volumetrics->getAlphaToPos(*pos, distance_mult);
+		bHasNebula = true;
 	}
-	return false;
+
+	alpha *= fAlphaMult;
+	return bHasNebula;
 }
 
 // fogging stuff --------------------------------------------------------------------

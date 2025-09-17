@@ -1084,7 +1084,7 @@ void physics_apply_shock(vec3d *direction_vec, float pressure, physics_info *pi,
 // Warning:  Do not change ROTVEL_COLLIDE_WHACK_CONST.  This will mess up collision physics.
 // If you need to change the rotation, change  COLLISION_ROTATION_FACTOR in collide_ship_ship.
 #define ROTVEL_COLLIDE_WHACK_CONST 1.0
-void physics_collide_whack( vec3d *impulse, vec3d *world_delta_rotvel, physics_info *pi, matrix *orient, bool is_landing )
+void physics_collide_whack( vec3d *impulse, vec3d *world_delta_rotvel, physics_info *pi, matrix *orient, bool is_landing, float max_rotvel )
 {
 	vec3d	body_delta_rotvel;
 
@@ -1095,6 +1095,13 @@ void physics_collide_whack( vec3d *impulse, vec3d *world_delta_rotvel, physics_i
 	vm_vec_rotate( &body_delta_rotvel, world_delta_rotvel, orient );
 //	vm_vec_scale( &body_delta_rotvel, (float)	ROTVEL_COLLIDE_WHACK_CONST );
 	vm_vec_add2( &pi->rotvel, &body_delta_rotvel );
+
+	if (max_rotvel > 0.0f) {
+		float rotvel_mag = vm_vec_mag(&pi->rotvel);
+		if (rotvel_mag > max_rotvel) {
+			vm_vec_scale(&pi->rotvel, max_rotvel / rotvel_mag);
+		}
+	}
 
 	pi->flags |= PF_REDUCED_DAMP;
 	update_reduced_damp_timestamp( pi, vm_vec_mag(impulse) );
@@ -1242,7 +1249,7 @@ bool physics_lead_ballistic_trajectory(const vec3d* start, const vec3d* end_pos,
 
 		time = range / (weapon_speed * cosf(angle));
 
-		if (abs(time - best_guess_time) < 0.01f)
+		if (std::abs(time - best_guess_time) < 0.01f)
 			break;
 		else
 			best_guess_time = time;

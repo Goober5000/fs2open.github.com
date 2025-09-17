@@ -21,6 +21,7 @@ class ShipEditorDialogModel : public AbstractDialogModel {
 	int _m_departure_tree_formula;
 	int _m_arrival_tree_formula;
 	SCP_string _m_ship_name;
+	SCP_string _m_ship_display_name;
 	SCP_string _m_cargo1;
 	SCP_string _m_alt_name;
 	SCP_string _m_callsign;
@@ -70,14 +71,19 @@ class ShipEditorDialogModel : public AbstractDialogModel {
 
 		bool texenable = true;
 
+	int respawn_priority;
+
   public:
 	ShipEditorDialogModel(QObject* parent, EditorViewport* viewport);
 	void initializeData();
 	bool apply() override;
 	void reject() override;
 
-	void setShipName(const SCP_string m_ship_name);
+	void setShipName(const SCP_string &m_ship_name);
 	SCP_string getShipName() const;
+
+	void setShipDisplayName(const SCP_string &m_ship_display_name);
+	SCP_string getShipDisplayName() const;
 
 	void setShipClass(const int);
 	int getShipClass() const;
@@ -117,6 +123,9 @@ class ShipEditorDialogModel : public AbstractDialogModel {
 
 	void setPlayer(const bool);
 	bool getPlayer() const;
+
+	void setRespawn(const int);
+	int getRespawn() const;
 
 	void setArrivalLocationIndex(const int);
 	int getArrivalLocationIndex() const;
@@ -177,8 +186,8 @@ class ShipEditorDialogModel : public AbstractDialogModel {
 	 * @brief Returns true if the wing is a player wing
 	 * @param wing Takes an integer id of the wing
 	 */
-	static bool wing_is_player_wing(const int);
-	std::set<size_t> getShipOrders() const;
+	bool wing_is_player_wing(const int) const;
+	const std::set<size_t> &getShipOrders() const;
 
 	bool getTexEditEnable() const;
 	/**

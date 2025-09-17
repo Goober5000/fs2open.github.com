@@ -1847,7 +1847,9 @@ ADE_FUNC(loadMission, l_Mission, "string missionName", "Loads a mission", "boole
 	gr_post_process_set_defaults();
 
 	//NOW do the loading stuff
-	get_mission_info(s, &The_mission, false);
+	if (get_mission_info(s, &The_mission, false))
+		return ADE_RETURN_FALSE;
+
 	game_level_init();
 
 	if(!mission_load(s))
@@ -3031,6 +3033,29 @@ ADE_FUNC(jumpToMission, l_Campaign, "string filename, [boolean hub]", "Jumps to 
 
 	bool success = mission_campaign_jump_to_mission(filename, hub);
 	return ade_set_args(L, "b", success);
+}
+
+ADE_VIRTVAR(CustomData, l_Campaign, nullptr, "Gets the custom data table for this campaign", "table", "The campaign's custom data table") 
+{
+	if (ADE_SETTING_VAR) {
+		LuaError(L, "Setting Custom Data is not supported");
+	}
+
+	auto table = luacpp::LuaTable::create(L);
+
+	for (const auto& pair : Campaign.custom_data)
+	{
+		table.addValue(pair.first, pair.second);
+	}
+
+	return ade_set_args(L, "t", &table);	
+}
+
+ADE_FUNC(hasCustomData, l_Campaign, nullptr, "Detects whether the campaign has any custom data", "boolean", "true if the campaign's custom_data is not empty, false otherwise") 
+{
+
+	bool result = !Campaign.custom_data.empty();
+	return ade_set_args(L, "b", result);
 }
 
 // TODO: add a proper indexer type that returns a handle

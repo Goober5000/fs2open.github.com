@@ -809,6 +809,10 @@ DCF(mj_remove, "Removes a multijoin game (multiplayer")
 	// handle any gui details related to deleting this item
 	multi_join_handle_item_cull(idx);
 
+	if (Active_games.empty()) {
+		return;
+	}
+
 	// delete the item
 	SCP_list<active_game>::iterator game = Active_games.begin();
 	std::advance(game, idx);
@@ -1793,19 +1797,27 @@ void multi_join_list_page_down()
 
 void multi_join_cull_timeouts()
 {
-	// traverse through the entire list if any items exist	
-	if(!Active_games.empty()){
-		int i = 0;
-		for (auto game = Active_games.begin(); game != Active_games.end(); ++game) {
-			if (game->heard_from_timer.isValid() && (ui_timestamp_elapsed(game->heard_from_timer))) {
+	if (Active_games.empty()) {
+		return;
+	}
 
-				// handle any gui details related to deleting this item
-				multi_join_handle_item_cull(i);
-				
-				// delete the item
-				Active_games.erase(game);
+	// traverse through the entire list if any items exist
+	int i = 0;
+	for (auto game = Active_games.begin(); game != Active_games.end(); ++game) {
+		if (game->heard_from_timer.isValid() && (ui_timestamp_elapsed(game->heard_from_timer))) {
+
+			// handle any gui details related to deleting this item
+			multi_join_handle_item_cull(i);
+
+			// this list may have been cleared so check for it
+			if (Active_games.empty()) {
+				break;
 			}
-			i++;
+
+			// delete the item
+			Active_games.erase(game);
+		} else {
+			++i;
 		}
 	}
 }
@@ -1815,11 +1827,7 @@ void multi_join_handle_item_cull(int item_index)
 {	
 	Assertion((item_index >= 0) && (item_index < static_cast<int>(Active_games.size())),
 		"Tried to cull a multiplayer game that doesn't exist! Please report!");
-	
-	//Get the item
-	SCP_list<active_game>::iterator game = Active_games.begin();
-	std::advance(game, item_index);
-	
+
 	// if this is the only item on the list, unset everything
 	if(Active_games.size() == 1){
 		Multi_join_list_selected = -1;
@@ -4535,7 +4543,7 @@ void multi_create_list_load_campaigns()
 {
 	int idx, file_count;
 	int campaign_type,max_players;
-	char title[255];
+	SCP_string title;
 	char wild_card[10];
 	char **file_list = NULL;
 
@@ -4717,13 +4725,13 @@ void multi_create_list_do()
 // so we can set the data without bothering to check the UI anymore
 void multi_create_list_set_item(int abs_index, int mode) {
 
-	int campaign_type, max_players;
-	char title[NAME_LENGTH + 1];
+	int campaign_type = -1, max_players = 0;
+	SCP_string title;
 	netgame_info ng_temp;
 	netgame_info* ng;
 	multi_create_info* mcip = NULL;
 
-	char* campaign_desc;
+	char* campaign_desc = nullptr;
 
 	// if not on the standalone server
 	if (Net_player->flags & NETINFO_FLAG_AM_MASTER) {
@@ -4738,7 +4746,7 @@ void multi_create_list_set_item(int abs_index, int mode) {
 	if (mode == MULTI_CREATE_SHOW_MISSIONS) {
 		strcpy(ng->mission_name, Multi_create_mission_list[abs_index].filename);
 	} else {
-		strcpy(ng->mission_name, Multi_create_campaign_list[abs_index].filename);
+		strcpy(ng->campaign_name, Multi_create_campaign_list[abs_index].filename);
 	}
 
 	// make sure the netgame type is properly set
@@ -4819,23 +4827,21 @@ void multi_create_list_set_item(int abs_index, int mode) {
 
 		// if not on the standalone server
 		if (Net_player->flags & NETINFO_FLAG_AM_MASTER) {
-			memset(title, 0, sizeof(title));
 			// get the campaign info
 			if (!mission_campaign_get_info(ng->campaign_name,
 					title,
 					&campaign_type,
 					&max_players,
 					&campaign_desc,
-					&first_mission)) {
+					&first_mission))
+			{
+				nprintf(("Network", "MC: Failed to get campaign info for '%s'!\n", ng->campaign_name));
 				memset(ng->campaign_name, 0, sizeof(ng->campaign_name));
-				ng->max_players = 0;
 			}
-			// if we successfully got the info
-			else {
-				memset(ng->title, 0, NAME_LENGTH + 1);
-				strcpy_s(ng->title, title);
-				ng->max_players = max_players;
-			}
+
+			memset(ng->title, 0, sizeof(ng->title));
+			strcpy_s(ng->title, title.c_str());
+			ng->max_players = max_players;
 
 			nprintf(("Network", "MC MAX PLAYERS : %d\n", ng->max_players));
 
