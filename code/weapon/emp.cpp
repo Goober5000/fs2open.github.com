@@ -78,7 +78,7 @@ char Emp_random_char[NUM_RANDOM_CHARS] =
 //
 
 // maybe reformat a string 
-void emp_maybe_reformat_text(char *text, int max_len, int gauge_id);
+void emp_maybe_reformat_text(char *text, size_t max_len, int gauge_id);
 
 // randomize the chars in a string
 void emp_randomize_chars(char *str);
@@ -487,7 +487,7 @@ int emp_should_blit_gauge()
 }
 
 // emp hud string
-void emp_hud_string(int x, int y, int gauge_id, const char *str, int resize_mode, float scale)
+void emp_hud_string(int x, int y, int gauge_id, const char *str, size_t len, int resize_mode, float scale)
 {
 	char tmp[256] = "";
 
@@ -495,23 +495,27 @@ void emp_hud_string(int x, int y, int gauge_id, const char *str, int resize_mode
 	if (!*str)
 		return;
 
-	// copy the string
-	strcpy_s(tmp, str);
-
 	// if the emp effect is not active, don't even bother messing with the text
 	if(emp_active_local()){
-		emp_maybe_reformat_text(tmp, 256, gauge_id);
+		auto tmp_len = len < 255 ? len : 255;
+
+		// use a copied string rather than the original
+		strncpy(tmp, str, tmp_len);
+		tmp[tmp_len] = '\0';
+		str = tmp;
+
+		emp_maybe_reformat_text(tmp, tmp_len, gauge_id);
 
 		// jitter the coords
 		emp_hud_jitter(&x, &y);
 	}
 
 	// print the string out
-	gr_string(x, y, tmp, resize_mode, scale);
+	gr_string(x, y, str, resize_mode, scale, len);
 }
 
 // maybe reformat a string 
-void emp_maybe_reformat_text(char *text, int  /*max_len*/, int gauge_id)
+void emp_maybe_reformat_text(char *text, size_t /*max_len*/, int gauge_id)
 {
 	wacky_text *wt;
 

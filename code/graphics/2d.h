@@ -1044,12 +1044,16 @@ bool gr_resize_screen_posf(float *x, float *y, float *w = NULL, float *h = NULL,
 // so if you don't need to format the string, then call gr_string
 // directly.
 extern void gr_printf( int x, int y, const char * format, SCP_FORMAT_STRING ... ) SCP_FORMAT_STRING_ARGS(3, 4);
+extern void gr_printf( int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... ) SCP_FORMAT_STRING_ARGS(3, 4);
 // same as gr_printf but positions text correctly in menus
 extern void gr_printf_menu( int x, int y, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
+extern void gr_printf_menu( int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
 // same as gr_printf_menu but accounts for menu zooming
 extern void gr_printf_menu_zoomed( int x, int y, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
+extern void gr_printf_menu_zoomed( int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
 // same as gr_printf but doesn't resize for non-standard resolutions
 extern void gr_printf_no_resize( int x, int y, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
+extern void gr_printf_no_resize( int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )  SCP_FORMAT_STRING_ARGS(3, 4);
 
 // Returns the size of the string in pixels in w and h
 extern void gr_get_string_size( int *w, int *h, const char * text, float scaleMultiplier = 1.0f, size_t len = std::string::npos);

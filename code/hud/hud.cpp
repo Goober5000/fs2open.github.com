@@ -898,6 +898,11 @@ void HudGauge::render(float /*frametime*/, bool config)
 
 void HudGauge::renderString(int x, int y, const char *str, float scale, bool config)
 {
+	renderString(x, y, str, std::string::npos, scale, config);
+}
+
+void HudGauge::renderString(int x, int y, const char *str, size_t len, float scale, bool config)
+{
 	int nx = 0, ny = 0;
 	int resize = GR_RESIZE_FULL;
 
@@ -923,15 +928,20 @@ void HudGauge::renderString(int x, int y, const char *str, float scale, bool con
 	if (HUD_shadows) {
 		color cur = gr_screen.current_color;
 		gr_set_color_fast(&Color_black);
-		gr_string(x + nx + 1, y + ny + 1, str, resize, scale);
+		gr_string(x + nx + 1, y + ny + 1, str, resize, scale, len);
 		gr_set_color_fast(&cur);
 	}
 
-	gr_string(x + nx, y + ny, str, resize, scale);
+	gr_string(x + nx, y + ny, str, resize, scale, len);
 	gr_reset_screen_scale();
 }
 
 void HudGauge::renderString(int x, int y, int gauge_id, const char *str, float scale, bool config)
+{
+	renderString(x, y, gauge_id, str, std::string::npos, scale, config);
+}
+
+void HudGauge::renderString(int x, int y, int gauge_id, const char *str, size_t len, float scale, bool config)
 {
 	int nx = 0, ny = 0;
 	int resize = GR_RESIZE_FULL;
@@ -960,21 +970,26 @@ void HudGauge::renderString(int x, int y, int gauge_id, const char *str, float s
 		if (HUD_shadows) {
 			color cur = gr_screen.current_color;
 			gr_set_color_fast(&Color_black);
-			emp_hud_string(x + nx + 1, y + ny + 1, gauge_id, str, resize, scale);
+			emp_hud_string(x + nx + 1, y + ny + 1, gauge_id, str, len, resize, scale);
 			gr_set_color_fast(&cur);
 		}
-		emp_hud_string(x + nx, y + ny, gauge_id, str, resize, scale);
+		emp_hud_string(x + nx, y + ny, gauge_id, str, len, resize, scale);
 	} else {
 		if (HUD_shadows) {
 			color cur = gr_screen.current_color;
 			gr_set_color_fast(&Color_black);
-			gr_string(x + nx + 1, y + ny + 1, str, resize, scale);
+			gr_string(x + nx + 1, y + ny + 1, str, resize, scale, len);
 			gr_set_color_fast(&cur);
 		}
-		gr_string(x + nx, y + ny, str, resize, scale);
+		gr_string(x + nx, y + ny, str, resize, scale, len);
 	}
 
 	gr_reset_screen_scale();
+}
+
+void HudGauge::renderStringAlignCenter(int x, int y, int area_width, const char *s, size_t len, float scale, bool config)
+{
+	renderStringAlignCenter(x, y, area_width, s, std::string::npos, scale, config);
 }
 
 void HudGauge::renderStringAlignCenter(int x, int y, int area_width, const char *s, float scale, bool config)
@@ -985,32 +1000,30 @@ void HudGauge::renderStringAlignCenter(int x, int y, int area_width, const char 
 	renderString(x + ((area_width - w) / 2), y, s, scale, config);
 }
 
-void HudGauge::renderPrintf(int x, int y, float scale, bool config, const char* format, ...)
+void HudGauge::renderPrintf(int x, int y, float scale, bool config, SCP_FORMAT_STRING const char* format, ...) SCP_FORMAT_STRING_ARGS(6, 7)
 {
-	char tmp[256] = "";
+	SCP_string tmp;
 	va_list args;
 	
 	// format the text
 	va_start(args, format);
-	vsnprintf(tmp, sizeof(tmp)-1, format, args);
+	vsprintf(tmp, format, args);
 	va_end(args);
-	tmp[sizeof(tmp)-1] = '\0';
 
-	renderString(x, y, tmp, scale, config);
+	renderString(x, y, tmp.c_str(), scale, config);
 }
 
-void HudGauge::renderPrintfWithGauge(int x, int y, int gauge_id, float scale, bool config, const char* format, ...)
+void HudGauge::renderPrintfWithGauge(int x, int y, int gauge_id, float scale, bool config, SCP_FORMAT_STRING const char* format, ...)  SCP_FORMAT_STRING_ARGS(7, 8)
 {
-	char tmp[256] = "";
+	SCP_string tmp;
 	va_list args;
 	
 	// format the text
 	va_start(args, format);
-	vsnprintf(tmp, sizeof(tmp)-1, format, args);
+	vsprintf(tmp, format, args);
 	va_end(args);
-	tmp[sizeof(tmp)-1] = '\0';
 
-	renderString(x, y, gauge_id, tmp, scale, config);
+	renderString(x, y, gauge_id, tmp.c_str(), scale, config);
 }
 
 void HudGauge::renderBitmapColor(int frame, int x, int y, float scale, bool config) const

@@ -367,8 +367,11 @@ public:
 	void renderBitmapColor(int frame, int x, int y, float scale = 1.0f, bool config = false) const;
 	void renderBitmapEx(int frame, int x, int y, int w, int h, int sx, int sy, float scale = 1.0f, bool config = false) const;
 	void renderString(int x, int y, const char *str, float scale = 1.0f, bool config = false);
+	void renderString(int x, int y, const char *str, size_t len, float scale = 1.0f, bool config = false);
 	void renderString(int x, int y, int gauge_id, const char *str, float scale = 1.0f, bool config = false);
+	void renderString(int x, int y, int gauge_id, const char *str, size_t len, float scale = 1.0f, bool config = false);
 	void renderStringAlignCenter(int x, int y, int area_width, const char *s, float scale = 1.0f, bool config = false);
+	void renderStringAlignCenter(int x, int y, int area_width, const char *s, size_t len, float scale = 1.0f, bool config = false);
 	void renderPrintf(int x, int y, float scale, bool config, SCP_FORMAT_STRING const char* format, ...) SCP_FORMAT_STRING_ARGS(6, 7);
 	void renderPrintfWithGauge(int x, int y, int gauge_id, float scale, bool config, SCP_FORMAT_STRING const char* format, ...)  SCP_FORMAT_STRING_ARGS(7, 8);
 	void renderLine(int x1, int y1, int x2, int y2, bool config = false) const;
