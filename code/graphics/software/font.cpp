@@ -803,7 +803,7 @@ void gr_string_win(int x, int y, char *s)
 
 char grx_printf_text[2048];
 
-void gr_printf(int x, int y, const char * format, ...)
+void gr_printf(int x, int y, const char * format, SCP_FORMAT_STRING ... )
 {
 	va_list args;
 
@@ -817,7 +817,21 @@ void gr_printf(int x, int y, const char * format, ...)
 	gr_string(x, y, grx_printf_text);
 }
 
-void gr_printf_menu(int x, int y, const char * format, ...)
+void gr_printf(int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )
+{
+	va_list args;
+
+	if (!FontManager::isReady()) return;
+
+	va_start(args, format);
+	vsnprintf(grx_printf_text, len+1, format, args);
+	va_end(args);
+	grx_printf_text[len] = '\0';
+
+	gr_string(x, y, grx_printf_text, GR_RESIZE_FULL, 1.0f, len);
+}
+
+void gr_printf_menu(int x, int y, const char * format, SCP_FORMAT_STRING ... )
 {
 	va_list args;
 
@@ -831,7 +845,21 @@ void gr_printf_menu(int x, int y, const char * format, ...)
 	gr_string(x, y, grx_printf_text, GR_RESIZE_MENU);
 }
 
-void gr_printf_menu_zoomed(int x, int y, const char * format, ...)
+void gr_printf_menu(int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )
+{
+	va_list args;
+
+	if (!FontManager::isReady()) return;
+
+	va_start(args, format);
+	vsnprintf(grx_printf_text, len+1, format, args);
+	va_end(args);
+	grx_printf_text[len] = '\0';
+
+	gr_string(x, y, grx_printf_text, GR_RESIZE_MENU, 1.0f, len);
+}
+
+void gr_printf_menu_zoomed(int x, int y, const char * format, SCP_FORMAT_STRING ... )
 {
 	va_list args;
 
@@ -845,7 +873,21 @@ void gr_printf_menu_zoomed(int x, int y, const char * format, ...)
 	gr_string(x, y, grx_printf_text, GR_RESIZE_MENU_ZOOMED);
 }
 
-void gr_printf_no_resize(int x, int y, const char * format, ...)
+void gr_printf_menu_zoomed(int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )
+{
+	va_list args;
+
+	if (!FontManager::isReady()) return;
+
+	va_start(args, format);
+	vsnprintf(grx_printf_text, len+1, format, args);
+	va_end(args);
+	grx_printf_text[len] = '\0';
+
+	gr_string(x, y, grx_printf_text, GR_RESIZE_MENU_ZOOMED, 1.0f, len);
+}
+
+void gr_printf_no_resize(int x, int y, const char * format, SCP_FORMAT_STRING ... )
 {
 	va_list args;
 
@@ -857,4 +899,18 @@ void gr_printf_no_resize(int x, int y, const char * format, ...)
 	grx_printf_text[sizeof(grx_printf_text) - 1] = '\0';
 
 	gr_string(x, y, grx_printf_text, GR_RESIZE_NONE);
+}
+
+void gr_printf_no_resize(int x, int y, size_t len, const char * format, SCP_FORMAT_STRING ... )
+{
+	va_list args;
+
+	if (!FontManager::isReady()) return;
+
+	va_start(args, format);
+	vsnprintf(grx_printf_text, len+1, format, args);
+	va_end(args);
+	grx_printf_text[len] = '\0';
+
+	gr_string(x, y, grx_printf_text, GR_RESIZE_NONE, 1.0f, len);
 }
