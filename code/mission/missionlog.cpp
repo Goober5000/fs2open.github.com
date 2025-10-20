@@ -453,58 +453,56 @@ void message_log_add_seg(log_text_seg* entry, int x, int msg_color, const char* 
 	entry->flags = flags;
 }
 
-void message_log_add_segs(const char *source_string, int msg_color, int flags, SCP_vector<log_text_seg> *entry, bool split_string)
+void message_log_add_segs(const char *text, int msg_color, int flags, SCP_vector<log_text_seg> *entry, bool split_string)
 {
-	if (!source_string || !entry) {
+	if (!text || !entry) {
 		mprintf(("Why are you passing a NULL pointer to message_log_add_segs?\n"));
 		return;
 	}
-	if (!*source_string) {
-		return;
-	}
-        
-	int w;
-
-	// duplicate the string so that we can split it without modifying the source
-	char *dup_string = vm_strdup(source_string);
-	char *str = dup_string;
-	char *split = NULL;
 
 	if (split_string) {
 		while (true) {
 			if (X == ACTION_X) {
-				while (is_white_space(*str))
-					str++;
+				while (is_white_space(*text))
+					text++;
 			}
 
-			if (P_width - X < 1)
-				split = str;
-			else
-				split = split_str_once(str, P_width - X);
-
-			if (split != str) {
-				log_text_seg new_seg;
-				message_log_add_seg(&new_seg, X, msg_color, str, flags);
-				entry->push_back(std::move(new_seg));
+			if (!*text) {
+				return;
 			}
 
-			if (!split) {
-				gr_get_string_size(&w, NULL, str);
+			int w;
+			size_t split_len, split_next_pos;
+
+			if (P_width - X < 1) {
+				split_len = strlen(text);
+				split_next_pos = 0;
+				gr_get_string_size(&w, nullptr, text);
+			} else {
+				std::tie(split_len, split_next_pos, std::ignore) = split_str_once(text, P_width - X, std::string::npos, 1.0f, &w);
+			}
+
+			log_text_seg new_seg;
+			message_log_add_seg(&new_seg, X, msg_color, text, split_len, flags);
+			entry->push_back(std::move(new_seg));
+
+			if (split_next_pos == 0) {
 				X += w;
 				break;
 			}
 
 			X = ACTION_X;
-			str = split;
+			text += split_next_pos;
 		}
 	} else {
+		if (!*text) {
+			return;
+		}
+
 		log_text_seg new_seg;
-		message_log_add_seg(&new_seg, X, msg_color, str, flags);
+		message_log_add_seg(&new_seg, X, msg_color, text, flags);
 		entry->push_back(std::move(new_seg));
 	}
-
-	// free the buffer
-	vm_free(dup_string);
 }
 
 int mission_log_color_get_team(int msg_color)
