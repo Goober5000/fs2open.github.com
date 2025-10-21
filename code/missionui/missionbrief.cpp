@@ -1044,7 +1044,7 @@ void brief_render_closeup_text()
 {
 /*
 	brief_icon	*bi;
-	char			line[MAX_ICON_TEXT_LINE_LEN];
+	char			line[MAX_ICON_TEXT_LINE_LEN+1];
 	int			n_lines, i, render_x, render_y;
 	int			n_chars[MAX_ICON_TEXT_LINES];
 	char			*p_str[MAX_ICON_TEXT_LINES];
@@ -1062,7 +1062,7 @@ void brief_render_closeup_text()
 	gr_set_clip(render_x+CLOSEUP_TEXT_OFFSET, render_y, CLOSEUP_W,CLOSEUP_TEXT_H, GR_RESIZE_MENU);
 	gr_set_color_fast(&Color_white);
 
-//	n_lines = split_str(bi->text, CLOSEUP_W - 2*CLOSEUP_TEXT_OFFSET, n_chars, p_str, MAX_ICON_TEXT_LINES);
+//	n_lines = split_str(bi->text, p_str, n_chars, MAX_ICON_TEXT_LINES, CLOSEUP_W - 2*CLOSEUP_TEXT_OFFSET, MAX_ICON_TEXT_LINE_LEN);
 	Assert(n_lines != -1);
 
 	for ( i = 0; i < n_lines; i++ ) {

@@ -471,7 +471,7 @@ int Multi_pxo_max_chat_display[GR_NUM_RESOLUTIONS] = {
 // the "has left" message from the server
 #define MULTI_PXO_HAS_LEFT				"has left"
 
-#define MULTI_PXO_CHAT_LINE_LEN 512
+#define MULTI_PXO_CHAT_LINE_LEN 511
 
 // the chat list
 SCP_list<chat_line> Multi_pxo_chat;
@@ -510,7 +510,7 @@ void multi_pxo_chat_clear();
 void multi_pxo_chat_blit();
 
 // add a line of text
-void multi_pxo_chat_add_line(const char *txt,int mode);
+void multi_pxo_chat_add_line(const char *txt, size_t len, int mode);
 
 // process an incoming line of text
 void multi_pxo_chat_process_incoming(const char *txt, int mode = CHAT_MODE_NORMAL);
@@ -2922,10 +2922,14 @@ void multi_pxo_chat_clear()
 /**
  * Add a line of text
  */
-void multi_pxo_chat_add_line(const char *txt, int mode)
+void multi_pxo_chat_add_line(const char *txt, size_t len, int mode)
 {
+	if (len > MAX_CHAT_LINE_LEN)
+		len = MAX_CHAT_LINE_LEN;
+
 	chat_line temp;
-	strcpy_s(temp.text, txt);
+	strncpy(temp.text, txt, len);
+	temp.text[len] = 0;
 	temp.mode = mode;
 
 	if (Multi_pxo_chat.size() >= MAX_CHAT_LINES) {
@@ -2948,11 +2952,8 @@ void multi_pxo_chat_add_line(const char *txt, int mode)
  */
 void multi_pxo_chat_process_incoming(const char *txt,int mode)
 {
-	char msg_total[MULTI_PXO_CHAT_LINE_LEN],line[MULTI_PXO_CHAT_LINE_LEN];
-	int	n_lines,idx;
-	int	n_chars[20];
-	const char	*p_str[20];			//  the initial line (unindented)	
-	const char *priv_ptr;	
+	char msg_total[MULTI_PXO_CHAT_LINE_LEN+1];
+	const char *priv_ptr;
 
 	// filter out "has left" channel messages, when switching channels
 	if((SWITCHING_CHANNELS() || (Multi_pxo_switch_delay.isValid() && !ui_timestamp_elapsed(Multi_pxo_switch_delay))) && 
@@ -2993,35 +2994,23 @@ void multi_pxo_chat_process_incoming(const char *txt,int mode)
 	}
 
 	// split the text up into as many lines as necessary
-	n_lines = split_str(msg_total, Multi_pxo_chat_coords[gr_screen.res][2] - 5, n_chars, p_str, 3, MULTI_PXO_CHAT_LINE_LEN);
-	Assert((n_lines != -1) && (n_lines <= 20));
-	if((n_lines < 0) || (n_lines > 20)) {
-		return;
-	}
-
-	// if the string fits on one line
-	if(n_lines == 1) {
-		multi_pxo_chat_add_line(msg_total,mode);
-	}
-	// if the string was split into multiple lines
-	else {
-		// add the first line		
-		memcpy(line,p_str[0],n_chars[0]);
-		line[n_chars[0]] = '\0';
-		multi_pxo_chat_add_line(line,mode);
-
-		// copy the rest of the lines
-		for(idx=1; idx<n_lines; idx++){
-			memcpy(line,p_str[idx],n_chars[idx]);
-			line[n_chars[idx]] = '\0';			
-			
+	size_t split_len, split_next_pos;
+	bool first = true;
+	auto str = msg_total;
+	do {
+		if (first)
+			first = false;
+		else {
 			// unless the current mode is server or "switching channels", make all these CHAT_MODE_CARRY
-			if((mode != CHAT_MODE_SERVER) && (mode != CHAT_MODE_CHANNEL_SWITCH)){
+			if ((mode != CHAT_MODE_SERVER) && (mode != CHAT_MODE_CHANNEL_SWITCH)) {
 				mode = CHAT_MODE_CARRY;
-			}			
-			multi_pxo_chat_add_line(line, mode);
+			}
 		}
-	}	
+
+		std::tie(split_len, split_next_pos, std::ignore) = split_str_once(str, Multi_pxo_chat_coords[gr_screen.res][2] - 5, MULTI_PXO_CHAT_LINE_LEN);
+		multi_pxo_chat_add_line(str, split_len, mode);
+		str += split_next_pos;
+	} while (split_next_pos > 0);
 }
 
 /**

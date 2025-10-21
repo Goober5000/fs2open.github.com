@@ -44,7 +44,6 @@
 #define GOAL_TIMESTAMP_TRAINING	500			// every half second
 
 #define MAX_GOALS_PER_LIST			15
-#define MAX_GOAL_LINES	200
 
 // indicies for coordinates
 #define GOAL_SCREEN_X_COORD 0
@@ -162,12 +161,10 @@ struct goal_buttons {
 };
 
 struct goal_text {
-	int m_num_lines;
-	int m_line_sizes[MAX_GOAL_LINES];
-	const char *m_lines[MAX_GOAL_LINES];
+	SCP_vector<std::pair<const char *, size_t>> m_lines;
 
 	void init();
-	int add(const char *text = NULL);
+	size_t add(const char *text = NULL);
 	void display(int n, int y);
 };
 
@@ -248,8 +245,8 @@ void goal_list::set()
 	int i;
 
 	for (i=0; i<count; i++) {
-		line_offsets[i] = Goal_text.m_num_lines;
-		line_spans[i] = Goal_text.add(list[i]->message.c_str());
+		line_offsets[i] = sz2i(Goal_text.m_lines.size());
+		line_spans[i] = sz2i(Goal_text.add(list[i]->message.c_str()));
 		
 		if (i < count - 1)
 			Goal_text.add();
@@ -301,31 +298,24 @@ void goal_list::icons_display(int yoff)
 // initializes the goal text struct (empties it out)
 void goal_text::init()
 {
-	m_num_lines = 0;
+	m_lines.clear();
 }
 
 // Adds lines of goal text.  If passed NULL (or nothing passed) a blank line is added.  If
 // the text is too long, it is automatically split into more than one line.
 // Returns the number of lines added.
-int goal_text::add(const char *text)
+size_t goal_text::add(const char *text)
 {
-	int max, count;
-
-	max = MAX_GOAL_LINES - m_num_lines;
-	if (max < 1) {
-		Error(LOCATION, "Goal text space exhausted");
-		return 0;
-	}
-
 	if (!text) {
-		m_lines[m_num_lines] = NULL;
-		m_line_sizes[m_num_lines++] = 0;
+		m_lines.emplace_back("", 0);
 		return 1;
 	}
 
-	count = split_str(text, Goal_screen_text_w - Goal_screen_text_coords[gr_screen.res][GOAL_SCREEN_X_COORD] + Goal_screen_icon_xcoord[gr_screen.res], m_line_sizes + m_num_lines, m_lines + m_num_lines, max, MAX_GOAL_TEXT);
-	m_num_lines += count;
-	return count;
+	SCP_vector<std::pair<const char *, size_t>> split_lines;
+	auto n_lines = split_str(text, split_lines, Goal_screen_text_w - Goal_screen_text_coords[gr_screen.res][GOAL_SCREEN_X_COORD] + Goal_screen_icon_xcoord[gr_screen.res]);
+
+	m_lines.concat(std::move(split_lines));
+	return sz2i(n_lines);
 }
 
 // Display a line of goal text
@@ -334,19 +324,18 @@ int goal_text::add(const char *text)
 void goal_text::display(int n, int y)
 {
 	int y1, w, h;
-	char buf[MAX_GOAL_TEXT];
+	auto [str, len] = m_lines[n];
 
-	if ((n < 0) || (n >= m_num_lines) || (m_line_sizes[n] < 1))
+	if ((n < 0) || (n >= sz2i(m_lines.size())) || (len < 1))
 		return;  // out of range, don't draw anything
 
-	Assert(m_line_sizes[n] < MAX_GOAL_TEXT);
 	y += Goal_screen_text_y;
-	if (*m_lines[n] == '*') {  // header line
+	if (*str == '*') {  // header line
 		gr_set_color_fast(&Color_text_heading);
-		strncpy(buf, m_lines[n] + 1, m_line_sizes[n] - 1);
-		buf[m_line_sizes[n] - 1] = 0;
+		str++;
+		len--;
 
-		gr_get_string_size(&w, &h, buf);
+		gr_get_string_size(&w, &h, str);
 		y1 = y + h / 2 - 1;
 
 		// custom_size me
@@ -355,11 +344,9 @@ void goal_text::display(int n, int y)
 
 	} else {
 		gr_set_color_fast(&Color_text_normal);
-		strncpy(buf, m_lines[n], m_line_sizes[n]);
-		buf[m_line_sizes[n]] = 0;
 	}
 
-	gr_printf_menu(Goal_screen_text_x, y, "%s", buf);
+	gr_printf_menu(Goal_screen_text_x, y, len, "%s", str);
 }
 
 // Called as part of mission initialization.
@@ -626,7 +613,7 @@ int ML_objectives_init(int x, int y, int w, int h)
 	Goal_incomplete_bitmap = bm_load("ObjIncomp");
 	Goal_failed_bitmap = bm_load("ObjFail");
 
-	return Goal_text.m_num_lines;
+	return sz2i(Goal_text.m_lines.size());
 }
 
 // cleanup called when exiting the show goals screen
@@ -1467,7 +1454,7 @@ void goal_screen_scroll_down()
 	int max_lines;
 
 	max_lines = Goal_screen_text_h / gr_get_font_height();
-	if (Scroll_offset + max_lines < Goal_text.m_num_lines) {
+	if (Scroll_offset + max_lines < sz2i(Goal_text.m_lines.size())) {
 		Scroll_offset++;
 		gamesnd_play_iface(InterfaceSounds::SCROLL);
 	} else {

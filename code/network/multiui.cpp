@@ -103,7 +103,7 @@ const int MULTI_PING_MIN_RED = 250;
 const int MULTI_PING_MIN_ONE_SECOND = 1000;
 
 char Multi_common_all_text[MULTI_COMMON_MAX_TEXT];
-char Multi_common_text[MULTI_COMMON_TEXT_MAX_LINES][MULTI_COMMON_TEXT_MAX_LINE_LENGTH];
+char Multi_common_text[MULTI_COMMON_TEXT_MAX_LINES][MULTI_COMMON_TEXT_MAX_LINE_BUF];
 
 // Labels for Mission description
 static const char* PRE_CAMPAIGN_DESC =	"Campaign Description:\n";
@@ -224,22 +224,19 @@ void multi_mission_desciption_set(const char* str_in, int msg_index)
 
 void multi_common_split_text()
 {
-	int	n_lines, i;
-	int	n_chars[MAX_BRIEF_LINES];
+	size_t	n_lines, i;
+	size_t	n_chars[MAX_BRIEF_LINES];
 	const char	*p_str[MAX_BRIEF_LINES];
 
-	n_lines = split_str(Multi_common_all_text, Multi_common_text_coords[gr_screen.res][2], n_chars, p_str, MULTI_COMMON_TEXT_MAX_LINES, MULTI_COMMON_TEXT_MAX_LINE_LENGTH, MULTI_COMMON_TEXT_META_CHAR);
-	Assert(n_lines != -1);
+	n_lines = split_str(Multi_common_all_text, p_str, n_chars, MULTI_COMMON_TEXT_MAX_LINES, Multi_common_text_coords[gr_screen.res][2], MULTI_COMMON_TEXT_MAX_LINE_BUF-1, MULTI_COMMON_TEXT_META_CHAR);
 
 	for ( i = 0; i < n_lines; i++ ) {
-		Assert(n_chars[i] < MULTI_COMMON_TEXT_MAX_LINE_LENGTH); 
 		strncpy(Multi_common_text[i], p_str[i], n_chars[i]);
 		Multi_common_text[i][n_chars[i]] = 0;
-		drop_leading_white_space(Multi_common_text[i]);		
 	}
 
 	Multi_common_top_text_line = 0;
-	Multi_common_num_text_lines = n_lines;	
+	Multi_common_num_text_lines = sz2i(n_lines);	
 }
 
 void multi_common_render_text()

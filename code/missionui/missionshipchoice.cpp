@@ -1193,42 +1193,22 @@ void ship_select_blit_ship_info()
 	gr_string(Ship_info_coords[gr_screen.res][SHIP_SELECT_X_COORD], y_start, XSTR("Description",1571), GR_RESIZE_MENU);
 	y_start += line_height;
 
-	int n_lines;
-	int n_chars[MAX_BRIEF_LINES];
-	const char *p_str[MAX_BRIEF_LINES];
-	char Ship_select_ship_info_text[1500];
-	char Ship_select_ship_info_lines[MAX_NUM_SHIP_DESC_LINES][SHIP_SELECT_SHIP_INFO_MAX_LINE_LEN];
-	int Ship_select_ship_info_line_count;
-
-	strcpy_s(Ship_select_ship_info_text, sip->desc.get());
+	const char *desc = sip->desc.get();
+	ignore_white_space(&desc);
 	
-	if(Ship_select_ship_info_text[0] != '\0'){
+	if (desc[0] != '\0') {
+		gr_set_color_fast(text);
+
 		// split the string into multiple lines
 		// MageKing17: Changed to use the widths determined by Yarn here: https://scp.indiegames.us/mantis/view.php?id=3144#c16516
-		n_lines = split_str(Ship_select_ship_info_text, gr_screen.res == GR_640 ? 204 : 328, n_chars, p_str, MAX_NUM_SHIP_DESC_LINES, SHIP_SELECT_SHIP_INFO_MAX_LINE_LEN);
-
-		// copy the split up lines into the text lines array
-		for (int idx = 0;idx<n_lines;idx++ ) {
-			Assert(n_chars[idx] < SHIP_SELECT_SHIP_INFO_MAX_LINE_LEN);
-			strncpy(Ship_select_ship_info_lines[idx], p_str[idx], n_chars[idx]);
-			Ship_select_ship_info_lines[idx][n_chars[idx]] = 0;
-			drop_leading_white_space(Ship_select_ship_info_lines[idx]);		
-		}
-
-		// get the line count
-		Ship_select_ship_info_line_count = n_lines;
-	} else {
-		// set the line count to 
-		Ship_select_ship_info_line_count = 0;
-	}	
-	
-	Assert(Ship_select_ship_info_line_count < MAX_NUM_SHIP_DESC_LINES);
-	gr_set_color_fast(text);
-	for(int idx=0;idx<Ship_select_ship_info_line_count;idx++){
-		gr_string(Ship_info_coords[gr_screen.res][SHIP_SELECT_X_COORD]+4, y_start, Ship_select_ship_info_lines[idx], GR_RESIZE_MENU);
-		y_start += line_height;
+		size_t split_len, split_next_pos;
+		do {
+			std::tie(split_len, split_next_pos, std::ignore) = split_str_once(desc, gr_screen.res == GR_640 ? 204 : 328);
+			gr_string(Ship_info_coords[gr_screen.res][SHIP_SELECT_X_COORD] + 4, y_start, desc, GR_RESIZE_MENU);
+			desc += split_next_pos;
+			y_start += line_height;
+		} while (split_next_pos > 0);
 	}
-	
 }
 
 

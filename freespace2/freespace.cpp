@@ -5486,7 +5486,7 @@ void game_leave_state( int old_state, int new_state )
 			break;
 
 		case GS_STATE_TRAINING_PAUSED:
-			Training_num_lines = 0;
+			training_mission_pause();
 			// fall through to GS_STATE_GAME_PAUSED
 			FALLTHROUGH;
 

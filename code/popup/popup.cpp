@@ -350,36 +350,36 @@ int popup_process_keys(popup_info *pi, int k, int flags)
 // Split off the title and break up the body lines
 void popup_split_lines(popup_info *pi, int flags)
 {
-	int	nlines, i, body_offset = 0;
-	int	n_chars[POPUP_MAX_LINES];
+	size_t	nlines;
+	size_t	n_chars[POPUP_MAX_LINES];
 	const char	*p_str[POPUP_MAX_LINES];
 
 	font::set_font(font::FONT1);
-	n_chars[0]=0;
-
-	nlines = split_str(pi->raw_text, 1000, n_chars, p_str, POPUP_MAX_LINES, POPUP_MAX_LINE_CHARS);
-	Assert(nlines >= 0 && nlines <= POPUP_MAX_LINES );
+	auto raw_text = pi->raw_text;
 
 	if ( flags & (PF_TITLE | PF_TITLE_BIG) ) {
+		// split off first line as title
+		size_t split_len, split_next_pos;
+		std::tie(split_len, split_next_pos, std::ignore) = split_str_once(raw_text, 1000);
+
 		// get first line out
-		strncpy(pi->title, p_str[0], n_chars[0]);
-		pi->title[n_chars[0]] = 0;
-		body_offset = 1;
+		strncpy(pi->title, raw_text, split_len);
+		pi->title[split_len] = 0;
+		raw_text += split_next_pos;
 	}
 
 	if ( flags & PF_BODY_BIG ) {
 		font::set_font(font::FONT2);
 	}
 
-	nlines = split_str(pi->raw_text, Popup_text_coords[gr_screen.res][2], n_chars, p_str, POPUP_MAX_LINES, POPUP_MAX_LINE_CHARS);
-	Assert(nlines >= 0 && nlines <= POPUP_MAX_LINES );
+	nlines = split_str(raw_text, p_str, n_chars, POPUP_MAX_LINES, Popup_text_coords[gr_screen.res][2], POPUP_MAX_LINE_CHARS - 1);
+	Assert(nlines <= POPUP_MAX_LINES);
+	pi->nlines = sz2i(nlines);
 
-	pi->nlines = nlines - body_offset;
-
-	for ( i = 0; i < pi->nlines; i++ ) {
-		Assert(n_chars[i+body_offset] < POPUP_MAX_LINE_CHARS);
-		strncpy(pi->msg_lines[i], p_str[i+body_offset], n_chars[i+body_offset]);
-		pi->msg_lines[i][n_chars[i+body_offset]] = 0;
+	for (size_t i = 0; i < nlines; ++i) {
+		Assert(n_chars[i] < POPUP_MAX_LINE_CHARS);
+		strncpy(pi->msg_lines[i], p_str[i], n_chars[i]);
+		pi->msg_lines[i][n_chars[i]] = 0;
 	}
 
 	font::set_font(font::FONT1);

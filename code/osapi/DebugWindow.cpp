@@ -123,14 +123,13 @@ float DebugWindow::print_line(float bottom_y, const LineInfo& line) {
 	gr_get_string_size(&category_width, nullptr, line.category.c_str());
 
 	// Wrap the string to make sure everything can be read
-	SCP_vector<const char*> split_lines;
-	SCP_vector<int> line_lengths;
+	SCP_vector<std::pair<const char*, size_t>> split_lines;
 
 	// Substract 40 so that we can have margins on both sides
 	// Make sure that the width doesn't go too low or else split_str will not be able to fit enough characters in one line
 	auto max_w = std::max(40, gr_screen.max_w - max_category_width - 40);
 
-	split_str(line.text.c_str(), max_w, line_lengths, split_lines);
+	split_str(line.text.c_str(), split_lines, max_w);
 
 	auto text_height = split_lines.size() * font::get_current_font()->getHeight();
 
@@ -144,8 +143,8 @@ float DebugWindow::print_line(float bottom_y, const LineInfo& line) {
 
 	gr_set_color_fast(&Color_white);
 
-	for (size_t i = 0; i < split_lines.size(); ++i) {
-		gr_string(max_category_width + 18.f, y_pos, split_lines[i], GR_RESIZE_NONE, 1.0f, static_cast<size_t>(line_lengths[i]));
+	for (auto &split_line: split_lines) {
+		gr_string(max_category_width + 18.f, y_pos, split_line.first, GR_RESIZE_NONE, 1.0f, split_line.second);
 
 		y_pos += font::get_current_font()->getHeight();
 	}

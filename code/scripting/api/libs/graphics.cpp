@@ -1360,7 +1360,6 @@ ADE_FUNC(drawOffscreenIndicator, l_Graphics, "object Object, [boolean draw=true,
 		return ADE_RETURN_NIL;
 }
 
-#define MAX_TEXT_LINES		256
 static const char *BooleanValues[] = {"False", "True"};
 
 static int drawString_sub(lua_State *L, bool use_resize_arg)

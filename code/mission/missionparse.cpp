@@ -1652,7 +1652,7 @@ void parse_briefing(mission * /*pm*/, int flags)
 	brief_icon *bi;
 	briefing *bp;
 
-	char not_used_text[MAX_ICON_TEXT_LEN];
+	SCP_string not_used_text;
 	
 	// MWA -- 2/3/98.  we can now have multiple briefing and debriefings in a mission
 	for ( nt = 0; nt < Num_teams; nt++ ) {
@@ -1818,10 +1818,10 @@ void parse_briefing(mission * /*pm*/, int flags)
 
 				bi->label[0] = 0;
 				if (optional_string("$label:"))
-					stuff_string(bi->label, F_MESSAGE, MAX_LABEL_LEN);
+					stuff_string(bi->label, F_MESSAGE, MAX_LABEL_BUF);
 				bi->closeup_label[0] = 0;
 				if (optional_string("$closeup label:")) {
-					stuff_string(bi->closeup_label, F_MESSAGE, MAX_LABEL_LEN);
+					stuff_string(bi->closeup_label, F_MESSAGE, MAX_LABEL_BUF);
 				}
 
 				bi->scale_factor = 1.0f;
@@ -1881,7 +1881,7 @@ void parse_briefing(mission * /*pm*/, int flags)
 				}
 
 				required_string("$multi_text");
-				stuff_string(not_used_text, F_MULTITEXT, MAX_ICON_TEXT_LEN);
+				stuff_string(not_used_text, F_MULTITEXT);
 				required_string("$end_icon");
 			} // end while
 

@@ -1468,10 +1468,6 @@ int Cr_info_coords[GR_NUM_RESOLUTIONS][4] = {
 #define CR_RESET_BUTTON					4
 #define CR_COMMIT_BUTTON				5
 
-#define MAX_INFO_LINES		20
-
-#define MAX_INFO_LINE_LEN	256
-
 ui_button_info Cr_buttons[GR_NUM_RESOLUTIONS][CR_NUM_BUTTONS] = {
 	{ // GR_640
 		ui_button_info("CAB_00",	2,		42,	-1,	-1,	0),
@@ -1510,8 +1506,7 @@ static int Desc_scroll_offset;
 static int Selected_campaign_index;
 static int Active_campaign_index;
 
-const char *Info_text_ptrs[MAX_INFO_LINES];
-int Num_info_lines, Info_text_line_size[MAX_INFO_LINES];
+SCP_vector<std::pair<const char *, size_t>> Info_text_lines;
 
 void campaign_room_build_listing()
 {
@@ -1540,14 +1535,14 @@ void campaign_room_build_listing()
 
 void set_new_campaign_line(int n)
 {
-	char *str;
+	const char *str;
 
 	Selected_campaign_index = n;
 	str = Campaign_descs[Selected_campaign_index];
-	Num_info_lines = 0;
+	Info_text_lines.clear();
 	if (str) {
-		Num_info_lines = split_str(str, Cr_info_coords[gr_screen.res][2], Info_text_line_size, Info_text_ptrs, MAX_INFO_LINES, MAX_INFO_LINE_LEN);
-		Assert(Num_info_lines >= 0);
+		split_str(str, Info_text_lines, Cr_info_coords[gr_screen.res][2]);
+		Assert(!Info_text_lines.empty());
 	}
 
 	Desc_scroll_offset = 0;
@@ -1565,7 +1560,7 @@ void campaign_room_scroll_info_up()
 
 void campaign_room_scroll_info_down()
 {
-	if ( (Num_info_lines - Desc_scroll_offset) * gr_get_font_height() > Cr_info_coords[gr_screen.res][3]) {
+	if ( (sz2i(Info_text_lines.size()) - Desc_scroll_offset) * gr_get_font_height() > Cr_info_coords[gr_screen.res][3]) {
 		Desc_scroll_offset++;
 		gamesnd_play_iface(InterfaceSounds::SCROLL);
 
@@ -1802,8 +1797,7 @@ void campaign_room_close()
 
 	// Reset info text pointers and size since they may contain pointers into the campaign description which will be
 	// freed soon.
-	memset(Info_text_line_size, 0, sizeof(Info_text_line_size));
-	memset(Info_text_ptrs, 0, sizeof(Info_text_ptrs));
+	Info_text_lines.clear();
 
 	// free the global Campaign_* list stuff
 	mission_campaign_free_list();
@@ -1821,7 +1815,6 @@ void campaign_room_close()
 void campaign_room_do_frame(float  /*frametime*/)
 {
 	char buf[256];
-	char line_text[MAX_INFO_LINE_LEN];
 	int i, k, y, line;
 	int select_tease_line = -1;  // line mouse is down on, but won't be selected until button released
 
@@ -1967,14 +1960,10 @@ void campaign_room_do_frame(float  /*frametime*/)
 	gr_set_color_fast(&Color_text_normal);
 
 	while (y + font_height <= Cr_info_coords[gr_screen.res][3]) {
-		if (i >= Num_info_lines)
+		if (i >= sz2i(Info_text_lines.size()))
 			break;
 
-		Assert(Info_text_line_size[i] < MAX_INFO_LINE_LEN);
-		strncpy(line_text, Info_text_ptrs[i], Info_text_line_size[i]);
-		line_text[Info_text_line_size[i]] = 0;
-		drop_white_space(line_text);
-		gr_string(Cr_info_coords[gr_screen.res][0], Cr_info_coords[gr_screen.res][1] + y, line_text, GR_RESIZE_MENU);
+		gr_string(Cr_info_coords[gr_screen.res][0], Cr_info_coords[gr_screen.res][1] + y, Info_text_lines[i].first, GR_RESIZE_MENU, 1.0f, Info_text_lines[i].second);
 		y += font_height;
 		i++;
 	}

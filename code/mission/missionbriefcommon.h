@@ -91,23 +91,17 @@ extern const float		BRIEF_TEXT_WIPE_TIME;		// time in seconds for wipe to occur
 // ------------------------------------------------------------------------
 
 #define	MAX_BRIEF_LINES		70
-#define	MAX_BRIEF_LINE_LEN	512		// max number of chars in a briefing line. Increased to allow for multibyte characters to fill a briefing line
+#define	MAX_BRIEF_LINE_BUF	512		// max storage for a briefing line. Increased to allow for multibyte characters to fill a briefing line
 #define	MAX_BRIEF_LINE_W_640		375		// max width of line in pixels in 640x480 mode
 #define	MAX_BRIEF_LINE_W_1024	600		// max width of line in pixels in 1024x768 mode
 
 #define	MAX_DEBRIEF_LINES		60
-#define	MAX_DEBRIEF_LINE_LEN	512		// max number of chars in a debriefing line
 #define	MAX_DEBRIEF_LINE_W	500		// max width of line in pixels
-
-#define	MAX_ICON_TEXT_LEN			1024		// max number of chars for icon info
-#define	MAX_ICON_TEXT_LINES		30
-#define	MAX_ICON_TEXT_LINE_LEN	512	// max number of chars in icon info line
-#define	MAX_ICON_TEXT_LINE_W		170		// max width of line in pixels
 
 #define	MAX_STAGE_ICONS			20
 #define	MAX_BRIEF_STAGES			15
 #define	MAX_DEBRIEF_STAGES		40
-#define	MAX_LABEL_LEN				64
+#define	MAX_LABEL_BUF				64
 
 #define		BI_HIGHLIGHT		(1<<0)
 #define		BI_SHOWHIGHLIGHT	(1<<1)
@@ -129,8 +123,8 @@ typedef struct brief_icon {
 	int		id;
 	int		team;
 	vec3d	pos;
-	char		label[MAX_LABEL_LEN];
-	char		closeup_label[MAX_LABEL_LEN];
+	char		label[MAX_LABEL_BUF];
+	char		closeup_label[MAX_LABEL_BUF];
 	hud_anim	fade_anim;
 	hud_anim	highlight_anim;
 	int		flags;				// BI_* flags defined above
@@ -326,7 +320,7 @@ void brief_voice_pause(int stage_num);
 void brief_voice_unpause(int stage_num);
 
 // fancy briefing style text functions for use in other modules.
-int brief_color_text_init(const char *src, int w, const char default_color = '\0', int instance = 0, int max_lines = MAX_BRIEF_LINES, const bool append = false);
+int brief_color_text_init(const char *src, int w, const char default_color = '\0', int instance = 0, size_t max_lines = MAX_BRIEF_LINES, const bool append = false);
 int brief_render_text(int line_offset, int x, int y, int h, float frametime, int instance = 0, int line_spacing = 0);
 
 void cmd_brief_reset();

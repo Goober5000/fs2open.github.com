@@ -60,8 +60,6 @@ int Om_mask_0		  = -1;
 int Om_background_1 = -1;
 int Om_mask_1       = -1;
 
-#define OM_NOTIFICATION_LINE_LEN 255
-
 // screen modes
 #define OM_MODE_NONE									-1		// no mode (unintialized)
 #define OM_MODE_GENERAL								0		// general tab
@@ -636,11 +634,10 @@ void options_multi_notify_process()
 {
 	int w;
 	const char *p_str[3];
-	int n_chars[3];
-	char line[OM_NOTIFICATION_LINE_LEN];
-	int line_count;
+	size_t n_chars[3];
+	size_t line_count;
 	int y_start;
-	int idx;
+	size_t idx;
 	int line_height;
 	
 	// if there is no timestamp, do nothing
@@ -656,15 +653,12 @@ void options_multi_notify_process()
 
 	// otherwise display the string
 	line_height = gr_get_font_height() + 1;
-	line_count = split_str(Om_notify_string, 600, n_chars, p_str, 3, OM_NOTIFICATION_LINE_LEN);
+	line_count = split_str(Om_notify_string, p_str, n_chars, 3, 600);
 	y_start = OM_NOTIFY_Y;
 	gr_set_color_fast(&Color_bright);
 	for(idx=0;idx<line_count;idx++){
-		memset(line, 0, OM_NOTIFICATION_LINE_LEN);
-		strncpy(line, p_str[idx], n_chars[idx]);
-				
-		gr_get_string_size(&w,NULL,line);
-		gr_string((600 - w)/2,y_start,line,GR_RESIZE_MENU);
+		gr_get_string_size(&w,nullptr,p_str[idx],1.0f,n_chars[idx]);
+		gr_string((600 - w)/2,y_start,p_str[idx],GR_RESIZE_MENU,1.0f,n_chars[idx]);
 
 		y_start += line_height;
 	}	

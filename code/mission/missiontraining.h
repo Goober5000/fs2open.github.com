@@ -16,7 +16,6 @@ class TIMESTAMP;
 
 extern int Max_directives;
 extern int Training_message_method;
-extern int Training_num_lines;
 extern int Training_message_visible;
 extern int Training_failure;
 
@@ -37,6 +36,7 @@ extern TIMESTAMP Players_target_timestamp;
 extern TIMESTAMP Players_mlocked_timestamp;
 
 void training_mission_init();
+void training_mission_pause();
 void training_mission_shutdown();
 void training_check_objectives();
 void message_training_queue(const char *text, TIMESTAMP timestamp, int length = -1);

@@ -35,7 +35,6 @@
 
 
 
-#define MAX_TRAINING_MESSAGE_LINES		10
 #define TRAINING_MESSAGE_WINDOW_WIDTH	266
 #define TRAINING_LINE_WIDTH			250  // width in pixels of actual text
 #define TRAINING_TIMING					150  // milliseconds per character to display messages
@@ -68,14 +67,12 @@ typedef struct {
 } training_message_queue;
 
 SCP_string Training_buf;
-const char *Training_lines[MAX_TRAINING_MESSAGE_LINES];  // Training message split into lines
-int Training_line_lengths[MAX_TRAINING_MESSAGE_LINES];
+SCP_vector<std::pair<const char *, size_t>> Training_lines;  // Training message split into lines
 
 char Training_voice_filename[NAME_LENGTH];
 int Max_directives = TRAINING_OBJ_DISPLAY_LINES;
 TIMESTAMP Training_message_timestamp;
 int Training_message_method = 1;
-int Training_num_lines = 0;
 int Training_voice = -1;
 int Training_voice_type;
 int Training_voice_soundstream;
@@ -407,7 +404,7 @@ void training_mission_init()
 {
 	int i;
 
-	Assert(!Training_num_lines);
+	Training_lines.clear();
 	Training_obj_num_lines = 0;
 	Training_message_queue_count = 0;
 	Training_failure = 0;
@@ -436,6 +433,11 @@ void training_mission_init()
 	Players_targeted_subsys = nullptr;
 	Players_target_timestamp = TIMESTAMP::invalid();
 	Players_mlocked_timestamp = TIMESTAMP::invalid();
+}
+
+void training_mission_pause()
+{
+	Training_lines.clear();
 }
 
 int comp_training_lines_by_born_on_date(const int *e1, const int *e2)
@@ -701,7 +703,8 @@ void training_mission_shutdown()
 	}
 
 	Training_voice = -1;
-	Training_num_lines = Training_obj_num_lines = 0;
+	Training_lines.clear();
+	Training_obj_num_lines = 0;
 
 	Training_buf.clear();
 }
@@ -892,7 +895,7 @@ int message_play_training_voice(int index)
 }
 
 /** 
- * One time initializations done when we want to display a new training mission.
+ * One-time initializations done when we want to display a new training message.
  * 
  * This does all the processing and setup required to actually display it, including 
  * starting the voice file playing
@@ -900,7 +903,7 @@ int message_play_training_voice(int index)
 void message_training_setup(int m, int length, char *special_message)
 {
 	if ((m < 0) || !Messages[m].message[0]) {  // remove current message from the screen
-		Training_num_lines = 0;
+		Training_lines.clear();
 		return;
 	}
 
@@ -912,9 +915,7 @@ void message_training_setup(int m, int length, char *special_message)
 	// moved from message_training_display() because we got rid of an extra buffer and we have to determine
 	// the number of lines earlier to avoid inadvertant modification of Training_buf.  - taylor
 	training_process_message();
-	Training_num_lines = split_str(Training_buf.c_str(), TRAINING_LINE_WIDTH, Training_line_lengths, Training_lines, MAX_TRAINING_MESSAGE_LINES);
-
-	Assert(Training_num_lines >= 0);
+	split_str(Training_buf.c_str(), Training_lines, TRAINING_LINE_WIDTH);
 
 	if ((message_play_training_voice(Messages[m].wave_info.index) < 0) || (Master_voice_volume <= 0)) {
 		if (length > 0)
@@ -1070,13 +1071,13 @@ void message_training_update_frame()
 	// the code that preps the training message and counts the number of lines
 	// has been moved to message_training_setup()
 
-	if (Training_num_lines <= 0){
+	if (Training_lines.empty()) {
 		return;
 	}
 
 	Training_message_visible = 1;
 
-	if ((Training_voice >= 0) && (Training_num_lines > 0) && !(Training_message_timestamp.isValid())) {
+	if ((Training_voice >= 0) && !(Training_message_timestamp.isValid())) {
 		if (Training_voice_type)
 			z = audiostream_is_playing(Training_voice_soundstream);
 		else
@@ -1139,7 +1140,7 @@ void HudGaugeTrainingMessages::render(float /*frametime*/, bool config)
 		return;
 	}
 
-	if (Training_num_lines <= 0){
+	if (Training_lines.empty()) {
 		return;
 	}
 
@@ -1160,20 +1161,22 @@ void HudGaugeTrainingMessages::render(float /*frametime*/, bool config)
 		gr_unsize_screen_pos(&nx, &ny);
 	}
 
-	gr_shade(position[0] + nx, position[1] + ny, TRAINING_MESSAGE_WINDOW_WIDTH, Training_num_lines * height + height);
+	gr_shade(position[0] + nx, position[1] + ny, TRAINING_MESSAGE_WINDOW_WIDTH, sz2i(Training_lines.size()) * height + height);
 	gr_reset_screen_scale();
 
 	gr_set_color_fast(&Color_bright_blue);
 	int mode = 0, count = 0;
-	for (int i=0; i<Training_num_lines; i++) {  // loop through all lines of message
-		const char* str = Training_lines[i];
+	int num_lines = sz2i(Training_lines.size());
+	for (int i=0; i<num_lines; i++) {  // loop through all lines of message
+		auto [str, len] = Training_lines[i];
 		int z = 0;
 		int x = position[0] + (TRAINING_MESSAGE_WINDOW_WIDTH - TRAINING_LINE_WIDTH) / 2;
 		int y = position[1] + i * height + height / 2 + 1;
 
 		char buf[256];
-		while ((str - Training_lines[i]) < Training_line_lengths[i]) {  // loop through each character of each line
-			if ((count < MAX_TRAINING_MESSAGE_MODS) && (static_cast<size_t>(str - Training_lines[i]) == Training_message_mods[count].pos)) {
+		auto line_start = str;
+		while (static_cast<size_t>(str - line_start) < len) {  // loop through each character of each line
+			if ((count < MAX_TRAINING_MESSAGE_MODS) && (static_cast<size_t>(str - line_start) == Training_message_mods[count].pos)) {
 				buf[z] = 0;
 				renderPrintf(x, y, 1.0, config, "%s", buf);
 				gr_get_string_size(&z, NULL, buf);
@@ -1197,7 +1200,7 @@ void HudGaugeTrainingMessages::render(float /*frametime*/, bool config)
 
 		if (z) {
 			buf[z] = 0;
-			renderPrintf(x, y, 1.0, config, "%s", buf);
+			renderPrintf(x, y, 1.0f, config, "%s", buf);
 		}
 	}
 }
@@ -1208,7 +1211,7 @@ void HudGaugeTrainingMessages::render(float /*frametime*/, bool config)
 void training_process_message()
 {
 	int count = 0;
-	SCP_string orig = Training_buf;
+	SCP_string orig(std::move(Training_buf));
 	Training_buf.clear();
 	auto src = orig.c_str();
 

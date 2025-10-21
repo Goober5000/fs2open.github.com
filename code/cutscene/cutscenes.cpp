@@ -339,18 +339,13 @@ int Cutscene_desc_coords[GR_NUM_RESOLUTIONS][4] = {
 		}
 };
 
-#define MAX_TEXT_LINES        20
-int Cutscene_max_text_lines[GR_NUM_RESOLUTIONS] = {
+size_t Cutscene_max_text_lines[GR_NUM_RESOLUTIONS] = {
 		10,
-		MAX_TEXT_LINES
+		20
 };
-#define MAX_TEXT_LINE_LEN    256
 
-static int Text_size;
-static int Text_offset = 0;
-static int Text_line_size[MAX_TEXT_LINES];
-static const char* Text_lines[MAX_TEXT_LINES];
-
+static size_t Text_line_num = 0;
+static SCP_vector<std::pair<const char *, size_t>> Text_lines;
 
 void cutscenes_screen_play()
 {
@@ -687,48 +682,36 @@ void cutscenes_screen_do_frame()
 
 	if (Description_index != Selected_line)
 	{
-		char* src = NULL;
-
 		Description_index = Selected_line;
-		Text_size = 0;
-		if (Description_index < (int) Cutscene_list.size() &&
-			(int) Cutscene_list[Description_index] < (int) Cutscenes.size())
+		Text_lines.clear();
+		if (Description_index < sz2i(Cutscene_list.size()) && Cutscene_list[Description_index] < sz2i(Cutscenes.size()))
 		{
-			src = Cutscenes[Cutscene_list[Description_index]].description;
+			const char *src = Cutscenes[Cutscene_list[Description_index]].description;
 			if (src)
 			{
-				Text_size = split_str(src, Cutscene_desc_coords[gr_screen.res][2], Text_line_size, Text_lines,
-									  Cutscene_max_text_lines[gr_screen.res], MAX_TEXT_LINE_LEN);
-				Assert(Text_size >= 0 && Text_size < Cutscene_max_text_lines[gr_screen.res]);
+				split_str(src, Text_lines, Cutscene_desc_coords[gr_screen.res][2]);
+				if (Text_lines.size() > Cutscene_max_text_lines[gr_screen.res])
+					Text_lines.resize(Cutscene_max_text_lines[gr_screen.res]);
 			}
 		}
 	}
 
 	if (Description_index >= 0)
 	{
-		int len;
-		char line[MAX_TEXT_LINE_LEN + 1];
-
 		gr_set_color_fast(&Color_text_normal);
 
 		y = 0;
-		z = Text_offset;
+		size_t line_num = Text_line_num;
 		while (y + font_height <= Cutscene_desc_coords[gr_screen.res][3])
 		{
-			if (z >= Text_size || z >= MAX_TEXT_LINES - 1)
+			if (line_num >= Text_lines.size())
 				break;
 
-			len = Text_line_size[z];
-			if (len > MAX_TEXT_LINE_LEN)
-				len = MAX_TEXT_LINE_LEN;
-
-			strncpy(line, Text_lines[z], len);
-			line[len] = 0;
-			gr_string(Cutscene_desc_coords[gr_screen.res][0], Cutscene_desc_coords[gr_screen.res][1] + y, line,
-					  GR_RESIZE_MENU);
+			gr_string(Cutscene_desc_coords[gr_screen.res][0], Cutscene_desc_coords[gr_screen.res][1] + y, Text_lines[line_num].first,
+					  GR_RESIZE_MENU, 1.0f, Text_lines[line_num].second);
 
 			y += font_height;
-			z++;
+			line_num++;
 		}
 	}
 

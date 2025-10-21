@@ -735,15 +735,15 @@ subtitle::subtitle(int in_x_pos, int in_y_pos, const char* in_text, const char* 
 		in_text = text_buf.c_str();
 	}
 
-	int num_text_lines = 0;
+	size_t num_text_lines = 0;
 	const char *text_line_ptrs[MAX_SUBTITLE_LINES];
-	int text_line_lens[MAX_SUBTITLE_LINES];
+	size_t text_line_lens[MAX_SUBTITLE_LINES];
 
 	//Setup text
 	if ( (in_text != NULL) && (in_text[0] != '\0') ) {
 		int split_width = (in_width > 0) ? in_width : 200;
 
-		num_text_lines = split_str(in_text, split_width, text_line_lens, text_line_ptrs, MAX_SUBTITLE_LINES);
+		num_text_lines = split_str(in_text, text_line_ptrs, text_line_lens, MAX_SUBTITLE_LINES, split_width);
 		for(int i = 0; i < num_text_lines; i++)
 		{
 			text_buf.assign(text_line_ptrs[i], text_line_lens[i]);
@@ -789,9 +789,9 @@ subtitle::subtitle(int in_x_pos, int in_y_pos, const char* in_text, const char* 
 		}
 
 		//Get text size
-		for(int i = 0; i < num_text_lines; i++)
+		for(size_t i = 0; i < num_text_lines; i++)
 		{
-			gr_get_string_size(&w, &h, text_line_ptrs[i], 1.0f, static_cast<size_t>(text_line_lens[i]));
+			gr_get_string_size(&w, &h, text_line_ptrs[i], 1.0f, text_line_lens[i]);
 
 			if(w > tw)
 				tw = w;

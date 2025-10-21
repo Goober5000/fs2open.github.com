@@ -140,9 +140,6 @@ int Tech_slider_coords[GR_NUM_RESOLUTIONS][4] = {
 	}
 };
 
-#define MAX_TEXT_LINES		150
-#define MAX_TEXT_LINE_LEN	256
-
 struct techroom_buttons {
 	const char *filename;
 	int x, y, xt, yt;
@@ -205,10 +202,8 @@ static int Trackball_active = 0;
 static matrix Techroom_ship_orient = IDENTITY_MATRIX;
 static int Techroom_show_all = 0;
 
-static int Text_size;
-static int Text_offset;
-static int Text_line_size[MAX_TEXT_LINES];
-static const char *Text_lines[MAX_TEXT_LINES];
+static size_t Text_line_num;
+static SCP_vector<std::pair<const char *, size_t>> Text_lines;
 
 static int Cur_entry = -1;				// this is the current entry selected, using entry indexing
 static int Cur_entry_index = -1;		// this is the current entry selected, using master list indexing
@@ -260,13 +255,13 @@ void tech_scroll_list_down();
 
 void techroom_init_desc(const char *src, int w)
 {
-	Text_size = Text_offset = 0;
+	Text_line_num = 0;
+	Text_lines.clear();
 	if (!src) {
 		return;
 	}
 
-	Text_size = split_str(src, w, Text_line_size, Text_lines, MAX_TEXT_LINES, MAX_TEXT_LINE_LEN);
-	Assert(Text_size >= 0 && Text_size < MAX_TEXT_LINES);
+	split_str(src, Text_lines, w);
 }
 
 void techroom_unload_animation()
@@ -426,33 +421,22 @@ void techroom_select_new_entry()
 // write out the current description in the bottom window
 void techroom_render_desc(int xo, int yo, int ho)
 {
-	int y, z, len, font_height;
-	char line[MAX_TEXT_LINE_LEN + 1];
-
-	font_height = gr_get_font_height();
-
-	y = 0;
-	z = Text_offset;
+	int font_height = gr_get_font_height();
+	int y = 0;
+	size_t z = Text_line_num;
 	while (y + font_height <= ho) {
-		if (z >= Text_size){
+		if (z >= Text_lines.size()){
 			break;
 		}
 
-		len = Text_line_size[z];
-		if (len > MAX_TEXT_LINE_LEN){
-			len = MAX_TEXT_LINE_LEN;
-		}
-
-		strncpy(line, Text_lines[z], len);
-		line[len] = 0;
-		gr_string(xo, yo + y, line, GR_RESIZE_MENU);
+		gr_string(xo, yo + y, Text_lines[z].first, GR_RESIZE_MENU, 1.0f, Text_lines[z].second);
 
 		y += font_height;
 		z++;
 	}
 
 	// maybe output 'more' indicator
-	if ( z < Text_size ) {
+	if ( z < Text_lines.size() ) {
 		// can be scrolled down
 		int more_txt_x = Tech_desc_coords[gr_screen.res][0] + (Tech_desc_coords[gr_screen.res][2]/2) - 10;	// FIXME should move these to constants since they don't move
 		int more_txt_y = Tech_desc_coords[gr_screen.res][1] + Tech_desc_coords[gr_screen.res][3];				// located below brief text, centered
@@ -711,8 +695,8 @@ void tech_next_entry()
 
 void tech_scroll_info_up()
 {
-	if (Text_offset) {
-		Text_offset--;
+	if (Text_line_num) {
+		Text_line_num--;
 		gamesnd_play_iface(InterfaceSounds::SCROLL);
 	} else {
 		gamesnd_play_iface(InterfaceSounds::GENERAL_FAIL);
@@ -725,8 +709,8 @@ void tech_scroll_info_down()
 
 	h = Tech_desc_coords[gr_screen.res][SHIP_H_COORD];
 
-	if (Text_offset + h / gr_get_font_height() < Text_size) {
-		Text_offset++;
+	if (Text_line_num + h / gr_get_font_height() < sz2i(Text_lines.size())) {
+		Text_line_num++;
 		gamesnd_play_iface(InterfaceSounds::SCROLL);
 	} else { //-V523
 		gamesnd_play_iface(InterfaceSounds::GENERAL_FAIL);

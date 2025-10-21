@@ -758,43 +758,42 @@ void chatbox_add_line(const char *msg, int pid, int add_id)
 		chat.callsign[0] = '\0';
 	}	
 
+	// strip leading whitespace
+	ignore_white_space(&msg);
+	auto orig_msg = msg;
+
 	// split the text up into as many lines as necessary
-	int n_chars[3];	
-	const char* p_str[3]; // for the initial line (unindented)
-	int n_lines = split_str(msg, Chatbox_disp_w, n_chars, p_str, 3, CHATBOX_STRING_LEN);
-	Assertion(n_lines != -1, "Chat split string returned an invalid number of lines, please report!");	
+	size_t split_len, split_next_pos;
+	std::tie(split_len, split_next_pos, std::ignore) = split_str_once(msg, Chatbox_disp_w, CHATBOX_STRING_LEN);
 
 	// will happen if msg is all whitespace, in which case we should ignore it
-	if (n_lines == 0) {
+	if (split_len == 0) {
 		return;
 	}
 
 	// copy in the chars
-	strcpy_s(chat.text, p_str[0]);
-
+	strncpy(chat.text, msg, split_len);
+	chat.text[split_len] = 0;
 	chat_box_add_chat_to_list(chat);
 	
 	// if we have more than 1 line, re-split everything so that the rest are indented
-	if(n_lines > 1){
-		// split up the string after the first break-marker
-		char msg_extra[CHATBOX_STRING_LEN];
-		n_lines = split_str(msg_extra + n_chars[0],Chatbox_disp_w - CHAT_LINE_INDENT,n_chars,p_str,3, CHATBOX_STRING_LEN);
-		Assertion(n_lines != -1, "Chat split string returned an invalid number of lines, please report!");		
+	while (split_next_pos > 0) {
+		// split up the new string
+		msg += split_next_pos;
+		std::tie(split_len, split_next_pos, std::ignore) = split_str_once(msg, Chatbox_disp_w - CHAT_LINE_INDENT, CHATBOX_STRING_LEN);
 
-		// setup these remaining lines
-		for(int idx=0;idx<n_lines;idx++){
-			brief_chat i_chat;
-			i_chat.player_id = pid;
-			i_chat.indent = true;
-			strcpy_s(i_chat.text, p_str[idx]);
-
-			chat_box_add_chat_to_list(i_chat);
-		}
+		// setup any remaining lines
+		brief_chat i_chat;
+		i_chat.player_id = pid;
+		i_chat.indent = true;
+		strncpy(i_chat.text, msg, split_len);
+		i_chat.text[split_len] = 0;
+		chat_box_add_chat_to_list(i_chat);
 	}
 			
 	// COMMAND LINE OPTION
-	if(Cmdline_multi_stream_chat_to_file && Multi_chat_stream!=NULL && msg[0] != '\0'){ // stream to the file if we're supposed to
-		cfwrite_string(msg,Multi_chat_stream);
+	if(Cmdline_multi_stream_chat_to_file && Multi_chat_stream) { // stream to the file if we're supposed to
+		cfwrite_string(orig_msg,Multi_chat_stream);
 		cfwrite_char('\n',Multi_chat_stream);
 	}	
 

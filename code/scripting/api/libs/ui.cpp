@@ -2777,8 +2777,8 @@ ADE_FUNC(getChat,
 	int i = 1;
 	for (auto& line : Multi_pxo_chat) {
 		
-		char callsign[CALLSIGN_LEN];
-		char text[MAX_CHAT_LINE_LEN];
+		char callsign[CALLSIGN_LEN+1];
+		char text[MAX_CHAT_LINE_LEN+1];
 
 		char* spacePos = std::strchr(line.text, ' ');
 

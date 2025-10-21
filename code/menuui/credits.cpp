@@ -383,10 +383,7 @@ void credits_parse_table(const char* filename)
 
 		SCP_string credits_text;
 		SCP_string line;
-
-		SCP_vector<int> charNum;
-		SCP_vector<const char*> lines;
-		int numLines = -1;
+		SCP_vector<std::pair<const char*, size_t>> lines;
 
 		bool first_run = true;
 		while (!check_for_eof_raw() && !check_for_string_raw("#end"))
@@ -412,45 +409,29 @@ void credits_parse_table(const char* filename)
 			else
 			{
 				// optionally split lines. This is default behavior but SCPUI doesn't use it
-				if (Split_credits_lines) {
-
-					// split_str doesn't take care of this.
-					charNum.clear();
-
+				if (Split_credits_lines)
+				{
 					// Split the string into multiple lines if it's too long
-					numLines = split_str(line.c_str(), Credits_text_coords[gr_screen.res][2], charNum, lines);
-
-					// Make sure that we have valid data
-					Assertion(lines.size() == (size_t)numLines,
-						"split_str reported %d lines but vector contains " SIZE_T_ARG " entries!",
-						numLines,
-						lines.size());
-
-					Assertion(lines.size() <= charNum.size(),
-						"Something has gone wrong while splitting strings. Got " SIZE_T_ARG
-						" lines but only " SIZE_T_ARG " chacter lengths.",
-						lines.size(),
-						charNum.size());
-				} else {
-					lines.push_back(line.c_str());
-					charNum.push_back((int)line.length());
-					numLines = 1;
+					split_str(line.c_str(), lines, Credits_text_coords[gr_screen.res][2]);
+				}
+				else
+				{
+					lines.emplace_back(line.c_str(), line.length());
 				}
 
 				// Now add all splitted lines to the credit text and append a newline to the end
-				for (int i = 0; i < numLines; i++)
+				for (auto &line_pair: lines)
 				{
-					credits_text.append(SCP_string(lines[i], charNum[i]));
+					credits_text.append(SCP_string(line_pair.first, line_pair.second));
 					credits_text.append("\n");
 				}
 
-				// clear vectors for the next round
+				// clear vector for the next round
 				lines.clear();
-				charNum.clear();
 			}
 		}
 
-		Credit_text_parts.push_back(credits_text);
+		Credit_text_parts.push_back(std::move(credits_text));
 
 		Credits_parsed = true;
 	}

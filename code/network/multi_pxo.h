@@ -64,7 +64,7 @@ extern pxo_channel Multi_pxo_channel_current;
 extern SCP_vector<SCP_string> Multi_pxo_players;
 
 // chat related stuff ----------------------------------------------
-#define MAX_CHAT_LINE_LEN 256
+#define MAX_CHAT_LINE_LEN 255
 
 // chat flags
 #define CHAT_MODE_NORMAL 0         // normal chat from someone

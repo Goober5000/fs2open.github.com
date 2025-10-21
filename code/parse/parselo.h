@@ -370,21 +370,18 @@ extern void maybe_convert_foreign_characters(SCP_string &text);
 extern size_t get_converted_string_length(const char *text);
 extern size_t get_converted_string_length(const SCP_string &text);
 std::tuple<size_t, size_t, bool> split_str_once(const char *src, int max_pixel_w, size_t max_line_len = std::string::npos, float scale = 1.0f, int *w = nullptr, int *h = nullptr);
-int split_str(const char* src,
-			  int max_pixel_w,
-			  int* n_chars,
+size_t split_str(const char* src,
 			  const char** p_str,
-			  int max_lines,
-			  int max_line_length = INT_MAX,
-			  unicode::codepoint_t ignore_char = (unicode::codepoint_t) -1,
-			  bool strip_leading_whitespace = true);
-int split_str(const char* src,
+			  size_t* n_chars,
+			  size_t max_lines,
 			  int max_pixel_w,
-			  SCP_vector<int>& n_chars,
-			  SCP_vector<const char*>& p_str,
-			  int max_line_length = INT_MAX,
-			  unicode::codepoint_t ignore_char = (unicode::codepoint_t) -1,
-			  bool strip_leading_whitespace = true);
+			  size_t max_line_len = std::string::npos,
+			  unicode::codepoint_t ignore_char = static_cast<unicode::codepoint_t>(-1));
+size_t split_str(const char* src,
+			  SCP_vector<std::pair<const char*, size_t>>& lines,
+			  int max_pixel_w,
+			  size_t max_line_len = std::string::npos,
+			  unicode::codepoint_t ignore_char = static_cast<unicode::codepoint_t>(-1));
 
 // fred
 extern int required_string_fred(const char *pstr, const char *end = NULL);

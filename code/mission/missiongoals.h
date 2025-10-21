@@ -46,8 +46,6 @@ extern const char *Goal_type_text(int n);
 
 // structures for primary and secondary goals
 
-#define	MAX_GOAL_TEXT	128
-
 #define	MGF_NO_MUSIC	(1<<0)		// don't play any event music when goal is achieved
 
 typedef struct mission_goal {

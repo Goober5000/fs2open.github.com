@@ -1396,7 +1396,7 @@ void brief_render_line(int line_num, int x, int y, int instance) {
 		}
 	}
 	size_t char_seq_pos = 0; //Cursor position into the following character sequence
-	char char_seq[MAX_BRIEF_LINE_LEN];
+	char char_seq[MAX_BRIEF_LINE_BUF];
 	int offset = 0; //offset is the horizontal position of the screen where strings are drawn
 	gr_set_color_fast(&Color_white);
 
@@ -1766,12 +1766,10 @@ int brief_text_colorize(char *src, int instance, char default_color_stack[], int
  * @param max_lines maximum number of lines
  * @param[in] append add on to the existing lines instead of replacing them (defaults to false)
  */
-int brief_color_text_init(const char* src, int w, const char default_color, int instance, int max_lines, const bool append)
+int brief_color_text_init(const char* src, int w, const char default_color, int instance, size_t max_lines, const bool append)
 {
-	int i, n_lines, len;
-	SCP_vector<int> n_chars;
-	SCP_vector<const char*> p_str;
-	char tmp_brief_line[MAX_BRIEF_LINE_LEN];
+	SCP_vector<std::pair<const char *, size_t>> brief_lines;
+	char tmp_brief_line[MAX_BRIEF_LINE_BUF];
 
 	// manage different default colors (don't use a SCP_ stack because eh)
 	char default_color_stack[HIGHEST_COLOR_STACK_INDEX + 1];
@@ -1784,29 +1782,28 @@ int brief_color_text_init(const char* src, int w, const char default_color, int 
 		default_color_stack[0] = default_color;
 	}
 
-	Assert(src != NULL);
-	n_lines = split_str(src, w, n_chars, p_str, MAX_BRIEF_LINE_LEN, BRIEF_META_CHAR);
-	Assert(n_lines >= 0);
+	Assert(src != nullptr);
+	ignore_white_space(&src);
+	split_str(src, brief_lines, w, MAX_BRIEF_LINE_BUF-1, BRIEF_META_CHAR);
 
 	//for compatability reasons truncate text from everything except the fiction viewer
-	if ((max_lines > 0) && (n_lines > max_lines)) {
-		n_lines = max_lines; 
+	if ((max_lines > 0) && (brief_lines.size() > max_lines)) {
+		brief_lines.resize(max_lines);
 	}
 
 	if (!append) {
 		Max_briefing_line_len = 1;
 		Colored_stream[instance].clear();
-	} else if (n_lines == 0 && !strcmp(src, "\n")) {	// Silly hack to allow inserting blank lines for debriefings -MageKing17
-		n_lines = 1;
-		p_str.push_back(0);
-		n_chars.push_back(0);
+	} else if (brief_lines.empty() && !strcmp(src, "\n")) {	// Silly hack to allow inserting blank lines for debriefings -MageKing17
+		brief_lines.emplace_back("", 0);
 	}
-	for (i=0; i<n_lines; i++) {
-		Assert(n_chars[i] < MAX_BRIEF_LINE_LEN);
-		strncpy(tmp_brief_line, p_str[i], n_chars[i]);
-		tmp_brief_line[n_chars[i]] = 0;
-		drop_leading_white_space(tmp_brief_line);
-		len = brief_text_colorize(&tmp_brief_line[0], instance, default_color_stack, color_stack_index);
+
+	for (auto &brief_line: brief_lines) {
+		Assert(brief_line.second < MAX_BRIEF_LINE_BUF);
+		strncpy(tmp_brief_line, brief_line.first, brief_line.second);
+		tmp_brief_line[brief_line.second] = 0;
+
+		int len = brief_text_colorize(&tmp_brief_line[0], instance, default_color_stack, color_stack_index);
 		if (len > Max_briefing_line_len)
 			Max_briefing_line_len = len;
 	}
@@ -1815,11 +1812,11 @@ int brief_color_text_init(const char* src, int w, const char default_color, int 
 	Play_brief_voice = 0;
 
 	if (append) {
-		Num_brief_text_lines[instance] += n_lines;
+		Num_brief_text_lines[instance] += sz2i(brief_lines.size());
 	} else {
-		Num_brief_text_lines[instance] = n_lines;
+		Num_brief_text_lines[instance] = sz2i(brief_lines.size());
 	}
-	return n_lines;
+	return sz2i(brief_lines.size());
 }
 
 /**

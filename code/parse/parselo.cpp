@@ -3751,8 +3751,6 @@ std::tuple<size_t, size_t, bool> split_str_once(const char *src, int max_pixel_w
 	return std::make_tuple(saved_len, pos2, false);
 }
 
-#define SPLIT_STR_BUFFER_SIZE	512
-
 // --------------------------------------------------------------------------------------
 // split_str()
 //
@@ -3761,271 +3759,74 @@ std::tuple<size_t, size_t, bool> split_str_once(const char *src, int max_pixel_w
 //
 // Supports \n's in the strings!
 //
-// parameters:		src			=>		source string to be broken up
-//						max_pixel_w	=>		max width of line in pixels
-//						n_chars		=>		output array that will hold number of characters in each line
-//						p_str			=>		output array of pointers to start of lines within src
-//						max_lines	=>		limit of number of lines to break src up into
-//						ignore_char	=>		OPTIONAL parameter (default val -1).  Ignore words starting with this character
-//												This is useful when you want to ignore embedded control information that starts
-//												with a specific character, like $ or #
+// parameters:  src          => source string to be broken up
+//              p_str        => output array of pointers to start of lines within src
+//              n_chars      => output array that will hold number of characters in each line
+//              max_lines    => limit of number of lines to break src up into
+//              max_pixel_w  => max width of line in pixels
+//              max_line_len => max width of line in pixels
+//              ignore_char  => OPTIONAL parameter (default val -1).  Ignore words starting with this character.
+//                              This is useful when you want to ignore embedded control information that starts
+//                              with a specific character, like $ or #
 //
-//	returns:			number of lines src is broken into
-//						-1 is returned when an error occurs
+//	returns:    number of lines src is broken into
 //
-int split_str(const char *src, int max_pixel_w, int *n_chars, const char **p_str, int max_lines, int max_line_length, unicode::codepoint_t ignore_char, bool strip_leading_whitespace)
+size_t split_str(const char* src, const char** p_str, size_t* n_chars, size_t max_lines, int max_pixel_w, size_t max_line_len, unicode::codepoint_t ignore_char)
 {
-	char buffer[SPLIT_STR_BUFFER_SIZE];
-	const char *breakpoint = NULL;
-	int sw, new_line = 1, line_num = 0, last_was_white = 0;
-	int ignore_until_whitespace, buf_index;
-
 	// check our assumptions..
-	Assert(src != NULL);
-	Assert(n_chars != NULL);
-	Assert(p_str != NULL);
+	Assert(src != nullptr);
+	Assert(p_str != nullptr);
+	Assert(n_chars != nullptr);
 	Assert(max_lines > 0);
 	Assert(max_pixel_w > 0);
+	Assert(max_line_len > 0);
 
-	Assertion(max_line_length > 0, "Max line length should be >0, not %d; get a coder!\n", max_line_length);
+	// strip leading whitespace
+	ignore_white_space(&src);
 
-	memset(buffer, 0, sizeof(buffer));
-	buf_index = 0;
-	ignore_until_whitespace = 0;
+	size_t line_num = 0;
+	while (line_num < max_lines)
+	{
+		size_t split_len, split_next_pos;
+		std::tie(split_len, split_next_pos, std::ignore) = split_str_once(src, max_pixel_w, max_line_len);
 
-	// get rid of any leading whitespace
-	while (strip_leading_whitespace && is_white_space(*src))
-		src++;
+		p_str[line_num] = src;
+		n_chars[line_num] = split_len;
+		++line_num;
 
-	new_line = 1;
-	p_str[0] = NULL;
-
-	// iterate through chars in line, keeping track of most recent "white space" location that can be used
-	// as a line splitting point if necessary
-	unicode::codepoint_range range(src);
-	auto end_iter = std::end(range);
-	auto iter = std::begin(range);
-	for (; iter != end_iter; ++iter) {
-		auto cp = *iter;
-
-		if (line_num >= max_lines)
-			return line_num;  // time to bail out
-
-		// starting a new line of text, init stuff for that
-		if (new_line) {
-			p_str[line_num] = NULL;
-			if (strip_leading_whitespace && is_gray_space(cp))
-				continue;
-
-			p_str[line_num] = iter.pos();
-			breakpoint = NULL;
-			new_line = 0;
-		}
-
-		// maybe skip leading whitespace
-		if (ignore_until_whitespace) {
-			if ( is_white_space(cp) )
-				ignore_until_whitespace = 0;
-
-			continue;
-		}
-
-		// if we have a newline, split the line here
-		if (cp == UNICODE_CHAR('\n')) {
-			n_chars[line_num] = (int)(iter.pos() - p_str[line_num]);  // track length of line
-			line_num++;
-			if (line_num < max_lines) {
-				p_str[line_num] = NULL;
-			}
-			new_line = 1;
-
-			memset(buffer, 0, SPLIT_STR_BUFFER_SIZE);
-			buf_index = 0;
-			continue;
-		}
-
-		if (cp == ignore_char) {
-			ignore_until_whitespace = 1;
-			continue;
-		}
-
-		if (is_gray_space(cp)) {
-			if (!last_was_white)  // track at first whitespace in a series of whitespace
-				breakpoint = iter.pos();
-
-			last_was_white = 1;
-
-		} else {
-			// indicate next time around that this wasn't a whitespace character
-			last_was_white = 0;
-		}
-
-		auto encoded_width = unicode::encoded_size(cp);
-		Assertion(buf_index + encoded_width < SPLIT_STR_BUFFER_SIZE,
-				  "buffer overflow in split_str: screen width causes this text to be longer than %d characters!",
-				  SPLIT_STR_BUFFER_SIZE - 1);
-
-		// throw it in our buffer
-		unicode::encode(cp, &buffer[buf_index]);
-		buf_index += (int)encoded_width;
-		buffer[buf_index] = 0;  // null terminate it
-
-		gr_get_string_size(&sw, NULL, buffer);
-		if (sw >= max_pixel_w || buf_index >= max_line_length) {
-			const char *end;
-
-			if (breakpoint) {
-				end = breakpoint;
-				iter = unicode::text_iterator(breakpoint, src, src + strlen(src));
-
-			} else {
-				end = iter.pos();  // force a split here since to whitespace
-				--iter;  // reuse this character in next line
-			}
-
-			n_chars[line_num] = (int)(end - p_str[line_num]);  // track length of line
-			Assert(n_chars[line_num]);
-			line_num++;
-			if (line_num < max_lines) {
-				p_str[line_num] = NULL;
-			}
-			new_line = 1;
-
-			memset(buffer, 0, sizeof(buffer));
-			buf_index = 0;
-			continue;
-		}
-	}	// end for
-
-	if (!new_line && p_str[line_num]) {
-		n_chars[line_num] = (int)(iter.pos() - p_str[line_num]);  // track length of line
-		Assert(n_chars[line_num]);
-		line_num++;
+		if (split_next_pos == 0)
+			break;
+		src += split_next_pos;
 	}
 
+	// after exiting the above loop by whatever path, this is now the number of lines
 	return line_num;
 }
 
-int split_str(const char *src, int max_pixel_w, SCP_vector<int> &n_chars, SCP_vector<const char*> &p_str, int max_line_length, unicode::codepoint_t ignore_char, bool strip_leading_whitespace)
+size_t split_str(const char* src, SCP_vector<std::pair<const char*, size_t>>& lines, int max_pixel_w, size_t max_line_len, unicode::codepoint_t ignore_char)
 {
-	char buffer[SPLIT_STR_BUFFER_SIZE];
-	const char *breakpoint = NULL;
-	int sw, new_line = 1, line_num = 0, last_was_white = 0;
-	int ignore_until_whitespace = 0, buf_index = 0;
-
 	// check our assumptions..
-	Assert(src != NULL);
+	Assert(src != nullptr);
 	Assert(max_pixel_w > 0);
+	Assert(max_line_len > 0);
 
-	Assertion(max_line_length > 0, "Max line length should be >0, not %d; get a coder!\n", max_line_length);
+	// strip leading whitespace
+	ignore_white_space(&src);
 
-	memset(buffer, 0, sizeof(buffer));
+	lines.clear();
+	while (true)
+	{
+		size_t split_len, split_next_pos;
+		std::tie(split_len, split_next_pos, std::ignore) = split_str_once(src, max_pixel_w, max_line_len);
 
-	// get rid of any leading whitespace
-	while (strip_leading_whitespace && is_white_space(*src))
-		src++;
+		lines.emplace_back(src, split_len);
 
-	p_str.clear();
-
-	// iterate through chars in line, keeping track of most recent "white space" location that can be used
-	// as a line splitting point if necessary
-	unicode::codepoint_range range(src);
-	auto end_iter = std::end(range);
-	auto iter = std::begin(range);
-	for (; iter != end_iter; ++iter) {
-		auto cp = *iter;
-
-		// starting a new line of text, init stuff for that
-		if (new_line) {
-			if (strip_leading_whitespace && is_gray_space(cp))
-				continue;
-
-			p_str.push_back(iter.pos());
-			breakpoint = NULL;
-			new_line = 0;
-		}
-
-		// maybe skip leading whitespace
-		if (ignore_until_whitespace) {
-			if ( is_white_space(cp) ) {
-				ignore_until_whitespace = 0;
-
-				// don't eat the newline
-				if (cp == EOLN)
-					--iter;
-			}
-
-			continue;
-		}
-
-		// if we have a newline, split the line here
-		if (cp == UNICODE_CHAR('\n')) {
-			n_chars.push_back((int)(iter.pos() - p_str[line_num]));  // track length of line
-			line_num++;
-			new_line = 1;
-
-			memset(buffer, 0, SPLIT_STR_BUFFER_SIZE);
-			buf_index = 0;
-			continue;
-		}
-
-		if (cp == ignore_char) {
-			ignore_until_whitespace = 1;
-			continue;
-		}
-
-		if (is_gray_space(cp)) {
-			if (!last_was_white)  // track at first whitespace in a series of whitespace
-				breakpoint = iter.pos();
-
-			last_was_white = 1;
-
-		} else {
-			// indicate next time around that this wasn't a whitespace character
-			last_was_white = 0;
-		}
-
-		auto encoded_width = unicode::encoded_size(cp);
-		Assertion(buf_index + encoded_width < SPLIT_STR_BUFFER_SIZE,
-				  "buffer overflow in split_str: screen width causes this text to be longer than %d characters!",
-				  SPLIT_STR_BUFFER_SIZE - 1);
-
-		// throw it in our buffer
-		unicode::encode(cp, &buffer[buf_index]);
-		buf_index += (int)encoded_width;
-		buffer[buf_index] = 0;  // null terminate it
-
-		gr_get_string_size(&sw, NULL, buffer);
-		if (sw >= max_pixel_w || buf_index >= max_line_length) {
-			const char *end;
-
-			if (breakpoint) {
-				end = breakpoint;
-				iter = unicode::text_iterator(breakpoint, src, src + strlen(src));
-
-			} else {
-				end = iter.pos();  // force a split here since to whitespace
-				--iter;  // reuse this character in next line
-			}
-
-			n_chars.push_back((int)(end - p_str[line_num]));  // track length of line
-			Assert(n_chars[line_num]);
-			line_num++;
-			new_line = 1;
-
-			memset(buffer, 0, sizeof(buffer));
-			buf_index = 0;
-			continue;
-		}
-	}	// end for
-
-	if (!new_line && p_str[line_num]) {
-		n_chars.push_back((int)(iter.pos() - p_str[line_num]));  // track length of line
-		Assert(n_chars[line_num]);
-		line_num++;
+		if (split_next_pos == 0)
+			break;
+		src += split_next_pos;
 	}
 
-	return line_num;
+	return lines.size();
 }
 
 // Goober5000

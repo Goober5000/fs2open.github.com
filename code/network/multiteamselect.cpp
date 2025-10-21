@@ -295,9 +295,9 @@ int Multi_ts_avail_start = 0;																		// starting index of where we wil
 int Multi_ts_avail_count = 0;																		// the # of available ship classes
 
 // ship information stuff
-#define MULTI_TS_SHIP_INFO_MAX_LINE_LEN				150
+#define MULTI_TS_SHIP_INFO_MAX_LINE_BUF				150
 #define MULTI_TS_SHIP_INFO_MAX_LINES					10
-#define MULTI_TS_SHIP_INFO_MAX_TEXT						(MULTI_TS_SHIP_INFO_MAX_LINE_LEN * MULTI_TS_SHIP_INFO_MAX_LINES)
+#define MULTI_TS_SHIP_INFO_MAX_TEXT						(MULTI_TS_SHIP_INFO_MAX_LINE_BUF * MULTI_TS_SHIP_INFO_MAX_LINES)
 
 static int Multi_ts_ship_info_coords[GR_NUM_RESOLUTIONS][3] = {
 	{ // GR_640
@@ -308,9 +308,9 @@ static int Multi_ts_ship_info_coords[GR_NUM_RESOLUTIONS][3] = {
 	}
 };
 
-char Multi_ts_ship_info_lines[MULTI_TS_SHIP_INFO_MAX_LINES][MULTI_TS_SHIP_INFO_MAX_LINE_LEN];
+char Multi_ts_ship_info_lines[MULTI_TS_SHIP_INFO_MAX_LINES][MULTI_TS_SHIP_INFO_MAX_LINE_BUF];
 char Multi_ts_ship_info_text[MULTI_TS_SHIP_INFO_MAX_TEXT];
-int Multi_ts_ship_info_line_count;
+size_t Multi_ts_ship_info_line_count;
 
 // status bar mode
 static int Multi_ts_status_coords[GR_NUM_RESOLUTIONS][3] = {
@@ -1601,7 +1601,7 @@ void multi_ts_blit_ship_info()
 	
 	Assert(Multi_ts_ship_info_line_count < 3);
 	gr_set_color_fast(&Color_normal);
-	for(int idx=0;idx<Multi_ts_ship_info_line_count;idx++){
+	for(size_t idx=0;idx<Multi_ts_ship_info_line_count;idx++){
 		gr_string(Multi_ts_ship_info_coords[gr_screen.res][MULTI_TS_X_COORD], y_start, Multi_ts_ship_info_lines[idx], GR_RESIZE_MENU);
 		y_start += line_height;
 	}
@@ -2565,12 +2565,6 @@ int multi_ts_slot_bmap_num(int slot_index)
 // select the given slot and setup any information, etc
 void multi_ts_select_ship()
 {
-	int n_lines;
-	int n_chars[MAX_BRIEF_LINES];
-	const char *p_str[MAX_BRIEF_LINES];
-	char *token;
-	
-	
 	// blast all current text
 	memset(Multi_ts_ship_info_lines,0,MULTI_TS_SHIP_INFO_MAX_TEXT);
 	memset(Multi_ts_ship_info_text,0,MULTI_TS_SHIP_INFO_MAX_TEXT);
@@ -2602,7 +2596,7 @@ void multi_ts_select_ship()
 	{
 		// strip out newlines
 		auto ship_desc = util::unique_copy(Ship_info[Multi_ts_select_ship_class].desc.get(), true);
-		token = strtok(ship_desc.get(), "\n");
+		auto token = strtok(ship_desc.get(), "\n");
 		if(token != NULL){
 			strcpy_s(Multi_ts_ship_info_text,token);
 			while(token != NULL){
@@ -2615,15 +2609,17 @@ void multi_ts_select_ship()
 		}
 	
 		if(Multi_ts_ship_info_text[0] != '\0'){
+			const char *p_str[MAX_BRIEF_LINES];
+			size_t n_chars[MAX_BRIEF_LINES];
+
 			// split the string into multiple lines
-			n_lines = split_str(Multi_ts_ship_info_text, Multi_ts_ship_info_coords[gr_screen.res][MULTI_TS_W_COORD], n_chars, p_str, MULTI_TS_SHIP_INFO_MAX_LINES, MULTI_TS_SHIP_INFO_MAX_LINE_LEN,0);
+			auto n_lines = split_str(Multi_ts_ship_info_text, p_str, n_chars, MULTI_TS_SHIP_INFO_MAX_LINES, Multi_ts_ship_info_coords[gr_screen.res][MULTI_TS_W_COORD], MULTI_TS_SHIP_INFO_MAX_LINE_BUF-1);
 
 			// copy the split up lines into the text lines array
-			for (int idx = 0;idx<n_lines;idx++ ) {
-				Assert(n_chars[idx] < MULTI_TS_SHIP_INFO_MAX_LINE_LEN);
+			for (size_t idx = 0; idx < n_lines; idx++) {
+				Assert(n_chars[idx] < MULTI_TS_SHIP_INFO_MAX_LINE_BUF);
 				strncpy(Multi_ts_ship_info_lines[idx], p_str[idx], n_chars[idx]);
 				Multi_ts_ship_info_lines[idx][n_chars[idx]] = 0;
-				drop_leading_white_space(Multi_ts_ship_info_lines[idx]);		
 			}
 
 			// get the line count
