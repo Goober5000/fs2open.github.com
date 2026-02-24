@@ -1102,7 +1102,7 @@ enum class sexp_mode
 #define SEXP_ATOM				2
 
 // flags for sexpressions -- masked onto the end of the type field
-#define SEXP_FLAG_PERSISTENT				(1<<31)		// should this sexp node be persistant across missions
+#define SEXP_FLAG_PERSISTENT				(1<<31)		// should this sexp node be kept across missions, i.e. not freed -- note, NOT the same as variable/container persistence
 #define SEXP_FLAG_VARIABLE					(1<<30)
 
 // sexp variable definitions
@@ -1126,6 +1126,18 @@ enum class sexp_mode
 #define SEXP_VARIABLE_NETWORK				(1<<28)
 #define SEXP_VARIABLE_SAVE_TO_PLAYER_FILE	(1<<27)
 
+// There are three types of persistence for variables and containers:
+// 1. No persistence: the value is only kept for the duration of a mission's gameplay
+// 2. Campaign-persistence: the value is scoped to a campaign, and has no value outside the campaign
+// 3. Player-persistence: the value is scoped to the player/pilot file, and can be referenced in any campaign
+// And there are two ways that persistent variables/containers are saved:
+// 1. When the mission progresses with an outcome that is "accepted" by the player
+// 2. When the mission closes in any way (progress, quit, restart)
+// So, there can be four combinations of persistence (campaign/player times progress/close).  When persistent variables
+// were first implemented, there was an assumption that player-persistence implied save-on-close, and that
+// campaign-persistence implied save-on-progress, and the original mission parsing code reflects that.  But after the
+// 2018 rework, either type can be used with either save.  The 2018 rework also introduced new terminology:
+// "eternal" means player-persistent, and "non-eternal" means campaign-persistent.
 #define SEXP_VARIABLE_IS_PERSISTENT (SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS|SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE)
 
 #define BLOCK_EXP_SIZE					6
