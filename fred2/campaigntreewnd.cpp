@@ -480,20 +480,25 @@ int campaign_tree_wnd::error(const char *msg, ...)
 
 int campaign_tree_wnd::internal_error(const char *msg, ...)
 {
-	SCP_string buf, buf2;
+	SCP_string buf;
 	va_list args;
 
-	g_err++;
 	va_start(args, msg);
 	vsprintf(buf, msg, args);
 	va_end(args);
 
-	sprintf(buf2, "%s\n\nThis is an internal error.  Please let Hoffoss\n"
-		"know about this so he can fix it.  Click cancel to debug.", buf.c_str());
+	g_err++;
 
-	nprintf(("Error", buf.c_str()));
-	if (MessageBox(buf2.c_str(), "Internal Error", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL)
+#ifndef NDEBUG
+	nprintf(("Internal Error", buf.c_str()));
+
+	buf += "\n\nThis is an internal error.  Please notify a coder about this.  Click cancel to debug.";
+
+	if (MessageBox(buf.c_str(), "Internal Error", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL)
 		Int3();  // drop to debugger so the problem can be analyzed.
+#else
+	MessageBox(buf.c_str(), "Error", MB_OK | MB_ICONEXCLAMATION);
+#endif
 
 	return -1;
 }

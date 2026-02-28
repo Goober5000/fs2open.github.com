@@ -399,7 +399,7 @@ void waypoint_stuff_name(char *dest, const char *waypoint_list_name, int waypoin
 
 	if (waypoint_num < 1)
 	{
-		Assertion(LOCATION, "A waypoint number must be at least 1!");
+		Error(LOCATION, "A waypoint number must be at least 1!");
 		*dest = 0;
 		return;
 	}
@@ -410,8 +410,9 @@ void waypoint_stuff_name(char *dest, const char *waypoint_list_name, int waypoin
 		return;
 	}
 
-	strncpy(dest, waypoint_list_name, name_max_len);
-	sprintf(dest + name_max_len, ":%d", waypoint_num);
+	auto name_len = std::min(strlen(waypoint_list_name), name_max_len);
+	strncpy(dest, waypoint_list_name, name_len);
+	sprintf(dest + name_len, ":%d", waypoint_num);
 }
 
 void waypoint_stuff_name(SCP_string &dest, const char *waypoint_list_name, int waypoint_num)
@@ -420,7 +421,7 @@ void waypoint_stuff_name(SCP_string &dest, const char *waypoint_list_name, int w
 
 	if (waypoint_num < 1)
 	{
-		Assertion(LOCATION, "A waypoint number must be at least 1!");
+		Error(LOCATION, "A waypoint number must be at least 1!");
 		dest = "";
 		return;
 	}
