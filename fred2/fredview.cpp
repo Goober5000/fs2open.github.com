@@ -3400,27 +3400,22 @@ int CFREDView::error(const char *msg, ...)
 
 int CFREDView::internal_error(const char *msg, ...)
 {
-	char buf[2048];
+	SCP_string buf;
 	va_list args;
 
 	va_start(args, msg);
-	vsnprintf(buf, sizeof(buf)-1, msg, args);
+	vsprintf(buf, msg, args);
 	va_end(args);
-	buf[sizeof(buf)-1] = '\0';
 
 	g_err = 1;
 
 #ifndef NDEBUG
-	char buf2[2048];
+	buf += "\n\nThis is an internal error.  Please notify a coder about this.  Click cancel to debug.";
 
-	sprintf(buf2, "%s\n\nThis is an internal error.  Please let Jason\n"
-		"know about this so he can fix it.  Click cancel to debug.", buf);
-
-	if (MessageBox(buf2, "Internal Error", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL)
+	if (MessageBox(buf.c_str(), "Internal Error", MB_OKCANCEL | MB_ICONEXCLAMATION) == IDCANCEL)
 		Int3();  // drop to debugger so the problem can be analyzed.
-
 #else
-	MessageBox(buf, "Error", MB_OK | MB_ICONEXCLAMATION);
+	MessageBox(buf.c_str(), "Error", MB_OK | MB_ICONEXCLAMATION);
 #endif
 
 	return -1;
