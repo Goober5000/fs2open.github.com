@@ -6564,7 +6564,7 @@ bool parse_mission(mission *pm, int flags)
 	Warned_about_team_out_of_range = false;
 
 	reset_parse();
-	mission_init(pm);
+	mission_init(pm, (flags & MPF_ONLY_MISSION_INFO) != 0);
 
 	parse_mission_info(pm);
 
@@ -7120,7 +7120,7 @@ void mission::Reset()
 /**
  * Initialize the mission and related data structures.
  */
-void mission_init(mission *pm)
+void mission_init(mission *pm, bool quick_init)
 {
 	pm->Reset();
 
@@ -7131,6 +7131,11 @@ void mission_init(mission *pm)
 
 	Mission_all_attack = 0;
 	Num_teams = 1;				// assume 1
+
+	// sometimes we don't need to run through the entire initialization,
+	// e.g. if we're just checking mission info
+	if (quick_init)
+		return;
 
 	init_sexp();
 	mission_goals_and_events_init();
