@@ -138,6 +138,13 @@ bool mission_json::json_get_bool(const json_t* obj, const char* key, bool defaul
 	return default_val;
 }
 
+// Extern declarations needed for flag tables defined in missionparse.cpp
+extern flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[];
+extern const size_t Num_parse_object_flags;
+extern flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[];
+extern const size_t Num_parse_mission_flags;
+extern SCP_vector<parsed_prop> Parse_props;
+
 // ============================================================
 // Internal load helpers (anonymous namespace)
 // ============================================================
@@ -169,9 +176,6 @@ void load_parse_object_flags_json(const json_t* arr, flagset<Mission::Parse_Obje
 	if (!arr || !json_is_array(arr))
 		return;
 
-	extern flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[];
-	extern const size_t Num_parse_object_flags;
-
 	size_t index;
 	json_t* val;
 	json_array_foreach(arr, index, val) {
@@ -190,9 +194,6 @@ void load_mission_flags_json(const json_t* arr, flagset<Mission::Mission_Flags>&
 {
 	if (!arr || !json_is_array(arr))
 		return;
-
-	extern flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[];
-	extern const size_t Num_parse_mission_flags;
 
 	size_t index;
 	json_t* val;

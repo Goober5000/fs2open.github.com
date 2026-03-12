@@ -85,6 +85,14 @@ json_t* mission_json::sexp_to_json(int node_index)
 	return json_string(sexp_str.c_str());
 }
 
+// Extern declarations needed for flag tables defined in missionparse.cpp
+extern flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[];
+extern const size_t Num_parse_object_flags;
+extern flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[];
+extern const size_t Num_parse_mission_flags;
+extern int Num_builtin_messages;
+extern SCP_vector<parsed_prop> Parse_props;
+
 // ============================================================
 // Internal save helpers (anonymous namespace)
 // ============================================================
@@ -119,9 +127,6 @@ json_t* save_parse_object_flags_json(const flagset<Mission::Parse_Object_Flags>&
 {
 	json_t* arr = json_array();
 
-	extern flag_def_list_new<Mission::Parse_Object_Flags> Parse_object_flags[];
-	extern const size_t Num_parse_object_flags;
-
 	for (size_t i = 0; i < Num_parse_object_flags; i++) {
 		if (flags[Parse_object_flags[i].def]) {
 			json_array_append_new(arr, json_string(Parse_object_flags[i].name));
@@ -133,9 +138,6 @@ json_t* save_parse_object_flags_json(const flagset<Mission::Parse_Object_Flags>&
 json_t* save_mission_flags_json(const flagset<Mission::Mission_Flags>& flags)
 {
 	json_t* arr = json_array();
-
-	extern flag_def_list_new<Mission::Mission_Flags> Parse_mission_flags[];
-	extern const size_t Num_parse_mission_flags;
 
 	for (size_t i = 0; i < Num_parse_mission_flags; i++) {
 		if (Parse_mission_flags[i].in_use && flags[Parse_mission_flags[i].def]) {
@@ -758,8 +760,8 @@ json_t* save_objects_json()
 		if (shipp->team >= 0 && shipp->team < static_cast<int>(Iff_info.size()))
 			json_object_set_new(obj, "team", json_string(Iff_info[shipp->team].iff_name));
 
-		if (!shipp->team_color_setting.empty())
-			json_object_set_new(obj, "team_color_setting", json_string(shipp->team_color_setting.c_str()));
+		if (Ship_info[shipp->ship_info_index].uses_team_colors && !shipp->team_name.empty())
+			json_object_set_new(obj, "team_color_setting", json_string(shipp->team_name.c_str()));
 
 		json_object_set_new(obj, "position", mission_json::vec3d_to_json(objp->pos));
 		json_object_set_new(obj, "orientation", mission_json::matrix_to_json(objp->orient));
@@ -866,7 +868,7 @@ json_t* save_objects_json()
 		// Flags - manually map runtime flags to parse object flag names
 		{
 			json_t* flags_arr = json_array();
-			if (shipp->flags[Ship::Ship_Flags::Cargo_known])
+			if (shipp->flags[Ship::Ship_Flags::Cargo_revealed])
 				json_array_append_new(flags_arr, json_string("cargo-known"));
 			if (shipp->flags[Ship::Ship_Flags::Ignore_count])
 				json_array_append_new(flags_arr, json_string("ignore-count"));
@@ -972,8 +974,8 @@ json_t* save_objects_json()
 			json_object_set_new(obj, "persona", json_string(Personas[shipp->persona_index].name));
 		if (shipp->wingnum >= 0)
 			json_object_set_new(obj, "wing", json_string(Wings[shipp->wingnum].name));
-		if (shipp->kamikaze_damage > 0)
-			json_object_set_new(obj, "kamikaze_damage", json_integer(shipp->kamikaze_damage));
+		if (Ai_info[shipp->ai_index].kamikaze_damage > 0)
+			json_object_set_new(obj, "kamikaze_damage", json_integer(Ai_info[shipp->ai_index].kamikaze_damage));
 
 		// Special explosion
 		if (shipp->use_special_explosion) {
@@ -993,16 +995,21 @@ json_t* save_objects_json()
 		if (shipp->special_shield > 0)
 			json_object_set_new(obj, "special_shield", json_integer(shipp->special_shield));
 
-		// Texture replacements
-		if (!shipp->replacement_textures.empty()) {
+		// Texture replacements (stored in the global Fred_texture_replacements vector)
+		{
 			json_t* tex_arr = json_array();
-			for (const auto& tr : shipp->replacement_textures) {
-				json_t* tex = json_object();
-				json_object_set_new(tex, "old_texture", json_string(tr.old_texture));
-				json_object_set_new(tex, "new_texture", json_string(tr.new_texture));
-				json_array_append_new(tex_arr, tex);
+			for (const auto& tr : Fred_texture_replacements) {
+				if (!stricmp(shipp->ship_name, tr.ship_name) && !tr.from_table) {
+					json_t* tex = json_object();
+					json_object_set_new(tex, "old_texture", json_string(tr.old_texture));
+					json_object_set_new(tex, "new_texture", json_string(tr.new_texture));
+					json_array_append_new(tex_arr, tex);
+				}
 			}
-			json_object_set_new(obj, "replacement_textures", tex_arr);
+			if (json_array_size(tex_arr) > 0)
+				json_object_set_new(obj, "replacement_textures", tex_arr);
+			else
+				json_decref(tex_arr);
 		}
 
 		// Dock list
@@ -1147,8 +1154,6 @@ json_t* save_wings_json()
 	return arr;
 }
 
-extern SCP_vector<parsed_prop> Parse_props;
-
 json_t* save_props_json()
 {
 	json_t* arr = json_array();
@@ -1156,7 +1161,7 @@ json_t* save_props_json()
 		json_t* obj = json_object();
 		json_object_set_new(obj, "name", json_string(prop.name));
 		if (prop.prop_info_index >= 0)
-			json_object_set_new(obj, "class", json_string(Prop_info[prop.prop_info_index].name));
+			json_object_set_new(obj, "class", json_string(Prop_info[prop.prop_info_index].name.c_str()));
 		json_object_set_new(obj, "position", mission_json::vec3d_to_json(prop.position));
 		json_object_set_new(obj, "orientation", mission_json::matrix_to_json(prop.orientation));
 		json_object_set_new(obj, "flags", save_parse_object_flags_json(prop.flags));
@@ -1268,9 +1273,6 @@ json_t* save_waypoints_json()
 json_t* save_messages_json()
 {
 	json_t* arr = json_array();
-
-	// Skip built-in messages (first Num_builtin_messages entries)
-	extern int Num_builtin_messages;
 
 	for (int i = Num_builtin_messages; i < static_cast<int>(Messages.size()); i++) {
 		const MMessage& msg = Messages[i];
