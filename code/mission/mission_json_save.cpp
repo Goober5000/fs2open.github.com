@@ -5,7 +5,6 @@
 
 #include "mission/mission_json.h"
 
-#include <jansson.h>
 #include <ctime>
 
 #include "ai/ai.h"
@@ -121,6 +120,33 @@ const char* departure_location_name(DepartureLocation loc)
 		case DepartureLocation::TO_DOCK_BAY: return "To Dock Bay";
 		default: return "At Location";
 	}
+}
+
+json_t* anchor_to_json(int anchor)
+{
+	if (anchor < 0)
+		return json_null();
+
+	if (anchor & SPECIAL_ARRIVAL_ANCHOR_FLAG) {
+		int iff_index = anchor & ~SPECIAL_ARRIVAL_ANCHOR_FLAG & ~SPECIAL_ARRIVAL_ANCHOR_PLAYER_FLAG;
+		bool restrict_to_players = (anchor & SPECIAL_ARRIVAL_ANCHOR_PLAYER_FLAG) != 0;
+
+		if (iff_index >= 0 && iff_index < static_cast<int>(Iff_info.size())) {
+			char tmp[NAME_LENGTH + 15];
+			if (restrict_to_players)
+				sprintf(tmp, "<any %s player>", Iff_info[iff_index].iff_name);
+			else
+				sprintf(tmp, "<any %s>", Iff_info[iff_index].iff_name);
+			strlwr(tmp);
+			return json_string(tmp);
+		}
+		return json_null();
+	}
+
+	if (anchor >= 0 && anchor < MAX_SHIPS && Ships[anchor].objnum >= 0)
+		return json_string(Ships[anchor].ship_name);
+
+	return json_null();
 }
 
 json_t* save_parse_object_flags_json(const flagset<Mission::Parse_Object_Flags>& flags)
@@ -239,9 +265,9 @@ json_t* save_mission_info_json()
 	{
 		json_t* ss = json_object();
 		json_object_set_new(ss, "arrival_location", json_string(arrival_location_name(The_mission.support_ships.arrival_location)));
-		json_object_set_new(ss, "arrival_anchor", json_integer(The_mission.support_ships.arrival_anchor));
+		json_object_set_new(ss, "arrival_anchor", anchor_to_json(The_mission.support_ships.arrival_anchor));
 		json_object_set_new(ss, "departure_location", json_string(departure_location_name(The_mission.support_ships.departure_location)));
-		json_object_set_new(ss, "departure_anchor", json_integer(The_mission.support_ships.departure_anchor));
+		json_object_set_new(ss, "departure_anchor", anchor_to_json(The_mission.support_ships.departure_anchor));
 		json_object_set_new(ss, "max_hull_repair_val", json_real(The_mission.support_ships.max_hull_repair_val));
 		json_object_set_new(ss, "max_subsys_repair_val", json_real(The_mission.support_ships.max_subsys_repair_val));
 		json_object_set_new(ss, "max_support_ships", json_integer(The_mission.support_ships.max_support_ships));
@@ -679,6 +705,9 @@ json_t* save_players_json()
 	for (int t = 0; t < Num_teams; t++) {
 		json_t* team = json_object();
 
+		if (t == 0 && Player_start_shipnum >= 0)
+			json_object_set_new(team, "starting_shipname", json_string(Ships[Player_start_shipnum].ship_name));
+
 		// Ship choices
 		json_t* ships = json_array();
 		for (int i = 0; i < Team_data[t].num_ship_choices; i++) {
@@ -849,7 +878,7 @@ json_t* save_objects_json()
 		if (shipp->arrival_distance != 0)
 			json_object_set_new(obj, "arrival_distance", json_integer(shipp->arrival_distance));
 		if (shipp->arrival_anchor >= 0)
-			json_object_set_new(obj, "arrival_anchor", json_integer(shipp->arrival_anchor));
+			json_object_set_new(obj, "arrival_anchor", anchor_to_json(shipp->arrival_anchor));
 		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(shipp->arrival_cue));
 		if (shipp->arrival_delay != 0)
 			json_object_set_new(obj, "arrival_delay", json_integer(shipp->arrival_delay));
@@ -858,7 +887,7 @@ json_t* save_objects_json()
 
 		json_object_set_new(obj, "departure_location", json_string(departure_location_name(shipp->departure_location)));
 		if (shipp->departure_anchor >= 0)
-			json_object_set_new(obj, "departure_anchor", json_integer(shipp->departure_anchor));
+			json_object_set_new(obj, "departure_anchor", anchor_to_json(shipp->departure_anchor));
 		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(shipp->departure_cue));
 		if (shipp->departure_delay != 0)
 			json_object_set_new(obj, "departure_delay", json_integer(shipp->departure_delay));
@@ -995,9 +1024,10 @@ json_t* save_objects_json()
 		if (shipp->special_shield > 0)
 			json_object_set_new(obj, "special_shield", json_integer(shipp->special_shield));
 
-		// Texture replacements (stored in the global Fred_texture_replacements vector)
+		// Texture replacements - check both Fred global and parse objects
 		{
 			json_t* tex_arr = json_array();
+
 			for (const auto& tr : Fred_texture_replacements) {
 				if (!stricmp(shipp->ship_name, tr.ship_name) && !tr.from_table) {
 					json_t* tex = json_object();
@@ -1006,6 +1036,23 @@ json_t* save_objects_json()
 					json_array_append_new(tex_arr, tex);
 				}
 			}
+
+			if (json_array_size(tex_arr) == 0) {
+				for (const auto& po : Parse_objects) {
+					if (!stricmp(shipp->ship_name, po.name)) {
+						for (const auto& tr : po.replacement_textures) {
+							if (!tr.from_table) {
+								json_t* tex = json_object();
+								json_object_set_new(tex, "old_texture", json_string(tr.old_texture));
+								json_object_set_new(tex, "new_texture", json_string(tr.new_texture));
+								json_array_append_new(tex_arr, tex);
+							}
+						}
+						break;
+					}
+				}
+			}
+
 			if (json_array_size(tex_arr) > 0)
 				json_object_set_new(obj, "replacement_textures", tex_arr);
 			else
@@ -1018,16 +1065,27 @@ json_t* save_objects_json()
 			if (dp) {
 				json_t* dock_arr = json_array();
 				while (dp) {
-					json_t* dock = json_object();
-					if (dp->dockpoint_used >= 0)
-						json_object_set_new(dock, "dockpoint", json_string(model_get_dock_name(Ship_info[shipp->ship_info_index].model_num, dp->dockpoint_used)));
 					if (dp->docked_objp && dp->docked_objp->type == OBJ_SHIP) {
+						json_t* dock = json_object();
 						json_object_set_new(dock, "docked_to", json_string(Ships[dp->docked_objp->instance].ship_name));
+
+						int my_dockpoint = dock_find_dockpoint_used_by_object(objp, dp->docked_objp);
+						int other_dockpoint = dock_find_dockpoint_used_by_object(dp->docked_objp, objp);
+						if (my_dockpoint >= 0)
+							json_object_set_new(dock, "docker_point", json_string(
+								model_get_dock_name(Ship_info[shipp->ship_info_index].model_num, my_dockpoint)));
+						if (other_dockpoint >= 0)
+							json_object_set_new(dock, "dockee_point", json_string(
+								model_get_dock_name(Ship_info[Ships[dp->docked_objp->instance].ship_info_index].model_num, other_dockpoint)));
+
+						json_array_append_new(dock_arr, dock);
 					}
-					json_array_append_new(dock_arr, dock);
 					dp = dp->next;
 				}
-				json_object_set_new(obj, "dock_list", dock_arr);
+				if (json_array_size(dock_arr) > 0)
+					json_object_set_new(obj, "dock_list", dock_arr);
+				else
+					json_decref(dock_arr);
 			}
 		}
 
@@ -1055,6 +1113,29 @@ json_t* save_objects_json()
 
 		if (shipp->group >= 0)
 			json_object_set_new(obj, "group", json_integer(shipp->group));
+
+		if (shipp->collision_group_id != 0)
+			json_object_set_new(obj, "collision_group_id", json_integer(shipp->collision_group_id));
+
+		if (shipp->ship_max_hull_strength != 0.0f)
+			json_object_set_new(obj, "ship_max_hull_strength", json_real(shipp->ship_max_hull_strength));
+		if (shipp->ship_max_shield_strength != 0.0f)
+			json_object_set_new(obj, "ship_max_shield_strength", json_real(shipp->ship_max_shield_strength));
+
+		// Fields only available from parse objects
+		for (const auto& po : Parse_objects) {
+			if (!stricmp(shipp->ship_name, po.name)) {
+				if (po.destroy_before_mission_time >= 0)
+					json_object_set_new(obj, "destroy_before_mission_time", json_integer(po.destroy_before_mission_time));
+				if (po.net_signature != 0)
+					json_object_set_new(obj, "net_signature", json_integer(po.net_signature));
+				if (po.respawn_count != 0)
+					json_object_set_new(obj, "respawn_count", json_integer(po.respawn_count));
+				if (po.respawn_priority != 0)
+					json_object_set_new(obj, "respawn_priority", json_integer(po.respawn_priority));
+				break;
+			}
+		}
 
 		json_array_append_new(arr, obj);
 	}
@@ -1097,10 +1178,8 @@ json_t* save_wings_json()
 		json_object_set_new(obj, "arrival_location", json_string(arrival_location_name(w.arrival_location)));
 		if (w.arrival_distance != 0)
 			json_object_set_new(obj, "arrival_distance", json_integer(w.arrival_distance));
-		if (w.arrival_anchor >= 0) {
-			if (w.arrival_anchor < MAX_SHIPS && Ships[w.arrival_anchor].objnum >= 0)
-				json_object_set_new(obj, "arrival_anchor", json_string(Ships[w.arrival_anchor].ship_name));
-		}
+		if (w.arrival_anchor >= 0)
+			json_object_set_new(obj, "arrival_anchor", anchor_to_json(w.arrival_anchor));
 		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(w.arrival_cue));
 		if (w.arrival_delay != 0)
 			json_object_set_new(obj, "arrival_delay", json_integer(w.arrival_delay));
@@ -1108,10 +1187,8 @@ json_t* save_wings_json()
 			json_object_set_new(obj, "arrival_path_mask", json_integer(w.arrival_path_mask));
 
 		json_object_set_new(obj, "departure_location", json_string(departure_location_name(w.departure_location)));
-		if (w.departure_anchor >= 0) {
-			if (w.departure_anchor < MAX_SHIPS && Ships[w.departure_anchor].objnum >= 0)
-				json_object_set_new(obj, "departure_anchor", json_string(Ships[w.departure_anchor].ship_name));
-		}
+		if (w.departure_anchor >= 0)
+			json_object_set_new(obj, "departure_anchor", anchor_to_json(w.departure_anchor));
 		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(w.departure_cue));
 		if (w.departure_delay != 0)
 			json_object_set_new(obj, "departure_delay", json_integer(w.departure_delay));

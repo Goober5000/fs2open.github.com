@@ -11,7 +11,6 @@
 #pragma warning(disable: 4706)
 #endif
 
-#include <jansson.h>
 #include <cstring>
 
 #include "ai/ai.h"
@@ -46,6 +45,8 @@
 
 // Forward declarations for internal functions from missionparse.cpp
 extern bool post_process_mission(mission *pm);
+extern int allocate_subsys_status();
+extern int get_anchor(const char *name);
 
 // ============================================================
 // Helper implementations
@@ -177,6 +178,21 @@ DepartureLocation parse_departure_location(const char* str)
 	return DepartureLocation::AT_LOCATION;
 }
 
+int json_to_anchor(const json_t* obj, const char* key)
+{
+	const json_t* val = json_object_get(obj, key);
+	if (!val || json_is_null(val))
+		return -1;
+
+	if (json_is_string(val))
+		return get_anchor(json_string_value(val));
+
+	if (json_is_integer(val))
+		return static_cast<int>(json_integer_value(val));
+
+	return -1;
+}
+
 void load_parse_object_flags_json(const json_t* arr, flagset<Mission::Parse_Object_Flags>& flags)
 {
 	if (!arr || !json_is_array(arr))
@@ -289,6 +305,82 @@ void load_ai_goals_json(const json_t* arr, ai_goal* goalp)
 	}
 }
 
+int ai_goals_json_to_sexp(const json_t* arr)
+{
+	if (!arr || !json_is_array(arr) || json_array_size(arr) == 0)
+		return -1;
+
+	SCP_string sexp_str = "( goals ";
+
+	size_t index;
+	json_t* val;
+	json_array_foreach(arr, index, val) {
+		const char* mode_str = json_get_string(val, "mode", "");
+		int priority = json_get_int(val, "priority", 50);
+		const char* target = json_get_string(val, "target_name", nullptr);
+
+		bool no_target = (!stricmp(mode_str, "ai-chase-any") ||
+		                  !stricmp(mode_str, "ai-undock") ||
+		                  !stricmp(mode_str, "ai-keep-safe-distance") ||
+		                  !stricmp(mode_str, "ai-play-dead") ||
+		                  !stricmp(mode_str, "ai-play-dead-persistent") ||
+		                  !stricmp(mode_str, "ai-warp-out"));
+
+		sexp_str += "( ";
+		sexp_str += mode_str;
+		sexp_str += " ";
+
+		if (!no_target && target) {
+			if (!stricmp(mode_str, "ai-destroy-subsystem")) {
+				const char* subsys = json_get_string(val, "subsystem", nullptr);
+				sexp_str += "\"";
+				sexp_str += target;
+				sexp_str += "\" ";
+				if (subsys) {
+					sexp_str += "\"";
+					sexp_str += subsys;
+					sexp_str += "\" ";
+				}
+			} else if (!stricmp(mode_str, "ai-dock")) {
+				const char* docker_pt = json_get_string(val, "docker_point", nullptr);
+				const char* dockee_pt = json_get_string(val, "dockee_point", nullptr);
+				sexp_str += "\"";
+				sexp_str += target;
+				sexp_str += "\" ";
+				if (docker_pt) {
+					sexp_str += "\"";
+					sexp_str += docker_pt;
+					sexp_str += "\" ";
+				}
+				if (dockee_pt) {
+					sexp_str += "\"";
+					sexp_str += dockee_pt;
+					sexp_str += "\" ";
+				}
+			} else {
+				sexp_str += "\"";
+				sexp_str += target;
+				sexp_str += "\" ";
+			}
+		}
+
+		char pri_buf[16];
+		sprintf(pri_buf, "%d", priority);
+		sexp_str += pri_buf;
+		sexp_str += " ) ";
+	}
+
+	sexp_str += ")";
+
+	char* saved_mp = Mp;
+	SCP_string temp_buf(sexp_str);
+	Mp = temp_buf.data();
+	int node = get_sexp_main();
+	Mp = saved_mp;
+
+	return node;
+}
+
 int find_persona_index(const char* name)
 {
 	for (int i = 0; i < static_cast<int>(Personas.size()); i++) {
@@ -339,9 +431,9 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 	const json_t* ss = json_object_get(obj, "support_ships");
 	if (ss) {
 		pm->support_ships.arrival_location = parse_arrival_location(json_get_string(ss, "arrival_location", "At Location"));
-		pm->support_ships.arrival_anchor = json_get_int(ss, "arrival_anchor", -1);
+		pm->support_ships.arrival_anchor = json_to_anchor(ss, "arrival_anchor");
 		pm->support_ships.departure_location = parse_departure_location(json_get_string(ss, "departure_location", "At Location"));
-		pm->support_ships.departure_anchor = json_get_int(ss, "departure_anchor", -1);
+		pm->support_ships.departure_anchor = json_to_anchor(ss, "departure_anchor");
 		pm->support_ships.max_hull_repair_val = json_get_float(ss, "max_hull_repair_val", 0.0f);
 		pm->support_ships.max_subsys_repair_val = json_get_float(ss, "max_subsys_repair_val", 100.0f);
 		pm->support_ships.max_support_ships = json_get_int(ss, "max_support_ships", -1);
@@ -727,6 +819,12 @@ void load_players_json(const json_t* arr)
 		const json_t* team = json_array_get(arr, t);
 		team_data& td = Team_data[t];
 
+		if (t == 0) {
+			const char* ssn = json_get_string(team, "starting_shipname", nullptr);
+			if (ssn)
+				strcpy_s(Player_start_shipname, ssn);
+		}
+
 		const char* ds = json_get_string(team, "default_ship", nullptr);
 		if (ds)
 			td.default_ship = ship_info_lookup(ds);
@@ -831,6 +929,9 @@ void load_objects_json(const json_t* arr, mission* pm)
 		if (ai_class_name)
 			po.ai_class = find_ai_class(ai_class_name);
 
+		// AI goals
+		po.ai_goals = ai_goals_json_to_sexp(json_object_get(val, "ai_goals"));
+
 		// Cargo
 		const char* cargo = json_get_string(val, "cargo", nullptr);
 		if (cargo) {
@@ -855,19 +956,28 @@ void load_objects_json(const json_t* arr, mission* pm)
 		po.arrival_location = parse_arrival_location(json_get_string(val, "arrival_location", "At Location"));
 		po.arrival_distance = json_get_int(val, "arrival_distance", 0);
 
-		po.arrival_anchor = json_get_int(val, "arrival_anchor", -1);
+		po.arrival_anchor = json_to_anchor(val, "arrival_anchor");
 		po.arrival_cue = json_to_sexp(json_object_get(val, "arrival_cue"));
 		po.arrival_delay = json_get_int(val, "arrival_delay", 0);
 		po.arrival_path_mask = json_get_int(val, "arrival_path_mask", 0);
 
 		po.departure_location = parse_departure_location(json_get_string(val, "departure_location", "At Location"));
-		po.departure_anchor = json_get_int(val, "departure_anchor", -1);
+		po.departure_anchor = json_to_anchor(val, "departure_anchor");
 		po.departure_cue = json_to_sexp(json_object_get(val, "departure_cue"));
 		po.departure_delay = json_get_int(val, "departure_delay", 0);
 		po.departure_path_mask = json_get_int(val, "departure_path_mask", 0);
 
 		// Flags
 		load_parse_object_flags_json(json_object_get(val, "flags"), po.flags);
+
+		if (po.flags[Mission::Parse_Object_Flags::OF_Player_start]) {
+			po.flags.set(Mission::Parse_Object_Flags::SF_Cargo_known);
+			Player_starts++;
+
+			if (*Player_start_shipname == '\0') {
+				strcpy_s(Player_start_shipname, po.name);
+			}
+		}
 
 		po.escort_priority = json_get_int(val, "escort_priority", 0);
 		po.hotkey = json_get_int(val, "hotkey", -1);
@@ -880,6 +990,13 @@ void load_objects_json(const json_t* arr, mission* pm)
 
 		po.kamikaze_damage = json_get_int(val, "kamikaze_damage", 0);
 		po.group = json_get_int(val, "group", -1);
+		po.collision_group_id = json_get_int(val, "collision_group_id", 0);
+		po.ship_max_hull_strength = json_get_float(val, "ship_max_hull_strength", 0.0f);
+		po.ship_max_shield_strength = json_get_float(val, "ship_max_shield_strength", 0.0f);
+		po.destroy_before_mission_time = json_get_int(val, "destroy_before_mission_time", -1);
+		po.net_signature = static_cast<ushort>(json_get_int(val, "net_signature", 0));
+		po.respawn_count = json_get_int(val, "respawn_count", 0);
+		po.respawn_priority = json_get_int(val, "respawn_priority", 0);
 
 		// Special explosion
 		const json_t* sexp_obj = json_object_get(val, "special_explosion");
@@ -938,20 +1055,16 @@ void load_objects_json(const json_t* arr, mission* pm)
 			}
 		}
 
-		// Subsystem status from JSON (primary/secondary banks on the ship-level Pilot subsystem)
+			// Subsystem status from JSON
 		const json_t* subsys_arr = json_object_get(val, "subsystems");
 		if (subsys_arr && json_is_array(subsys_arr)) {
-			int start_idx = Subsys_index;
+			po.subsys_index = Subsys_index;
+			po.subsys_count = 0;
 			size_t si;
 			json_t* sv;
 			json_array_foreach(subsys_arr, si, sv) {
-				if (Subsys_index >= (MAX_SHIPS * MAX_SHIP_PRIMARY_BANKS))
-					break;
-
-				subsys_status* ssp = &Subsys_status[Subsys_index];
-				memset(ssp, 0, sizeof(subsys_status));
-				ssp->ai_class = -1;
-				ssp->subsys_cargo_name = 0;
+				int new_idx = allocate_subsys_status();
+				subsys_status* ssp = &Subsys_status[new_idx];
 
 				strcpy_s(ssp->name, json_get_string(sv, "name", "Pilot"));
 				ssp->percent = json_get_float(sv, "damage_percent", 0.0f);
@@ -964,9 +1077,6 @@ void load_objects_json(const json_t* arr, mission* pm)
 						const char* wn = json_string_value(json_array_get(prim, b));
 						ssp->primary_banks[b] = (wn && strlen(wn) > 0) ? weapon_info_lookup(wn) : -1;
 					}
-				} else {
-					for (auto & primary_bank : ssp->primary_banks)
-						primary_bank = -1;
 				}
 
 				// Secondary banks
@@ -977,9 +1087,6 @@ void load_objects_json(const json_t* arr, mission* pm)
 						const char* wn = json_string_value(json_array_get(sec, b));
 						ssp->secondary_banks[b] = (wn && strlen(wn) > 0) ? weapon_info_lookup(wn) : -1;
 					}
-				} else {
-					for (auto & secondary_bank : ssp->secondary_banks)
-						secondary_bank = -1;
 				}
 
 				const json_t* ammo = json_object_get(sv, "secondary_ammo");
@@ -990,10 +1097,31 @@ void load_objects_json(const json_t* arr, mission* pm)
 					}
 				}
 
-				Subsys_index++;
+				po.subsys_count++;
 			}
-			po.subsys_index = start_idx;
-			po.subsys_count = Subsys_index - start_idx;
+		}
+
+		// Dock list -> Initially_docked
+		const json_t* dock_arr = json_object_get(val, "dock_list");
+		if (dock_arr && json_is_array(dock_arr)) {
+			size_t di;
+			json_t* dv;
+			json_array_foreach(dock_arr, di, dv) {
+				if (Total_initially_docked >= MAX_SHIPS)
+					break;
+
+				const char* docked_to = json_get_string(dv, "docked_to", nullptr);
+				const char* docker_pt = json_get_string(dv, "docker_point", nullptr);
+				const char* dockee_pt = json_get_string(dv, "dockee_point", nullptr);
+
+				if (docked_to) {
+					strcpy_s(Initially_docked[Total_initially_docked].docker, po.name);
+					strcpy_s(Initially_docked[Total_initially_docked].dockee, docked_to);
+					strcpy_s(Initially_docked[Total_initially_docked].docker_point, docker_pt ? docker_pt : "");
+					strcpy_s(Initially_docked[Total_initially_docked].dockee_point, dockee_pt ? dockee_pt : "");
+					Total_initially_docked++;
+				}
+			}
 		}
 
 		Parse_objects.push_back(po);
@@ -1049,13 +1177,13 @@ void load_wings_json(const json_t* arr, mission* pm)
 		// Arrival / Departure
 		w.arrival_location = parse_arrival_location(json_get_string(val, "arrival_location", "At Location"));
 		w.arrival_distance = json_get_int(val, "arrival_distance", 0);
-		w.arrival_anchor = -1;
+		w.arrival_anchor = json_to_anchor(val, "arrival_anchor");
 		w.arrival_cue = json_to_sexp(json_object_get(val, "arrival_cue"));
 		w.arrival_delay = json_get_int(val, "arrival_delay", 0);
 		w.arrival_path_mask = json_get_int(val, "arrival_path_mask", 0);
 
 		w.departure_location = parse_departure_location(json_get_string(val, "departure_location", "At Location"));
-		w.departure_anchor = -1;
+		w.departure_anchor = json_to_anchor(val, "departure_anchor");
 		w.departure_cue = json_to_sexp(json_object_get(val, "departure_cue"));
 		w.departure_delay = json_get_int(val, "departure_delay", 0);
 		w.departure_path_mask = json_get_int(val, "departure_path_mask", 0);
@@ -1085,6 +1213,33 @@ void load_wings_json(const json_t* arr, mission* pm)
 		}
 
 		Num_wings++;
+	}
+}
+
+void load_props_json(const json_t* arr)
+{
+	if (!arr || !json_is_array(arr))
+		return;
+
+	Parse_props.clear();
+	size_t index;
+	json_t* val;
+	json_array_foreach(arr, index, val) {
+		parsed_prop p{};
+
+		strcpy_s(p.name, json_get_string(val, "name", ""));
+
+		const char* class_name = json_get_string(val, "class", nullptr);
+		if (class_name)
+			p.prop_info_index = prop_info_lookup(class_name);
+		else
+			p.prop_info_index = -1;
+
+		p.position = json_to_vec3d(json_object_get(val, "position"));
+		p.orientation = json_to_matrix(json_object_get(val, "orientation"));
+		load_parse_object_flags_json(json_object_get(val, "flags"), p.flags);
+
+		Parse_props.push_back(p);
 	}
 }
 
@@ -1472,6 +1627,7 @@ bool mission_json::load(const char* pathname, mission* pm, int flags)
 	load_players_json(json_object_get(root, "players"));
 	load_objects_json(json_object_get(root, "objects"), pm);
 	load_wings_json(json_object_get(root, "wings"), pm);
+	load_props_json(json_object_get(root, "props"));
 	load_events_json(json_object_get(root, "events"));
 	load_goals_json(json_object_get(root, "goals"));
 	load_waypoints_json(json_object_get(root, "waypoints"));
