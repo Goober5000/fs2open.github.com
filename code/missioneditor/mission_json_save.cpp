@@ -11,10 +11,13 @@
 #include "ai/ai.h"
 #include "ai/ai_flags.h"
 #include "ai/aigoals.h"
+#include "ai/ailua.h"
 #include "asteroid/asteroid.h"
 #include "cfile/cfile.h"
 #include "fireball/fireballs.h"
 #include "gamesnd/eventmusic.h"
+#include "globalincs/alphacolors.h"
+#include "graphics/2d.h"
 #include "gamesnd/gamesnd.h"
 #include "globalincs/version.h"
 #include "hud/hudsquadmsg.h"
@@ -617,10 +620,9 @@ json_t* save_briefing_icon_json(const brief_icon& icon)
 {
 	json_t* obj = json_object();
 	json_object_set_new(obj, "type", json_integer(icon.type));
-	json_object_set_new(obj, "team", json_integer(icon.team));
+	json_object_set_new(obj, "team", json_string(Iff_info[icon.team].iff_name));
 	json_object_set_new(obj, "id", json_integer(icon.id));
 	json_object_set_new(obj, "pos", mission_json::vec3d_to_json(icon.pos));
-	json_object_set_new(obj, "flags", json_integer(icon.flags));
 
 	if (icon.ship_class >= 0 && icon.ship_class < static_cast<int>(Ship_info.size()))
 		json_object_set_new(obj, "ship_class", json_string(Ship_info[icon.ship_class].name));
@@ -630,10 +632,15 @@ json_t* save_briefing_icon_json(const brief_icon& icon)
 	if (strlen(icon.closeup_label) > 0)
 		json_object_set_new(obj, "closeup_label", json_string(icon.closeup_label));
 
-	json_object_set_new(obj, "highlight", json_integer((icon.flags & BI_HIGHLIGHT) ? 1 : 0));
-	json_object_set_new(obj, "mirror", json_integer((icon.flags & BI_MIRROR_ICON) ? 1 : 0));
-	json_object_set_new(obj, "use_wing_icon", json_integer((icon.flags & BI_USE_WING_ICON) ? 1 : 0));
-	json_object_set_new(obj, "use_cargo_icon", json_integer((icon.flags & BI_USE_CARGO_ICON) ? 1 : 0));
+	if (icon.scale_factor != 1.0f)
+		json_object_set_new(obj, "icon_scale", json_integer(static_cast<int>(icon.scale_factor * 100.0f)));
+
+	json_object_set_new(obj, "highlight", json_boolean((icon.flags & BI_HIGHLIGHT) != 0));
+	json_object_set_new(obj, "mirror", json_boolean((icon.flags & BI_MIRROR_ICON) != 0));
+	if (icon.flags & BI_USE_WING_ICON)
+		json_object_set_new(obj, "use_wing_icon", json_true());
+	if (icon.flags & BI_USE_CARGO_ICON)
+		json_object_set_new(obj, "use_cargo_icon", json_true());
 
 	return obj;
 }
@@ -672,6 +679,15 @@ json_t* save_briefing_json()
 			json_object_set_new(stage, "flags", json_integer(s.flags));
 			json_object_set_new(stage, "formula", mission_json::sexp_to_json(s.formula));
 			json_object_set_new(stage, "draw_grid", json_boolean(s.draw_grid));
+
+			if (!gr_compare_color_values(s.grid_color, Color_briefing_grid)) {
+				json_t* gc = json_object();
+				json_object_set_new(gc, "red", json_integer(s.grid_color.red));
+				json_object_set_new(gc, "green", json_integer(s.grid_color.green));
+				json_object_set_new(gc, "blue", json_integer(s.grid_color.blue));
+				json_object_set_new(gc, "alpha", json_integer(s.grid_color.alpha));
+				json_object_set_new(stage, "grid_color", gc);
+			}
 
 			json_t* icons = json_array();
 			for (int j = 0; j < s.num_icons; j++) {
@@ -730,13 +746,61 @@ json_t* save_debriefing_json()
 
 json_t* save_players_json()
 {
-	json_t* arr = json_array();
+	json_t* obj = json_object();
 
+	// Alternate types list
+	if (Mission_alt_type_count > 0) {
+		json_t* alt_arr = json_array();
+		for (int i = 0; i < Mission_alt_type_count; i++) {
+			json_array_append_new(alt_arr, json_string(Mission_alt_types[i]));
+		}
+		json_object_set_new(obj, "alternate_types", alt_arr);
+	}
+
+	// Callsigns list
+	if (Mission_callsign_count > 0) {
+		json_t* cs_arr = json_array();
+		for (int i = 0; i < Mission_callsign_count; i++) {
+			json_array_append_new(cs_arr, json_string(Mission_callsigns[i]));
+		}
+		json_object_set_new(obj, "callsigns", cs_arr);
+	}
+
+	// General orders enabled
+	{
+		SCP_vector<SCP_string> e_list = ai_lua_get_general_orders(true);
+		if (!e_list.empty()) {
+			json_t* orders = json_array();
+			for (const SCP_string& order : e_list) {
+				json_array_append_new(orders, json_string(order.c_str()));
+			}
+			json_object_set_new(obj, "general_orders_enabled", orders);
+		}
+	}
+
+	// General orders valid
+	{
+		SCP_vector<SCP_string> v_list = ai_lua_get_general_orders(false, true);
+		if (!v_list.empty()) {
+			json_t* orders = json_array();
+			for (const SCP_string& order : v_list) {
+				json_array_append_new(orders, json_string(order.c_str()));
+			}
+			json_object_set_new(obj, "general_orders_valid", orders);
+		}
+	}
+
+	// Teams
+	json_t* teams_arr = json_array();
 	for (int t = 0; t < Num_teams; t++) {
 		json_t* team = json_object();
 
-		if (t == 0 && Player_start_shipnum >= 0)
+		// Starting shipname for all teams
+		if (Player_start_shipnum >= 0)
 			json_object_set_new(team, "starting_shipname", json_string(Ships[Player_start_shipnum].ship_name));
+
+		if (Team_data[t].do_not_validate)
+			json_object_set_new(team, "do_not_validate", json_true());
 
 		// Ship choices
 		json_t* ships = json_array();
@@ -776,20 +840,28 @@ json_t* save_players_json()
 			else
 				json_object_set_new(entry, "count", json_integer(Team_data[t].weaponry_count[i]));
 
-			if (Team_data[t].weapon_required[i])
-				json_object_set_new(entry, "required", json_true());
-
 			json_array_append_new(weapons, entry);
 		}
 		json_object_set_new(team, "weapon_pool", weapons);
 
-		if (Team_data[t].do_not_validate)
-			json_object_set_new(team, "do_not_validate", json_true());
+		// Required weapons for mission
+		{
+			json_t* req_arr = json_array();
+			for (int j = 0; j < weapon_info_size(); j++) {
+				if (Team_data[t].weapon_required[j])
+					json_array_append_new(req_arr, json_string(Weapon_info[j].name));
+			}
+			if (json_array_size(req_arr) > 0)
+				json_object_set_new(team, "required_weapons", req_arr);
+			else
+				json_decref(req_arr);
+		}
 
-		json_array_append_new(arr, team);
+		json_array_append_new(teams_arr, team);
 	}
+	json_object_set_new(obj, "teams", teams_arr);
 
-	return arr;
+	return obj;
 }
 
 // Save warp parameters for a ship, mirroring save_warp_params() in missionsave.cpp.
@@ -1663,23 +1735,33 @@ json_t* save_waypoints_json()
 
 json_t* save_messages_json()
 {
-	json_t* arr = json_array();
+	json_t* result = json_object();
 
+	// Command sender and persona (mission-wide, mirroring save_messages() in missionsave.cpp)
+	if (stricmp(The_mission.command_sender, DEFAULT_COMMAND))
+		json_object_set_new(result, "command_sender", json_string(The_mission.command_sender));
+
+	if (The_mission.command_persona != Default_command_persona)
+		json_object_set_new(result, "command_persona", json_string(Personas[The_mission.command_persona].name));
+
+	// Message list
+	json_t* arr = json_array();
 	for (int i = Num_builtin_messages; i < static_cast<int>(Messages.size()); i++) {
 		const MMessage& msg = Messages[i];
 		json_t* obj = json_object();
 		json_object_set_new(obj, "name", json_string(msg.name));
+
+		json_object_set_new(obj, "team", json_integer(
+			((msg.multi_team < 0) || (msg.multi_team >= 2)) ? -1 : msg.multi_team));
+
 		json_object_set_new(obj, "message", json_string(msg.message));
 
 		if (msg.persona_index >= 0 && msg.persona_index < static_cast<int>(Personas.size()))
 			json_object_set_new(obj, "persona", json_string(Personas[msg.persona_index].name));
 
-		if (msg.multi_team >= 0)
-			json_object_set_new(obj, "multi_team", json_integer(msg.multi_team));
-
-		if (msg.avi_info.name && strlen(msg.avi_info.name) > 0)
+		if (msg.avi_info.name)
 			json_object_set_new(obj, "avi_name", json_string(msg.avi_info.name));
-		if (msg.wave_info.name && strlen(msg.wave_info.name) > 0)
+		if (msg.wave_info.name)
 			json_object_set_new(obj, "wave_name", json_string(msg.wave_info.name));
 
 		if (!msg.note.empty())
@@ -1687,8 +1769,9 @@ json_t* save_messages_json()
 
 		json_array_append_new(arr, obj);
 	}
+	json_object_set_new(result, "messages", arr);
 
-	return arr;
+	return result;
 }
 
 json_t* save_reinforcements_json()
