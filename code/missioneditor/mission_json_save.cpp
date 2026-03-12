@@ -249,37 +249,23 @@ json_t* save_mission_info_json()
 {
 	json_t* obj = json_object();
 
+	// Version
 	json_object_set_new(obj, "version_major", json_integer(The_mission.required_fso_version.major));
 	json_object_set_new(obj, "version_minor", json_integer(The_mission.required_fso_version.minor));
 	json_object_set_new(obj, "version_build", json_integer(The_mission.required_fso_version.build));
 	json_object_set_new(obj, "version_revision", json_integer(The_mission.required_fso_version.revision));
+
+	// Basic metadata
 	json_object_set_new(obj, "name", json_string(The_mission.name));
 	json_object_set_new(obj, "author", json_string(The_mission.author.c_str()));
 	json_object_set_new(obj, "created", json_string(The_mission.created));
 	json_object_set_new(obj, "modified", json_string(The_mission.modified));
 	json_object_set_new(obj, "notes", json_string(The_mission.notes));
 	json_object_set_new(obj, "mission_desc", json_string(The_mission.mission_desc));
+
+	// Game type and flags
 	json_object_set_new(obj, "game_type", json_integer(The_mission.game_type));
 	json_object_set_new(obj, "flags", save_mission_flags_json(The_mission.flags));
-	json_object_set_new(obj, "num_players", json_integer(The_mission.num_players));
-	json_object_set_new(obj, "num_respawns", json_integer(The_mission.num_respawns));
-	json_object_set_new(obj, "max_respawn_delay", json_integer(The_mission.max_respawn_delay));
-
-	// Support ship info
-	{
-		json_t* ss = json_object();
-		json_object_set_new(ss, "arrival_location", json_string(arrival_location_name(The_mission.support_ships.arrival_location)));
-		json_object_set_new(ss, "arrival_anchor", anchor_to_json(The_mission.support_ships.arrival_anchor));
-		json_object_set_new(ss, "departure_location", json_string(departure_location_name(The_mission.support_ships.departure_location)));
-		json_object_set_new(ss, "departure_anchor", anchor_to_json(The_mission.support_ships.departure_anchor));
-		json_object_set_new(ss, "max_hull_repair_val", json_real(The_mission.support_ships.max_hull_repair_val));
-		json_object_set_new(ss, "max_subsys_repair_val", json_real(The_mission.support_ships.max_subsys_repair_val));
-		json_object_set_new(ss, "max_support_ships", json_integer(The_mission.support_ships.max_support_ships));
-		json_object_set_new(ss, "max_concurrent_ships", json_integer(The_mission.support_ships.max_concurrent_ships));
-		if (The_mission.support_ships.ship_class >= 0)
-			json_object_set_new(ss, "ship_class", json_string(Ship_info[The_mission.support_ships.ship_class].name));
-		json_object_set_new(obj, "support_ships", ss);
-	}
 
 	// Nebula settings
 	if (The_mission.flags[Mission::Mission_Flags::Fullneb]) {
@@ -288,7 +274,8 @@ json_t* save_mission_info_json()
 	}
 	json_object_set_new(obj, "fog_near_mult", json_real(The_mission.neb_near_multi));
 	json_object_set_new(obj, "fog_far_mult", json_real(The_mission.neb_far_multi));
-	json_object_set_new(obj, "contrail_threshold", json_integer(The_mission.contrail_threshold));
+	if (The_mission.contrail_threshold != CONTRAIL_THRESHOLD_DEFAULT)
+		json_object_set_new(obj, "contrail_threshold", json_integer(The_mission.contrail_threshold));
 
 	// Volumetric nebula
 	if (The_mission.volumetrics) {
@@ -324,6 +311,10 @@ json_t* save_mission_info_json()
 			json_object_set_new(noise, "color_g", json_integer(static_cast<int>(std::get<1>(nnc) * 255.0f)));
 			json_object_set_new(noise, "color_b", json_integer(static_cast<int>(std::get<2>(nnc) * 255.0f)));
 			json_object_set_new(noise, "intensity", json_real(v.getNoiseColorIntensity()));
+			if (v.noiseColorFunc1)
+				json_object_set_new(noise, "function_base", json_string(v.noiseColorFunc1->c_str()));
+			if (v.noiseColorFunc2)
+				json_object_set_new(noise, "function_sub", json_string(v.noiseColorFunc2->c_str()));
 			json_object_set_new(noise, "resolution", json_integer(v.getNoiseResolution()));
 			json_object_set_new(vol, "noise", noise);
 		}
@@ -331,11 +322,71 @@ json_t* save_mission_info_json()
 		json_object_set_new(obj, "volumetric_nebula", vol);
 	}
 
+	// Multiplayer settings
+	if (The_mission.game_type & MISSION_TYPE_MULTI) {
+		json_object_set_new(obj, "num_players", json_integer(Player_starts));
+		json_object_set_new(obj, "num_respawns", json_integer(The_mission.num_respawns));
+		json_object_set_new(obj, "max_respawn_delay", json_integer(The_mission.max_respawn_delay));
+	}
+
+	// Support ship info
+	{
+		json_t* ss = json_object();
+		json_object_set_new(ss, "max_support_ships", json_integer(The_mission.support_ships.max_support_ships));
+		json_object_set_new(ss, "max_hull_repair_val", json_real(The_mission.support_ships.max_hull_repair_val));
+		json_object_set_new(ss, "max_subsys_repair_val", json_real(The_mission.support_ships.max_subsys_repair_val));
+		json_object_set_new(ss, "max_concurrent_ships", json_integer(The_mission.support_ships.max_concurrent_ships));
+		if (The_mission.support_ships.ship_class >= 0)
+			json_object_set_new(ss, "ship_class", json_string(Ship_info[The_mission.support_ships.ship_class].name));
+		json_object_set_new(ss, "arrival_location", json_string(arrival_location_name(The_mission.support_ships.arrival_location)));
+		json_object_set_new(ss, "arrival_anchor", anchor_to_json(The_mission.support_ships.arrival_anchor));
+		json_object_set_new(ss, "departure_location", json_string(departure_location_name(The_mission.support_ships.departure_location)));
+		json_object_set_new(ss, "departure_anchor", anchor_to_json(The_mission.support_ships.departure_anchor));
+		json_object_set_new(obj, "support_ships", ss);
+	}
+
+	// All teams attack
+	if (Mission_all_attack)
+		json_object_set_new(obj, "all_teams_attack", json_boolean(true));
+
+	// Player entry delay
+	if (Entry_delay_time)
+		json_object_set_new(obj, "player_entry_delay", json_real(f2fl(Entry_delay_time)));
+
+	// Viewer position and orientation (editor state)
+	Assertion(json_save_config != nullptr, "json_save_config must be set before saving mission info");
+	json_object_set_new(obj, "viewer_pos", mission_json::vec3d_to_json(json_save_config->view_pos));
+	json_object_set_new(obj, "viewer_orient", mission_json::matrix_to_json(json_save_config->view_orient));
+
 	// Squadron info
-	if (strlen(The_mission.squad_name) > 0)
+	if (!(The_mission.game_type & MISSION_TYPE_MULTI) && strlen(The_mission.squad_name) > 0) {
 		json_object_set_new(obj, "squad_name", json_string(The_mission.squad_name));
-	if (strlen(The_mission.squad_filename) > 0)
-		json_object_set_new(obj, "squad_filename", json_string(The_mission.squad_filename));
+		if (strlen(The_mission.squad_filename) > 0)
+			json_object_set_new(obj, "squad_filename", json_string(The_mission.squad_filename));
+	}
+
+	// Wing names
+	if (strcmp(Starting_wing_names[0], "Alpha") || strcmp(Starting_wing_names[1], "Beta") ||
+		strcmp(Starting_wing_names[2], "Gamma")) {
+		json_t* sw = json_array();
+		for (int i = 0; i < MAX_STARTING_WINGS; i++)
+			json_array_append_new(sw, json_string(Starting_wing_names[i]));
+		json_object_set_new(obj, "starting_wing_names", sw);
+	}
+	if (strcmp(Squadron_wing_names[0], "Alpha") || strcmp(Squadron_wing_names[1], "Beta") ||
+		strcmp(Squadron_wing_names[2], "Gamma") || strcmp(Squadron_wing_names[3], "Delta") ||
+		strcmp(Squadron_wing_names[4], "Epsilon")) {
+		json_t* sq = json_array();
+		for (int i = 0; i < MAX_SQUADRON_WINGS; i++)
+			json_array_append_new(sq, json_string(Squadron_wing_names[i]));
+		json_object_set_new(obj, "squadron_wing_names", sq);
+	}
+	if (strcmp(TVT_wing_names[0], "Alpha") || strcmp(TVT_wing_names[1], "Zeta")) {
+		json_t* tv = json_array();
+		for (int i = 0; i < MAX_TVT_WINGS; i++)
+			json_array_append_new(tv, json_string(TVT_wing_names[i]));
+		json_object_set_new(obj, "tvt_wing_names", tv);
+	}
 
 	// Loading screens
 	if (strlen(The_mission.loading_screen[GR_640]) > 0)
@@ -344,8 +395,26 @@ json_t* save_mission_info_json()
 		json_object_set_new(obj, "loading_screen_1024", json_string(The_mission.loading_screen[GR_1024]));
 
 	// Skybox
-	if (strlen(The_mission.skybox_model) > 0)
+	if (strlen(The_mission.skybox_model) > 0) {
 		json_object_set_new(obj, "skybox_model", json_string(The_mission.skybox_model));
+
+		// Skybox animations and moveables
+		const auto& anim_triggers = The_mission.skybox_model_animations.getRegisteredAnimNames();
+		const auto& moveable_triggers = The_mission.skybox_model_animations.getRegisteredMoveables();
+
+		if (!anim_triggers.empty()) {
+			json_t* anims = json_array();
+			for (const auto& animation : anim_triggers)
+				json_array_append_new(anims, json_string(animation.c_str()));
+			json_object_set_new(obj, "skybox_model_animations", anims);
+		}
+		if (!moveable_triggers.empty()) {
+			json_t* moveables = json_array();
+			for (const auto& moveable : moveable_triggers)
+				json_array_append_new(moveables, json_string(moveable.c_str()));
+			json_object_set_new(obj, "skybox_model_moveables", moveables);
+		}
+	}
 
 	if (!vm_matrix_same(&vmd_identity_matrix, &The_mission.skybox_orientation))
 		json_object_set_new(obj, "skybox_orientation", mission_json::matrix_to_json(The_mission.skybox_orientation));
@@ -358,7 +427,7 @@ json_t* save_mission_info_json()
 		json_object_set_new(obj, "ai_profile", json_string(The_mission.ai_profile->profile_name));
 
 	// Lighting profile
-	if (!The_mission.lighting_profile_name.empty())
+	if (The_mission.lighting_profile_name != lighting_profiles::default_name())
 		json_object_set_new(obj, "lighting_profile", json_string(The_mission.lighting_profile_name.c_str()));
 
 	// Sound environment
@@ -372,26 +441,6 @@ json_t* save_mission_info_json()
 			json_object_set_new(snd, "decay", json_real(m_env->decay));
 			json_object_set_new(obj, "sound_environment", snd);
 		}
-	}
-
-	// Wing names
-	{
-		json_t* sw = json_array();
-		for (int i = 0; i < MAX_STARTING_WINGS; i++)
-			json_array_append_new(sw, json_string(Starting_wing_names[i]));
-		json_object_set_new(obj, "starting_wing_names", sw);
-	}
-	{
-		json_t* sq = json_array();
-		for (int i = 0; i < MAX_SQUADRON_WINGS; i++)
-			json_array_append_new(sq, json_string(Squadron_wing_names[i]));
-		json_object_set_new(obj, "squadron_wing_names", sq);
-	}
-	{
-		json_t* tv = json_array();
-		for (int i = 0; i < MAX_TVT_WINGS; i++)
-			json_array_append_new(tv, json_string(TVT_wing_names[i]));
-		json_object_set_new(obj, "tvt_wing_names", tv);
 	}
 
 	return obj;
