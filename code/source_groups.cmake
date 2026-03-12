@@ -835,6 +835,9 @@ add_file_folder("Mission"
 	mission/missiontraining.cpp
 	mission/missiontraining.h
 	mission/mission_flags.h
+	mission/mission_json.h
+	mission/mission_json_save.cpp
+	mission/mission_json_load.cpp
 )
 
 # MissionEditor file

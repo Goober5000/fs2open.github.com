@@ -46,6 +46,7 @@
 #include "mission/missionlog.h"
 #include "mission/missionmessage.h"
 #include "mission/missionparse.h"
+#include "mission/mission_json.h"
 #include "missionui/fictionviewer.h"
 #include "missionui/missioncmdbrief.h"
 #include "missionui/redalert.h"
@@ -7212,6 +7213,21 @@ bool parse_main(const char *mission_name, int flags)
 		Ship_class_names[i] = it->name;
 	
 	do {
+		// Check if this is a JSON mission file (by extension)
+		bool is_json_mission = false;
+		{
+			size_t len = strlen(mission_name);
+			if (len > 5 && !stricmp(mission_name + len - 5, ".json")) {
+				is_json_mission = true;
+			}
+		}
+
+		if (is_json_mission) {
+			// JSON mission loading path
+			rval = mission_json::load(mission_name, &The_mission, flags);
+			break;
+		}
+
 		// don't do this for imports
 		if (!(flags & MPF_IMPORT_FSM)) {
 			CFILE *ftemp = cfopen(mission_name, "rt", CF_TYPE_MISSIONS);
