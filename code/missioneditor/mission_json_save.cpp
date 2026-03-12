@@ -24,6 +24,7 @@
 #include "iff_defs/iff_defs.h"
 #include "jumpnode/jumpnode.h"
 #include "libs/jansson.h"
+#include "math/bitarray.h"
 #include "lighting/lighting_profiles.h"
 #include "mission/missionbriefcommon.h"
 #include "model/model.h"
@@ -47,7 +48,9 @@
 #include "ship/ship_flags.h"
 #include "ship/shipfx.h"
 #include "sound/ds.h"
+#include "starfield/nebula.h"
 #include "starfield/starfield.h"
+#include "starfield/starfield_flags.h"
 #include "weapon/weapon.h"
 
 // ============================================================
@@ -1535,6 +1538,9 @@ json_t* save_wings_json()
 
 	for (int i = 0; i < Num_wings; i++) {
 		wing& w = Wings[i];
+		if (!w.wave_count)
+			continue;
+
 		json_t* obj = json_object();
 
 		json_object_set_new(obj, "name", json_string(w.name));
@@ -1546,56 +1552,55 @@ json_t* save_wings_json()
 		json_object_set_new(obj, "wave_threshold", json_integer(w.threshold));
 		json_object_set_new(obj, "special_ship", json_integer(w.special_ship));
 
-		if (w.formation >= 0)
-			json_object_set_new(obj, "formation", json_integer(w.formation));
+		if (w.formation >= 0 && w.formation < static_cast<int>(Wing_formations.size()))
+			json_object_set_new(obj, "formation", json_string(Wing_formations[w.formation].name));
 		if (w.formation_scale != 1.0f)
 			json_object_set_new(obj, "formation_scale", json_real(w.formation_scale));
 
-		// Ships in this wing
-		json_t* ships = json_array();
-		for (int j = 0; j < w.wave_count; j++) {
-			if (w.ship_index[j] >= 0) {
-				json_array_append_new(ships, json_string(Ships[w.ship_index[j]].ship_name));
-			}
-		}
-		json_object_set_new(obj, "ships", ships);
-
-		// Arrival / Departure
+		// Arrival
 		json_object_set_new(obj, "arrival_location", json_string(arrival_location_name(w.arrival_location)));
 		if (w.arrival_distance != 0)
 			json_object_set_new(obj, "arrival_distance", json_integer(w.arrival_distance));
 		if (w.arrival_anchor >= 0)
 			json_object_set_new(obj, "arrival_anchor", anchor_to_json(w.arrival_anchor));
-		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(w.arrival_cue));
-		if (w.arrival_delay != 0)
-			json_object_set_new(obj, "arrival_delay", json_integer(w.arrival_delay));
 		if (w.arrival_path_mask != 0)
 			json_object_set_new(obj, "arrival_path_mask", json_integer(w.arrival_path_mask));
+		if (w.arrival_delay)
+			json_object_set_new(obj, "arrival_delay", json_integer(w.arrival_delay));
+		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(w.arrival_cue));
 
+		// Departure
 		json_object_set_new(obj, "departure_location", json_string(departure_location_name(w.departure_location)));
 		if (w.departure_anchor >= 0)
 			json_object_set_new(obj, "departure_anchor", anchor_to_json(w.departure_anchor));
-		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(w.departure_cue));
-		if (w.departure_delay != 0)
-			json_object_set_new(obj, "departure_delay", json_integer(w.departure_delay));
 		if (w.departure_path_mask != 0)
 			json_object_set_new(obj, "departure_path_mask", json_integer(w.departure_path_mask));
+		if (w.departure_delay)
+			json_object_set_new(obj, "departure_delay", json_integer(w.departure_delay));
+		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(w.departure_cue));
+
+		// Ships in this wing (after departure, matching standard order)
+		{
+			json_t* ships = json_array();
+			for (int j = 0; j < w.wave_count; j++) {
+				if (w.ship_index[j] >= 0) {
+					json_array_append_new(ships, json_string(Ships[w.ship_index[j]].ship_name));
+				}
+			}
+			json_object_set_new(obj, "ships", ships);
+		}
 
 		// AI goals
-		json_t* goals = save_ai_goals_json(w.ai_goals);
-		if (json_array_size(goals) > 0)
-			json_object_set_new(obj, "ai_goals", goals);
-		else
-			json_decref(goals);
+		{
+			json_t* goals = save_ai_goals_json(w.ai_goals);
+			if (json_array_size(goals) > 0)
+				json_object_set_new(obj, "ai_goals", goals);
+			else
+				json_decref(goals);
+		}
 
 		if (w.hotkey >= 0)
 			json_object_set_new(obj, "hotkey", json_integer(w.hotkey));
-
-		// Wave delay
-		if (w.wave_delay_min > 0)
-			json_object_set_new(obj, "wave_delay_min", json_integer(w.wave_delay_min));
-		if (w.wave_delay_max > 0)
-			json_object_set_new(obj, "wave_delay_max", json_integer(w.wave_delay_max));
 
 		// Wing flags
 		{
@@ -1610,6 +1615,12 @@ json_t* save_wings_json()
 			else
 				json_decref(wflags);
 		}
+
+		// Wave delay
+		if (w.wave_delay_min)
+			json_object_set_new(obj, "wave_delay_min", json_integer(w.wave_delay_min));
+		if (w.wave_delay_max)
+			json_object_set_new(obj, "wave_delay_max", json_integer(w.wave_delay_max));
 
 		json_array_append_new(arr, obj);
 	}
@@ -1638,7 +1649,8 @@ json_t* save_events_json()
 {
 	json_t* arr = json_array();
 
-	for (const auto& evt : Mission_events) {
+	for (int i = 0; i < static_cast<int>(Mission_events.size()); i++) {
+		const auto& evt = Mission_events[i];
 		json_t* obj = json_object();
 		json_object_set_new(obj, "name", json_string(evt.name.c_str()));
 		json_object_set_new(obj, "formula", mission_json::sexp_to_json(evt.formula));
@@ -1660,6 +1672,46 @@ json_t* save_events_json()
 			json_object_set_new(obj, "event_flags", json_integer(evt.flags));
 		if (evt.mission_log_flags != 0)
 			json_object_set_new(obj, "mission_log_flags", json_integer(evt.mission_log_flags));
+
+		// Event annotations
+		if (!Event_annotations.empty()) {
+			event_annotation default_ea;
+			json_t* ann_arr = json_array();
+
+			for (const auto& ea : Event_annotations) {
+				if (ea.path.empty() || ea.path.front() != i)
+					continue;
+
+				json_t* ann = json_object();
+
+				if (ea.comment != default_ea.comment)
+					json_object_set_new(ann, "comment", json_string(ea.comment.c_str()));
+
+				if (ea.r != default_ea.r || ea.g != default_ea.g || ea.b != default_ea.b) {
+					json_t* bg_color = json_object();
+					json_object_set_new(bg_color, "r", json_integer(ea.r));
+					json_object_set_new(bg_color, "g", json_integer(ea.g));
+					json_object_set_new(bg_color, "b", json_integer(ea.b));
+					json_object_set_new(ann, "background_color", bg_color);
+				}
+
+				if (ea.path.size() > 1) {
+					json_t* path = json_array();
+					auto it = ea.path.begin();
+					for (++it; it != ea.path.end(); ++it) {
+						json_array_append_new(path, json_integer(*it));
+					}
+					json_object_set_new(ann, "path", path);
+				}
+
+				json_array_append_new(ann_arr, ann);
+			}
+
+			if (json_array_size(ann_arr) > 0)
+				json_object_set_new(obj, "annotations", ann_arr);
+			else
+				json_decref(ann_arr);
+		}
 
 		json_array_append_new(arr, obj);
 	}
@@ -1709,8 +1761,39 @@ json_t* save_waypoints_json()
 		json_t* node = json_object();
 		json_object_set_new(node, "name", json_string(jn.GetName()));
 		json_object_set_new(node, "position", mission_json::vec3d_to_json(*jn.GetPosition()));
-		if (strlen(jn.GetDisplayName()) > 0 && strcmp(jn.GetName(), jn.GetDisplayName()) != 0)
-			json_object_set_new(node, "display_name", json_string(jn.GetDisplayName()));
+
+		// Display name (matching standard logic)
+		if (json_save_config->always_save_display_names || jn.HasDisplayName()) {
+			char truncated_name[NAME_LENGTH];
+			strcpy_s(truncated_name, jn.GetName());
+			end_string_at_first_hash_symbol(truncated_name);
+
+			if (json_save_config->always_save_display_names || strcmp(jn.GetDisplayName(), truncated_name) != 0)
+				json_object_set_new(node, "display_name", json_string(jn.GetDisplayName()));
+		}
+
+		// Model file
+		if (jn.IsSpecialModel()) {
+			int model = jn.GetModelNumber();
+			polymodel* pm = model_get(model);
+			json_object_set_new(node, "model_file", json_string(pm->filename));
+		}
+
+		// Alpha color
+		if (jn.IsColored()) {
+			const auto& jn_color = jn.GetColor();
+			json_t* color_obj = json_object();
+			json_object_set_new(color_obj, "red", json_integer(jn_color.red));
+			json_object_set_new(color_obj, "green", json_integer(jn_color.green));
+			json_object_set_new(color_obj, "blue", json_integer(jn_color.blue));
+			json_object_set_new(color_obj, "alpha", json_integer(jn_color.alpha));
+			json_object_set_new(node, "alphacolor", color_obj);
+		}
+
+		// Hidden
+		if (jn.IsHidden())
+			json_object_set_new(node, "hidden", json_true());
+
 		json_array_append_new(jn_arr, node);
 	}
 	json_object_set_new(obj, "jump_nodes", jn_arr);
@@ -1816,15 +1899,50 @@ json_t* save_bitmaps_json()
 {
 	json_t* obj = json_object();
 
+	json_object_set_new(obj, "num_stars", json_integer(Num_stars));
 	json_object_set_new(obj, "ambient_light_level", json_integer(The_mission.ambient_light_level));
 
-	if (strlen(The_mission.envmap_name) > 0)
-		json_object_set_new(obj, "environment_map", json_string(The_mission.envmap_name));
+	// Neb2 stuff
+	if (The_mission.flags[Mission::Mission_Flags::Fullneb]) {
+		json_object_set_new(obj, "neb2_texture", json_string(Neb2_texture_name));
+
+		if (The_mission.flags[Mission::Mission_Flags::Neb2_fog_color_override]) {
+			json_t* neb_color = json_object();
+			json_object_set_new(neb_color, "r", json_integer(Neb2_fog_color[0]));
+			json_object_set_new(neb_color, "g", json_integer(Neb2_fog_color[1]));
+			json_object_set_new(neb_color, "b", json_integer(Neb2_fog_color[2]));
+			json_object_set_new(obj, "neb2_color", neb_color);
+		}
+
+		json_t* poofs = json_array();
+		for (size_t i = 0; i < Poof_info.size(); ++i) {
+			if (get_bit(Neb2_poof_flags.get(), i)) {
+				json_array_append_new(poofs, json_string(Poof_info[i].name));
+			}
+		}
+		json_object_set_new(obj, "neb2_poofs", poofs);
+	}
+	// Legacy nebula (neb1)
+	else if (Nebula_index >= 0) {
+		json_object_set_new(obj, "nebula", json_string(Nebula_filenames[Nebula_index]));
+		json_object_set_new(obj, "nebula_color", json_string(Nebula_colors[Mission_palette]));
+		json_object_set_new(obj, "nebula_pitch", json_integer(Nebula_pitch));
+		json_object_set_new(obj, "nebula_bank", json_integer(Nebula_bank));
+		json_object_set_new(obj, "nebula_heading", json_integer(Nebula_heading));
+	}
 
 	// Backgrounds
 	json_t* bg_arr = json_array();
 	for (const auto& bg : Backgrounds) {
 		json_t* bg_obj = json_object();
+
+		// Background flags
+		if (bg.flags.any_set()) {
+			json_t* bf = json_array();
+			if (bg.flags[Starfield::Background_Flags::Corrected_angles_in_mission_file])
+				json_array_append_new(bf, json_string("corrected angles"));
+			json_object_set_new(bg_obj, "flags", bf);
+		}
 
 		json_t* suns = json_array();
 		for (const auto& sun : bg.suns) {
@@ -1832,7 +1950,6 @@ json_t* save_bitmaps_json()
 			json_object_set_new(s, "filename", json_string(sun.filename));
 			json_object_set_new(s, "angles", mission_json::angles_to_json(sun.ang));
 			json_object_set_new(s, "scale_x", json_real(sun.scale_x));
-			json_object_set_new(s, "scale_y", json_real(sun.scale_y));
 			json_array_append_new(suns, s);
 		}
 		json_object_set_new(bg_obj, "suns", suns);
@@ -1853,6 +1970,9 @@ json_t* save_bitmaps_json()
 		json_array_append_new(bg_arr, bg_obj);
 	}
 	json_object_set_new(obj, "backgrounds", bg_arr);
+
+	if (strlen(The_mission.envmap_name) > 0)
+		json_object_set_new(obj, "environment_map", json_string(The_mission.envmap_name));
 
 	return obj;
 }
@@ -1911,12 +2031,35 @@ json_t* save_music_json()
 
 	if (strlen(The_mission.event_music_name) > 0)
 		json_object_set_new(obj, "event_music", json_string(The_mission.event_music_name));
+	if (stricmp(The_mission.substitute_event_music_name, "None"))
+		json_object_set_new(obj, "substitute_event_music", json_string(The_mission.substitute_event_music_name));
 	if (strlen(The_mission.briefing_music_name) > 0)
 		json_object_set_new(obj, "briefing_music", json_string(The_mission.briefing_music_name));
-	if (strlen(The_mission.substitute_event_music_name) > 0)
-		json_object_set_new(obj, "substitute_event_music", json_string(The_mission.substitute_event_music_name));
-	if (strlen(The_mission.substitute_briefing_music_name) > 0)
+	if (stricmp(The_mission.substitute_briefing_music_name, "None"))
 		json_object_set_new(obj, "substitute_briefing_music", json_string(The_mission.substitute_briefing_music_name));
+
+	// Debriefing music
+	if (Mission_music[SCORE_DEBRIEFING_SUCCESS] != event_music_get_spooled_music_index("Success")) {
+		json_object_set_new(obj, "debriefing_success_music", json_string(
+			Mission_music[SCORE_DEBRIEFING_SUCCESS] < 0 ? "None"
+				: Spooled_music[Mission_music[SCORE_DEBRIEFING_SUCCESS]].name));
+	}
+	if (Mission_music[SCORE_DEBRIEFING_AVERAGE] != event_music_get_spooled_music_index("Average")) {
+		json_object_set_new(obj, "debriefing_average_music", json_string(
+			Mission_music[SCORE_DEBRIEFING_AVERAGE] < 0 ? "None"
+				: Spooled_music[Mission_music[SCORE_DEBRIEFING_AVERAGE]].name));
+	}
+	if (Mission_music[SCORE_DEBRIEFING_FAILURE] != event_music_get_spooled_music_index("Failure")) {
+		json_object_set_new(obj, "debriefing_fail_music", json_string(
+			Mission_music[SCORE_DEBRIEFING_FAILURE] < 0 ? "None"
+				: Spooled_music[Mission_music[SCORE_DEBRIEFING_FAILURE]].name));
+	}
+
+	// Fiction viewer music
+	if (mission_has_fiction() && Mission_music[SCORE_FICTION_VIEWER] >= 0) {
+		json_object_set_new(obj, "fiction_viewer_music", json_string(
+			Spooled_music[Mission_music[SCORE_FICTION_VIEWER]].name));
+	}
 
 	return obj;
 }
