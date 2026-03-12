@@ -7,6 +7,7 @@
 
 struct mission;
 struct json_t;
+struct FredSaveConfig;
 
 namespace mission_json {
 
@@ -15,7 +16,7 @@ constexpr int FORMAT_VERSION = 1;
 
 // Save the current in-memory mission state to a JSON file.
 // Returns 0 on success, negative on error.
-int save(const char* pathname);
+int save(const char* pathname, const FredSaveConfig& config);
 
 // Load a mission from a JSON file into the provided mission struct.
 // flags: same MPF_* flags used by parse_mission().

@@ -4,6 +4,7 @@
  */
 
 #include "missioneditor/mission_json.h"
+#include "missioneditor/missionsave.h"
 
 #include <ctime>
 
@@ -96,6 +97,9 @@ extern SCP_vector<parsed_prop> Parse_props;
 // Internal save helpers (anonymous namespace)
 // ============================================================
 namespace {
+
+// File-scope pointer to the save configuration, set at the start of mission_json::save().
+static const FredSaveConfig* json_save_config = nullptr;
 
 const char* arrival_location_name(ArrivalLocation loc)
 {
@@ -349,10 +353,6 @@ json_t* save_mission_info_json()
 	if (The_mission.skybox_flags != DEFAULT_NMODEL_FLAGS)
 		json_object_set_new(obj, "skybox_flags", json_integer(The_mission.skybox_flags));
 
-	// Environment map
-	if (strlen(The_mission.envmap_name) > 0)
-		json_object_set_new(obj, "envmap_name", json_string(The_mission.envmap_name));
-
 	// AI profile
 	if (The_mission.ai_profile)
 		json_object_set_new(obj, "ai_profile", json_string(The_mission.ai_profile->profile_name));
@@ -373,23 +373,6 @@ json_t* save_mission_info_json()
 			json_object_set_new(obj, "sound_environment", snd);
 		}
 	}
-
-	// Gravity
-	if (!IS_VEC_NULL(&The_mission.gravity))
-		json_object_set_new(obj, "gravity", mission_json::vec3d_to_json(The_mission.gravity));
-
-	// HUD timer padding
-	if (The_mission.HUD_timer_padding != 0)
-		json_object_set_new(obj, "hud_timer_padding", json_integer(The_mission.HUD_timer_padding));
-
-	// Ambient light
-	json_object_set_new(obj, "ambient_light_level", json_integer(The_mission.ambient_light_level));
-
-	// Command persona/sender
-	if (The_mission.command_persona >= 0 && The_mission.command_persona < static_cast<int>(Personas.size()))
-		json_object_set_new(obj, "command_persona", json_string(Personas[The_mission.command_persona].name));
-	if (strlen(The_mission.command_sender) > 0)
-		json_object_set_new(obj, "command_sender", json_string(The_mission.command_sender));
 
 	// Wing names
 	{
@@ -412,11 +395,6 @@ json_t* save_mission_info_json()
 	}
 
 	return obj;
-}
-
-json_t* save_plot_info_json()
-{
-	return json_object();
 }
 
 json_t* save_variables_json()
@@ -728,10 +706,6 @@ json_t* save_players_json()
 			json_array_append_new(ships, entry);
 		}
 		json_object_set_new(team, "ship_choices", ships);
-		json_object_set_new(team, "loadout_total", json_integer(Team_data[t].loadout_total));
-
-		if (Team_data[t].default_ship >= 0 && Team_data[t].default_ship < static_cast<int>(Ship_info.size()))
-			json_object_set_new(team, "default_ship", json_string(Ship_info[Team_data[t].default_ship].name));
 
 		// Weapon pool
 		json_t* weapons = json_array();
@@ -977,8 +951,6 @@ json_t* save_objects_json()
 				json_array_append_new(flags_arr, json_string("always-death-scream"));
 			if (shipp->flags[Ship::Ship_Flags::Afterburner_locked])
 				json_array_append_new(flags_arr, json_string("afterburners-locked"));
-			if (objp->flags[Object::Object_Flags::Immobile])
-				json_array_append_new(flags_arr, json_string("immobile"));
 			if (shipp->flags[Ship::Ship_Flags::No_ets])
 				json_array_append_new(flags_arr, json_string("no-ets"));
 			if (shipp->flags[Ship::Ship_Flags::Cloaked])
@@ -1113,29 +1085,6 @@ json_t* save_objects_json()
 
 		if (shipp->group >= 0)
 			json_object_set_new(obj, "group", json_integer(shipp->group));
-
-		if (shipp->collision_group_id != 0)
-			json_object_set_new(obj, "collision_group_id", json_integer(shipp->collision_group_id));
-
-		if (shipp->ship_max_hull_strength != 0.0f)
-			json_object_set_new(obj, "ship_max_hull_strength", json_real(shipp->ship_max_hull_strength));
-		if (shipp->ship_max_shield_strength != 0.0f)
-			json_object_set_new(obj, "ship_max_shield_strength", json_real(shipp->ship_max_shield_strength));
-
-		// Fields only available from parse objects
-		for (const auto& po : Parse_objects) {
-			if (!stricmp(shipp->ship_name, po.name)) {
-				if (po.destroy_before_mission_time >= 0)
-					json_object_set_new(obj, "destroy_before_mission_time", json_integer(po.destroy_before_mission_time));
-				if (po.net_signature != 0)
-					json_object_set_new(obj, "net_signature", json_integer(po.net_signature));
-				if (po.respawn_count != 0)
-					json_object_set_new(obj, "respawn_count", json_integer(po.respawn_count));
-				if (po.respawn_priority != 0)
-					json_object_set_new(obj, "respawn_priority", json_integer(po.respawn_priority));
-				break;
-			}
-		}
 
 		json_array_append_new(arr, obj);
 	}
@@ -1557,13 +1506,14 @@ json_t* save_custom_data_json()
 // Public save entry point
 // ============================================================
 
-int mission_json::save(const char* pathname)
+int mission_json::save(const char* pathname, const FredSaveConfig& config)
 {
+	json_save_config = &config;
+
 	json_t* root = json_object();
 	json_object_set_new(root, "format_version", json_integer(FORMAT_VERSION));
 
 	json_object_set_new(root, "mission_info", save_mission_info_json());
-	json_object_set_new(root, "plot_info", save_plot_info_json());
 	json_object_set_new(root, "variables", save_variables_json());
 	json_object_set_new(root, "containers", save_containers_json());
 	json_object_set_new(root, "cutscenes", save_cutscenes_json());
@@ -1589,6 +1539,7 @@ int mission_json::save(const char* pathname)
 	if (!fp) {
 		json_decref(root);
 		mprintf(("mission_json::save - Failed to open '%s' for writing\n", pathname));
+		json_save_config = nullptr;
 		return -1;
 	}
 
@@ -1598,8 +1549,10 @@ int mission_json::save(const char* pathname)
 
 	if (result != 0) {
 		mprintf(("mission_json::save - Failed to write JSON to '%s'\n", pathname));
+		json_save_config = nullptr;
 		return -2;
 	}
 
+	json_save_config = nullptr;
 	return 0;
 }
