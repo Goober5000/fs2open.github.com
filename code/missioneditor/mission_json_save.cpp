@@ -3,7 +3,7 @@
  * Provides an alternate, structured mission format for use by AI agents.
  */
 
-#include "mission/mission_json.h"
+#include "missioneditor/mission_json.h"
 
 #include <ctime>
 

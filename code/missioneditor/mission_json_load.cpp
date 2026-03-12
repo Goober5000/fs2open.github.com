@@ -3,7 +3,7 @@
  * Provides an alternate, structured mission format for use by AI agents.
  */
 
-#include "mission/mission_json.h"
+#include "missioneditor/mission_json.h"
 
 // Jansson's json_array_foreach / json_object_foreach macros use assignment
 // inside conditionals, which is intentional.  Suppress MSVC C4706 for this file.
