@@ -13,7 +13,9 @@
 #include "ai/aigoals.h"
 #include "asteroid/asteroid.h"
 #include "cfile/cfile.h"
+#include "fireball/fireballs.h"
 #include "gamesnd/eventmusic.h"
+#include "gamesnd/gamesnd.h"
 #include "globalincs/version.h"
 #include "hud/hudsquadmsg.h"
 #include "iff_defs/iff_defs.h"
@@ -40,6 +42,7 @@
 #include "prop/prop.h"
 #include "ship/ship.h"
 #include "ship/ship_flags.h"
+#include "ship/shipfx.h"
 #include "sound/ds.h"
 #include "starfield/starfield.h"
 #include "weapon/weapon.h"
@@ -789,6 +792,288 @@ json_t* save_players_json()
 	return arr;
 }
 
+// Save warp parameters for a ship, mirroring save_warp_params() in missionsave.cpp.
+// Only saves fields that differ from the ship_info defaults.
+// Returns a json object with the differing params, or nullptr if params match defaults.
+json_t* save_warp_params_json(WarpDirection direction, ship* shipp)
+{
+	WarpParams *shipp_params, *sip_params;
+	if (direction == WarpDirection::WARP_IN) {
+		if (shipp->warpin_params_index == Ship_info[shipp->ship_info_index].warpin_params_index)
+			return nullptr;
+
+		shipp_params = &Warp_params[shipp->warpin_params_index];
+		sip_params = &Warp_params[Ship_info[shipp->ship_info_index].warpin_params_index];
+	} else {
+		if (shipp->warpout_params_index == Ship_info[shipp->ship_info_index].warpout_params_index)
+			return nullptr;
+
+		shipp_params = &Warp_params[shipp->warpout_params_index];
+		sip_params = &Warp_params[Ship_info[shipp->ship_info_index].warpout_params_index];
+	}
+
+	json_t* obj = json_object();
+
+	if (shipp_params->warp_type != sip_params->warp_type) {
+		if (shipp_params->warp_type & WT_DEFAULT_WITH_FIREBALL) {
+			json_object_set_new(obj, "type", json_string(Fireball_info[shipp_params->warp_type & WT_FLAG_MASK].unique_id));
+		} else if (shipp_params->warp_type >= 0 && shipp_params->warp_type < Num_warp_types) {
+			json_object_set_new(obj, "type", json_string(Warp_types[shipp_params->warp_type]));
+		}
+	}
+
+	if (shipp_params->snd_start != sip_params->snd_start) {
+		if (shipp_params->snd_start.isValid())
+			json_object_set_new(obj, "start_sound", json_string(gamesnd_get_game_sound(shipp_params->snd_start)->name.c_str()));
+	}
+
+	if (shipp_params->snd_end != sip_params->snd_end) {
+		if (shipp_params->snd_end.isValid())
+			json_object_set_new(obj, "end_sound", json_string(gamesnd_get_game_sound(shipp_params->snd_end)->name.c_str()));
+	}
+
+	if (direction == WarpDirection::WARP_OUT && shipp_params->warpout_engage_time != sip_params->warpout_engage_time) {
+		if (shipp_params->warpout_engage_time > 0)
+			json_object_set_new(obj, "engage_time", json_real(i2fl(shipp_params->warpout_engage_time) / 1000.0f));
+	}
+
+	if (shipp_params->speed != sip_params->speed) {
+		if (shipp_params->speed > 0.0f)
+			json_object_set_new(obj, "speed", json_real(shipp_params->speed));
+	}
+
+	if (shipp_params->time != sip_params->time) {
+		if (shipp_params->time > 0)
+			json_object_set_new(obj, "time", json_real(i2fl(shipp_params->time) / 1000.0f));
+	}
+
+	if (shipp_params->accel_exp != sip_params->accel_exp) {
+		if (shipp_params->accel_exp > 0.0f) {
+			const char* key = (direction == WarpDirection::WARP_IN) ? "decel_exp" : "accel_exp";
+			json_object_set_new(obj, key, json_real(shipp_params->accel_exp));
+		}
+	}
+
+	if (shipp_params->radius != sip_params->radius) {
+		if (shipp_params->radius > 0.0f)
+			json_object_set_new(obj, "radius", json_real(shipp_params->radius));
+	}
+
+	if (stricmp(shipp_params->anim, sip_params->anim) != 0) {
+		if (strlen(shipp_params->anim) > 0)
+			json_object_set_new(obj, "animation", json_string(shipp_params->anim));
+	}
+
+	if (shipp_params->supercap_warp_physics != sip_params->supercap_warp_physics) {
+		json_object_set_new(obj, "supercap_warp_physics", json_boolean(shipp_params->supercap_warp_physics));
+	}
+
+	if (direction == WarpDirection::WARP_OUT &&
+		shipp_params->warpout_player_speed != sip_params->warpout_player_speed) {
+		if (shipp_params->warpout_player_speed > 0.0f)
+			json_object_set_new(obj, "player_warpout_speed", json_real(shipp_params->warpout_player_speed));
+	}
+
+	if (json_object_size(obj) == 0) {
+		json_decref(obj);
+		return nullptr;
+	}
+
+	return obj;
+}
+
+// Save turret info for a subsystem, mirroring save_turret_info() in missionsave.cpp.
+// Only saves AI class and weapon banks that differ from the subsystem defaults.
+void save_turret_info_json(json_t* sub, ship_subsys* ptr, int ship_index)
+{
+	int i, z;
+	ship_weapon* wp = &ptr->weapons;
+
+	if (wp->ai_class != Ship_info[Ships[ship_index].ship_info_index].ai_class) {
+		json_object_set_new(sub, "ai_class", json_string(Ai_class_names[wp->ai_class]));
+	}
+
+	z = 0;
+	i = wp->num_primary_banks;
+	while (i--)
+		if (wp->primary_bank_weapons[i] != ptr->system_info->primary_banks[i])
+			z = 1;
+
+	if (z) {
+		json_t* prim = json_array();
+		for (i = 0; i < wp->num_primary_banks; i++) {
+			if (wp->primary_bank_weapons[i] != -1)
+				json_array_append_new(prim, json_string(Weapon_info[wp->primary_bank_weapons[i]].name));
+			else
+				json_array_append_new(prim, json_string(""));
+		}
+		json_object_set_new(sub, "primary_banks", prim);
+	}
+
+	z = 0;
+	i = wp->num_secondary_banks;
+	while (i--)
+		if (wp->secondary_bank_weapons[i] != ptr->system_info->secondary_banks[i])
+			z = 1;
+
+	if (z) {
+		json_t* sec = json_array();
+		for (i = 0; i < wp->num_secondary_banks; i++) {
+			if (wp->secondary_bank_weapons[i] != -1)
+				json_array_append_new(sec, json_string(Weapon_info[wp->secondary_bank_weapons[i]].name));
+			else
+				json_array_append_new(sec, json_string(""));
+		}
+		json_object_set_new(sub, "secondary_banks", sec);
+	}
+
+	z = 0;
+	i = wp->num_secondary_banks;
+	while (i--)
+		if (wp->secondary_bank_ammo[i] != 100)
+			z = 1;
+
+	if (z) {
+		json_t* ammo = json_array();
+		for (i = 0; i < wp->num_secondary_banks; i++)
+			json_array_append_new(ammo, json_integer(wp->secondary_bank_ammo[i]));
+		json_object_set_new(sub, "secondary_ammo", ammo);
+	}
+}
+
+// Save common object data (initial state, weapon banks, subsystems),
+// mirroring save_common_object_data() in missionsave.cpp.
+json_t* save_common_object_data_json(object* objp, ship* shipp)
+{
+	int j, z;
+	ship_info* sip = &Ship_info[shipp->ship_info_index];
+	json_t* obj = json_object();
+
+	// Initial velocity/hull/shields
+	if (static_cast<int>(objp->phys_info.speed))
+		json_object_set_new(obj, "initial_velocity", json_integer(static_cast<int>(objp->phys_info.speed)));
+
+	if (fl2i(objp->hull_strength) != 100)
+		json_object_set_new(obj, "initial_hull", json_integer(fl2i(objp->hull_strength)));
+
+	if (fl2i(objp->shield_quadrant[0]) != 100)
+		json_object_set_new(obj, "initial_shields", json_integer(fl2i(objp->shield_quadrant[0])));
+
+	// Ship-level primary banks (Pilot subsystem)
+	ship_weapon* wp = &shipp->weapons;
+	z = 0;
+	j = wp->num_primary_banks;
+	while (j-- && (j >= 0))
+		if (wp->primary_bank_weapons[j] != sip->primary_bank_weapons[j])
+			z = 1;
+
+	if (z) {
+		json_t* prim = json_array();
+		for (j = 0; j < wp->num_primary_banks; j++) {
+			if (wp->primary_bank_weapons[j] != -1)
+				json_array_append_new(prim, json_string(Weapon_info[wp->primary_bank_weapons[j]].name));
+			else
+				json_array_append_new(prim, json_string(""));
+		}
+		json_object_set_new(obj, "primary_banks", prim);
+	}
+
+	z = 0;
+	j = wp->num_secondary_banks;
+	while (j-- && (j >= 0))
+		if (wp->secondary_bank_weapons[j] != sip->secondary_bank_weapons[j])
+			z = 1;
+
+	if (z) {
+		json_t* sec = json_array();
+		for (j = 0; j < wp->num_secondary_banks; j++) {
+			if (wp->secondary_bank_weapons[j] != -1)
+				json_array_append_new(sec, json_string(Weapon_info[wp->secondary_bank_weapons[j]].name));
+			else
+				json_array_append_new(sec, json_string(""));
+		}
+		json_object_set_new(obj, "secondary_banks", sec);
+	}
+
+	z = 0;
+	j = wp->num_secondary_banks;
+	while (j-- && (j >= 0))
+		if (wp->secondary_bank_ammo[j] != 100)
+			z = 1;
+
+	if (z) {
+		json_t* ammo = json_array();
+		for (j = 0; j < wp->num_secondary_banks; j++)
+			json_array_append_new(ammo, json_integer(wp->secondary_bank_ammo[j]));
+		json_object_set_new(obj, "secondary_ammo", ammo);
+	}
+
+	// Subsystems
+	json_t* subsys_arr = json_array();
+	ship_subsys* ptr = GET_FIRST(&shipp->subsys_list);
+
+	while (ptr != END_OF_LIST(&shipp->subsys_list) && ptr) {
+		// Only write subsystem if it has damage, cargo, or is a turret (matching standard)
+		if ((ptr->current_hits) || (ptr->system_info && ptr->system_info->type == SUBSYSTEM_TURRET) ||
+			(ptr->subsys_cargo_name > 0)) {
+
+			json_t* sub = json_object();
+			json_object_set_new(sub, "name", json_string(ptr->system_info->subobj_name));
+
+			if (ptr->current_hits) {
+				json_object_set_new(sub, "damage", json_integer(static_cast<int>(ptr->current_hits)));
+			}
+
+			if (ptr->subsys_cargo_name > 0) {
+				json_object_set_new(sub, "cargo_name", json_string(Cargo_names[ptr->subsys_cargo_name]));
+			}
+
+			if (ptr->subsys_cargo_title[0] != '\0') {
+				json_object_set_new(sub, "cargo_title", json_string(ptr->subsys_cargo_title));
+			}
+
+			if (ptr->system_info->type == SUBSYSTEM_TURRET)
+				save_turret_info_json(sub, ptr, SHIP_INDEX(shipp));
+
+			json_array_append_new(subsys_arr, sub);
+		}
+
+		ptr = GET_NEXT(ptr);
+	}
+
+	if (json_array_size(subsys_arr) > 0)
+		json_object_set_new(obj, "subsystems", subsys_arr);
+	else
+		json_decref(subsys_arr);
+
+	return obj;
+}
+
+// Save a single dock instance, mirroring save_single_dock_instance() in missionsave.cpp.
+json_t* save_single_dock_instance_json(ship* shipp, dock_instance* dock_ptr)
+{
+	object* objp_a = &Objects[shipp->objnum];
+	object* objp_b = dock_ptr->docked_objp;
+	ship* other_shipp = &Ships[objp_b->instance];
+
+	json_t* dock = json_object();
+	json_object_set_new(dock, "docked_to", json_string(other_shipp->ship_name));
+
+	// Note: standard format has docker/dockee reversed (Volition bug preserved for compatibility).
+	// JSON format uses the correct naming.
+	int my_dockpoint = dock_find_dockpoint_used_by_object(objp_a, objp_b);
+	int other_dockpoint = dock_find_dockpoint_used_by_object(objp_b, objp_a);
+
+	if (other_dockpoint >= 0)
+		json_object_set_new(dock, "docker_point", json_string(
+			model_get_dock_name(Ship_info[other_shipp->ship_info_index].model_num, other_dockpoint)));
+	if (my_dockpoint >= 0)
+		json_object_set_new(dock, "dockee_point", json_string(
+			model_get_dock_name(Ship_info[shipp->ship_info_index].model_num, my_dockpoint)));
+
+	return dock;
+}
+
 json_t* save_objects_json()
 {
 	json_t* arr = json_array();
@@ -799,127 +1084,133 @@ json_t* save_objects_json()
 			continue;
 
 		object* objp = &Objects[shipp->objnum];
+		ship_info* sip = &Ship_info[shipp->ship_info_index];
+
+		auto j = objp->type;
+		if ((j != OBJ_SHIP) && (j != OBJ_START))
+			continue;
+
 		json_t* obj = json_object();
 
+		// --- Name and display name ---
 		json_object_set_new(obj, "name", json_string(shipp->ship_name));
 
-		if (shipp->display_name.length() > 0)
-			json_object_set_new(obj, "display_name", json_string(shipp->display_name.c_str()));
+		if ((json_save_config->always_save_display_names && shipp->wingnum < 0) || shipp->has_display_name()) {
+			char truncated_name[NAME_LENGTH];
+			strcpy_s(truncated_name, shipp->ship_name);
+			end_string_at_first_hash_symbol(truncated_name);
 
-		if (shipp->ship_info_index >= 0 && shipp->ship_info_index < static_cast<int>(Ship_info.size()))
-			json_object_set_new(obj, "ship_class", json_string(Ship_info[shipp->ship_info_index].name));
+			if ((json_save_config->always_save_display_names && shipp->wingnum < 0) || strcmp(shipp->get_display_name(), truncated_name) != 0)
+				json_object_set_new(obj, "display_name", json_string(shipp->get_display_name()));
+		}
 
-		if (shipp->team >= 0 && shipp->team < static_cast<int>(Iff_info.size()))
-			json_object_set_new(obj, "team", json_string(Iff_info[shipp->team].iff_name));
+		// --- Class and alt classes ---
+		json_object_set_new(obj, "ship_class", json_string(sip->name));
 
-		if (Ship_info[shipp->ship_info_index].uses_team_colors && !shipp->team_name.empty())
+		if (!shipp->s_alt_classes.empty()) {
+			json_t* alt_arr = json_array();
+			for (const auto& ac : shipp->s_alt_classes) {
+				json_t* a = json_object();
+				if (ac.variable_index != -1)
+					json_object_set_new(a, "variable", json_string(Sexp_variables[ac.variable_index].variable_name));
+				else if (ac.ship_class >= 0 && ac.ship_class < static_cast<int>(Ship_info.size()))
+					json_object_set_new(a, "ship_class", json_string(Ship_info[ac.ship_class].name));
+				json_object_set_new(a, "default", json_boolean(ac.default_to_this_class));
+				json_array_append_new(alt_arr, a);
+			}
+			json_object_set_new(obj, "alt_classes", alt_arr);
+		}
+
+		// --- Alt name and callsign ---
+		Assertion(json_save_config->fred_alt_names != nullptr, "json_save_config->fred_alt_names is null!");
+		if (strlen(json_save_config->fred_alt_names[i]))
+			json_object_set_new(obj, "alt", json_string(json_save_config->fred_alt_names[i]));
+
+		Assertion(json_save_config->fred_callsigns != nullptr, "json_save_config->fred_callsigns is null!");
+		if (strlen(json_save_config->fred_callsigns[i]))
+			json_object_set_new(obj, "callsign", json_string(json_save_config->fred_callsigns[i]));
+
+		// --- Team and team color ---
+		json_object_set_new(obj, "team", json_string(Iff_info[shipp->team].iff_name));
+
+		if (sip->uses_team_colors && !shipp->team_name.empty())
 			json_object_set_new(obj, "team_color_setting", json_string(shipp->team_name.c_str()));
 
+		// --- Position and orientation ---
 		json_object_set_new(obj, "position", mission_json::vec3d_to_json(objp->pos));
 		json_object_set_new(obj, "orientation", mission_json::matrix_to_json(objp->orient));
 
-		if (shipp->weapons.ai_class >= 0 && shipp->weapons.ai_class < Num_ai_classes)
+		// --- AI class (only if different from ship_info default) ---
+		if (shipp->weapons.ai_class != sip->ai_class)
 			json_object_set_new(obj, "ai_class", json_string(Ai_class_names[shipp->weapons.ai_class]));
 
-		// AI goals
-		ai_info* aip = &Ai_info[shipp->ai_index];
-		json_t* goals = save_ai_goals_json(aip->goals);
-		if (json_array_size(goals) > 0)
-			json_object_set_new(obj, "ai_goals", goals);
-		else
-			json_decref(goals);
-
-		// Cargo
-		if (shipp->cargo1 >= 0) {
-			json_object_set_new(obj, "cargo", json_string(Cargo_names[shipp->cargo1]));
-		}
-
-		// Initial state
-		json_object_set_new(obj, "initial_velocity", json_integer(static_cast<int>(objp->phys_info.max_vel.xyz.z)));
-		json_object_set_new(obj, "initial_hull", json_integer(
-			(shipp->ship_max_hull_strength > 0.0f)
-				? static_cast<int>(objp->hull_strength * 100.0f / shipp->ship_max_hull_strength)
-				: 100));
-		json_object_set_new(obj, "initial_shields", json_integer(
-			(shipp->ship_max_shield_strength > 0.0f)
-				? static_cast<int>(shield_get_strength(objp) * 100.0f / shipp->ship_max_shield_strength)
-				: 0));
-
-		// Subsystem status
+		// --- AI goals ---
 		{
-			json_t* subsys_arr = json_array();
-			ship_subsys* ss = GET_FIRST(&shipp->subsys_list);
-			while (ss != END_OF_LIST(&shipp->subsys_list)) {
-				json_t* sub = json_object();
-				json_object_set_new(sub, "name", json_string(ss->system_info->subobj_name));
-
-				if (ss->current_hits < ss->max_hits) {
-					float pct = (ss->max_hits > 0) ? (1.0f - ss->current_hits / ss->max_hits) * 100.0f : 0.0f;
-					json_object_set_new(sub, "damage_percent", json_real(pct));
-				}
-
-				// Primary banks
-				if (ss->weapons.num_primary_banks > 0) {
-					json_t* prim = json_array();
-					for (int b = 0; b < ss->weapons.num_primary_banks; b++) {
-						int wi = ss->weapons.primary_bank_weapons[b];
-						if (wi >= 0 && wi < static_cast<int>(Weapon_info.size()))
-							json_array_append_new(prim, json_string(Weapon_info[wi].name));
-						else
-							json_array_append_new(prim, json_string(""));
-					}
-					json_object_set_new(sub, "primary_banks", prim);
-				}
-
-				// Secondary banks
-				if (ss->weapons.num_secondary_banks > 0) {
-					json_t* sec = json_array();
-					json_t* ammo = json_array();
-					for (int b = 0; b < ss->weapons.num_secondary_banks; b++) {
-						int wi = ss->weapons.secondary_bank_weapons[b];
-						if (wi >= 0 && wi < static_cast<int>(Weapon_info.size()))
-							json_array_append_new(sec, json_string(Weapon_info[wi].name));
-						else
-							json_array_append_new(sec, json_string(""));
-						json_array_append_new(ammo, json_integer(ss->weapons.secondary_bank_ammo[b]));
-					}
-					json_object_set_new(sub, "secondary_banks", sec);
-					json_object_set_new(sub, "secondary_ammo", ammo);
-				}
-
-				json_array_append_new(subsys_arr, sub);
-				ss = GET_NEXT(ss);
-			}
-			if (json_array_size(subsys_arr) > 0)
-				json_object_set_new(obj, "subsystems", subsys_arr);
+			ai_info* aip = &Ai_info[shipp->ai_index];
+			json_t* goals = save_ai_goals_json(aip->goals);
+			if (json_array_size(goals) > 0)
+				json_object_set_new(obj, "ai_goals", goals);
 			else
-				json_decref(subsys_arr);
+				json_decref(goals);
 		}
 
-		// Arrival/Departure
+		// --- Cargo and cargo title ---
+		json_object_set_new(obj, "cargo", json_string(Cargo_names[shipp->cargo1]));
+
+		if (shipp->cargo_title[0] != '\0')
+			json_object_set_new(obj, "cargo_title", json_string(shipp->cargo_title));
+
+		// --- Common object data (initial state, weapon banks, subsystems) ---
+		{
+			json_t* common = save_common_object_data_json(objp, shipp);
+			// Merge common object data fields into the ship object
+			const char* key;
+			json_t* value;
+			json_object_foreach(common, key, value) {
+				json_object_set(obj, key, value);
+			}
+			json_decref(common);
+		}
+
+		// --- Arrival ---
 		json_object_set_new(obj, "arrival_location", json_string(arrival_location_name(shipp->arrival_location)));
 		if (shipp->arrival_distance != 0)
 			json_object_set_new(obj, "arrival_distance", json_integer(shipp->arrival_distance));
 		if (shipp->arrival_anchor >= 0)
 			json_object_set_new(obj, "arrival_anchor", anchor_to_json(shipp->arrival_anchor));
-		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(shipp->arrival_cue));
-		if (shipp->arrival_delay != 0)
-			json_object_set_new(obj, "arrival_delay", json_integer(shipp->arrival_delay));
 		if (shipp->arrival_path_mask != 0)
 			json_object_set_new(obj, "arrival_path_mask", json_integer(shipp->arrival_path_mask));
+		if (shipp->arrival_delay)
+			json_object_set_new(obj, "arrival_delay", json_integer(shipp->arrival_delay));
+		json_object_set_new(obj, "arrival_cue", mission_json::sexp_to_json(shipp->arrival_cue));
 
+		// --- Departure ---
 		json_object_set_new(obj, "departure_location", json_string(departure_location_name(shipp->departure_location)));
 		if (shipp->departure_anchor >= 0)
 			json_object_set_new(obj, "departure_anchor", anchor_to_json(shipp->departure_anchor));
-		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(shipp->departure_cue));
-		if (shipp->departure_delay != 0)
-			json_object_set_new(obj, "departure_delay", json_integer(shipp->departure_delay));
 		if (shipp->departure_path_mask != 0)
 			json_object_set_new(obj, "departure_path_mask", json_integer(shipp->departure_path_mask));
+		if (shipp->departure_delay)
+			json_object_set_new(obj, "departure_delay", json_integer(shipp->departure_delay));
+		json_object_set_new(obj, "departure_cue", mission_json::sexp_to_json(shipp->departure_cue));
 
-		// Flags - manually map runtime flags to parse object flag names
+		// --- Warp parameters ---
+		{
+			json_t* warpin = save_warp_params_json(WarpDirection::WARP_IN, shipp);
+			if (warpin)
+				json_object_set_new(obj, "warpin_params", warpin);
+
+			json_t* warpout = save_warp_params_json(WarpDirection::WARP_OUT, shipp);
+			if (warpout)
+				json_object_set_new(obj, "warpout_params", warpout);
+		}
+
+		// --- Flags ---
+		// Combines both +Flags: and +Flags2: from standard format into a single array
 		{
 			json_t* flags_arr = json_array();
+
+			// +Flags: block
 			if (shipp->flags[Ship::Ship_Flags::Cargo_revealed])
 				json_array_append_new(flags_arr, json_string("cargo-known"));
 			if (shipp->flags[Ship::Ship_Flags::Ignore_count])
@@ -928,7 +1219,8 @@ json_t* save_objects_json()
 				json_array_append_new(flags_arr, json_string("protect-ship"));
 			if (shipp->flags[Ship::Ship_Flags::Reinforcement])
 				json_array_append_new(flags_arr, json_string("reinforcement"));
-			if (objp->flags[Object::Object_Flags::No_shields])
+			if (objp->flags[Object::Object_Flags::No_shields] &&
+				!sip->flags[Ship::Info_Flags::Intrinsic_no_shields])
 				json_array_append_new(flags_arr, json_string("no-shields"));
 			if (shipp->flags[Ship::Ship_Flags::Escort])
 				json_array_append_new(flags_arr, json_string("escort"));
@@ -972,10 +1264,8 @@ json_t* save_objects_json()
 				json_array_append_new(flags_arr, json_string("friendly-stealth-invisible"));
 			if (shipp->flags[Ship::Ship_Flags::Dont_collide_invis])
 				json_array_append_new(flags_arr, json_string("don't-collide-invisible"));
-			if (shipp->flags[Ship::Ship_Flags::Ship_locked])
-				json_array_append_new(flags_arr, json_string("ship-locked"));
-			if (shipp->flags[Ship::Ship_Flags::Weapons_locked])
-				json_array_append_new(flags_arr, json_string("weapons-locked"));
+
+			// +Flags2: block
 			if (shipp->flags[Ship::Ship_Flags::Primitive_sensors])
 				json_array_append_new(flags_arr, json_string("primitive-sensors"));
 			if (shipp->flags[Ship::Ship_Flags::No_subspace_drive])
@@ -998,55 +1288,152 @@ json_t* save_objects_json()
 				json_array_append_new(flags_arr, json_string("no-death-scream"));
 			if (shipp->flags[Ship::Ship_Flags::Always_death_scream])
 				json_array_append_new(flags_arr, json_string("always-death-scream"));
+			if (shipp->flags[Ship::Ship_Flags::Navpoint_needslink])
+				json_array_append_new(flags_arr, json_string("nav-needslink"));
+			if (shipp->flags[Ship::Ship_Flags::Hide_ship_name])
+				json_array_append_new(flags_arr, json_string("hide-ship-name"));
+			if (shipp->flags[Ship::Ship_Flags::Set_class_dynamically])
+				json_array_append_new(flags_arr, json_string("set-class-dynamically"));
+			if (shipp->flags[Ship::Ship_Flags::Lock_all_turrets_initially])
+				json_array_append_new(flags_arr, json_string("lock-all-turrets"));
 			if (shipp->flags[Ship::Ship_Flags::Afterburner_locked])
 				json_array_append_new(flags_arr, json_string("afterburners-locked"));
+			if (shipp->flags[Ship::Ship_Flags::Force_shields_on])
+				json_array_append_new(flags_arr, json_string("force-shields-on"));
+			if (objp->flags[Object::Object_Flags::Dont_change_position])
+				json_array_append_new(flags_arr, json_string("don't-change-position"));
+			if (objp->flags[Object::Object_Flags::Dont_change_orientation])
+				json_array_append_new(flags_arr, json_string("don't-change-orientation"));
 			if (shipp->flags[Ship::Ship_Flags::No_ets])
 				json_array_append_new(flags_arr, json_string("no-ets"));
 			if (shipp->flags[Ship::Ship_Flags::Cloaked])
 				json_array_append_new(flags_arr, json_string("cloaked"));
+			if (shipp->flags[Ship::Ship_Flags::Ship_locked])
+				json_array_append_new(flags_arr, json_string("ship-locked"));
+			if (shipp->flags[Ship::Ship_Flags::Weapons_locked])
+				json_array_append_new(flags_arr, json_string("weapons-locked"));
 			if (shipp->flags[Ship::Ship_Flags::Scramble_messages])
 				json_array_append_new(flags_arr, json_string("scramble-messages"));
 			if (!(objp->flags[Object::Object_Flags::Collides]))
 				json_array_append_new(flags_arr, json_string("no_collide"));
+			if (shipp->flags[Ship::Ship_Flags::No_disabled_self_destruct])
+				json_array_append_new(flags_arr, json_string("no-disabled-self-destruct"));
+			if (shipp->flags[Ship::Ship_Flags::Same_arrival_warp_when_docked])
+				json_array_append_new(flags_arr, json_string("same-arrival-warp-when-docked"));
+			if (shipp->flags[Ship::Ship_Flags::Same_departure_warp_when_docked])
+				json_array_append_new(flags_arr, json_string("same-departure-warp-when-docked"));
+			if (objp->flags[Object::Object_Flags::Attackable_if_no_collide])
+				json_array_append_new(flags_arr, json_string("ai-attackable-if-no-collide"));
+			if (shipp->flags[Ship::Ship_Flags::Fail_sound_locked_primary])
+				json_array_append_new(flags_arr, json_string("fail-sound-locked-primary"));
+			if (shipp->flags[Ship::Ship_Flags::Fail_sound_locked_secondary])
+				json_array_append_new(flags_arr, json_string("fail-sound-locked-secondary"));
+			if (shipp->flags[Ship::Ship_Flags::Aspect_immune])
+				json_array_append_new(flags_arr, json_string("aspect-immune"));
+			if (shipp->flags[Ship::Ship_Flags::Cannot_perform_scan_hide_cargo])
+				json_array_append_new(flags_arr, json_string("cannot-perform-scan-hide-cargo"));
+			if (shipp->flags[Ship::Ship_Flags::Cannot_perform_scan_show_cargo])
+				json_array_append_new(flags_arr, json_string("cannot-perform-scan-show-cargo"));
+			if (shipp->flags[Ship::Ship_Flags::No_targeting_limits])
+				json_array_append_new(flags_arr, json_string("no-targeting-limits"));
+
 			json_object_set_new(obj, "flags", flags_arr);
 		}
 
-		// Other ship properties
-		if (shipp->escort_priority != 0)
-			json_object_set_new(obj, "escort_priority", json_integer(shipp->escort_priority));
-		if (shipp->hotkey >= 0)
-			json_object_set_new(obj, "hotkey", json_integer(shipp->hotkey));
-		if (shipp->score != 0)
-			json_object_set_new(obj, "score", json_integer(shipp->score));
-		if (shipp->assist_score_pct != 0.0f)
-			json_object_set_new(obj, "assist_score_pct", json_real(shipp->assist_score_pct));
-		if (shipp->persona_index >= 0 && shipp->persona_index < static_cast<int>(Personas.size()))
-			json_object_set_new(obj, "persona", json_string(Personas[shipp->persona_index].name));
-		if (shipp->wingnum >= 0)
-			json_object_set_new(obj, "wing", json_string(Wings[shipp->wingnum].name));
-		if (Ai_info[shipp->ai_index].kamikaze_damage > 0)
-			json_object_set_new(obj, "kamikaze_damage", json_integer(Ai_info[shipp->ai_index].kamikaze_damage));
+		// --- Respawn priority (always written, matching standard) ---
+		json_object_set_new(obj, "respawn_priority", json_integer(shipp->respawn_priority));
 
-		// Special explosion
+		// --- Escort priority ---
+		if (shipp->flags[Ship::Ship_Flags::Escort])
+			json_object_set_new(obj, "escort_priority", json_integer(shipp->escort_priority));
+
+		// --- Guardian threshold ---
+		if (shipp->ship_guardian_threshold != 0)
+			json_object_set_new(obj, "guardian_threshold", json_integer(shipp->ship_guardian_threshold));
+
+		// --- Special explosion ---
 		if (shipp->use_special_explosion) {
 			json_t* sexp_obj = json_object();
 			json_object_set_new(sexp_obj, "damage", json_integer(shipp->special_exp_damage));
 			json_object_set_new(sexp_obj, "blast", json_integer(shipp->special_exp_blast));
 			json_object_set_new(sexp_obj, "inner_radius", json_integer(shipp->special_exp_inner));
 			json_object_set_new(sexp_obj, "outer_radius", json_integer(shipp->special_exp_outer));
-			json_object_set_new(sexp_obj, "use_shockwave", json_boolean(shipp->use_shockwave));
-			json_object_set_new(sexp_obj, "shockwave_speed", json_integer(shipp->special_exp_shockwave_speed));
-			json_object_set_new(sexp_obj, "deathroll_time", json_integer(shipp->special_exp_deathroll_time));
+			if (shipp->use_shockwave && (shipp->special_exp_shockwave_speed > 0))
+				json_object_set_new(sexp_obj, "shockwave_speed", json_integer(shipp->special_exp_shockwave_speed));
+			if (shipp->special_exp_deathroll_time > 0)
+				json_object_set_new(sexp_obj, "deathroll_time", json_integer(shipp->special_exp_deathroll_time));
 			json_object_set_new(obj, "special_explosion", sexp_obj);
 		}
 
-		if (shipp->special_hitpoints > 0)
+		// --- Special hitpoints and shield ---
+		if (shipp->special_hitpoints)
 			json_object_set_new(obj, "special_hitpoints", json_integer(shipp->special_hitpoints));
-		if (shipp->special_shield > 0)
+		if (shipp->special_shield >= 0)
 			json_object_set_new(obj, "special_shield", json_integer(shipp->special_shield));
 
-		// Texture replacements - check both Fred global and parse objects
-		{
+		// --- Kamikaze damage ---
+		if (Ai_info[shipp->ai_index].ai_flags[AI::AI_Flags::Kamikaze])
+			json_object_set_new(obj, "kamikaze_damage", json_integer(Ai_info[shipp->ai_index].kamikaze_damage));
+
+		// --- Hotkey ---
+		if (shipp->hotkey >= 0)
+			json_object_set_new(obj, "hotkey", json_integer(shipp->hotkey));
+
+		// --- Dock list ---
+		if (object_is_docked(objp)) {
+			json_t* dock_arr = json_array();
+
+			if (dock_check_docked_one_on_one(objp)) {
+				// retail-style: only save for non-leaders
+				if (!(shipp->flags[Ship::Ship_Flags::Dock_leader])) {
+					json_array_append_new(dock_arr, save_single_dock_instance_json(shipp, objp->dock_list));
+				}
+			} else {
+				// multiply docked: save all instances
+				for (dock_instance* dock_ptr = objp->dock_list; dock_ptr != nullptr; dock_ptr = dock_ptr->next) {
+					json_array_append_new(dock_arr, save_single_dock_instance_json(shipp, dock_ptr));
+				}
+			}
+
+			if (json_array_size(dock_arr) > 0)
+				json_object_set_new(obj, "dock_list", dock_arr);
+			else
+				json_decref(dock_arr);
+		}
+
+		// --- Destroy at ---
+		if (shipp->flags[Ship::Ship_Flags::Kill_before_mission])
+			json_object_set_new(obj, "destroy_at", json_integer(shipp->final_death_time));
+
+		// --- Orders accepted ---
+		if (shipp->orders_accepted != ship_get_default_orders_accepted(sip)) {
+			json_t* orders_arr = json_array();
+			for (size_t order_id : shipp->orders_accepted) {
+				const auto& order = Player_orders[order_id];
+				json_array_append_new(orders_arr, json_string(order.parse_name.c_str()));
+			}
+			json_object_set_new(obj, "orders_accepted", orders_arr);
+		}
+
+		// --- Group ---
+		if (shipp->group >= 0)
+			json_object_set_new(obj, "group", json_integer(shipp->group));
+
+		// --- Score ---
+		if (sip->score == shipp->score) {
+			json_object_set_new(obj, "use_table_score", json_true());
+		}
+		json_object_set_new(obj, "score", json_integer(shipp->score));
+
+		if (shipp->assist_score_pct != 0.0f)
+			json_object_set_new(obj, "assist_score_pct", json_real(shipp->assist_score_pct));
+
+		// --- Persona ---
+		if (shipp->persona_index >= 0 && shipp->persona_index < static_cast<int>(Personas.size()))
+			json_object_set_new(obj, "persona", json_string(Personas[shipp->persona_index].name));
+
+		// --- Texture replacements ---
+		if (!Fred_texture_replacements.empty()) {
 			json_t* tex_arr = json_array();
 
 			for (const auto& tr : Fred_texture_replacements) {
@@ -1058,82 +1445,11 @@ json_t* save_objects_json()
 				}
 			}
 
-			if (json_array_size(tex_arr) == 0) {
-				for (const auto& po : Parse_objects) {
-					if (!stricmp(shipp->ship_name, po.name)) {
-						for (const auto& tr : po.replacement_textures) {
-							if (!tr.from_table) {
-								json_t* tex = json_object();
-								json_object_set_new(tex, "old_texture", json_string(tr.old_texture));
-								json_object_set_new(tex, "new_texture", json_string(tr.new_texture));
-								json_array_append_new(tex_arr, tex);
-							}
-						}
-						break;
-					}
-				}
-			}
-
 			if (json_array_size(tex_arr) > 0)
 				json_object_set_new(obj, "replacement_textures", tex_arr);
 			else
 				json_decref(tex_arr);
 		}
-
-		// Dock list
-		{
-			dock_instance* dp = objp->dock_list;
-			if (dp) {
-				json_t* dock_arr = json_array();
-				while (dp) {
-					if (dp->docked_objp && dp->docked_objp->type == OBJ_SHIP) {
-						json_t* dock = json_object();
-						json_object_set_new(dock, "docked_to", json_string(Ships[dp->docked_objp->instance].ship_name));
-
-						int my_dockpoint = dock_find_dockpoint_used_by_object(objp, dp->docked_objp);
-						int other_dockpoint = dock_find_dockpoint_used_by_object(dp->docked_objp, objp);
-						if (my_dockpoint >= 0)
-							json_object_set_new(dock, "docker_point", json_string(
-								model_get_dock_name(Ship_info[shipp->ship_info_index].model_num, my_dockpoint)));
-						if (other_dockpoint >= 0)
-							json_object_set_new(dock, "dockee_point", json_string(
-								model_get_dock_name(Ship_info[Ships[dp->docked_objp->instance].ship_info_index].model_num, other_dockpoint)));
-
-						json_array_append_new(dock_arr, dock);
-					}
-					dp = dp->next;
-				}
-				if (json_array_size(dock_arr) > 0)
-					json_object_set_new(obj, "dock_list", dock_arr);
-				else
-					json_decref(dock_arr);
-			}
-		}
-
-		// Alt classes
-		if (!shipp->s_alt_classes.empty()) {
-			json_t* alt_arr = json_array();
-			for (const auto& ac : shipp->s_alt_classes) {
-				json_t* a = json_object();
-				if (ac.ship_class >= 0 && ac.ship_class < static_cast<int>(Ship_info.size()))
-					json_object_set_new(a, "ship_class", json_string(Ship_info[ac.ship_class].name));
-				json_object_set_new(a, "default", json_boolean(ac.default_to_this_class));
-				json_array_append_new(alt_arr, a);
-			}
-			json_object_set_new(obj, "alt_classes", alt_arr);
-		}
-
-		// Orders accepted
-		if (!shipp->orders_accepted.empty()) {
-			json_t* orders_arr = json_array();
-			for (size_t oi : shipp->orders_accepted) {
-				json_array_append_new(orders_arr, json_integer(static_cast<int>(oi)));
-			}
-			json_object_set_new(obj, "orders_accepted", orders_arr);
-		}
-
-		if (shipp->group >= 0)
-			json_object_set_new(obj, "group", json_integer(shipp->group));
 
 		json_array_append_new(arr, obj);
 	}
