@@ -131,6 +131,8 @@ class volumetric_nebula {
 	const std::tuple<float, float>& getNoiseColorScale() const;
 	const std::tuple<float, float, float>& getNoiseColor() const;
 	float getNoiseColorIntensity() const;
+	const std::optional<SCP_string>& getNoiseColorFunc1() const;
+	const std::optional<SCP_string>& getNoiseColorFunc2() const;
 
 	bool isVolumeBitmapValid() const;
 	void renderVolumeBitmap();

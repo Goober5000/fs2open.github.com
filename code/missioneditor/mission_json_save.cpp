@@ -320,10 +320,10 @@ json_t* save_mission_info_json()
 			json_object_set_new(noise, "color_g", json_integer(static_cast<int>(std::get<1>(nnc) * 255.0f)));
 			json_object_set_new(noise, "color_b", json_integer(static_cast<int>(std::get<2>(nnc) * 255.0f)));
 			json_object_set_new(noise, "intensity", json_real(v.getNoiseColorIntensity()));
-			if (v.noiseColorFunc1)
-				json_object_set_new(noise, "function_base", json_string(v.noiseColorFunc1->c_str()));
-			if (v.noiseColorFunc2)
-				json_object_set_new(noise, "function_sub", json_string(v.noiseColorFunc2->c_str()));
+			if (v.getNoiseColorFunc1())
+				json_object_set_new(noise, "function_base", json_string(v.getNoiseColorFunc1()->c_str()));
+			if (v.getNoiseColorFunc2())
+				json_object_set_new(noise, "function_sub", json_string(v.getNoiseColorFunc2()->c_str()));
 			json_object_set_new(noise, "resolution", json_integer(v.getNoiseResolution()));
 			json_object_set_new(vol, "noise", noise);
 		}

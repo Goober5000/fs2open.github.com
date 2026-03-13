@@ -355,6 +355,14 @@ float volumetric_nebula::getNoiseColorIntensity() const {
 	return noiseColorIntensity;
 }
 
+const std::optional<SCP_string>& volumetric_nebula::getNoiseColorFunc1() const {
+	return noiseColorFunc1;
+}
+
+const std::optional<SCP_string>& volumetric_nebula::getNoiseColorFunc2() const {
+	return noiseColorFunc2;
+}
+
 bool volumetric_nebula::isVolumeBitmapValid() const {
 	return volumeBitmapHandle >= 0 && (!getNoiseActive() || noiseVolumeBitmapHandle >= 0);
 }
