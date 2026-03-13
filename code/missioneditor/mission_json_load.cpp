@@ -1538,7 +1538,11 @@ void load_wings_json(const json_t* arr, mission* pm)
 		w.num_waves = json_get_int(val, "num_waves", 1);
 		w.threshold = json_get_int(val, "wave_threshold", 0);
 		w.special_ship = json_get_int(val, "special_ship", 0);
-		w.formation = json_get_int(val, "formation", -1);
+		const char* formation_name = json_get_string(val, "formation", nullptr);
+		if (formation_name)
+			w.formation = wing_formation_lookup(formation_name);
+		else
+			w.formation = -1;
 		w.formation_scale = json_get_float(val, "formation_scale", 1.0f);
 
 		// Ships in wing - resolve ship names to Parse_objects indices
@@ -1635,6 +1639,7 @@ void load_events_json(const json_t* arr)
 		return;
 
 	Mission_events.clear();
+	Event_annotations.clear();
 	size_t index;
 	json_t* val;
 
@@ -1654,6 +1659,40 @@ void load_events_json(const json_t* arr)
 		evt.mission_log_flags = json_get_int(val, "mission_log_flags", 0);
 
 		Mission_events.push_back(std::move(evt));
+
+		// Event annotations
+		const json_t* ann_arr = json_object_get(val, "annotations");
+		if (ann_arr && json_is_array(ann_arr)) {
+			size_t ai;
+			json_t* av;
+			json_array_foreach(ann_arr, ai, av) {
+				event_annotation ea;
+
+				const char* comment = json_get_string(av, "comment", nullptr);
+				if (comment)
+					ea.comment = comment;
+
+				const json_t* bg_color = json_object_get(av, "background_color");
+				if (bg_color && json_is_object(bg_color)) {
+					ea.r = static_cast<ubyte>(json_get_int(bg_color, "r", 255));
+					ea.g = static_cast<ubyte>(json_get_int(bg_color, "g", 255));
+					ea.b = static_cast<ubyte>(json_get_int(bg_color, "b", 255));
+				}
+
+				// Path: prepend event index, then append saved path elements
+				ea.path.push_back(static_cast<int>(index));
+				const json_t* path = json_object_get(av, "path");
+				if (path && json_is_array(path)) {
+					size_t pi;
+					json_t* pv;
+					json_array_foreach(path, pi, pv) {
+						ea.path.push_back(static_cast<int>(json_integer_value(pv)));
+					}
+				}
+
+				Event_annotations.push_back(std::move(ea));
+			}
+		}
 	}
 }
 
@@ -1703,6 +1742,30 @@ void load_waypoints_json(const json_t* obj)
 
 			const char* name = json_get_string(val, "name", "");
 			jn.SetName(name);
+
+			// Display name
+			const char* display_name = json_get_string(val, "display_name", nullptr);
+			if (display_name)
+				jn.SetDisplayName(display_name);
+
+			// Model file
+			const char* model_file = json_get_string(val, "model_file", nullptr);
+			if (model_file)
+				jn.SetModel(model_file);
+
+			// Alpha color
+			const json_t* color_obj = json_object_get(val, "alphacolor");
+			if (color_obj && json_is_object(color_obj)) {
+				int r = json_get_int(color_obj, "red", 0);
+				int g = json_get_int(color_obj, "green", 255);
+				int b = json_get_int(color_obj, "blue", 0);
+				int a = json_get_int(color_obj, "alpha", 255);
+				jn.SetAlphaColor(r, g, b, a);
+			}
+
+			// Hidden
+			if (json_get_bool(val, "hidden", false))
+				jn.SetVisibility(false);
 
 			Jump_nodes.push_back(std::move(jn));
 		}
