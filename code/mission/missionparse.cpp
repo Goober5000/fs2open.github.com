@@ -92,13 +92,7 @@
 const gameversion::version MISSION_VERSION = gameversion::version(23, 1);
 const gameversion::version LEGACY_MISSION_VERSION = gameversion::version(0, 10);
 
-LOCAL struct {
-	char docker[NAME_LENGTH];
-	char dockee[NAME_LENGTH];
-	char docker_point[NAME_LENGTH];
-	char dockee_point[NAME_LENGTH];
-} Initially_docked[MAX_SHIPS];
-
+initial_dock_entry Initially_docked[MAX_SHIPS];
 int Total_initially_docked;
 
 mission	The_mission;

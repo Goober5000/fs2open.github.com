@@ -527,6 +527,16 @@ extern SCP_vector<p_object> Parse_objects;
 extern p_object Support_ship_pobj, *Arriving_support_ship;
 extern p_object Ship_arrival_list;
 
+struct initial_dock_entry
+{
+	char docker[NAME_LENGTH];
+	char dockee[NAME_LENGTH];
+	char docker_point[NAME_LENGTH];
+	char dockee_point[NAME_LENGTH];
+};
+extern initial_dock_entry Initially_docked[MAX_SHIPS];
+extern int Total_initially_docked;
+
 typedef struct team_data {
 	// ships
 	int		default_ship;  // default ship type for player start point (recommended choice)
