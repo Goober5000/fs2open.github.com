@@ -288,8 +288,8 @@ json_t* save_mission_info_json()
 		json_object_set_new(obj, "neb_awacs", json_real(Neb2_awacs));
 		json_object_set_new(obj, "storm_name", json_string(Mission_parse_storm_name));
 	}
-	json_object_set_new(obj, "fog_near_mult", json_real(The_mission.neb_near_multi));
-	json_object_set_new(obj, "fog_far_mult", json_real(The_mission.neb_far_multi));
+	json_object_set_new(obj, "fog_near_mult", json_real(Neb2_fog_near_mult));
+	json_object_set_new(obj, "fog_far_mult", json_real(Neb2_fog_far_mult));
 	if (The_mission.contrail_threshold != CONTRAIL_THRESHOLD_DEFAULT)
 		json_object_set_new(obj, "contrail_threshold", json_integer(The_mission.contrail_threshold));
 

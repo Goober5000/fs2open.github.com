@@ -603,7 +603,7 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 	}
 
 	// Lighting profile
-	pm->lighting_profile_name = json_get_string(obj, "lighting_profile", "");
+	pm->lighting_profile_name = json_get_string(obj, "lighting_profile", lighting_profiles::default_name().c_str());
 
 	// Sound environment
 	const json_t* snd = json_object_get(obj, "sound_environment");
