@@ -18,7 +18,9 @@
 #include "ai/ai_profiles.h"
 #include "asteroid/asteroid.h"
 #include "cfile/cfile.h"
+#include "fireball/fireballs.h"
 #include "gamesnd/eventmusic.h"
+#include "gamesnd/gamesnd.h"
 #include "globalincs/version.h"
 #include "hud/hudsquadmsg.h"
 #include "iff_defs/iff_defs.h"
@@ -42,6 +44,7 @@
 #include "parse/sexp_container.h"
 #include "prop/prop.h"
 #include "ship/ship.h"
+#include "ship/shipfx.h"
 #include "sound/ds.h"
 #include "starfield/starfield.h"
 #include "weapon/weapon.h"
@@ -985,6 +988,93 @@ void load_players_json(const json_t* arr)
 	}
 }
 
+// Load warp parameters from a JSON object, starting from defaults inherited from the ship class.
+// Returns the warp params index, or -1 if no custom params were specified.
+int load_warp_params_json(const json_t* obj, WarpDirection direction, int default_params_index)
+{
+	if (!obj || !json_is_object(obj) || json_object_size(obj) == 0)
+		return -1;
+
+	// Start with a copy of the defaults
+	WarpParams params = Warp_params[default_params_index];
+	params.direction = direction;
+
+	// Warp type
+	const char* type_str = json_get_string(obj, "type", nullptr);
+	if (type_str) {
+		// Check for fireball type first
+		int fireball_idx = -1;
+		for (int i = 0; i < static_cast<int>(Fireball_info.size()); i++) {
+			if (!stricmp(type_str, Fireball_info[i].unique_id)) {
+				fireball_idx = i;
+				break;
+			}
+		}
+		if (fireball_idx >= 0) {
+			params.warp_type = fireball_idx | WT_DEFAULT_WITH_FIREBALL;
+		} else {
+			int wt = warptype_match(type_str);
+			if (wt >= 0)
+				params.warp_type = wt;
+		}
+	}
+
+	// Sounds
+	const char* start_snd = json_get_string(obj, "start_sound", nullptr);
+	if (start_snd)
+		params.snd_start = gamesnd_get_by_name(start_snd);
+
+	const char* end_snd = json_get_string(obj, "end_sound", nullptr);
+	if (end_snd)
+		params.snd_end = gamesnd_get_by_name(end_snd);
+
+	// Engage time (warpout only)
+	const json_t* engage = json_object_get(obj, "engage_time");
+	if (engage && json_is_real(engage))
+		params.warpout_engage_time = fl2i(static_cast<float>(json_real_value(engage)) * 1000.0f);
+
+	// Speed
+	const json_t* speed = json_object_get(obj, "speed");
+	if (speed && json_is_real(speed))
+		params.speed = static_cast<float>(json_real_value(speed));
+
+	// Time
+	const json_t* time_val = json_object_get(obj, "time");
+	if (time_val && json_is_real(time_val))
+		params.time = fl2i(static_cast<float>(json_real_value(time_val)) * 1000.0f);
+
+	// Accel/decel exponent (note: save uses "decel_exp" for warp-in, "accel_exp" for warp-out, both stored in accel_exp)
+	const json_t* accel = json_object_get(obj, "accel_exp");
+	if (accel && json_is_real(accel))
+		params.accel_exp = static_cast<float>(json_real_value(accel));
+
+	const json_t* decel = json_object_get(obj, "decel_exp");
+	if (decel && json_is_real(decel))
+		params.accel_exp = static_cast<float>(json_real_value(decel));
+
+	// Radius
+	const json_t* radius = json_object_get(obj, "radius");
+	if (radius && json_is_real(radius))
+		params.radius = static_cast<float>(json_real_value(radius));
+
+	// Animation
+	const char* anim = json_get_string(obj, "animation", nullptr);
+	if (anim)
+		strcpy_s(params.anim, anim);
+
+	// Supercap warp physics
+	const json_t* supercap = json_object_get(obj, "supercap_warp_physics");
+	if (supercap && json_is_boolean(supercap))
+		params.supercap_warp_physics = json_is_true(supercap);
+
+	// Player warpout speed (warpout only)
+	const json_t* player_speed = json_object_get(obj, "player_warpout_speed");
+	if (player_speed && json_is_real(player_speed))
+		params.warpout_player_speed = static_cast<float>(json_real_value(player_speed));
+
+	return find_or_add_warp_params(params);
+}
+
 void load_objects_json(const json_t* arr, mission* pm)
 {
 	if (!arr || !json_is_array(arr))
@@ -999,6 +1089,14 @@ void load_objects_json(const json_t* arr, mission* pm)
 
 		strcpy_s(po.name, json_get_string(val, "name", ""));
 
+		// If name has a hash, create a default display name (mirroring standard parser)
+		if (get_pointer_to_first_hash_symbol(po.name)) {
+			po.display_name = po.name;
+			end_string_at_first_hash_symbol(po.display_name);
+			po.flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
+		}
+
+		// Explicit display name overrides the hash-based default
 		const char* display = json_get_string(val, "display_name", nullptr);
 		if (display) {
 			po.display_name = display;
@@ -1008,12 +1106,39 @@ void load_objects_json(const json_t* arr, mission* pm)
 		const char* sc_name = json_get_string(val, "ship_class", "");
 		po.ship_class = ship_info_lookup(sc_name);
 
+		// Initialize class-specific defaults (mirroring parse_object in missionparse.cpp)
+		if (po.ship_class >= 0) {
+			ship_info* sip = &Ship_info[po.ship_class];
+			po.ai_class = sip->ai_class;
+			po.warpin_params_index = sip->warpin_params_index;
+			po.warpout_params_index = sip->warpout_params_index;
+			po.ship_max_shield_strength = sip->max_shield_strength;
+			po.ship_max_hull_strength = sip->max_hull_strength;
+			po.max_shield_recharge = sip->max_shield_recharge;
+			po.replacement_textures = sip->replacement_textures;
+		}
+
 		const char* team_name = json_get_string(val, "team", "");
 		po.team = iff_lookup(team_name);
 		po.loadout_team = po.team;
 
 		const char* tcs = json_get_string(val, "team_color_setting", nullptr);
 		if (tcs) po.team_color_setting = tcs;
+
+		// Alt name and callsign (indexes into Mission_alt_types/Mission_callsigns arrays)
+		const char* alt_name = json_get_string(val, "alt", nullptr);
+		if (alt_name) {
+			po.alt_type_index = mission_parse_lookup_alt(alt_name);
+			if (po.alt_type_index < 0)
+				Warning(LOCATION, "Error looking up alternate ship type name %s!", alt_name);
+		}
+
+		const char* callsign_name = json_get_string(val, "callsign", nullptr);
+		if (callsign_name) {
+			po.callsign_index = mission_parse_lookup_callsign(callsign_name);
+			if (po.callsign_index < 0)
+				Warning(LOCATION, "Error looking up callsign %s!", callsign_name);
+		}
 
 		po.pos = json_to_vec3d(json_object_get(val, "position"));
 		po.orient = json_to_matrix(json_object_get(val, "orientation"));
@@ -1041,6 +1166,10 @@ void load_objects_json(const json_t* arr, mission* pm)
 			po.cargo1 = static_cast<char>(ci);
 		}
 
+		const char* cargo_title = json_get_string(val, "cargo_title", nullptr);
+		if (cargo_title)
+			strcpy_s(po.cargo_title, cargo_title);
+
 		po.initial_velocity = json_get_int(val, "initial_velocity", 0);
 		po.initial_hull = json_get_int(val, "initial_hull", 100);
 		po.initial_shields = json_get_int(val, "initial_shields", 100);
@@ -1060,6 +1189,17 @@ void load_objects_json(const json_t* arr, mission* pm)
 		po.departure_delay = json_get_int(val, "departure_delay", 0);
 		po.departure_path_mask = json_get_int(val, "departure_path_mask", 0);
 
+		// Warp parameters
+		{
+			int warpin_idx = load_warp_params_json(json_object_get(val, "warpin_params"), WarpDirection::WARP_IN, po.warpin_params_index);
+			if (warpin_idx >= 0)
+				po.warpin_params_index = warpin_idx;
+
+			int warpout_idx = load_warp_params_json(json_object_get(val, "warpout_params"), WarpDirection::WARP_OUT, po.warpout_params_index);
+			if (warpout_idx >= 0)
+				po.warpout_params_index = warpout_idx;
+		}
+
 		// Flags
 		load_parse_object_flags_json(json_object_get(val, "flags"), po.flags);
 
@@ -1074,7 +1214,13 @@ void load_objects_json(const json_t* arr, mission* pm)
 
 		po.escort_priority = json_get_int(val, "escort_priority", 0);
 		po.hotkey = json_get_int(val, "hotkey", -1);
-		po.score = json_get_int(val, "score", 0);
+
+		// Score — if use_table_score is set, use the ship class table default
+		if (json_get_bool(val, "use_table_score", false) && po.ship_class >= 0) {
+			po.score = Ship_info[po.ship_class].score;
+		} else {
+			po.score = json_get_int(val, "score", 0);
+		}
 		po.assist_score_pct = json_get_float(val, "assist_score_pct", 0.0f);
 
 		const char* persona_name = json_get_string(val, "persona", nullptr);
@@ -1084,6 +1230,14 @@ void load_objects_json(const json_t* arr, mission* pm)
 		po.kamikaze_damage = json_get_int(val, "kamikaze_damage", 0);
 		po.group = json_get_int(val, "group", -1);
 		po.respawn_priority = json_get_int(val, "respawn_priority", 0);
+
+		// Guardian threshold
+		po.ship_guardian_threshold = json_get_int(val, "guardian_threshold", 0);
+
+		// Destroy before mission time
+		int destroy_at = json_get_int(val, "destroy_at", -1);
+		if (destroy_at >= 0)
+			po.destroy_before_mission_time = destroy_at;
 
 		// Special explosion
 		const json_t* sexp_obj = json_object_get(val, "special_explosion");
@@ -1132,17 +1286,25 @@ void load_objects_json(const json_t* arr, mission* pm)
 			}
 		}
 
-		// Orders accepted
+		// Orders accepted (saved as string names via Player_orders[].parse_name)
 		const json_t* orders = json_object_get(val, "orders_accepted");
 		if (orders && json_is_array(orders)) {
 			size_t oi;
 			json_t* ov;
 			json_array_foreach(orders, oi, ov) {
-				po.orders_accepted.insert(static_cast<size_t>(json_integer_value(ov)));
+				const char* order_name = json_string_value(ov);
+				if (!order_name) continue;
+
+				for (size_t order_id = 0; order_id < Player_orders.size(); order_id++) {
+					if (!stricmp(order_name, Player_orders[order_id].parse_name.c_str())) {
+						po.orders_accepted.insert(order_id);
+						break;
+					}
+				}
 			}
 		}
 
-			// Subsystem status from JSON
+		// Subsystem status from JSON
 		const json_t* subsys_arr = json_object_get(val, "subsystems");
 		if (subsys_arr && json_is_array(subsys_arr)) {
 			po.subsys_index = Subsys_index;
@@ -1154,7 +1316,32 @@ void load_objects_json(const json_t* arr, mission* pm)
 				subsys_status* ssp = &Subsys_status[new_idx];
 
 				strcpy_s(ssp->name, json_get_string(sv, "name", "Pilot"));
-				ssp->percent = json_get_float(sv, "damage_percent", 0.0f);
+				ssp->percent = json_get_float(sv, "damage", 0.0f);
+
+				// Subsystem cargo
+				const char* subsys_cargo = json_get_string(sv, "cargo_name", nullptr);
+				if (subsys_cargo) {
+					int ci;
+					for (ci = 0; ci < Num_cargo; ci++) {
+						if (!stricmp(Cargo_names[ci], subsys_cargo))
+							break;
+					}
+					if (ci == Num_cargo && Num_cargo < MAX_CARGO) {
+						strcpy_s(Cargo_names_buf[Num_cargo], subsys_cargo);
+						Cargo_names[Num_cargo] = Cargo_names_buf[Num_cargo];
+						Num_cargo++;
+					}
+					ssp->subsys_cargo_name = ci;
+				}
+
+				const char* subsys_cargo_title = json_get_string(sv, "cargo_title", nullptr);
+				if (subsys_cargo_title)
+					strcpy_s(ssp->subsys_cargo_title, subsys_cargo_title);
+
+				// Turret AI class
+				const char* subsys_ai_class = json_get_string(sv, "ai_class", nullptr);
+				if (subsys_ai_class)
+					ssp->ai_class = find_ai_class(subsys_ai_class);
 
 				// Primary banks
 				const json_t* prim = json_object_get(sv, "primary_banks");
