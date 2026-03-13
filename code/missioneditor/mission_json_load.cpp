@@ -28,6 +28,7 @@
 #include "globalincs/alphacolors.h"
 #include "jumpnode/jumpnode.h"
 #include "libs/jansson.h"
+#include "math/bitarray.h"
 #include "lighting/lighting_profiles.h"
 #include "mission/missionbriefcommon.h"
 #include "mission/missiongoals.h"
@@ -47,6 +48,7 @@
 #include "ship/ship.h"
 #include "ship/shipfx.h"
 #include "sound/ds.h"
+#include "starfield/nebula.h"
 #include "starfield/starfield.h"
 #include "weapon/weapon.h"
 
@@ -826,6 +828,10 @@ void load_briefing_json(const json_t* arr)
 
 		strcpy_s(b.background[GR_640], json_get_string(obj, "background_640", ""));
 		strcpy_s(b.background[GR_1024], json_get_string(obj, "background_1024", ""));
+		strcpy_s(b.ship_select_background[GR_640], json_get_string(obj, "ship_select_bg_640", ""));
+		strcpy_s(b.ship_select_background[GR_1024], json_get_string(obj, "ship_select_bg_1024", ""));
+		strcpy_s(b.weapon_select_background[GR_640], json_get_string(obj, "weapon_select_bg_640", ""));
+		strcpy_s(b.weapon_select_background[GR_1024], json_get_string(obj, "weapon_select_bg_1024", ""));
 
 		const json_t* stages = json_object_get(obj, "stages");
 		if (stages && json_is_array(stages)) {
@@ -842,6 +848,18 @@ void load_briefing_json(const json_t* arr)
 				bs.formula = json_to_sexp(json_object_get(s, "formula"));
 				bs.draw_grid = json_get_bool(s, "draw_grid", true);
 
+				// Grid color
+				const json_t* gc = json_object_get(s, "grid_color");
+				if (gc && json_is_object(gc)) {
+					gr_init_color(&bs.grid_color,
+						json_get_int(gc, "red", 0),
+						json_get_int(gc, "green", 0),
+						json_get_int(gc, "blue", 0));
+					bs.grid_color.alpha = static_cast<ubyte>(json_get_int(gc, "alpha", 255));
+				} else {
+					bs.grid_color = Color_briefing_grid;
+				}
+
 				const json_t* icons = json_object_get(s, "icons");
 				if (icons && json_is_array(icons)) {
 					bs.num_icons = static_cast<int>(json_array_size(icons));
@@ -850,10 +868,31 @@ void load_briefing_json(const json_t* arr)
 						const json_t* ic = json_array_get(icons, j);
 						memset(&bs.icons[j], 0, sizeof(brief_icon));
 						bs.icons[j].type = json_get_int(ic, "type", 0);
-						bs.icons[j].team = json_get_int(ic, "team", 0);
+
+						// Team — saved as IFF name string
+						const char* team_name = json_get_string(ic, "team", nullptr);
+						if (team_name)
+							bs.icons[j].team = iff_lookup(team_name);
+						else
+							bs.icons[j].team = 0;
+
 						bs.icons[j].id = json_get_int(ic, "id", 0);
 						bs.icons[j].pos = json_to_vec3d(json_object_get(ic, "pos"));
-						bs.icons[j].flags = json_get_int(ic, "flags", 0);
+
+						// Icon flags — saved as individual booleans
+						bs.icons[j].flags = 0;
+						if (json_get_bool(ic, "highlight", false))
+							bs.icons[j].flags |= BI_HIGHLIGHT;
+						if (json_get_bool(ic, "mirror", false))
+							bs.icons[j].flags |= BI_MIRROR_ICON;
+						if (json_get_bool(ic, "use_wing_icon", false))
+							bs.icons[j].flags |= BI_USE_WING_ICON;
+						if (json_get_bool(ic, "use_cargo_icon", false))
+							bs.icons[j].flags |= BI_USE_CARGO_ICON;
+
+						// Icon scale
+						int icon_scale_pct = json_get_int(ic, "icon_scale", 100);
+						bs.icons[j].scale_factor = icon_scale_pct / 100.0f;
 
 						const char* sc_name = json_get_string(ic, "ship_class", nullptr);
 						if (sc_name)
@@ -1799,7 +1838,66 @@ void load_bitmaps_json(const json_t* obj)
 {
 	if (!obj) return;
 
+	Num_stars = json_get_int(obj, "num_stars", 0);
 	The_mission.ambient_light_level = json_get_int(obj, "ambient_light_level", 0);
+
+	// Neb2 settings (when Fullneb flag is set)
+	if (The_mission.flags[Mission::Mission_Flags::Fullneb]) {
+		const char* neb2_tex = json_get_string(obj, "neb2_texture", nullptr);
+		if (neb2_tex)
+			strcpy_s(Neb2_texture_name, neb2_tex);
+
+		const json_t* neb_color = json_object_get(obj, "neb2_color");
+		if (neb_color && json_is_object(neb_color)) {
+			Neb2_fog_color[0] = static_cast<ubyte>(json_get_int(neb_color, "r", 0));
+			Neb2_fog_color[1] = static_cast<ubyte>(json_get_int(neb_color, "g", 0));
+			Neb2_fog_color[2] = static_cast<ubyte>(json_get_int(neb_color, "b", 0));
+			The_mission.flags.set(Mission::Mission_Flags::Neb2_fog_color_override);
+		}
+
+		const json_t* poofs = json_object_get(obj, "neb2_poofs");
+		if (poofs && json_is_array(poofs)) {
+			size_t pi;
+			json_t* pv;
+			json_array_foreach(poofs, pi, pv) {
+				const char* poof_name = json_string_value(pv);
+				if (poof_name) {
+					for (size_t k = 0; k < Poof_info.size(); k++) {
+						if (!stricmp(poof_name, Poof_info[k].name)) {
+							set_bit(Neb2_poof_flags.get(), k);
+							break;
+						}
+					}
+				}
+			}
+		}
+	}
+	// Legacy nebula (neb1)
+	else {
+		const char* nebula = json_get_string(obj, "nebula", nullptr);
+		if (nebula) {
+			for (int i = 0; i < NUM_NEBULAS; i++) {
+				if (!stricmp(nebula, Nebula_filenames[i])) {
+					Nebula_index = i;
+					break;
+				}
+			}
+
+			const char* neb_color_name = json_get_string(obj, "nebula_color", nullptr);
+			if (neb_color_name) {
+				for (int i = 0; i < NUM_NEBULA_COLORS; i++) {
+					if (!stricmp(neb_color_name, Nebula_colors[i])) {
+						Mission_palette = i;
+						break;
+					}
+				}
+			}
+
+			Nebula_pitch = json_get_int(obj, "nebula_pitch", 0);
+			Nebula_bank = json_get_int(obj, "nebula_bank", 0);
+			Nebula_heading = json_get_int(obj, "nebula_heading", 0);
+		}
+	}
 
 	const char* envmap = json_get_string(obj, "environment_map", nullptr);
 	if (envmap)
@@ -1813,6 +1911,18 @@ void load_bitmaps_json(const json_t* obj)
 		json_array_foreach(bg_arr, index, val) {
 			background_t bg;
 
+			// Background flags
+			const json_t* bf = json_object_get(val, "flags");
+			if (bf && json_is_array(bf)) {
+				size_t fi;
+				json_t* fv;
+				json_array_foreach(bf, fi, fv) {
+					const char* flag_name = json_string_value(fv);
+					if (flag_name && !stricmp(flag_name, "corrected angles"))
+						bg.flags.set(Starfield::Background_Flags::Corrected_angles_in_mission_file);
+				}
+			}
+
 			const json_t* suns = json_object_get(val, "suns");
 			if (suns && json_is_array(suns)) {
 				size_t si;
@@ -1823,7 +1933,7 @@ void load_bitmaps_json(const json_t* obj)
 					strcpy_s(sle.filename, json_get_string(sv, "filename", ""));
 					sle.ang = json_to_angles(json_object_get(sv, "angles"));
 					sle.scale_x = json_get_float(sv, "scale_x", 1.0f);
-					sle.scale_y = json_get_float(sv, "scale_y", 1.0f);
+					sle.scale_y = sle.scale_x;  // suns only have scale_x
 					bg.suns.push_back(sle);
 				}
 			}
@@ -1912,8 +2022,26 @@ void load_music_json(const json_t* obj, mission* pm)
 
 	strcpy_s(pm->event_music_name, json_get_string(obj, "event_music", ""));
 	strcpy_s(pm->briefing_music_name, json_get_string(obj, "briefing_music", ""));
-	strcpy_s(pm->substitute_event_music_name, json_get_string(obj, "substitute_event_music", ""));
-	strcpy_s(pm->substitute_briefing_music_name, json_get_string(obj, "substitute_briefing_music", ""));
+	strcpy_s(pm->substitute_event_music_name, json_get_string(obj, "substitute_event_music", "None"));
+	strcpy_s(pm->substitute_briefing_music_name, json_get_string(obj, "substitute_briefing_music", "None"));
+
+	// Debriefing music
+	const char* debrief_success = json_get_string(obj, "debriefing_success_music", nullptr);
+	if (debrief_success)
+		Mission_music[SCORE_DEBRIEFING_SUCCESS] = event_music_get_spooled_music_index(debrief_success);
+
+	const char* debrief_avg = json_get_string(obj, "debriefing_average_music", nullptr);
+	if (debrief_avg)
+		Mission_music[SCORE_DEBRIEFING_AVERAGE] = event_music_get_spooled_music_index(debrief_avg);
+
+	const char* debrief_fail = json_get_string(obj, "debriefing_fail_music", nullptr);
+	if (debrief_fail)
+		Mission_music[SCORE_DEBRIEFING_FAILURE] = event_music_get_spooled_music_index(debrief_fail);
+
+	// Fiction viewer music
+	const char* fiction_music = json_get_string(obj, "fiction_viewer_music", nullptr);
+	if (fiction_music)
+		Mission_music[SCORE_FICTION_VIEWER] = event_music_get_spooled_music_index(fiction_music);
 }
 
 void load_custom_data_json(const json_t* obj, mission* pm)
