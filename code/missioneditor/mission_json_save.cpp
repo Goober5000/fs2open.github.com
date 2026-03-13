@@ -123,7 +123,7 @@ static const FredSaveConfig* json_save_config = nullptr;
 // returns {"text": "...", "id": N}. Otherwise returns a plain json_string.
 json_t* json_xstr(const char* text)
 {
-	if (!text || !text[0])
+	if (!text)
 		return json_string("");
 
 	int str_id = fhash_string_exists(text);
