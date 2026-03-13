@@ -648,7 +648,6 @@ static int Arrival_message_delay_timestamp_m[2];
 // local prototypes
 void parse_player_info2(mission *pm);
 bool post_process_mission(mission *pm);
-int allocate_subsys_status();
 void parse_common_object_data(p_object	*objp);
 void parse_asteroid_fields(mission *pm);
 int mission_set_arrival_location(int anchor, ArrivalLocation location, int distance, int objnum, int path_mask, vec3d *new_pos, matrix *new_orient);

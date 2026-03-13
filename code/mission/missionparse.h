@@ -565,6 +565,7 @@ extern int Num_teams;
 
 extern subsys_status *Subsys_status;
 extern int Subsys_index;
+int allocate_subsys_status();
 
 extern vec3d Parse_viewer_pos;
 extern matrix Parse_viewer_orient;

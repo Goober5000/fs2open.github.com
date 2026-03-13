@@ -1423,11 +1423,47 @@ void load_objects_json(const json_t* arr, mission* pm)
 			}
 		}
 
-		// Subsystem status from JSON
+		// Ship-level weapon banks (Pilot subsystem) and subsystem status
+		po.subsys_index = Subsys_index;
+		po.subsys_count = 0;
+
+		// Always create a Pilot subsys_status entry for ship-level weapon banks
+		{
+			int pilot_idx = allocate_subsys_status();
+			subsys_status* pilot_ssp = &Subsys_status[pilot_idx];
+			strcpy_s(pilot_ssp->name, "Pilot");
+			po.subsys_count++;
+
+			const json_t* prim = json_object_get(val, "primary_banks");
+			if (prim && json_is_array(prim)) {
+				size_t bc = std::min(json_array_size(prim), static_cast<size_t>(MAX_SHIP_PRIMARY_BANKS));
+				for (size_t b = 0; b < bc; b++) {
+					const char* wn = json_string_value(json_array_get(prim, b));
+					pilot_ssp->primary_banks[b] = (wn && strlen(wn) > 0) ? weapon_info_lookup(wn) : -1;
+				}
+			}
+
+			const json_t* sec = json_object_get(val, "secondary_banks");
+			if (sec && json_is_array(sec)) {
+				size_t bc = std::min(json_array_size(sec), static_cast<size_t>(MAX_SHIP_SECONDARY_BANKS));
+				for (size_t b = 0; b < bc; b++) {
+					const char* wn = json_string_value(json_array_get(sec, b));
+					pilot_ssp->secondary_banks[b] = (wn && strlen(wn) > 0) ? weapon_info_lookup(wn) : -1;
+				}
+			}
+
+			const json_t* ammo = json_object_get(val, "secondary_ammo");
+			if (ammo && json_is_array(ammo)) {
+				size_t bc = std::min(json_array_size(ammo), static_cast<size_t>(MAX_SHIP_SECONDARY_BANKS));
+				for (size_t b = 0; b < bc; b++) {
+					pilot_ssp->secondary_ammo[b] = static_cast<int>(json_integer_value(json_array_get(ammo, b)));
+				}
+			}
+		}
+
+		// Additional subsystems (turrets, damaged subsystems, etc.)
 		const json_t* subsys_arr = json_object_get(val, "subsystems");
 		if (subsys_arr && json_is_array(subsys_arr)) {
-			po.subsys_index = Subsys_index;
-			po.subsys_count = 0;
 			size_t si;
 			json_t* sv;
 			json_array_foreach(subsys_arr, si, sv) {
