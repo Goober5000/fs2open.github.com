@@ -110,6 +110,7 @@ public:
 	* @returns FALSE otherwise
 	*/
 	virtual BOOL OnSaveDocument(LPCTSTR lpszPathName);
+	virtual BOOL DoSave(LPCTSTR lpszPathName, BOOL bReplace = TRUE);
 	//}}AFX_VIRTUAL
 
 	/**

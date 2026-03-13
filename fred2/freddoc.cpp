@@ -689,6 +689,65 @@ BOOL CFREDDoc::OnOpenDocument(LPCTSTR pathname)
 	return TRUE;
 }
 
+BOOL CFREDDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
+{
+	const char* json_ext = ".json";
+	const char* fs2_ext = ".fs2";
+	bool want_json = (Mission_save_format == FSO_FORMAT_JSON);
+
+	// If we have an existing path, swap the extension to match the current format
+	CString newPath;
+	if (lpszPathName != nullptr) {
+		newPath = lpszPathName;
+		int dot = newPath.ReverseFind('.');
+		if (dot >= 0) {
+			CString base = newPath.Left(dot);
+			newPath = base + (want_json ? json_ext : fs2_ext);
+		}
+		lpszPathName = newPath;
+	}
+
+	// For Save As (NULL path), or when the extension-swapped path doesn't exist yet,
+	// show a file dialog with the correct filter and default extension
+	if (lpszPathName == nullptr || GetFileAttributes(lpszPathName) == INVALID_FILE_ATTRIBUTES) {
+		CString defaultName;
+		if (lpszPathName != nullptr) {
+			// use the extension-swapped name as the default
+			defaultName = lpszPathName;
+		} else if (m_strPathName.GetLength() > 0) {
+			// use the current document path with swapped extension
+			defaultName = m_strPathName;
+			int dot = defaultName.ReverseFind('.');
+			if (dot >= 0)
+				defaultName = defaultName.Left(dot);
+			defaultName += (want_json ? json_ext : fs2_ext);
+		}
+
+		const char* ext = want_json ? "json" : "fs2";
+		const char* filter = want_json
+			? "JSON Missions (*.json)|*.json|FreeSpace2 Missions (*.fs2)|*.fs2||"
+			: "FreeSpace2 Missions (*.fs2)|*.fs2|JSON Missions (*.json)|*.json||";
+
+		CFileDialog dlg(FALSE, ext, defaultName.IsEmpty() ? nullptr : (LPCTSTR)defaultName,
+			OFN_HIDEREADONLY | OFN_OVERWRITEPROMPT | OFN_NOCHANGEDIR, filter);
+
+		if (dlg.DoModal() != IDOK)
+			return FALSE;
+
+		newPath = dlg.GetPathName();
+		lpszPathName = newPath;
+	}
+
+	// Delegate to OnSaveDocument with the resolved path
+	if (!OnSaveDocument(lpszPathName))
+		return FALSE;
+
+	if (bReplace)
+		SetPathName(lpszPathName);
+
+	return TRUE;
+}
+
 // For tokenizing
 #define MAX_FILENAME_LEN_1	31
 #if (MAX_FILENAME_LEN_1) != (MAX_FILENAME_LEN - 1)
