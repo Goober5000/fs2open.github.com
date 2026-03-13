@@ -3,6 +3,7 @@
 #pragma once
 
 #include "globalincs/pstypes.h"
+#include "globalincs/version.h"
 #include "math/vecmat.h"
 
 struct mission;
