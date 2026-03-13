@@ -471,6 +471,13 @@ namespace parse
 		~ParseException() noexcept override = default;
 	};
 
+	class BadFormatException : public std::runtime_error
+	{
+	public:
+		explicit BadFormatException(const std::string& msg) : std::runtime_error(msg) {}
+		~BadFormatException() noexcept override = default;
+	};
+
 	class FileOpenException : public ParseException
 	{
 	public:

@@ -1859,7 +1859,7 @@ json_t* save_messages_json()
 
 		json_array_append_new(arr, obj);
 	}
-	json_object_set_new(result, "messages", arr);
+	json_object_set_new(result, "message_list", arr);
 
 	return result;
 }

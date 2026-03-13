@@ -1836,7 +1836,7 @@ void load_messages_json(const json_t* obj)
 	}
 
 	// Message list
-	const json_t* arr = json_object_get(obj, "messages");
+	const json_t* arr = json_object_get(obj, "message_list");
 	if (!arr || !json_is_array(arr))
 		return;
 
@@ -1876,6 +1876,7 @@ void load_messages_json(const json_t* obj)
 		msg.note = json_get_string(val, "note", "");
 
 		Messages.push_back(msg);
+		Num_messages++;
 	}
 }
 

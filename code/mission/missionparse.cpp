@@ -729,7 +729,16 @@ void parse_mission_info(mission *pm, bool basic = false)
 	char game_string[NAME_LENGTH];
 
 	// Goober5000
+	ignore_white_space();
+	if (*Mp == '{') {
+		throw parse::BadFormatException("File is JSON!");
+	}
+
+	// Goober5000
 	skip_to_start_of_string("#Mission Info");
+	if (*Mp == 0 || *Mp == EOF) {
+		throw parse::BadFormatException("Unexpected end-of-file!");
+	}
 
 	required_string("#Mission Info");
 	
@@ -7208,18 +7217,13 @@ bool parse_main(const char *mission_name, int flags)
 	
 	do {
 		// Check if this is a JSON mission file (by extension)
-		bool is_json_mission = false;
 		{
 			size_t len = strlen(mission_name);
 			if (len > 5 && !stricmp(mission_name + len - 5, ".json")) {
-				is_json_mission = true;
+				// JSON mission loading path
+				rval = mission_json::load(mission_name, &The_mission, flags);
+				break;
 			}
-		}
-
-		if (is_json_mission) {
-			// JSON mission loading path
-			rval = mission_json::load(mission_name, &The_mission, flags);
-			break;
 		}
 
 		// don't do this for imports
@@ -7257,6 +7261,14 @@ bool parse_main(const char *mission_name, int flags)
 			}
 
 			display_parse_diagnostics();
+		}
+		catch (const parse::BadFormatException& e)
+		{
+			mprintf(("MISSIONS: Mission '%s' is not the standard FS2 format.  Message = %s.\n", mission_name, e.what()));
+
+			// try loading JSON
+			rval = mission_json::load(mission_name, &The_mission, flags);
+			break;
 		}
 		catch (const parse::ParseException& e)
 		{
