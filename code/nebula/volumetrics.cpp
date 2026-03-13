@@ -363,6 +363,18 @@ const std::optional<SCP_string>& volumetric_nebula::getNoiseColorFunc2() const {
 	return noiseColorFunc2;
 }
 
+void volumetric_nebula::setHullPof(const SCP_string& pof) {
+	hullPof = pof;
+}
+
+void volumetric_nebula::setNoiseColorFunc1(const SCP_string& func) {
+	noiseColorFunc1 = func;
+}
+
+void volumetric_nebula::setNoiseColorFunc2(const SCP_string& func) {
+	noiseColorFunc2 = func;
+}
+
 bool volumetric_nebula::isVolumeBitmapValid() const {
 	return volumeBitmapHandle >= 0 && (!getNoiseActive() || noiseVolumeBitmapHandle >= 0);
 }

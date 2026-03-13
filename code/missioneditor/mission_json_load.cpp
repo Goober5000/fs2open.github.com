@@ -22,6 +22,7 @@
 #include "globalincs/version.h"
 #include "hud/hudsquadmsg.h"
 #include "iff_defs/iff_defs.h"
+#include "globalincs/alphacolors.h"
 #include "jumpnode/jumpnode.h"
 #include "libs/jansson.h"
 #include "lighting/lighting_profiles.h"
@@ -32,7 +33,9 @@
 #include "mission/mission_flags.h"
 #include "missionui/fictionviewer.h"
 #include "missionui/missioncmdbrief.h"
+#include "model/animation/modelanimation.h"
 #include "nebula/neb.h"
+#include "nebula/volumetrics.h"
 #include "object/waypoint.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
@@ -443,6 +446,25 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 			pm->support_ships.ship_class = ship_info_lookup(sc_name);
 	}
 
+	// All teams attack
+	if (json_get_bool(obj, "all_teams_attack", false))
+		Mission_all_attack = 1;
+
+	// Player entry delay
+	{
+		float entry_delay = json_get_float(obj, "player_entry_delay", 0.0f);
+		if (entry_delay > 0.0f)
+			Entry_delay_time = fl2f(entry_delay);
+	}
+
+	// Viewer position and orientation (editor state)
+	const json_t* vp = json_object_get(obj, "viewer_pos");
+	if (vp)
+		Parse_viewer_pos = json_to_vec3d(vp);
+	const json_t* vo = json_object_get(obj, "viewer_orient");
+	if (vo)
+		Parse_viewer_orient = json_to_matrix(vo);
+
 	// Nebula
 	pm->neb_near_multi = json_get_float(obj, "fog_near_mult", 1.0f);
 	pm->neb_far_multi = json_get_float(obj, "fog_far_mult", 1.0f);
@@ -455,7 +477,72 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 	}
 
 	pm->contrail_threshold = json_get_int(obj, "contrail_threshold", CONTRAIL_THRESHOLD_DEFAULT);
-	pm->ambient_light_level = json_get_int(obj, "ambient_light_level", 0);
+
+	// Volumetric nebula
+	const json_t* vol = json_object_get(obj, "volumetric_nebula");
+	if (vol) {
+		pm->volumetrics.emplace();
+		auto& v = *pm->volumetrics;
+		v.setHullPof(json_get_string(vol, "hull_pof", ""));
+
+		auto color_to_unit = [](int value) { return static_cast<float>(std::clamp(value, 0, 255)) / 255.0f; };
+
+		float mainR = color_to_unit(json_get_int(vol, "color_r", 0));
+		float mainG = color_to_unit(json_get_int(vol, "color_g", 0));
+		float mainB = color_to_unit(json_get_int(vol, "color_b", 0));
+
+		std::optional<float> noiseScaleBase, noiseScaleSub;
+		std::optional<float> noiseR, noiseG, noiseB;
+		std::optional<float> noiseIntensity;
+		std::optional<int> noiseRes;
+		std::optional<bool> noiseIsActive;
+
+		const json_t* noise = json_object_get(vol, "noise");
+		if (noise) {
+			noiseIsActive = true;
+			noiseScaleBase = json_get_float(noise, "scale_x", 1.0f);
+			noiseScaleSub = json_get_float(noise, "scale_y", 1.0f);
+			noiseR = color_to_unit(json_get_int(noise, "color_r", 0));
+			noiseG = color_to_unit(json_get_int(noise, "color_g", 0));
+			noiseB = color_to_unit(json_get_int(noise, "color_b", 0));
+			noiseIntensity = json_get_float(noise, "intensity", 1.0f);
+			noiseRes = json_get_int(noise, "resolution", 4);
+
+			const char* func1 = json_get_string(noise, "function_base", nullptr);
+			if (func1)
+				v.setNoiseColorFunc1(func1);
+			const char* func2 = json_get_string(noise, "function_sub", nullptr);
+			if (func2)
+				v.setNoiseColorFunc2(func2);
+		}
+
+		const json_t* pos_obj = json_object_get(vol, "position");
+		std::optional<vec3d> position;
+		if (pos_obj)
+			position = json_to_vec3d(pos_obj);
+
+		v.set_runtime_params(
+			position,
+			json_get_int(vol, "steps", 0),			// 0 means use default
+			json_get_int(vol, "global_light_steps", 0),
+			json_get_float(vol, "opacity_distance", 0.0f),
+			json_get_float(vol, "alpha_lim", 0.0f),
+			json_get_float(vol, "emissive_spread", 0.0f),
+			json_get_float(vol, "emissive_intensity", 0.0f),
+			json_get_float(vol, "emissive_falloff", 0.0f),
+			json_get_float(vol, "henyey_greenstein_coeff", 0.0f),
+			json_get_float(vol, "global_light_distance_factor", 0.0f),
+			noiseIsActive,
+			noiseScaleBase,
+			noiseScaleSub,
+			noiseIntensity,
+			mainR, mainG, mainB,
+			noiseR, noiseG, noiseB,
+			json_get_int(vol, "resolution", 0),
+			json_get_int(vol, "oversampling", 0),
+			json_get_float(vol, "smoothing", 0.0f),
+			noiseRes);
+	}
 
 	// Squadron info
 	strcpy_s(pm->squad_name, json_get_string(obj, "squad_name", ""));
@@ -467,13 +554,37 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 
 	// Skybox
 	strcpy_s(pm->skybox_model, json_get_string(obj, "skybox_model", ""));
+
+	// Skybox model animations
+	const json_t* sky_anims = json_object_get(obj, "skybox_model_animations");
+	if (sky_anims && json_is_array(sky_anims)) {
+		SCP_vector<SCP_string> animNames;
+		size_t idx2;
+		json_t* val2;
+		json_array_foreach(sky_anims, idx2, val2) {
+			if (json_is_string(val2))
+				animNames.emplace_back(json_string_value(val2));
+		}
+		animation::ModelAnimationParseHelper::loadAnimsetInfo(pm->skybox_model_animations, 'b', pm->name, animNames);
+	}
+
+	// Skybox model moveables
+	const json_t* sky_moveables = json_object_get(obj, "skybox_model_moveables");
+	if (sky_moveables && json_is_array(sky_moveables)) {
+		SCP_vector<SCP_string> moveableNames;
+		size_t idx2;
+		json_t* val2;
+		json_array_foreach(sky_moveables, idx2, val2) {
+			if (json_is_string(val2))
+				moveableNames.emplace_back(json_string_value(val2));
+		}
+		animation::ModelAnimationParseHelper::loadMoveablesetInfo(pm->skybox_model_animations, moveableNames);
+	}
+
 	const json_t* sky_orient = json_object_get(obj, "skybox_orientation");
 	if (sky_orient)
 		pm->skybox_orientation = json_to_matrix(sky_orient);
 	pm->skybox_flags = json_get_int(obj, "skybox_flags", DEFAULT_NMODEL_FLAGS);
-
-	// Environment map
-	strcpy_s(pm->envmap_name, json_get_string(obj, "envmap_name", ""));
 
 	// AI profile
 	const char* ai_prof = json_get_string(obj, "ai_profile", nullptr);
@@ -502,19 +613,6 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 		pm->sound_environment.damping = json_get_float(snd, "damping", 1.0f);
 		pm->sound_environment.decay = json_get_float(snd, "decay", 1.0f);
 	}
-
-	// Gravity
-	const json_t* grav = json_object_get(obj, "gravity");
-	if (grav)
-		pm->gravity = json_to_vec3d(grav);
-
-	pm->HUD_timer_padding = json_get_int(obj, "hud_timer_padding", 0);
-
-	// Command persona/sender
-	const char* cmd_persona = json_get_string(obj, "command_persona", nullptr);
-	if (cmd_persona)
-		pm->command_persona = find_persona_index(cmd_persona);
-	strcpy_s(pm->command_sender, json_get_string(obj, "command_sender", ""));
 
 	// Wing names
 	const json_t* sw = json_object_get(obj, "starting_wing_names");
@@ -825,11 +923,6 @@ void load_players_json(const json_t* arr)
 				strcpy_s(Player_start_shipname, ssn);
 		}
 
-		const char* ds = json_get_string(team, "default_ship", nullptr);
-		if (ds)
-			td.default_ship = ship_info_lookup(ds);
-
-		td.loadout_total = json_get_int(team, "loadout_total", 0);
 		td.do_not_validate = json_get_bool(team, "do_not_validate", false);
 
 		// Ship choices
@@ -990,12 +1083,6 @@ void load_objects_json(const json_t* arr, mission* pm)
 
 		po.kamikaze_damage = json_get_int(val, "kamikaze_damage", 0);
 		po.group = json_get_int(val, "group", -1);
-		po.collision_group_id = json_get_int(val, "collision_group_id", 0);
-		po.ship_max_hull_strength = json_get_float(val, "ship_max_hull_strength", 0.0f);
-		po.ship_max_shield_strength = json_get_float(val, "ship_max_shield_strength", 0.0f);
-		po.destroy_before_mission_time = json_get_int(val, "destroy_before_mission_time", -1);
-		po.net_signature = static_cast<ushort>(json_get_int(val, "net_signature", 0));
-		po.respawn_count = json_get_int(val, "respawn_count", 0);
 		po.respawn_priority = json_get_int(val, "respawn_priority", 0);
 
 		// Special explosion

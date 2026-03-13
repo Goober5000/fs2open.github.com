@@ -134,6 +134,10 @@ class volumetric_nebula {
 	const std::optional<SCP_string>& getNoiseColorFunc1() const;
 	const std::optional<SCP_string>& getNoiseColorFunc2() const;
 
+	void setHullPof(const SCP_string& pof);
+	void setNoiseColorFunc1(const SCP_string& func);
+	void setNoiseColorFunc2(const SCP_string& func);
+
 	bool isVolumeBitmapValid() const;
 	void renderVolumeBitmap();
 	int getVolumeBitmapHandle() const;

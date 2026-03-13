@@ -1595,6 +1595,36 @@ namespace animation {
 	}
 
 
+	void ModelAnimationParseHelper::loadAnimsetInfo(ModelAnimationSet& set, char uniqueTypePrefix, const SCP_string& uniqueParentName, const SCP_vector<SCP_string>& animNames) {
+		set.m_animationSet.clear();
+
+		for (const SCP_string& request : animNames) {
+			auto animIt = s_animationsById.find(request);
+			if (animIt != s_animationsById.end()) {
+				const ParsedModelAnimation& foundAnim = animIt->second;
+				set.emplace(foundAnim.anim, request, foundAnim.name, foundAnim.type, foundAnim.subtype, ModelAnimationParseHelper::getUniqueAnimationID(animIt->first, uniqueTypePrefix, uniqueParentName));
+			}
+			else {
+				error_display(0, "Animation with name %s not found!", request.c_str());
+			}
+		}
+	}
+
+	void ModelAnimationParseHelper::loadMoveablesetInfo(ModelAnimationSet& set, const SCP_vector<SCP_string>& moveableNames) {
+		set.m_moveableSet.clear();
+
+		for (SCP_string request : moveableNames) {
+			SCP_tolower(request);
+			auto animIt = s_moveablesById.find(request);
+			if (animIt != s_moveablesById.end()) {
+				set.m_moveableSet.emplace(animIt->first, animIt->second);
+			}
+			else {
+				error_display(0, "Moveable with name %s not found!", request.c_str());
+			}
+		}
+	}
+
 	void ModelAnimationParseHelper::parseLegacyAnimationTable(model_subsystem* sp, ship_info* sip) {
 		//the only thing initial animation type needs is the angle, 
 		//so to save space lets just make everything optional in this case

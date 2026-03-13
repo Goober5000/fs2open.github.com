@@ -421,6 +421,8 @@ namespace animation {
 		static void parseAnimsetInfoDrivers(ModelAnimationSet& set, char uniquePrefix, const SCP_string& parentName, std::function<std::function<float(polymodel_instance *)>()> driverSourceParser);
 
 		static void parseMoveablesetInfo(ModelAnimationSet& set);
+		static void loadAnimsetInfo(ModelAnimationSet& set, char uniqueTypePrefix, const SCP_string& uniqueParentName, const SCP_vector<SCP_string>& animNames);
+		static void loadMoveablesetInfo(ModelAnimationSet& set, const SCP_vector<SCP_string>& moveableNames);
 		//Parses the legacy animation table in ships.tbl of a single subsystem. Currently initial animations only
 		static void parseLegacyAnimationTable(model_subsystem* sp, ship_info* sip);
 	};
