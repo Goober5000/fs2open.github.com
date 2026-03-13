@@ -30,6 +30,7 @@
 #include "libs/jansson.h"
 #include "math/bitarray.h"
 #include "lighting/lighting_profiles.h"
+#include "localization/fhash.h"
 #include "mission/missionbriefcommon.h"
 #include "mission/missiongoals.h"
 #include "mission/missionmessage.h"
@@ -140,6 +141,35 @@ const char* mission_json::json_get_string(const json_t* obj, const char* key, co
 	if (!val || !json_is_string(val))
 		return default_val;
 	return json_string_value(val);
+}
+
+// Read a JSON value that is either a plain string or an XSTR object {"text", "id"}.
+// If an XSTR object with a valid id, registers text->id in the FRED hash table.
+// Returns the text string, or default_val if the key is missing.
+static const char* json_get_xstr(const json_t* obj, const char* key, const char* default_val)
+{
+	const json_t* val = json_object_get(obj, key);
+	if (!val)
+		return default_val;
+
+	if (json_is_string(val))
+		return json_string_value(val);
+
+	if (json_is_object(val)) {
+		const json_t* text_val = json_object_get(val, "text");
+		if (!text_val || !json_is_string(text_val))
+			return default_val;
+
+		const char* text = json_string_value(text_val);
+		int id = mission_json::json_get_int(val, "id", -1);
+
+		if (fhash_active() && id > -2)
+			fhash_add_str(text, id);
+
+		return text;
+	}
+
+	return default_val;
 }
 
 bool mission_json::json_get_bool(const json_t* obj, const char* key, bool default_val)
@@ -414,7 +444,7 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 {
 	if (!obj) return;
 
-	strcpy_s(pm->name, json_get_string(obj, "name", "Unnamed"));
+	strcpy_s(pm->name, json_get_xstr(obj, "name", "Unnamed"));
 	pm->author = json_get_string(obj, "author", "");
 
 	pm->required_fso_version = gameversion::version(
@@ -427,7 +457,7 @@ void load_mission_info_json(const json_t* obj, mission* pm)
 	strcpy_s(pm->created, json_get_string(obj, "created", ""));
 	strcpy_s(pm->modified, json_get_string(obj, "modified", ""));
 	strcpy_s(pm->notes, json_get_string(obj, "notes", ""));
-	strcpy_s(pm->mission_desc, json_get_string(obj, "mission_desc", ""));
+	strcpy_s(pm->mission_desc, json_get_xstr(obj, "mission_desc", ""));
 
 	pm->game_type = json_get_int(obj, "game_type", 0);
 	load_mission_flags_json(json_object_get(obj, "flags"), pm->flags);
@@ -806,7 +836,7 @@ void load_cmd_briefs_json(const json_t* arr)
 			size_t sc = std::min(json_array_size(stages), static_cast<size_t>(CMD_BRIEF_STAGES_MAX));
 			for (size_t i = 0; i < sc; i++) {
 				const json_t* s = json_array_get(stages, i);
-				cb.stage[i].text = json_get_string(s, "text", "");
+				cb.stage[i].text = json_get_xstr(s, "text", "");
 				strcpy_s(cb.stage[i].ani_filename, json_get_string(s, "ani_filename", ""));
 				strcpy_s(cb.stage[i].wave_filename, json_get_string(s, "wave_filename", ""));
 			}
@@ -838,7 +868,7 @@ void load_briefing_json(const json_t* arr)
 			for (size_t i = 0; i < sc; i++) {
 				const json_t* s = json_array_get(stages, i);
 				brief_stage& bs = b.stages[i];
-				bs.text = json_get_string(s, "text", "");
+				bs.text = json_get_xstr(s, "text", "");
 				strcpy_s(bs.voice, json_get_string(s, "voice", ""));
 				bs.camera_pos = json_to_vec3d(json_object_get(s, "camera_pos"));
 				bs.camera_orient = json_to_matrix(json_object_get(s, "camera_orient"));
@@ -899,8 +929,8 @@ void load_briefing_json(const json_t* arr)
 						else
 							bs.icons[j].ship_class = -1;
 
-						strcpy_s(bs.icons[j].label, json_get_string(ic, "label", ""));
-						strcpy_s(bs.icons[j].closeup_label, json_get_string(ic, "closeup_label", ""));
+						strcpy_s(bs.icons[j].label, json_get_xstr(ic, "label", ""));
+						strcpy_s(bs.icons[j].closeup_label, json_get_xstr(ic, "closeup_label", ""));
 					}
 				}
 
@@ -940,9 +970,9 @@ void load_debriefing_json(const json_t* arr)
 				const json_t* s = json_array_get(stages, i);
 				debrief_stage& ds = d.stages[i];
 				ds.formula = json_to_sexp(json_object_get(s, "formula"));
-				ds.text = json_get_string(s, "text", "");
+				ds.text = json_get_xstr(s, "text", "");
 				strcpy_s(ds.voice, json_get_string(s, "voice", ""));
-				ds.recommendation_text = json_get_string(s, "recommendation_text", "");
+				ds.recommendation_text = json_get_xstr(s, "recommendation_text", "");
 			}
 		}
 	}
@@ -1204,7 +1234,7 @@ void load_objects_json(const json_t* arr, mission* pm)
 		}
 
 		// Explicit display name overrides the hash-based default
-		const char* display = json_get_string(val, "display_name", nullptr);
+		const char* display = json_get_xstr(val, "display_name", nullptr);
 		if (display) {
 			po.display_name = display;
 			po.flags.set(Mission::Parse_Object_Flags::SF_Has_display_name);
@@ -1258,7 +1288,7 @@ void load_objects_json(const json_t* arr, mission* pm)
 		po.ai_goals = ai_goals_json_to_sexp(json_object_get(val, "ai_goals"));
 
 		// Cargo
-		const char* cargo = json_get_string(val, "cargo", nullptr);
+		const char* cargo = json_get_xstr(val, "cargo", nullptr);
 		if (cargo) {
 			int ci;
 			for (ci = 0; ci < Num_cargo; ci++) {
@@ -1273,7 +1303,7 @@ void load_objects_json(const json_t* arr, mission* pm)
 			po.cargo1 = static_cast<char>(ci);
 		}
 
-		const char* cargo_title = json_get_string(val, "cargo_title", nullptr);
+		const char* cargo_title = json_get_xstr(val, "cargo_title", nullptr);
 		if (cargo_title)
 			strcpy_s(po.cargo_title, cargo_title);
 
@@ -1478,7 +1508,7 @@ void load_objects_json(const json_t* arr, mission* pm)
 				ssp->percent = json_get_float(sv, "damage", 0.0f);
 
 				// Subsystem cargo
-				const char* subsys_cargo = json_get_string(sv, "cargo_name", nullptr);
+				const char* subsys_cargo = json_get_xstr(sv, "cargo_name", nullptr);
 				if (subsys_cargo) {
 					int ci;
 					for (ci = 0; ci < Num_cargo; ci++) {
@@ -1493,7 +1523,7 @@ void load_objects_json(const json_t* arr, mission* pm)
 					ssp->subsys_cargo_name = ci;
 				}
 
-				const char* subsys_cargo_title = json_get_string(sv, "cargo_title", nullptr);
+				const char* subsys_cargo_title = json_get_xstr(sv, "cargo_title", nullptr);
 				if (subsys_cargo_title)
 					strcpy_s(ssp->subsys_cargo_title, subsys_cargo_title);
 
@@ -1706,8 +1736,8 @@ void load_events_json(const json_t* arr)
 		evt.interval = json_get_int(val, "interval", 1);
 		evt.score = json_get_int(val, "score", 0);
 		evt.chain_delay = json_get_int(val, "chain_delay", -1);
-		evt.objective_text = json_get_string(val, "objective_text", "");
-		evt.objective_key_text = json_get_string(val, "objective_key_text", "");
+		evt.objective_text = json_get_xstr(val, "objective_text", "");
+		evt.objective_key_text = json_get_xstr(val, "objective_key_text", "");
 		evt.team = json_get_int(val, "team", -1);
 		evt.flags = json_get_int(val, "event_flags", 0);
 		evt.mission_log_flags = json_get_int(val, "mission_log_flags", 0);
@@ -1771,7 +1801,7 @@ void load_goals_json(const json_t* arr)
 			goal.type = PRIMARY_GOAL;
 
 		goal.formula = json_to_sexp(json_object_get(val, "formula"));
-		goal.message = json_get_string(val, "message", "");
+		goal.message = json_get_xstr(val, "message", "");
 		goal.score = json_get_int(val, "score", 0);
 		goal.flags = json_get_int(val, "flags", 0);
 		goal.team = json_get_int(val, "team", 0);
@@ -1797,7 +1827,7 @@ void load_waypoints_json(const json_t* obj)
 			jn.SetName(name);
 
 			// Display name
-			const char* display_name = json_get_string(val, "display_name", nullptr);
+			const char* display_name = json_get_xstr(val, "display_name", nullptr);
 			if (display_name)
 				jn.SetDisplayName(display_name);
 
@@ -1889,7 +1919,7 @@ void load_messages_json(const json_t* obj)
 		// Team field (saved for all messages)
 		msg.multi_team = json_get_int(val, "team", -1);
 
-		strcpy_s(msg.message, json_get_string(val, "message", ""));
+		strcpy_s(msg.message, json_get_xstr(val, "message", ""));
 
 		const char* persona = json_get_string(val, "persona", nullptr);
 		if (persona)

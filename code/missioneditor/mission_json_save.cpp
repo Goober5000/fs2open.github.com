@@ -33,6 +33,7 @@
 #include "libs/jansson.h"
 #include "math/bitarray.h"
 #include "lighting/lighting_profiles.h"
+#include "localization/fhash.h"
 #include "mission/missionbriefcommon.h"
 #include "model/model.h"
 #include "mission/missiongoals.h"
@@ -116,6 +117,32 @@ namespace {
 
 // File-scope pointer to the save configuration, set at the start of mission_json::save().
 static const FredSaveConfig* json_save_config = nullptr;
+
+// Returns a json_t* representing a localizable string.
+// If the string has a valid XSTR id (>= 0) in the FRED hash table,
+// returns {"text": "...", "id": N}. Otherwise returns a plain json_string.
+json_t* json_xstr(const char* text)
+{
+	if (!text || !text[0])
+		return json_string("");
+
+	int str_id = fhash_string_exists(text);
+
+	if (str_id <= -2) {
+		// Not in hash table — register with -1
+		fhash_add_str(text, -1);
+		return json_string(text);
+	}
+
+	if (str_id < 0)
+		return json_string(text);
+
+	// Has a real translation ID
+	json_t* obj = json_object();
+	json_object_set_new(obj, "text", json_string(text));
+	json_object_set_new(obj, "id", json_integer(str_id));
+	return obj;
+}
 
 const char* arrival_location_name(ArrivalLocation loc)
 {
@@ -272,12 +299,12 @@ json_t* save_mission_info_json()
 	json_object_set_new(obj, "version_revision", json_integer(The_mission.required_fso_version.revision));
 
 	// Basic metadata
-	json_object_set_new(obj, "name", json_string(The_mission.name));
+	json_object_set_new(obj, "name", json_xstr(The_mission.name));
 	json_object_set_new(obj, "author", json_string(The_mission.author.c_str()));
 	json_object_set_new(obj, "created", json_string(The_mission.created));
 	json_object_set_new(obj, "modified", json_string(The_mission.modified));
 	json_object_set_new(obj, "notes", json_string(The_mission.notes));
-	json_object_set_new(obj, "mission_desc", json_string(The_mission.mission_desc));
+	json_object_set_new(obj, "mission_desc", json_xstr(The_mission.mission_desc));
 
 	// Game type and flags
 	json_object_set_new(obj, "game_type", json_integer(The_mission.game_type));
@@ -607,7 +634,7 @@ json_t* save_cmd_brief_json(const cmd_brief& cb)
 	json_t* stages = json_array();
 	for (int i = 0; i < cb.num_stages; i++) {
 		json_t* s = json_object();
-		json_object_set_new(s, "text", json_string(cb.stage[i].text.c_str()));
+		json_object_set_new(s, "text", json_xstr(cb.stage[i].text.c_str()));
 		json_object_set_new(s, "ani_filename", json_string(cb.stage[i].ani_filename));
 		json_object_set_new(s, "wave_filename", json_string(cb.stage[i].wave_filename));
 		json_array_append_new(stages, s);
@@ -638,9 +665,9 @@ json_t* save_briefing_icon_json(const brief_icon& icon)
 		json_object_set_new(obj, "ship_class", json_string(Ship_info[icon.ship_class].name));
 
 	if (strlen(icon.label) > 0)
-		json_object_set_new(obj, "label", json_string(icon.label));
+		json_object_set_new(obj, "label", json_xstr(icon.label));
 	if (strlen(icon.closeup_label) > 0)
-		json_object_set_new(obj, "closeup_label", json_string(icon.closeup_label));
+		json_object_set_new(obj, "closeup_label", json_xstr(icon.closeup_label));
 
 	if (icon.scale_factor != 1.0f)
 		json_object_set_new(obj, "icon_scale", json_integer(static_cast<int>(icon.scale_factor * 100.0f)));
@@ -681,7 +708,7 @@ json_t* save_briefing_json()
 		for (int i = 0; i < b.num_stages; i++) {
 			const brief_stage& s = b.stages[i];
 			json_t* stage = json_object();
-			json_object_set_new(stage, "text", json_string(s.text.c_str()));
+			json_object_set_new(stage, "text", json_xstr(s.text.c_str()));
 			json_object_set_new(stage, "voice", json_string(s.voice));
 			json_object_set_new(stage, "camera_pos", mission_json::vec3d_to_json(s.camera_pos));
 			json_object_set_new(stage, "camera_orient", mission_json::matrix_to_json(s.camera_orient));
@@ -742,9 +769,9 @@ json_t* save_debriefing_json()
 			const debrief_stage& s = d.stages[i];
 			json_t* stage = json_object();
 			json_object_set_new(stage, "formula", mission_json::sexp_to_json(s.formula));
-			json_object_set_new(stage, "text", json_string(s.text.c_str()));
+			json_object_set_new(stage, "text", json_xstr(s.text.c_str()));
 			json_object_set_new(stage, "voice", json_string(s.voice));
-			json_object_set_new(stage, "recommendation_text", json_string(s.recommendation_text.c_str()));
+			json_object_set_new(stage, "recommendation_text", json_xstr(s.recommendation_text.c_str()));
 			json_array_append_new(stages, stage);
 		}
 		json_object_set_new(obj, "stages", stages);
@@ -1117,11 +1144,11 @@ json_t* save_common_object_data_json(object* objp, ship* shipp)
 			}
 
 			if (ptr->subsys_cargo_name > 0) {
-				json_object_set_new(sub, "cargo_name", json_string(Cargo_names[ptr->subsys_cargo_name]));
+				json_object_set_new(sub, "cargo_name", json_xstr(Cargo_names[ptr->subsys_cargo_name]));
 			}
 
 			if (ptr->subsys_cargo_title[0] != '\0') {
-				json_object_set_new(sub, "cargo_title", json_string(ptr->subsys_cargo_title));
+				json_object_set_new(sub, "cargo_title", json_xstr(ptr->subsys_cargo_title));
 			}
 
 			if (ptr->system_info->type == SUBSYSTEM_TURRET)
@@ -1193,7 +1220,7 @@ json_t* save_objects_json()
 			end_string_at_first_hash_symbol(truncated_name);
 
 			if ((json_save_config->always_save_display_names && shipp->wingnum < 0) || strcmp(shipp->get_display_name(), truncated_name) != 0)
-				json_object_set_new(obj, "display_name", json_string(shipp->get_display_name()));
+				json_object_set_new(obj, "display_name", json_xstr(shipp->get_display_name()));
 		}
 
 		// --- Class and alt classes ---
@@ -1247,10 +1274,10 @@ json_t* save_objects_json()
 		}
 
 		// --- Cargo and cargo title ---
-		json_object_set_new(obj, "cargo", json_string(Cargo_names[shipp->cargo1]));
+		json_object_set_new(obj, "cargo", json_xstr(Cargo_names[shipp->cargo1]));
 
 		if (shipp->cargo_title[0] != '\0')
-			json_object_set_new(obj, "cargo_title", json_string(shipp->cargo_title));
+			json_object_set_new(obj, "cargo_title", json_xstr(shipp->cargo_title));
 
 		// --- Common object data (initial state, weapon banks, subsystems) ---
 		{
@@ -1680,9 +1707,9 @@ json_t* save_events_json()
 		if (evt.chain_delay >= 0)
 			json_object_set_new(obj, "chain_delay", json_integer(evt.chain_delay));
 		if (!evt.objective_text.empty())
-			json_object_set_new(obj, "objective_text", json_string(evt.objective_text.c_str()));
+			json_object_set_new(obj, "objective_text", json_xstr(evt.objective_text.c_str()));
 		if (!evt.objective_key_text.empty())
-			json_object_set_new(obj, "objective_key_text", json_string(evt.objective_key_text.c_str()));
+			json_object_set_new(obj, "objective_key_text", json_xstr(evt.objective_key_text.c_str()));
 		if (evt.team >= 0)
 			json_object_set_new(obj, "team", json_integer(evt.team));
 		if (evt.flags != 0)
@@ -1754,7 +1781,7 @@ json_t* save_goals_json()
 		json_object_set_new(obj, "formula", mission_json::sexp_to_json(goal.formula));
 
 		if (!goal.message.empty())
-			json_object_set_new(obj, "message", json_string(goal.message.c_str()));
+			json_object_set_new(obj, "message", json_xstr(goal.message.c_str()));
 		if (goal.score != 0)
 			json_object_set_new(obj, "score", json_integer(goal.score));
 		if (goal.flags != 0)
@@ -1786,7 +1813,7 @@ json_t* save_waypoints_json()
 			end_string_at_first_hash_symbol(truncated_name);
 
 			if (json_save_config->always_save_display_names || strcmp(jn.GetDisplayName(), truncated_name) != 0)
-				json_object_set_new(node, "display_name", json_string(jn.GetDisplayName()));
+				json_object_set_new(node, "display_name", json_xstr(jn.GetDisplayName()));
 		}
 
 		// Model file
@@ -1854,7 +1881,7 @@ json_t* save_messages_json()
 		json_object_set_new(obj, "team", json_integer(
 			((msg.multi_team < 0) || (msg.multi_team >= 2)) ? -1 : msg.multi_team));
 
-		json_object_set_new(obj, "message", json_string(msg.message));
+		json_object_set_new(obj, "message", json_xstr(msg.message));
 
 		if (msg.persona_index >= 0 && msg.persona_index < static_cast<int>(Personas.size()))
 			json_object_set_new(obj, "persona", json_string(Personas[msg.persona_index].name));
