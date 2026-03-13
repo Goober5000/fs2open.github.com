@@ -1406,8 +1406,12 @@ void load_objects_json(const json_t* arr, mission* pm)
 		}
 
 		// Orders accepted (saved as string names via Player_orders[].parse_name)
+		// The key is only present when orders differ from the default, so its presence
+		// means SF_Use_unique_orders must be set (even for an empty array = no orders).
 		const json_t* orders = json_object_get(val, "orders_accepted");
 		if (orders && json_is_array(orders)) {
+			po.flags.set(Mission::Parse_Object_Flags::SF_Use_unique_orders);
+
 			size_t oi;
 			json_t* ov;
 			json_array_foreach(orders, oi, ov) {
@@ -2138,6 +2142,22 @@ void load_music_json(const json_t* obj, mission* pm)
 	strcpy_s(pm->briefing_music_name, json_get_string(obj, "briefing_music", ""));
 	strcpy_s(pm->substitute_event_music_name, json_get_string(obj, "substitute_event_music", "None"));
 	strcpy_s(pm->substitute_briefing_music_name, json_get_string(obj, "substitute_briefing_music", "None"));
+
+	// Set the soundtrack index, preferring the substitute in FS2 (not FRED)
+	int index = event_music_get_soundtrack_index(pm->substitute_event_music_name);
+	if ((index >= 0) && (Soundtracks[index].flags & EMF_VALID) && !Fred_running) {
+		event_music_set_soundtrack(pm->substitute_event_music_name);
+	} else {
+		event_music_set_soundtrack(pm->event_music_name);
+	}
+
+	// Set the briefing music index, preferring the substitute in FS2 (not FRED)
+	index = event_music_get_spooled_music_index(pm->substitute_briefing_music_name);
+	if ((index >= 0) && (Spooled_music[index].flags & SMF_VALID) && !Fred_running) {
+		event_music_set_score(SCORE_BRIEFING, pm->substitute_briefing_music_name);
+	} else {
+		event_music_set_score(SCORE_BRIEFING, pm->briefing_music_name);
+	}
 
 	// Debriefing music
 	const char* debrief_success = json_get_string(obj, "debriefing_success_music", nullptr);
