@@ -834,6 +834,9 @@ json_t* save_players_json()
 		json_object_set_new(team, "ship_choices", ships);
 
 		// Weapon pool
+		int used_pool[MAX_WEAPON_TYPES];
+		generate_weaponry_usage_list_team(t, used_pool);
+
 		json_t* weapons = json_array();
 		for (int i = 0; i < Team_data[t].num_weapon_choices; i++) {
 			json_t* entry = json_object();
@@ -845,10 +848,17 @@ json_t* save_players_json()
 					json_object_set_new(entry, "weapon_class", json_string(Weapon_info[wi].name));
 			}
 
-			if (strlen(Team_data[t].weaponry_amount_variable[i]) > 0)
+			if (strlen(Team_data[t].weaponry_amount_variable[i]) > 0) {
 				json_object_set_new(entry, "count_variable", json_string(Team_data[t].weaponry_amount_variable[i]));
-			else
-				json_object_set_new(entry, "count", json_integer(Team_data[t].weaponry_count[i]));
+			} else {
+				// add back the usage to convert from "extras" to "total" (matching missionsave.cpp)
+				if (strlen(Team_data[t].weaponry_pool_variable[i]) > 0)
+					json_object_set_new(entry, "count", json_integer(Team_data[t].weaponry_count[i]));
+				else {
+					json_object_set_new(entry, "count", json_integer(Team_data[t].weaponry_count[i] + used_pool[wi]));
+					used_pool[wi] = 0;
+				}
+			}
 
 			json_array_append_new(weapons, entry);
 		}
