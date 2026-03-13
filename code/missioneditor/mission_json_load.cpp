@@ -771,7 +771,6 @@ void load_fiction_json(const json_t* arr)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Fiction_viewer_stages.clear();
 	size_t index;
 	json_t* val;
 	json_array_foreach(arr, index, val) {
@@ -979,8 +978,6 @@ void load_players_json(const json_t* obj)
 	}
 
 	// General orders
-	ai_lua_reset_general_orders();
-
 	const json_t* orders_enabled = json_object_get(obj, "general_orders_enabled");
 	if (orders_enabled && json_is_array(orders_enabled)) {
 		size_t oi;
@@ -1191,8 +1188,6 @@ void load_objects_json(const json_t* arr, mission* pm)
 {
 	if (!arr || !json_is_array(arr))
 		return;
-
-	Parse_objects.clear();
 
 	size_t index;
 	json_t* val;
@@ -1531,7 +1526,6 @@ void load_wings_json(const json_t* arr, mission* pm)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Num_wings = 0;
 	size_t index;
 	json_t* val;
 
@@ -1540,7 +1534,6 @@ void load_wings_json(const json_t* arr, mission* pm)
 			break;
 
 		wing& w = Wings[Num_wings];
-		w.clear();
 
 		strcpy_s(w.name, json_get_string(val, "name", ""));
 		const char* sql = json_get_string(val, "squad_logo", nullptr);
@@ -1635,7 +1628,6 @@ void load_props_json(const json_t* arr)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Parse_props.clear();
 	size_t index;
 	json_t* val;
 	json_array_foreach(arr, index, val) {
@@ -1662,7 +1654,6 @@ void load_events_json(const json_t* arr)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Mission_events.clear();
 	size_t index;
 	json_t* val;
 
@@ -1724,7 +1715,6 @@ void load_goals_json(const json_t* arr)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Mission_goals.clear();
 	size_t index;
 	json_t* val;
 
@@ -1885,7 +1875,6 @@ void load_reinforcements_json(const json_t* arr)
 	if (!arr || !json_is_array(arr))
 		return;
 
-	Num_reinforcements = 0;
 	size_t index;
 	json_t* val;
 
@@ -1995,7 +1984,6 @@ void load_bitmaps_json(const json_t* obj)
 
 	const json_t* bg_arr = json_object_get(obj, "backgrounds");
 	if (bg_arr && json_is_array(bg_arr)) {
-		Backgrounds.clear();
 		size_t index;
 		json_t* val;
 		json_array_foreach(bg_arr, index, val) {
