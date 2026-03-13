@@ -15,6 +15,7 @@
 
 #include "ai/ai.h"
 #include "ai/aigoals.h"
+#include "ai/ailua.h"
 #include "ai/ai_profiles.h"
 #include "asteroid/asteroid.h"
 #include "cfile/cfile.h"
@@ -909,22 +910,81 @@ void load_debriefing_json(const json_t* arr)
 	}
 }
 
-void load_players_json(const json_t* arr)
+void load_players_json(const json_t* obj)
 {
-	if (!arr || !json_is_array(arr))
+	if (!obj || !json_is_object(obj))
 		return;
 
-	Num_teams = static_cast<int>(std::min(json_array_size(arr), static_cast<size_t>(MAX_TVT_TEAMS)));
+	// Alternate types list
+	const json_t* alt_arr = json_object_get(obj, "alternate_types");
+	if (alt_arr && json_is_array(alt_arr)) {
+		size_t ai;
+		json_t* av;
+		json_array_foreach(alt_arr, ai, av) {
+			const char* name = json_string_value(av);
+			if (name)
+				mission_parse_add_alt(name);
+		}
+	}
+
+	// Callsigns list
+	const json_t* cs_arr = json_object_get(obj, "callsigns");
+	if (cs_arr && json_is_array(cs_arr)) {
+		size_t ci;
+		json_t* cv;
+		json_array_foreach(cs_arr, ci, cv) {
+			const char* name = json_string_value(cv);
+			if (name)
+				mission_parse_add_callsign(name);
+		}
+	}
+
+	// General orders
+	ai_lua_reset_general_orders();
+
+	const json_t* orders_enabled = json_object_get(obj, "general_orders_enabled");
+	if (orders_enabled && json_is_array(orders_enabled)) {
+		size_t oi;
+		json_t* ov;
+		json_array_foreach(orders_enabled, oi, ov) {
+			const char* name = json_string_value(ov);
+			if (name) {
+				int lua_order_id = ai_lua_find_general_order_id(name);
+				if (lua_order_id >= 0)
+					ai_lua_enable_general_order(lua_order_id, true);
+			}
+		}
+	}
+
+	const json_t* orders_valid = json_object_get(obj, "general_orders_valid");
+	if (orders_valid && json_is_array(orders_valid)) {
+		size_t oi;
+		json_t* ov;
+		json_array_foreach(orders_valid, oi, ov) {
+			const char* name = json_string_value(ov);
+			if (name) {
+				int lua_order_id = ai_lua_find_general_order_id(name);
+				if (lua_order_id >= 0)
+					ai_lua_validate_general_order(lua_order_id, true);
+			}
+		}
+	}
+
+	// Teams
+	const json_t* teams_arr = json_object_get(obj, "teams");
+	if (!teams_arr || !json_is_array(teams_arr))
+		return;
+
+	Num_teams = static_cast<int>(std::min(json_array_size(teams_arr), static_cast<size_t>(MAX_TVT_TEAMS)));
 
 	for (int t = 0; t < Num_teams; t++) {
-		const json_t* team = json_array_get(arr, t);
+		const json_t* team = json_array_get(teams_arr, t);
 		team_data& td = Team_data[t];
 
-		if (t == 0) {
-			const char* ssn = json_get_string(team, "starting_shipname", nullptr);
-			if (ssn)
-				strcpy_s(Player_start_shipname, ssn);
-		}
+		// Starting shipname (saved for all teams now)
+		const char* ssn = json_get_string(team, "starting_shipname", nullptr);
+		if (ssn)
+			strcpy_s(Player_start_shipname, ssn);
 
 		td.do_not_validate = json_get_bool(team, "do_not_validate", false);
 
@@ -945,9 +1005,9 @@ void load_players_json(const json_t* arr)
 					td.ship_list_variables[i][0] = '\0';
 				}
 
-				const char* cv = json_get_string(entry, "count_variable", nullptr);
-				if (cv) {
-					strcpy_s(td.ship_count_variables[i], cv);
+				const char* count_var = json_get_string(entry, "count_variable", nullptr);
+				if (count_var) {
+					strcpy_s(td.ship_count_variables[i], count_var);
 					td.ship_count[i] = 0;
 				} else {
 					td.ship_count[i] = json_get_int(entry, "count", 0);
@@ -973,16 +1033,29 @@ void load_players_json(const json_t* arr)
 					td.weaponry_pool_variable[i][0] = '\0';
 				}
 
-				const char* cv = json_get_string(entry, "count_variable", nullptr);
-				if (cv) {
-					strcpy_s(td.weaponry_amount_variable[i], cv);
+				const char* count_var = json_get_string(entry, "count_variable", nullptr);
+				if (count_var) {
+					strcpy_s(td.weaponry_amount_variable[i], count_var);
 					td.weaponry_count[i] = 0;
 				} else {
 					td.weaponry_count[i] = json_get_int(entry, "count", 0);
 					td.weaponry_amount_variable[i][0] = '\0';
 				}
+			}
+		}
 
-				td.weapon_required[i] = json_get_bool(entry, "required", false);
+		// Required weapons
+		const json_t* req_arr = json_object_get(team, "required_weapons");
+		if (req_arr && json_is_array(req_arr)) {
+			size_t ri;
+			json_t* rv;
+			json_array_foreach(req_arr, ri, rv) {
+				const char* wname = json_string_value(rv);
+				if (wname) {
+					int wi = weapon_info_lookup(wname);
+					if (wi >= 0)
+						td.weapon_required[wi] = true;
+				}
 			}
 		}
 	}
@@ -1620,8 +1693,25 @@ void load_waypoints_json(const json_t* obj)
 	}
 }
 
-void load_messages_json(const json_t* arr)
+void load_messages_json(const json_t* obj)
 {
+	if (!obj || !json_is_object(obj))
+		return;
+
+	// Command sender and persona (mission-wide, moved here from mission_info)
+	const char* cmd_sender = json_get_string(obj, "command_sender", nullptr);
+	if (cmd_sender)
+		strcpy_s(The_mission.command_sender, cmd_sender);
+
+	const char* cmd_persona = json_get_string(obj, "command_persona", nullptr);
+	if (cmd_persona) {
+		int idx = find_persona_index(cmd_persona);
+		if (idx >= 0)
+			The_mission.command_persona = idx;
+	}
+
+	// Message list
+	const json_t* arr = json_object_get(obj, "messages");
 	if (!arr || !json_is_array(arr))
 		return;
 
@@ -1640,13 +1730,15 @@ void load_messages_json(const json_t* arr)
 		msg.wave_info.index = -1;
 
 		strcpy_s(msg.name, json_get_string(val, "name", ""));
+
+		// Team field (saved for all messages)
+		msg.multi_team = json_get_int(val, "team", -1);
+
 		strcpy_s(msg.message, json_get_string(val, "message", ""));
 
 		const char* persona = json_get_string(val, "persona", nullptr);
 		if (persona)
 			msg.persona_index = find_persona_index(persona);
-
-		msg.multi_team = json_get_int(val, "multi_team", -1);
 
 		const char* avi = json_get_string(val, "avi_name", nullptr);
 		if (avi)
