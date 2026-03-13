@@ -168,6 +168,8 @@ void campaign_tree_wnd::OnCpgnFileSave()
 		save.set_save_format(MissionFormat::RETAIL);
 	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
 		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else if (Mission_save_format == FSO_FORMAT_JSON) {
+		save.set_save_format(MissionFormat::STANDARD);	// campaigns are still saved as .fc2
 	} else {
 		save.set_save_format(MissionFormat::STANDARD);
 	}
@@ -245,6 +247,8 @@ void campaign_tree_wnd::OnCpgnFileSaveAs()
 		save.set_save_format(MissionFormat::RETAIL);
 	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
 		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else if (Mission_save_format == FSO_FORMAT_JSON) {
+		save.set_save_format(MissionFormat::STANDARD);	// campaigns are still saved as .fc2
 	} else {
 		save.set_save_format(MissionFormat::STANDARD);
 	}

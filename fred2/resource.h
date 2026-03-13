@@ -1547,6 +1547,7 @@
 #define ID_FORMAT_FS1_RETAIL            33072
 #define ID_EDITORS_SET_GLOBAL_SHIP_FLAGS 33073
 #define ID_FILE_IMPORT_FSM              33074
+#define ID_FORMAT_FS2_JSON              33075
 #define ID_VIEW_LIGHTING                33079
 #define ID_EDITORS_VOICE                33080
 #define ID_SHOW_IFF_0                   33081

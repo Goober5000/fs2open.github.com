@@ -360,6 +360,8 @@ BEGIN_MESSAGE_MAP(CFREDView, CView)
 	ON_UPDATE_COMMAND_UI(ID_FORMAT_FS2_RETAIL, OnUpdateFormatFs2Retail)
 	ON_COMMAND(ID_FORMAT_FS1_RETAIL, OnFormatFs1Retail)
 	ON_UPDATE_COMMAND_UI(ID_FORMAT_FS1_RETAIL, OnUpdateFormatFs1Retail)
+	ON_COMMAND(ID_FORMAT_FS2_JSON, OnFormatFs2Json)
+	ON_UPDATE_COMMAND_UI(ID_FORMAT_FS2_JSON, OnUpdateFormatFs2Json)
 	ON_COMMAND(ID_MISC_MOVESHIPSWHENUNDOCKING, OnMoveShipsWhenUndocking)
 	ON_UPDATE_COMMAND_UI(ID_MISC_MOVESHIPSWHENUNDOCKING, OnUpdateMoveShipsWhenUndocking)
 	ON_COMMAND(ID_MISC_POINTUSINGUVEC, OnPointUsingUvec)
@@ -4837,6 +4839,19 @@ void CFREDView::OnFormatFs1Retail()
 void CFREDView::OnUpdateFormatFs1Retail(CCmdUI* pCmdUI) 
 {
 	pCmdUI->SetCheck(Mission_save_format == FSO_FORMAT_RETAIL);
+}
+
+void CFREDView::OnFormatFs2Json() 
+{
+	Mission_save_format = FSO_FORMAT_JSON;
+
+	theApp.write_ini_file();
+	Update_window = 1;
+}
+
+void CFREDView::OnUpdateFormatFs2Json(CCmdUI* pCmdUI) 
+{
+	pCmdUI->SetCheck(Mission_save_format == FSO_FORMAT_JSON);
 }
 
 void CFREDView::OnEditorsSetGlobalShipFlags() 

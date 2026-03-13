@@ -8,6 +8,7 @@
  */
 
 #include "missionsave.h"
+#include "mission_json.h"
 
 #include "globalincs/alphacolors.h"
 #include "globalincs/linklist.h"
@@ -2409,7 +2410,7 @@ int Fred_mission_save::save_mission_file(const char* pathname)
 
 	// only display this warning once, and only when the user explicitly saves, as opposed to autosave
 	static bool Displayed_retail_background_warning = false;
-	if (save_config.save_format != MissionFormat::STANDARD && !Displayed_retail_background_warning) {
+	if (save_config.save_format == MissionFormat::RETAIL && !Displayed_retail_background_warning) {
 		for (const auto& bg : Backgrounds) {
 			if (bg.flags[Starfield::Background_Flags::Corrected_angles_in_mission_file]) {
 				SCP_string msg = "Background flags (including the fixed-angles-in-mission-file flag) are not supported in retail. "
@@ -3024,6 +3025,11 @@ void Fred_mission_save::save_mission_internal(const char* pathname)
 	auto timeinfo = localtime(&currentTime);
 
 	time_to_mission_info_string(timeinfo, The_mission.modified, DATE_TIME_LENGTH - 1);
+
+	if (save_config.save_format == MissionFormat::JSON) {
+		err = mission_json::save_mission(pathname, save_config);
+		return;
+	}
 
 	// Migrate the version!
 	The_mission.required_fso_version = MISSION_VERSION;

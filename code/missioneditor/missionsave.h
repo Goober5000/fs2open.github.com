@@ -16,7 +16,8 @@ struct sexp_container;
 enum class MissionFormat {
 	RETAIL = 0,
 	STANDARD = 1,
-	COMPATIBILITY_MODE = 2
+	COMPATIBILITY_MODE = 2,
+	JSON = 3
 };
 
 struct FredSaveConfig {

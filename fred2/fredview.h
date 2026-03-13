@@ -315,6 +315,8 @@ protected:
 	afx_msg void OnUpdateFormatFs2Retail(CCmdUI* pCmdUI);
 	afx_msg void OnFormatFs1Retail();
 	afx_msg void OnUpdateFormatFs1Retail(CCmdUI* pCmdUI);
+	afx_msg void OnFormatFs2Json();
+	afx_msg void OnUpdateFormatFs2Json(CCmdUI* pCmdUI);
 	afx_msg void OnMoveShipsWhenUndocking();
 	afx_msg void OnUpdateMoveShipsWhenUndocking(CCmdUI* pCmdUI);
 	afx_msg void OnPointUsingUvec();
@@ -391,7 +393,8 @@ enum FSO_FORMAT
 {
 	FSO_FORMAT_RETAIL = 0,
 	FSO_FORMAT_STANDARD = 1,
-	FSO_FORMAT_COMPATIBILITY_MODE = 2
+	FSO_FORMAT_COMPATIBILITY_MODE = 2,
+	FSO_FORMAT_JSON = 3
 };
 extern int Mission_save_format;
 

@@ -217,6 +217,7 @@ BEGIN
             MENUITEM "FS2 Open",                    33069, CHECKED
             MENUITEM "FS2 Retail",                  33070
             MENUITEM "Here Be Dragons",             33092
+            MENUITEM "FS2 JSON",                    33075
         END
         POPUP "&Import"
         BEGIN
@@ -3771,6 +3772,7 @@ BEGIN
     ID_FORMAT_FS2_OPEN      "Save missions with SCP features"
     ID_FORMAT_FS2_RETAIL    "Save missions compatible with FS2 retail"
     ID_FORMAT_FS1           "Save missions compatible with FS1 retail"
+    ID_FORMAT_FS2_JSON      "Save missions in JSON format"
 END
 
 STRINGTABLE

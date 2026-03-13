@@ -140,6 +140,8 @@ int CFREDDoc::autosave(char *desc) {
 		save.set_save_format(MissionFormat::RETAIL);
 	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
 		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else if (Mission_save_format == FSO_FORMAT_JSON) {
+		save.set_save_format(MissionFormat::JSON);
 	} else {
 		save.set_save_format(MissionFormat::STANDARD);
 	}
@@ -499,6 +501,8 @@ void CFREDDoc::OnFileImportFSM() {
 			save.set_save_format(MissionFormat::RETAIL);
 		} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
 			save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+		} else if (Mission_save_format == FSO_FORMAT_JSON) {
+			save.set_save_format(MissionFormat::JSON);
 		} else {
 			save.set_save_format(MissionFormat::STANDARD);
 		}
@@ -540,7 +544,10 @@ void CFREDDoc::OnFileImportFSM() {
 			*ch = '\0';
 
 		// add new extension
-		strcat_s(filename, ".fs2");
+		if (Mission_save_format == FSO_FORMAT_JSON)
+			strcat_s(filename, ".json");
+		else
+			strcat_s(filename, ".fs2");
 
 		strcpy_s(Mission_filename, filename);
 
@@ -694,6 +701,8 @@ BOOL CFREDDoc::OnSaveDocument(LPCTSTR pathname) {
 		save.set_save_format(MissionFormat::RETAIL);
 	} else if (Mission_save_format == FSO_FORMAT_COMPATIBILITY_MODE) {
 		save.set_save_format(MissionFormat::COMPATIBILITY_MODE);
+	} else if (Mission_save_format == FSO_FORMAT_JSON) {
+		save.set_save_format(MissionFormat::JSON);
 	} else {
 		save.set_save_format(MissionFormat::STANDARD);
 	}

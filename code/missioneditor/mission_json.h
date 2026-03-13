@@ -14,9 +14,11 @@ namespace mission_json {
 // JSON format version -- increment when the schema changes in an incompatible way
 constexpr int FORMAT_VERSION = 1;
 
+const auto MINIMUM_FSO_VERSION = gameversion::version(25, 0);
+
 // Save the current in-memory mission state to a JSON file.
 // Returns 0 on success, negative on error.
-int save(const char* pathname, const FredSaveConfig& config);
+int save_mission(const char* pathname, const FredSaveConfig& config);
 
 // Load a mission from a JSON file into the provided mission struct.
 // flags: same MPF_* flags used by parse_mission().

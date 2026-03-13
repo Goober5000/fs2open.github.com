@@ -3,6 +3,7 @@
  * Provides an alternate, structured mission format for use by AI agents.
  */
 
+#include "missioneditor/common.h"
 #include "missioneditor/mission_json.h"
 #include "missioneditor/missionsave.h"
 
@@ -2097,8 +2098,11 @@ json_t* save_custom_data_json()
 // Public save entry point
 // ============================================================
 
-int mission_json::save(const char* pathname, const FredSaveConfig& config)
+int mission_json::save_mission(const char* pathname, const FredSaveConfig& config)
 {
+	// JSON has a different minimum version
+	The_mission.required_fso_version = MINIMUM_FSO_VERSION;
+
 	json_save_config = &config;
 
 	json_t* root = json_object();
