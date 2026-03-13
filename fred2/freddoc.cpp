@@ -736,6 +736,14 @@ BOOL CFREDDoc::DoSave(LPCTSTR lpszPathName, BOOL bReplace)
 
 		newPath = dlg.GetPathName();
 		lpszPathName = newPath;
+
+		// Auto-set save format based on the file extension the user chose
+		CString chosenExt = newPath.Right(5).MakeLower();
+		if (chosenExt.Find(_T(".json")) >= 0 && Mission_save_format != FSO_FORMAT_JSON) {
+			Fred_view_wnd->OnFormatFs2Json();
+		} else if (chosenExt.Find(_T(".fs2")) >= 0 && Mission_save_format == FSO_FORMAT_JSON) {
+			Fred_view_wnd->OnFormatFs2Open();
+		}
 	}
 
 	// Delegate to OnSaveDocument with the resolved path

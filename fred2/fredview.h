@@ -97,6 +97,10 @@ public:
 //	virtual void SEDlg_destroy();
 
 // Generated message map functions
+public:
+	afx_msg void OnFormatFs2Open();
+	afx_msg void OnFormatFs2Json();
+
 protected:
 	//{{AFX_MSG(CFREDView)
 	afx_msg void OnViewGrid();
@@ -307,7 +311,6 @@ protected:
 	afx_msg void OnUpdateShowPaths(CCmdUI* pCmdUI);
 	afx_msg void OnShowDockPoints();
 	afx_msg void OnUpdateShowDockPoints(CCmdUI* pCmdUI);
-	afx_msg void OnFormatFs2Open();
 	afx_msg void OnUpdateFormatFs2Open(CCmdUI* pCmdUI);
 	afx_msg void OnFormatFs2OpenComp();
 	afx_msg void OnUpdateFormatFs2OpenComp(CCmdUI* pCmdUI);
@@ -315,7 +318,6 @@ protected:
 	afx_msg void OnUpdateFormatFs2Retail(CCmdUI* pCmdUI);
 	afx_msg void OnFormatFs1Retail();
 	afx_msg void OnUpdateFormatFs1Retail(CCmdUI* pCmdUI);
-	afx_msg void OnFormatFs2Json();
 	afx_msg void OnUpdateFormatFs2Json(CCmdUI* pCmdUI);
 	afx_msg void OnMoveShipsWhenUndocking();
 	afx_msg void OnUpdateMoveShipsWhenUndocking(CCmdUI* pCmdUI);
