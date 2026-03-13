@@ -7,6 +7,12 @@
 #include "missioneditor/mission_json.h"
 #include "missioneditor/missionsave.h"
 
+ // Jansson's json_array_foreach / json_object_foreach macros use assignment
+ // inside conditionals, which is intentional.  Suppress MSVC C4706 for this file.
+#ifdef _MSC_VER
+#pragma warning(disable: 4706)
+#endif
+
 #include <ctime>
 
 #include "ai/ai.h"
