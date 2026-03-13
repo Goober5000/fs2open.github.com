@@ -2098,7 +2098,7 @@ json_t* save_custom_data_json()
 // Public save entry point
 // ============================================================
 
-int mission_json::save_mission(const char* pathname, const FredSaveConfig& config)
+int mission_json::save(const char* pathname, const FredSaveConfig& config)
 {
 	// JSON has a different minimum version
 	The_mission.required_fso_version = MINIMUM_FSO_VERSION;

@@ -3027,7 +3027,7 @@ void Fred_mission_save::save_mission_internal(const char* pathname)
 	time_to_mission_info_string(timeinfo, The_mission.modified, DATE_TIME_LENGTH - 1);
 
 	if (save_config.save_format == MissionFormat::JSON) {
-		err = mission_json::save_mission(pathname, save_config);
+		err = mission_json::save(pathname, save_config);
 		return;
 	}
 
