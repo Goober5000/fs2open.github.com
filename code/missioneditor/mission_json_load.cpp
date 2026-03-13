@@ -1292,13 +1292,25 @@ void load_objects_json(const json_t* arr, mission* pm)
 
 		po.arrival_anchor = json_to_anchor(val, "arrival_anchor");
 		po.arrival_cue = json_to_sexp(json_object_get(val, "arrival_cue"));
-		po.arrival_delay = json_get_int(val, "arrival_delay", 0);
+		{
+			int delay = json_get_int(val, "arrival_delay", 0);
+			if (!Fred_running)
+				po.arrival_delay = -delay;		// use negative numbers to mean we haven't set up a timer yet
+			else
+				po.arrival_delay = delay;
+		}
 		po.arrival_path_mask = json_get_int(val, "arrival_path_mask", 0);
 
 		po.departure_location = parse_departure_location(json_get_string(val, "departure_location", "At Location"));
 		po.departure_anchor = json_to_anchor(val, "departure_anchor");
 		po.departure_cue = json_to_sexp(json_object_get(val, "departure_cue"));
-		po.departure_delay = json_get_int(val, "departure_delay", 0);
+		{
+			int delay = json_get_int(val, "departure_delay", 0);
+			if (!Fred_running)
+				po.departure_delay = -delay;	// use negative numbers to mean that delay timer not yet set
+			else
+				po.departure_delay = delay;
+		}
 		po.departure_path_mask = json_get_int(val, "departure_path_mask", 0);
 
 		// Warp parameters
@@ -1569,13 +1581,25 @@ void load_wings_json(const json_t* arr, mission* pm)
 		w.arrival_distance = json_get_int(val, "arrival_distance", 0);
 		w.arrival_anchor = json_to_anchor(val, "arrival_anchor");
 		w.arrival_cue = json_to_sexp(json_object_get(val, "arrival_cue"));
-		w.arrival_delay = json_get_int(val, "arrival_delay", 0);
+		{
+			int delay = json_get_int(val, "arrival_delay", 0);
+			if (!Fred_running)
+				w.arrival_delay = -delay;		// use negative numbers to mean we haven't set up a timer yet
+			else
+				w.arrival_delay = delay;
+		}
 		w.arrival_path_mask = json_get_int(val, "arrival_path_mask", 0);
 
 		w.departure_location = parse_departure_location(json_get_string(val, "departure_location", "At Location"));
 		w.departure_anchor = json_to_anchor(val, "departure_anchor");
 		w.departure_cue = json_to_sexp(json_object_get(val, "departure_cue"));
-		w.departure_delay = json_get_int(val, "departure_delay", 0);
+		{
+			int delay = json_get_int(val, "departure_delay", 0);
+			if (!Fred_running)
+				w.departure_delay = -delay;		// use negative numbers to mean that delay timer not yet set
+			else
+				w.departure_delay = delay;
+		}
 		w.departure_path_mask = json_get_int(val, "departure_path_mask", 0);
 
 		// AI goals
@@ -1639,7 +1663,6 @@ void load_events_json(const json_t* arr)
 		return;
 
 	Mission_events.clear();
-	Event_annotations.clear();
 	size_t index;
 	json_t* val;
 
@@ -1660,9 +1683,9 @@ void load_events_json(const json_t* arr)
 
 		Mission_events.push_back(std::move(evt));
 
-		// Event annotations
+		// annotations are only used in FRED
 		const json_t* ann_arr = json_object_get(val, "annotations");
-		if (ann_arr && json_is_array(ann_arr)) {
+		if (Fred_running && ann_arr && json_is_array(ann_arr)) {
 			size_t ai;
 			json_t* av;
 			json_array_foreach(ann_arr, ai, av) {
@@ -1934,6 +1957,9 @@ void load_bitmaps_json(const json_t* obj)
 				}
 			}
 		}
+		// initialize neb effect. its gross to do this here, but Fred is dumb so I have no choice ... :(
+		if (Fred_running)
+			neb2_post_level_init(The_mission.flags[Mission::Mission_Flags::Neb2_fog_color_override]);
 	}
 	// Legacy nebula (neb1)
 	else {
