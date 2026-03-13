@@ -862,8 +862,8 @@ void load_briefing_json(const json_t* arr)
 
 				const json_t* icons = json_object_get(s, "icons");
 				if (icons && json_is_array(icons)) {
-					bs.num_icons = static_cast<int>(json_array_size(icons));
-					bs.icons = new brief_icon[bs.num_icons];
+					bs.num_icons = static_cast<int>(std::min(json_array_size(icons), static_cast<size_t>(MAX_STAGE_ICONS)));
+					Assert(bs.icons != nullptr);
 					for (int j = 0; j < bs.num_icons; j++) {
 						const json_t* ic = json_array_get(icons, j);
 						memset(&bs.icons[j], 0, sizeof(brief_icon));
@@ -907,8 +907,8 @@ void load_briefing_json(const json_t* arr)
 
 				const json_t* lines = json_object_get(s, "lines");
 				if (lines && json_is_array(lines)) {
-					bs.num_lines = static_cast<int>(json_array_size(lines));
-					bs.lines = new brief_line[bs.num_lines];
+					bs.num_lines = static_cast<int>(std::min(json_array_size(lines), static_cast<size_t>(MAX_BRIEF_STAGE_LINES)));
+					Assert(bs.lines != nullptr);
 					for (int j = 0; j < bs.num_lines; j++) {
 						const json_t* ln = json_array_get(lines, j);
 						bs.lines[j].start_icon = json_get_int(ln, "start_icon", 0);
