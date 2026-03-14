@@ -203,14 +203,16 @@ static const char *sexp_oper_type_str(sexp_oper_type t)
 	}
 }
 
-static const char *weapon_subtype_str(int subtype)
+// Returns the effective weapon category.  Most beam weapons have subtype
+// WP_LASER (because they appear in #Primary Weapons), so we use is_beam()
+// rather than relying on the raw subtype field.
+static const char *weapon_category_str(const weapon_info &wip)
 {
-	switch (subtype) {
-		case WP_LASER:   return "primary";
-		case WP_MISSILE: return "secondary";
-		case WP_BEAM:    return "beam";
-		default: return "unknown";
-	}
+	if (wip.is_beam())
+		return "beam";
+	if (wip.is_secondary())
+		return "secondary";
+	return "primary";
 }
 
 // ---------------------------------------------------------------------------
@@ -335,6 +337,17 @@ void mcp_register_reference_tools(json_t *tools)
 		register_tool(tools, "get_sexp_operator",
 			"Get full details of a SEXP operator, including help text, argument types, return type, and category.",
 			props, req);
+	}
+
+	// get_reference_notes
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "topic", "Topic to look up (omit to list all available topics)");
+		register_tool(tools, "get_reference_notes",
+			"Get explanatory notes about FreeSpace game concepts and domain knowledge "
+			"that may not be obvious from raw data alone. Call without arguments to "
+			"list all available topics.",
+			props);
 	}
 }
 
@@ -581,18 +594,20 @@ static json_t *handle_get_ship_class(json_t *arguments)
 
 static json_t *handle_list_weapon_classes(json_t *arguments)
 {
-	// Optional subtype filter
-	int filter_subtype = -1;
+	// Optional category filter.  We use the semantic helpers (is_beam(),
+	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
+	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
+	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
 	if (arguments) {
 		json_t *v = json_object_get(arguments, "subtype");
 		if (v && json_is_string(v)) {
 			const char *st = json_string_value(v);
 			if (stricmp(st, "primary") == 0)
-				filter_subtype = WP_LASER;
+				filter = FILTER_PRIMARY;
 			else if (stricmp(st, "secondary") == 0)
-				filter_subtype = WP_MISSILE;
+				filter = FILTER_SECONDARY;
 			else if (stricmp(st, "beam") == 0)
-				filter_subtype = WP_BEAM;
+				filter = FILTER_BEAM;
 			else
 				return make_tool_result("Invalid subtype. Use \"primary\", \"secondary\", or \"beam\".", true);
 		}
@@ -602,14 +617,18 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	for (int i = 0; i < weapon_info_size(); i++) {
 		const auto &wip = Weapon_info[i];
 
-		if (filter_subtype >= 0 && wip.subtype != filter_subtype)
+		if (filter == FILTER_PRIMARY && !wip.is_non_beam_primary())
+			continue;
+		if (filter == FILTER_SECONDARY && !wip.is_secondary())
+			continue;
+		if (filter == FILTER_BEAM && !wip.is_beam())
 			continue;
 
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(wip.name));
 		if (wip.has_display_name())
 			json_object_set_new(item, "display_name", json_string(wip.get_display_name()));
-		json_object_set_new(item, "subtype", json_string(weapon_subtype_str(wip.subtype)));
+		json_object_set_new(item, "subtype", json_string(weapon_category_str(wip)));
 		set_optional_string(item, "title", wip.title);
 		json_object_set_new(item, "in_tech_database", json_boolean(wip.wi_flags[Weapon::Info_Flags::In_tech_database]));
 
@@ -637,7 +656,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	json_object_set_new(obj, "name", json_string(wip.name));
 	if (wip.has_display_name())
 		json_object_set_new(obj, "display_name", json_string(wip.get_display_name()));
-	json_object_set_new(obj, "subtype", json_string(weapon_subtype_str(wip.subtype)));
+	json_object_set_new(obj, "subtype", json_string(weapon_category_str(wip)));
 	set_optional_string(obj, "title", wip.title);
 	set_optional_string(obj, "description", wip.desc.get());
 	set_optional_string(obj, "tech_description", wip.tech_desc.get());
@@ -654,7 +673,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	json_object_set_new(obj, "optimum_range", json_real(wip.optimum_range));
 
 	// Missile-specific
-	if (wip.subtype == WP_MISSILE) {
+	if (wip.is_secondary()) {
 		json_object_set_new(obj, "cargo_size", json_real(wip.cargo_size));
 		json_object_set_new(obj, "is_homing", json_boolean(wip.is_homing()));
 		json_object_set_new(obj, "is_locked_homing", json_boolean(wip.is_locked_homing()));
@@ -907,6 +926,162 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// Reference notes — domain knowledge for AI agents
+// ---------------------------------------------------------------------------
+
+struct reference_note {
+	const char *topic;
+	const char *title;
+	const char *text;
+};
+
+static const reference_note Reference_notes[] = {
+	{
+		"weapon_categories",
+		"Weapon Categories and Banks",
+		"FreeSpace has two types of weapon banks: primary and secondary. "
+		"There are three logical categories of weapon:\n\n"
+		"- **Primary weapons** (subtype \"primary\"): Lasers and ballistic cannons. "
+		"They fire from primary weapon banks and typically have unlimited or "
+		"ammo-based ammunition.\n\n"
+		"- **Secondary weapons** (subtype \"secondary\"): Missiles, bombs, and "
+		"torpedoes. They fire from secondary weapon banks and consume finite "
+		"ammunition.\n\n"
+		"- **Beam weapons** (subtype \"beam\"): High-energy directed beams. "
+		"Although beams are a distinct category with unique mechanics, they "
+		"are always mounted on primary weapon banks because there are only "
+		"two physical bank types. In the game data, most beam weapons have "
+		"the internal subtype WP_LASER (not WP_BEAM) because they are defined "
+		"in the #Primary Weapons section of the table files. The `is_beam` "
+		"property in tool responses is the reliable way to identify them."
+	},
+	{
+		"ship_types_vs_classes",
+		"Ship Types vs. Ship Classes",
+		"A **ship type** (e.g. \"fighter\", \"bomber\", \"cruiser\", \"capital\") "
+		"is an abstract category that defines shared AI behaviors, targeting "
+		"rules, and gameplay properties. A **ship class** (e.g. \"GTF Ulysses\", "
+		"\"GVF Serapis\") is a specific model of ship with its own stats, "
+		"weapons, and visual appearance. Each ship class belongs to exactly "
+		"one ship type via its `class_type` field. Ship types control things "
+		"like whether the AI will accept player orders, auto-attack enemies, "
+		"attempt broadside maneuvers, or form into wings."
+	},
+	{
+		"species",
+		"Species in FreeSpace",
+		"Species define the major factions in the FreeSpace universe. The three "
+		"canonical species are:\n\n"
+		"- **Terran**: Humanity, part of the Galactic Terran-Vasudan Alliance (GTVA).\n"
+		"- **Vasudan**: An alien race, allied with Terrans in the GTVA after the "
+		"Terran-Vasudan War.\n"
+		"- **Shivan**: A mysterious and hostile alien race, the primary antagonist.\n\n"
+		"Each species has default settings for IFF (identification friend-or-foe), "
+		"AWACS multipliers, countermeasures, and support ships. Mods may add "
+		"additional species."
+	},
+	{
+		"sexp_overview",
+		"SEXP (S-Expression) System Overview",
+		"SEXPs are the scripting language used in FreeSpace mission events. "
+		"They use a Lisp-like S-expression syntax where each expression is "
+		"an operator followed by its arguments in parentheses.\n\n"
+		"SEXPs are organized into categories:\n"
+		"- **Objective**: Conditions for mission goals (is-destroyed, is-departed, etc.)\n"
+		"- **Time**: Time-related checks and delays\n"
+		"- **Logical**: Boolean logic (and, or, not, etc.)\n"
+		"- **Arithmetic**: Math operations (+, -, *, /, etc.)\n"
+		"- **Status**: Query game state (shield strength, distance, etc.)\n"
+		"- **Change**: Modify game state (set hull, change AI, etc.)\n"
+		"- **Conditional**: Control flow (when, if-then-else, etc.)\n"
+		"- **AI**: AI orders and goals\n"
+		"- **Training**: Training mission specific operators\n\n"
+		"Events use SEXPs as triggers and actions. A typical event has a "
+		"conditional SEXP that, when true, fires one or more action SEXPs."
+	},
+	{
+		"mission_structure",
+		"Mission File Structure",
+		"A FreeSpace mission file (.fs2) contains several major sections:\n\n"
+		"- **Mission Info**: Metadata (name, author, description, flags)\n"
+		"- **Ships**: All ships placed in the mission with positions, orientations, "
+		"loadouts, AI settings, and arrival/departure conditions\n"
+		"- **Wings**: Groups of ships that fly together in formation\n"
+		"- **Events**: SEXP-driven logic (triggers and actions)\n"
+		"- **Goals**: Mission objectives shown to the player\n"
+		"- **Waypoints**: Named paths for AI navigation\n"
+		"- **Messages**: In-mission dialogue with sender and audio\n"
+		"- **Briefing**: Pre-mission briefing stages with text and camera positions\n"
+		"- **Debriefing**: Post-mission stages triggered by conditions\n"
+		"- **Reinforcements**: Ships/wings that can be called in mid-mission\n\n"
+		"FRED2 is the mission editor. Missions can be saved in .fs2 (standard) "
+		"or .json format."
+	},
+	{
+		"iff",
+		"IFF (Identification Friend or Foe)",
+		"IFF determines team allegiances in a mission. Standard IFF teams include "
+		"\"Friendly\", \"Hostile\", and \"Unknown\", but custom IFF entries can be "
+		"defined. Each IFF has an associated color for HUD display and "
+		"relationships with other IFF teams (friend, foe, or neutral). "
+		"Ships on the same IFF team are allies; ships on opposing IFF teams "
+		"are enemies. SEXPs can change IFF allegiances mid-mission."
+	},
+	{
+		"subsystems",
+		"Ship Subsystems",
+		"Subsystems are targetable components of a ship, each with their own "
+		"hitpoints. Common subsystem types include:\n\n"
+		"- **Engines**: Disabling stops the ship from moving\n"
+		"- **Weapons**: Disabling prevents the ship from firing\n"
+		"- **Sensors/Communication**: Affects targeting and messaging\n"
+		"- **Navigation**: Affects autopilot and warp capability\n"
+		"- **Turrets**: Individual gun emplacements on larger ships\n"
+		"- **Fighter bays**: Launch and recovery bays for carried craft\n\n"
+		"Subsystems can be individually targeted, damaged, disabled, and "
+		"repaired. Many SEXPs reference subsystems by name."
+	},
+
+	// sentinel
+	{ nullptr, nullptr, nullptr }
+};
+
+static json_t *handle_get_reference_notes(json_t *arguments)
+{
+	const char *topic = nullptr;
+	if (arguments) {
+		json_t *v = json_object_get(arguments, "topic");
+		if (v && json_is_string(v))
+			topic = json_string_value(v);
+	}
+
+	// If no topic specified, list all available topics
+	if (!topic || topic[0] == '\0') {
+		json_t *arr = json_array();
+		for (const reference_note *rn = Reference_notes; rn->topic; rn++) {
+			json_t *item = json_object();
+			json_object_set_new(item, "topic", json_string(rn->topic));
+			json_object_set_new(item, "title", json_string(rn->title));
+			json_array_append_new(arr, item);
+		}
+		return make_json_tool_result(arr);
+	}
+
+	// Look up the requested topic (case-insensitive)
+	for (const reference_note *rn = Reference_notes; rn->topic; rn++) {
+		if (stricmp(topic, rn->topic) == 0) {
+			json_t *obj = json_object();
+			json_object_set_new(obj, "topic", json_string(rn->topic));
+			json_object_set_new(obj, "title", json_string(rn->title));
+			json_object_set_new(obj, "text", json_string(rn->text));
+			return make_json_tool_result(obj);
+		}
+	}
+
+	return make_tool_result("Topic not found. Call get_reference_notes without arguments to list available topics.", true);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -925,6 +1100,7 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 			"list_species",
 			"list_intel_entries", "get_intel_entry",
 			"list_sexp_operators", "get_sexp_operator",
+			"get_reference_notes",
 			nullptr
 		};
 		for (const char **t = our_tools; *t; t++) {
@@ -956,6 +1132,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_sexp_operators(arguments);
 	if (strcmp(tool_name, "get_sexp_operator") == 0)
 		return handle_get_sexp_operator(arguments);
+	if (strcmp(tool_name, "get_reference_notes") == 0)
+		return handle_get_reference_notes(arguments);
 
 	return nullptr;  // not one of our tools
 }
