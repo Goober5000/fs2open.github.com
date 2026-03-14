@@ -724,6 +724,7 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 
 	if (FREDDoc_ptr->load_mission(req->filepath)) {
 		FREDDoc_ptr->autosave("nothing");
+		FREDDoc_ptr->SetTitle((LPCTSTR)Mission_filename);
 		Undo_count = 0;
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
