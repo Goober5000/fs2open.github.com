@@ -13,6 +13,7 @@
 #include <algorithm>
 #include "FRED.h"
 #include "MainFrm.h"
+#include "mcp_reference_tools.h"
 #include "FREDDoc.h"
 #include "FREDView.h"
 #include "FredRender.h"
@@ -459,6 +460,9 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	fhash_activate();
 
 	fred_preload_all_briefing_icons(); //phreak.  This needs to be done or else the briefing icons won't show up
+
+	// Signal that all game tables are loaded and safe for MCP reference tools to query
+	mcp_tables_ready.store(true);
 	fiction_viewer_reset();
 	cmd_brief_reset();
 
