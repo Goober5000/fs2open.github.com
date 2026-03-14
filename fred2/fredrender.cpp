@@ -92,6 +92,13 @@ int Last_cursor_over = -1;
 int last_x = 0;
 int last_y = 0;
 int Lookat_mode = 0;
+
+// Orbit camera state
+vec3d Orbit_pivot = ZERO_VECTOR;
+float Orbit_distance = 200.0f;
+float Orbit_phi = 1.24f;
+float Orbit_theta = 2.25f;
+bool Orbit_active = false;
 int rendering_order[MAX_SHIPS];
 int render_count = 0;
 int Show_asteroid_field = 1;
@@ -1311,6 +1318,88 @@ void move_mouse(int btn, int mdx, int mdy) {
 	}
 }
 
+// ---------- Orbit camera functions ----------
+
+vec3d orbit_camera_get_pivot()
+{
+	if (query_valid_object()) {
+		Orbit_pivot = Objects[cur_object_index].pos;
+	}
+	return Orbit_pivot;
+}
+
+void orbit_camera_init_from_current_view(const vec3d *pivot)
+{
+	vec3d offset;
+	vm_vec_sub(&offset, &view_pos, pivot);
+
+	Orbit_distance = vm_vec_mag(&offset);
+	if (Orbit_distance < 1.0f)
+		Orbit_distance = 100.0f;
+
+	Orbit_phi = acosf(std::clamp(offset.xyz.y / Orbit_distance, -1.0f, 1.0f));
+	Orbit_theta = atan2f(offset.xyz.z, offset.xyz.x);
+	Orbit_pivot = *pivot;
+	Orbit_active = true;
+}
+
+void orbit_camera_apply()
+{
+	float sp = sinf(Orbit_phi);
+
+	vec3d new_pos;
+	new_pos.xyz.x = sp * cosf(Orbit_theta);
+	new_pos.xyz.y = cosf(Orbit_phi);
+	new_pos.xyz.z = sp * sinf(Orbit_theta);
+
+	vm_vec_scale(&new_pos, Orbit_distance);
+	vm_vec_add(&view_pos, &Orbit_pivot, &new_pos);
+
+	// Point camera at pivot
+	vec3d look_dir;
+	vm_vec_sub(&look_dir, &Orbit_pivot, &view_pos);
+	if (vm_vec_mag(&look_dir) > 0.001f) {
+		vec3d world_up = { 0.0f, 1.0f, 0.0f };
+		vm_vector_2_matrix(&view_orient, &look_dir, &world_up, nullptr);
+	}
+
+	Update_window = 1;
+}
+
+void orbit_camera_rotate(int dx, int dy)
+{
+	Orbit_theta += dx / 100.0f;
+	Orbit_phi += dy / 100.0f;
+
+	CLAMP(Orbit_phi, 0.01f, PI - 0.01f);
+
+	orbit_camera_apply();
+}
+
+void orbit_camera_pan(int dx, int dy)
+{
+	float pan_scale = Orbit_distance * 0.002f;
+
+	vec3d pan_delta;
+	vm_vec_copy_scale(&pan_delta, &view_orient.vec.rvec, -(float)dx * pan_scale);
+	vm_vec_scale_add2(&pan_delta, &view_orient.vec.uvec, (float)dy * pan_scale);
+
+	vm_vec_add2(&Orbit_pivot, &pan_delta);
+
+	orbit_camera_apply();
+}
+
+void orbit_camera_zoom(float delta)
+{
+	Orbit_distance *= 1.0f + delta;
+
+	CLAMP(Orbit_distance, 1.0f, 10000000.0f);
+
+	orbit_camera_apply();
+}
+
+// ---------- End orbit camera functions ----------
+
 int object_check_collision(object *objp, vec3d *p0, vec3d *p1, vec3d *hitpos) {
 	mc_info mc;
 
@@ -1425,6 +1514,9 @@ void process_controls(vec3d *pos, matrix *orient, float frametime, int key, int 
 		if (rotangs.h && Universal_heading)
 			vm_transpose(orient);
 	}
+
+	// Invalidate orbit camera state so it re-initializes on next mouse drag
+	Orbit_active = false;
 }
 
 void process_movement_keys(int key, vec3d *mvec, angles *angs) {
