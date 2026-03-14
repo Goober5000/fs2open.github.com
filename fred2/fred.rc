@@ -401,6 +401,8 @@ BEGIN
         MENUITEM "Music Player",                ID_MUSIC_PLAYER
         MENUITEM "Mission Statistics\tCtrl+Shift+D", 33067
         MENUITEM "Error Checker\tShift+H",      32978
+        MENUITEM SEPARATOR
+        MENUITEM "Model Context Protocol Server", ID_TOOLS_MCP_SERVER
     END
     POPUP "Settings"
     BEGIN

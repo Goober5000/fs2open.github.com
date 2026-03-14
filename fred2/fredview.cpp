@@ -14,6 +14,7 @@
 
 #include "FREDDoc.h"
 #include "FREDView.h"
+#include "mcpserver.h"
 #include "FredRender.h"
 #include "cfile/cfile.h"
 #include "Grid.h"
@@ -371,6 +372,8 @@ BEGIN_MESSAGE_MAP(CFREDView, CView)
 	ON_COMMAND(ID_EDITORS_SET_GLOBAL_SHIP_FLAGS, OnEditorsSetGlobalShipFlags)
 	ON_COMMAND(ID_EDITORS_VOICE, OnEditorsVoiceManager)
 	ON_COMMAND(ID_EDITORS_FICTION, OnEditorsFiction)
+	ON_COMMAND(ID_TOOLS_MCP_SERVER, OnToolsMcpServer)
+	ON_UPDATE_COMMAND_UI(ID_TOOLS_MCP_SERVER, OnUpdateToolsMcpServer)
 	ON_WM_DESTROY()
 	ON_WM_CREATE()
 	ON_WM_ERASEBKGND()
@@ -5024,7 +5027,21 @@ void CFREDView::OnShowIFF9()
 	OnShowIFF(9);
 }
 
-void CFREDView::OnUpdateShowIFF9(CCmdUI* pCmdUI) 
+void CFREDView::OnUpdateShowIFF9(CCmdUI* pCmdUI)
 {
 	OnUpdateShowIFF(9, pCmdUI);
+}
+
+void CFREDView::OnToolsMcpServer()
+{
+	if (mcp_server_is_running()) {
+		mcp_server_stop();
+	} else {
+		mcp_server_start();
+	}
+}
+
+void CFREDView::OnUpdateToolsMcpServer(CCmdUI* pCmdUI)
+{
+	pCmdUI->SetCheck(mcp_server_is_running());
 }

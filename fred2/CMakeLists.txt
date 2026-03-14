@@ -156,6 +156,8 @@ set(FRED2_SOURCES
 	wing_editor.h
 	MFCGraphicsOperations.cpp
 	MFCGraphicsOperations.h
+	mcpserver.cpp
+	mcpserver.h
 	fred.rc
 	version.rc2
 )
@@ -201,6 +203,7 @@ TARGET_LINK_LIBRARIES(FRED2 PUBLIC "$<$<NOT:$<CONFIG:Release>>:nafxcwd.lib>")
 TARGET_LINK_LIBRARIES(FRED2 PUBLIC "$<$<CONFIG:Release>:nafxcw.lib>")
 
 target_link_libraries(FRED2 PUBLIC glad_wgl)
+target_link_libraries(FRED2 PUBLIC mongoose)
 
 enable_clang_tidy(FRED2)
 
