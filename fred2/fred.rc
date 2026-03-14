@@ -3569,6 +3569,7 @@ BEGIN
                             "Allow all objects to be selected or moved"
     ID_MISC_POINTUSINGUVEC  "When using the Object Editor to point ships, take the ship's current up-vector into account"
     ID_MUSIC_PLAYER         "Preview music files"
+    ID_TOOLS_MCP_SERVER     "Start or stop the Model Context Protocol server, which allows AI agents to operate FRED2"
 END
 
 STRINGTABLE
