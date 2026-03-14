@@ -7,6 +7,7 @@
 
 #include "mission/missionparse.h"
 #include "mainfrm.h"
+#include "globalincs/pstypes.h"
 
 static struct mg_context *mcp_ctx = nullptr;
 
@@ -198,6 +199,12 @@ static json_t *execute_on_main_thread(McpToolId tool, const char *filepath)
 	req.filepath[sizeof(req.filepath) - 1] = '\0';
 	req.success = false;
 	req.result_message[0] = '\0';
+
+	// Normalize path separators for the FreeSpace engine
+	for (char *p = req.filepath; *p; ++p) {
+		if (*p == '/' || *p == '\\')
+			*p = DIR_SEPARATOR_CHAR;
+	}
 
 	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
 
