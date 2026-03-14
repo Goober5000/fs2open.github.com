@@ -6,6 +6,7 @@
 #include <climits>
 #include <cstring>
 
+#include "mainfrm.h"
 #include "ship/ship.h"
 #include "weapon/weapon.h"
 #include "species_defs/species_defs.h"
@@ -366,6 +367,21 @@ void mcp_register_reference_tools(json_t *tools)
 			"that may not be obvious from raw data alone. Call without arguments to "
 			"list all available topics.",
 			props);
+	}
+
+	// get_ship_model_details
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship class (e.g. \"GTD Orion\")");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "get_ship_model_details",
+			"Get 3D model details for a ship class, including bounding box dimensions, "
+			"docking bays, and navigation paths (for subsystem attack, docking, and "
+			"fighter bay arrival/departure). Note: if the model is not already loaded, "
+			"this tool may take several seconds to respond while the model is loaded "
+			"into memory.",
+			props, req);
 	}
 }
 
@@ -1147,6 +1163,208 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// get_ship_model_details — requires model loading on main thread
+// ---------------------------------------------------------------------------
+
+// Determine usage annotation for a path by checking if it's referenced
+// by docking bays or ship bays.
+static const char *determine_path_usage(int path_index, const polymodel *pm)
+{
+	// Check if this path is a subsystem attack path
+	if (pm->paths[path_index].type == MP_TYPE_SUBSYS)
+		return "subsystem";
+
+	// Check if this path is referenced by a docking bay
+	for (int d = 0; d < pm->n_docks; d++) {
+		const auto &bay = pm->docking_bays[d];
+		for (int sp = 0; sp < bay.num_spline_paths; sp++) {
+			if (bay.splines[sp] == path_index)
+				return "dockpoint";
+		}
+	}
+
+	// Check if this path is referenced by a ship bay (fighter bay)
+	if (pm->ship_bay) {
+		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
+			if (pm->ship_bay->path_indexes[b] == path_index)
+				return "ship_bay";
+		}
+	}
+
+	return "other";
+}
+
+static json_t *handle_get_ship_model_details(json_t *arguments)
+{
+	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
+	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
+	if (!name || name[0] == '\0')
+		return make_tool_result("Missing required parameter: name", true);
+
+	int sip_idx = ship_info_lookup(name);
+	if (sip_idx < 0)
+		return make_tool_result("Ship class not found", true);
+
+	// Marshal model_load() to the main thread
+	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
+		return make_tool_result("FRED2 main window is not available", true);
+
+	McpToolRequest req = {};
+	req.tool = McpToolId::LOAD_SHIP_MODEL;
+	strncpy(req.filepath, name, sizeof(req.filepath) - 1);
+	req.filepath[sizeof(req.filepath) - 1] = '\0';
+	req.success = false;
+	req.result_message[0] = '\0';
+
+	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
+
+	if (!req.success)
+		return make_tool_result(req.result_message, true);
+
+	// Model is now loaded — read polymodel data
+	const auto &sip = Ship_info[sip_idx];
+	if (sip.model_num < 0)
+		return make_tool_result("Model failed to load", true);
+
+	polymodel *pm = model_get(sip.model_num);
+	if (!pm)
+		return make_tool_result("Model data unavailable", true);
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(sip.name));
+
+	// Bounding box dimensions
+	{
+		json_t *mins = json_object();
+		json_object_set_new(mins, "x", json_real(pm->mins.xyz.x));
+		json_object_set_new(mins, "y", json_real(pm->mins.xyz.y));
+		json_object_set_new(mins, "z", json_real(pm->mins.xyz.z));
+		json_object_set_new(obj, "mins", mins);
+
+		json_t *maxs = json_object();
+		json_object_set_new(maxs, "x", json_real(pm->maxs.xyz.x));
+		json_object_set_new(maxs, "y", json_real(pm->maxs.xyz.y));
+		json_object_set_new(maxs, "z", json_real(pm->maxs.xyz.z));
+		json_object_set_new(obj, "maxs", maxs);
+	}
+
+	// Docking bays
+	{
+		json_t *docks = json_array();
+		for (int d = 0; d < pm->n_docks; d++) {
+			const auto &bay = pm->docking_bays[d];
+			json_t *dock_obj = json_object();
+
+			json_object_set_new(dock_obj, "name", json_string(bay.name));
+			json_object_set_new(dock_obj, "num_slots", json_integer(bay.num_slots));
+
+			// Type flags as array of strings
+			json_t *type_arr = json_array();
+			if (bay.type_flags & DOCK_TYPE_CARGO)
+				json_array_append_new(type_arr, json_string("cargo"));
+			if (bay.type_flags & DOCK_TYPE_REARM)
+				json_array_append_new(type_arr, json_string("rearm"));
+			if (bay.type_flags & DOCK_TYPE_GENERIC)
+				json_array_append_new(type_arr, json_string("generic"));
+			json_object_set_new(dock_obj, "type_flags", type_arr);
+
+			// Slot positions and normals
+			json_t *positions = json_array();
+			json_t *normals = json_array();
+			for (int s = 0; s < bay.num_slots; s++) {
+				json_t *pos = json_object();
+				json_object_set_new(pos, "x", json_real(bay.pnt[s].xyz.x));
+				json_object_set_new(pos, "y", json_real(bay.pnt[s].xyz.y));
+				json_object_set_new(pos, "z", json_real(bay.pnt[s].xyz.z));
+				json_array_append_new(positions, pos);
+
+				json_t *nrm = json_object();
+				json_object_set_new(nrm, "x", json_real(bay.norm[s].xyz.x));
+				json_object_set_new(nrm, "y", json_real(bay.norm[s].xyz.y));
+				json_object_set_new(nrm, "z", json_real(bay.norm[s].xyz.z));
+				json_array_append_new(normals, nrm);
+			}
+			json_object_set_new(dock_obj, "positions", positions);
+			json_object_set_new(dock_obj, "normals", normals);
+
+			// Spline path names
+			json_t *spline_names = json_array();
+			for (int sp = 0; sp < bay.num_spline_paths; sp++) {
+				int spline_idx = bay.splines[sp];
+				if (spline_idx >= 0 && spline_idx < pm->n_paths)
+					json_array_append_new(spline_names, json_string(pm->paths[spline_idx].name));
+			}
+			if (json_array_size(spline_names) > 0)
+				json_object_set_new(dock_obj, "spline_path_names", spline_names);
+			else
+				json_decref(spline_names);
+
+			json_array_append_new(docks, dock_obj);
+		}
+		json_object_set_new(obj, "docking_bays", docks);
+	}
+
+	// Paths
+	{
+		json_t *paths = json_array();
+		for (int p = 0; p < pm->n_paths; p++) {
+			const auto &path = pm->paths[p];
+			json_t *path_obj = json_object();
+
+			json_object_set_new(path_obj, "name", json_string(path.name));
+			set_optional_string(path_obj, "parent_name", path.parent_name);
+			json_object_set_new(path_obj, "num_vertices", json_integer(path.nverts));
+			json_object_set_new(path_obj, "usage", json_string(determine_path_usage(p, pm)));
+
+			// Vertices
+			json_t *verts = json_array();
+			for (int v = 0; v < path.nverts; v++) {
+				const auto &vert = path.verts[v];
+				json_t *vert_obj = json_object();
+
+				json_t *pos = json_object();
+				json_object_set_new(pos, "x", json_real(vert.pos.xyz.x));
+				json_object_set_new(pos, "y", json_real(vert.pos.xyz.y));
+				json_object_set_new(pos, "z", json_real(vert.pos.xyz.z));
+				json_object_set_new(vert_obj, "pos", pos);
+
+				json_object_set_new(vert_obj, "radius", json_real(vert.radius));
+
+				json_array_append_new(verts, vert_obj);
+			}
+			json_object_set_new(path_obj, "vertices", verts);
+
+			json_array_append_new(paths, path_obj);
+		}
+		json_object_set_new(obj, "paths", paths);
+	}
+
+	// Ship bay (fighter bay arrival/departure paths)
+	if (pm->ship_bay && pm->ship_bay->num_paths > 0) {
+		json_t *bay_obj = json_object();
+		json_object_set_new(bay_obj, "num_paths", json_integer(pm->ship_bay->num_paths));
+
+		json_t *bay_paths = json_array();
+		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
+			int path_idx = pm->ship_bay->path_indexes[b];
+			json_t *bp = json_object();
+
+			if (path_idx >= 0 && path_idx < pm->n_paths)
+				json_object_set_new(bp, "path_name", json_string(pm->paths[path_idx].name));
+
+			json_object_set_new(bp, "arrival", json_boolean((pm->ship_bay->arrive_flags & (1 << b)) != 0));
+			json_object_set_new(bp, "departure", json_boolean((pm->ship_bay->depart_flags & (1 << b)) != 0));
+
+			json_array_append_new(bay_paths, bp);
+		}
+		json_object_set_new(bay_obj, "paths", bay_paths);
+		json_object_set_new(obj, "ship_bay", bay_obj);
+	}
+
+	return make_json_tool_result(obj);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -1166,6 +1384,7 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 			"list_intel_entries", "get_intel_entry",
 			"list_sexp_operators", "get_sexp_operator",
 			"get_reference_notes",
+			"get_ship_model_details",
 			nullptr
 		};
 		for (const char **t = our_tools; *t; t++) {
@@ -1199,6 +1418,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_operator(arguments);
 	if (strcmp(tool_name, "get_reference_notes") == 0)
 		return handle_get_reference_notes(arguments);
+	if (strcmp(tool_name, "get_ship_model_details") == 0)
+		return handle_get_ship_model_details(arguments);
 
 	return nullptr;  // not one of our tools
 }
