@@ -160,6 +160,8 @@ set(FRED2_SOURCES
 	wing_editor.h
 	MFCGraphicsOperations.cpp
 	MFCGraphicsOperations.h
+	mcpserver.cpp
+	mcpserver.h
 	fred.rc
 	version.rc2
 )
@@ -212,6 +214,7 @@ IF(NOT FSO_MSVC_RUNTIME_DLL)
 ENDIF()
 
 target_link_libraries(FRED2 PUBLIC glad_wgl)
+target_link_libraries(FRED2 PUBLIC mongoose)
 
 enable_clang_tidy(FRED2)
 
