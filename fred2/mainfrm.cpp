@@ -699,7 +699,9 @@ bool url_launch(const char *url)
 // MCP tool call handler — runs on the main MFC thread
 // ---------------------------------------------------------------------------
 
-static void set_mission_filename_from_path(const char *pathname)
+// Sets Mission_filename (without extension) and returns a pointer to the
+// extension within pathname (including the dot), or "" if there is none.
+static const char *set_mission_filename_from_path(const char *pathname)
 {
 	auto sep_ch = strrchr(pathname, '\\');
 	if (!sep_ch)
@@ -715,16 +717,20 @@ static void set_mission_filename_from_path(const char *pathname)
 		len = 79;
 	strncpy(Mission_filename, filename, len);
 	Mission_filename[len] = 0;
+
+	return (ext_ch != nullptr) ? ext_ch : "";
 }
 
 static void mcp_handle_load_mission(McpToolRequest *req)
 {
 	clean_up_selections();
-	set_mission_filename_from_path(req->filepath);
+	auto ext = set_mission_filename_from_path(req->filepath);
 
 	if (FREDDoc_ptr->load_mission(req->filepath)) {
+		CString title;
+		title.Format("%s%s", Mission_filename, ext);
 		FREDDoc_ptr->autosave("nothing");
-		FREDDoc_ptr->SetTitle((LPCTSTR)Mission_filename);
+		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		Undo_count = 0;
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
@@ -745,7 +751,7 @@ static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 		return;
 	}
 
-	set_mission_filename_from_path(req->filepath);
+	auto ext = set_mission_filename_from_path(req->filepath);
 
 	Fred_mission_save save;
 	save.set_save_format(format);
@@ -756,6 +762,9 @@ static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 	save.set_fred_callsigns(Fred_callsigns);
 
 	if (save.save_mission_file(req->filepath) == 0) {
+		CString title;
+		title.Format("%s%s", Mission_filename, ext);
+		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
