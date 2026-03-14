@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "mcpserver.h"
+#include "mcp_reference_tools.h"
 #include "mongoose.h"
 
 #include <jansson.h>
@@ -167,13 +168,16 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_array_append_new(tools, t);
 	}
 
+	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
+	mcp_register_reference_tools(tools);
+
 	json_object_set_new(result, "tools", tools);
 
 	return result;
 }
 
 // Build an MCP tool result with a text content item
-static json_t *make_tool_result(const char *text, bool is_error = false)
+json_t *make_tool_result(const char *text, bool is_error)
 {
 	json_t *result = json_object();
 	json_t *content = json_array();
@@ -250,6 +254,12 @@ static json_t *handle_tools_call(json_t *params)
 
 		return execute_on_main_thread(tool, filepath);
 	}
+
+	// Try reference/discovery tools
+	json_t *arguments = json_object_get(params, "arguments");
+	json_t *ref_result = mcp_handle_reference_tool(tool_name, arguments);
+	if (ref_result)
+		return ref_result;
 
 	return make_tool_result("Unknown tool", true);
 }
