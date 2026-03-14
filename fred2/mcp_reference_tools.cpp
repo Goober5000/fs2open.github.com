@@ -215,6 +215,24 @@ static const char *weapon_category_str(const weapon_info &wip)
 	return "primary";
 }
 
+static const char *subsystem_type_str(int type)
+{
+	switch (type) {
+		case SUBSYSTEM_ENGINE:        return "engine";
+		case SUBSYSTEM_TURRET:        return "turret";
+		case SUBSYSTEM_RADAR:         return "radar";
+		case SUBSYSTEM_NAVIGATION:    return "navigation";
+		case SUBSYSTEM_COMMUNICATION: return "communication";
+		case SUBSYSTEM_WEAPONS:       return "weapons";
+		case SUBSYSTEM_SENSORS:       return "sensors";
+		case SUBSYSTEM_SOLAR:         return "solar";
+		case SUBSYSTEM_GAS_COLLECT:   return "gas_collect";
+		case SUBSYSTEM_ACTIVATION:    return "activation";
+		case SUBSYSTEM_UNKNOWN:       return "unknown";
+		default: return "unknown";
+	}
+}
+
 // ---------------------------------------------------------------------------
 // Tool schema registration
 // ---------------------------------------------------------------------------
@@ -576,7 +594,54 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	{
 		json_t *subsys = json_array();
 		for (int s = 0; s < sip.n_subsystems; s++) {
-			json_array_append_new(subsys, json_string(sip.subsystems[s].name));
+			const auto &ss = sip.subsystems[s];
+			json_t *ss_obj = json_object();
+
+			json_object_set_new(ss_obj, "name", json_string(ss.name));
+			json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
+			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
+
+			// Turret-specific info
+			if (ss.type == SUBSYSTEM_TURRET) {
+				json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
+				json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
+
+				// Convert FOV from dot-product to degrees for readability
+				if (ss.turret_fov > -1.0f && ss.turret_fov < 1.0f) {
+					float fov_deg = acosf(ss.turret_fov) * (180.0f / PI);
+					json_object_set_new(ss_obj, "turret_fov_degrees", json_real(fov_deg));
+				}
+
+				// Turret primary weapons
+				json_t *t_pri = json_array();
+				for (int b = 0; b < MAX_SHIP_PRIMARY_BANKS; b++) {
+					if (ss.primary_banks[b] >= 0 && ss.primary_banks[b] < weapon_info_size())
+						json_array_append_new(t_pri, json_string(Weapon_info[ss.primary_banks[b]].name));
+				}
+				if (json_array_size(t_pri) > 0)
+					json_object_set_new(ss_obj, "primary_weapons", t_pri);
+				else
+					json_decref(t_pri);
+
+				// Turret secondary weapons
+				json_t *t_sec = json_array();
+				for (int b = 0; b < MAX_SHIP_SECONDARY_BANKS; b++) {
+					if (ss.secondary_banks[b] >= 0 && ss.secondary_banks[b] < weapon_info_size())
+						json_array_append_new(t_sec, json_string(Weapon_info[ss.secondary_banks[b]].name));
+				}
+				if (json_array_size(t_sec) > 0)
+					json_object_set_new(ss_obj, "secondary_weapons", t_sec);
+				else
+					json_decref(t_sec);
+			}
+
+			// AWACS info
+			if (ss.awacs_intensity > 0.0f) {
+				json_object_set_new(ss_obj, "awacs_intensity", json_real(ss.awacs_intensity));
+				json_object_set_new(ss_obj, "awacs_radius", json_real(ss.awacs_radius));
+			}
+
+			json_array_append_new(subsys, ss_obj);
 		}
 		json_object_set_new(obj, "subsystems", subsys);
 	}
