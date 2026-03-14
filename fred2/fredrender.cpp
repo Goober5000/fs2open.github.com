@@ -1368,7 +1368,7 @@ void orbit_camera_apply()
 
 void orbit_camera_rotate(int dx, int dy)
 {
-	float rot_scale = physics_rot / 30.0f;
+	float rot_scale = physics_rot / 300.0f;
 	Orbit_theta += dx / 100.0f * rot_scale;
 	Orbit_phi += dy / 100.0f * rot_scale;
 
@@ -1379,7 +1379,7 @@ void orbit_camera_rotate(int dx, int dy)
 
 void orbit_camera_pan(int dx, int dy)
 {
-	float pan_scale = Orbit_distance * 0.002f * (physics_speed / 3.0f);
+	float pan_scale = Orbit_distance * 0.002f * (physics_speed / 30.0f);
 
 	vec3d pan_delta;
 	vm_vec_copy_scale(&pan_delta, &view_orient.vec.rvec, -(float)dx * pan_scale);
@@ -1392,7 +1392,7 @@ void orbit_camera_pan(int dx, int dy)
 
 void orbit_camera_zoom(float delta)
 {
-	Orbit_distance *= 1.0f + delta * (physics_speed / 3.0f);
+	Orbit_distance *= 1.0f + delta * (physics_speed / 30.0f);
 
 	CLAMP(Orbit_distance, 1.0f, 10000000.0f);
 
