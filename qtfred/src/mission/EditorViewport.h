@@ -84,6 +84,14 @@ class EditorViewport {
 
 	void move_mouse(int btn, int mdx, int mdy);
 
+	// Orbit camera
+	vec3d orbit_camera_get_pivot();
+	void orbit_camera_init_from_current_view(const vec3d *pivot);
+	void orbit_camera_apply();
+	void orbit_camera_rotate(int dx, int dy);
+	void orbit_camera_pan(int dx, int dy);
+	void orbit_camera_zoom(float delta);
+
 	int object_check_collision(object* objp, vec3d* p0, vec3d* p1, vec3d* hitpos);
 
 	int select_object(int cx, int cy);
@@ -130,6 +138,13 @@ class EditorViewport {
 
 	int physics_speed = 1;
 	int physics_rot = 25;
+
+	// Orbit camera state
+	vec3d Orbit_pivot = vmd_zero_vector;
+	float Orbit_distance = 200.0f;
+	float Orbit_phi = 1.24f;
+	float Orbit_theta = 2.25f;
+	bool Orbit_active = false;
 
 	vec3d Constraint;
 	vec3d Anticonstraint;

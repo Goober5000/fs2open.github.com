@@ -1,6 +1,8 @@
 //
 //
 
+#include <algorithm>
+#include <cmath>
 #include <globalincs/linklist.h>
 #include <object/object.h>
 #include <render/3d.h>
@@ -379,7 +381,121 @@ void EditorViewport::process_controls(vec3d* pos, matrix* orient, float frametim
 			vm_transpose(orient);
 		}
 	}
+
+	// Invalidate orbit camera state so it re-initializes on next mouse drag
+	Orbit_active = false;
 }
+
+// ---------- Orbit camera functions ----------
+
+vec3d EditorViewport::orbit_camera_get_pivot()
+{
+	vec3d pivot;
+
+	if (query_valid_object(editor->currentObject)) {
+		pivot = Objects[editor->currentObject].pos;
+	} else if (!The_grid) {
+		pivot = ZERO_VECTOR;
+	} else {
+		// Intersect camera forward ray with the grid plane
+		vec3d *grid_normal = &The_grid->gmatrix.vec.uvec;
+		float denom = vm_vec_dot(grid_normal, &view_orient.vec.fvec);
+
+		if (fl_abs(denom) > 0.0001f) {
+			float t = -(vm_vec_dot(grid_normal, &view_pos) + The_grid->planeD) / denom;
+			if (t > 0.0f) {
+				vm_vec_scale_add(&pivot, &view_pos, &view_orient.vec.fvec, t);
+			} else {
+				pivot = The_grid->center;
+			}
+		} else {
+			pivot = The_grid->center;
+		}
+	}
+	return pivot;
+}
+
+void EditorViewport::orbit_camera_init_from_current_view(const vec3d *pivot)
+{
+	vec3d offset;
+	vm_vec_sub(&offset, &view_pos, pivot);
+
+	Orbit_distance = vm_vec_mag(&offset);
+	if (Orbit_distance < 1.0f)
+		Orbit_distance = 100.0f;
+
+	const matrix &grid_mat = The_grid ? The_grid->gmatrix : vmd_identity_matrix;
+	vec3d local_offset;
+	vm_vec_rotate(&local_offset, &offset, &grid_mat);
+
+	Orbit_phi = acosf(std::clamp(local_offset.xyz.y / Orbit_distance, -1.0f, 1.0f));
+	Orbit_theta = atan2f(local_offset.xyz.z, local_offset.xyz.x);
+	Orbit_pivot = *pivot;
+	Orbit_active = true;
+}
+
+void EditorViewport::orbit_camera_apply()
+{
+	float sp = sinf(Orbit_phi);
+
+	vec3d local_pos;
+	local_pos.xyz.x = sp * cosf(Orbit_theta);
+	local_pos.xyz.y = cosf(Orbit_phi);
+	local_pos.xyz.z = sp * sinf(Orbit_theta);
+
+	const matrix &grid_mat = The_grid ? The_grid->gmatrix : vmd_identity_matrix;
+	vec3d world_offset;
+	vm_vec_unrotate(&world_offset, &local_pos, &grid_mat);
+
+	vm_vec_scale(&world_offset, Orbit_distance);
+	vm_vec_add(&view_pos, &Orbit_pivot, &world_offset);
+
+	vec3d look_dir;
+	vm_vec_sub(&look_dir, &Orbit_pivot, &view_pos);
+	if (vm_vec_mag(&look_dir) > 0.001f) {
+		vec3d grid_up = grid_mat.vec.uvec;
+		vm_vector_2_matrix(&view_orient, &look_dir, &grid_up, nullptr);
+	}
+
+	needsUpdate();
+}
+
+void EditorViewport::orbit_camera_rotate(int dx, int dy)
+{
+	float rot_scale = physics_rot / 300.0f;
+	Orbit_theta += dx / 100.0f * rot_scale;
+	Orbit_phi += dy / 100.0f * rot_scale;
+
+	CLAMP(Orbit_phi, 0.01f, PI - 0.01f);
+
+	orbit_camera_apply();
+}
+
+void EditorViewport::orbit_camera_pan(int dx, int dy)
+{
+	float speed_factor = 1.0f + (physics_speed - 1) / 499.0f * 9.0f;
+	float pan_scale = Orbit_distance * 0.002f * speed_factor;
+
+	vec3d pan_delta;
+	vm_vec_copy_scale(&pan_delta, &view_orient.vec.rvec, -(float)dx * pan_scale);
+	vm_vec_scale_add2(&pan_delta, &view_orient.vec.uvec, (float)dy * pan_scale);
+
+	vm_vec_add2(&Orbit_pivot, &pan_delta);
+
+	orbit_camera_apply();
+}
+
+void EditorViewport::orbit_camera_zoom(float delta)
+{
+	float zoom_speed = 1.0f + (physics_speed - 1) / 499.0f * 4.0f;
+	Orbit_distance *= powf(2.0f, delta * zoom_speed);
+
+	CLAMP(Orbit_distance, 1.0f, 10000000.0f);
+
+	orbit_camera_apply();
+}
+
+// ---------- End orbit camera functions ----------
 
 /**
 * @brief Increments mission time

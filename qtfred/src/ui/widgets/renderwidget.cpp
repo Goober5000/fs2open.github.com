@@ -61,21 +61,15 @@ bool RenderWindow::event(QEvent* evt) {
 	switch (evt->type()) {
 	case QEvent::MouseButtonRelease:
 	case QEvent::MouseButtonPress: {
-		auto mouseEvent = static_cast<QMouseEvent*>(evt);
-
-		if (mouseEvent->button() == Qt::RightButton) {
-			// Right button events may cause a context menu so we send that to our parent which will handle that
-			qGuiApp->sendEvent(parent(), evt);
-		} else {
-			// The rest will be handled by the render widget
-			qGuiApp->sendEvent(_renderWidget, evt);
-		}
+		// All button events go to the render widget for unified handling
+		qGuiApp->sendEvent(_renderWidget, evt);
 		return true;
 	}
 	case QEvent::KeyPress:
 	case QEvent::KeyRelease:
 	case QEvent::MouseButtonDblClick:
-	case QEvent::MouseMove: {
+	case QEvent::MouseMove:
+	case QEvent::Wheel: {
 		// Redirect all the events to the render widget since we want to handle them in in the QtWidget related code
 		qGuiApp->sendEvent(_renderWidget, evt);
 		return true;
@@ -168,6 +162,12 @@ void RenderWidget::setSurfaceFormat(const QSurfaceFormat& fmt) {
 	_window->initializeGL(fmt);
 }
 void RenderWidget::contextMenuEvent(QContextMenuEvent* event) {
+	// Suppress context menu if right-button was used for orbit dragging
+	if (_rbuttonMoved) {
+		event->accept();
+		return;
+	}
+
 	event->accept();
 
 	auto parentView = static_cast<FredView*>(parentWidget());
@@ -210,8 +210,32 @@ void RenderWidget::mouseDoubleClickEvent(QMouseEvent* event) {
 	event->ignore();
 }
 void RenderWidget::mousePressEvent(QMouseEvent* event) {
+	// Orbit camera: middle button
+	if (event->button() == Qt::MiddleButton) {
+		if (_viewport->viewpoint == 0 && _viewport->Control_mode == 0) {
+			vec3d pivot = _viewport->orbit_camera_get_pivot();
+			_viewport->orbit_camera_init_from_current_view(&pivot);
+			_orbitDragging = true;
+			_orbitLastMouse = event->pos();
+		}
+		return;
+	}
+
+	// Orbit camera: right button
+	if (event->button() == Qt::RightButton) {
+		_rbuttonDown = true;
+		_rbuttonMoved = false;
+		_rbuttonDownPoint = event->pos();
+		_orbitLastMouse = event->pos();
+
+		if (_viewport->viewpoint == 0 && _viewport->Control_mode == 0) {
+			vec3d pivot = _viewport->orbit_camera_get_pivot();
+			_viewport->orbit_camera_init_from_current_view(&pivot);
+		}
+		return;
+	}
+
 	if (event->button() != Qt::LeftButton) {
-		// Ignore everything that has nothing to to with the left button
 		return QWidget::mousePressEvent(event);
 	}
 
@@ -303,9 +327,57 @@ Briefing_dialog->icon_select(Objects[cur_object_index].instance);
 	}
 */
 }
+void RenderWidget::handleOrbitDrag(QPoint point, Qt::KeyboardModifiers modifiers)
+{
+	int dx = point.x() - _orbitLastMouse.x();
+	int dy = point.y() - _orbitLastMouse.y();
+	_orbitLastMouse = point;
+
+	if (modifiers & Qt::ShiftModifier)
+		_viewport->orbit_camera_pan(dx, dy);
+	else
+		_viewport->orbit_camera_rotate(dx, dy);
+}
+
+void RenderWidget::wheelEvent(QWheelEvent* event)
+{
+	if (_viewport->viewpoint != 0 || _viewport->Control_mode != 0) {
+		QWidget::wheelEvent(event);
+		return;
+	}
+
+	if (!_viewport->Orbit_active) {
+		vec3d pivot = _viewport->orbit_camera_get_pivot();
+		_viewport->orbit_camera_init_from_current_view(&pivot);
+	}
+
+	_viewport->orbit_camera_zoom(event->angleDelta().y() / -200.0f);
+	event->accept();
+}
+
 void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 	auto mouseDX = event->pos() - _lastMouse;
 	_lastMouse = event->pos();
+
+	// Orbit camera: middle button drag
+	if (_orbitDragging && event->buttons().testFlag(Qt::MiddleButton)) {
+		handleOrbitDrag(event->pos(), event->modifiers());
+		return;
+	}
+
+	// Orbit camera: right button drag
+	if (_rbuttonDown && event->buttons().testFlag(Qt::RightButton)
+		&& _viewport->viewpoint == 0 && _viewport->Control_mode == 0) {
+		if (!_rbuttonMoved) {
+			if (abs(event->pos().x() - _rbuttonDownPoint.x()) > 2
+				|| abs(event->pos().y() - _rbuttonDownPoint.y()) > 2)
+				_rbuttonMoved = true;
+		}
+		if (_rbuttonMoved) {
+			handleOrbitDrag(event->pos(), event->modifiers());
+			return;
+		}
+	}
 
 // Update marking box
 	_markingBox.x2 = event->x();
@@ -352,8 +424,26 @@ void RenderWidget::mouseMoveEvent(QMouseEvent* event) {
 	}
 }
 void RenderWidget::mouseReleaseEvent(QMouseEvent* event) {
+	if (event->button() == Qt::MiddleButton) {
+		_orbitDragging = false;
+		return;
+	}
+
+	if (event->button() == Qt::RightButton) {
+		bool wasDragging = _rbuttonMoved;
+		_rbuttonDown = false;
+		_rbuttonMoved = false;
+
+		if (!wasDragging) {
+			// No drag occurred — show context menu
+			auto parentView = static_cast<FredView*>(parentWidget());
+			Q_ASSERT(parentView);
+			parentView->showContextMenu(event->globalPos());
+		}
+		return;
+	}
+
 	if (event->button() != Qt::LeftButton) {
-		// Ignore everything that has nothing to to with the left button
 		return QWidget::mousePressEvent(event);
 	}
 
