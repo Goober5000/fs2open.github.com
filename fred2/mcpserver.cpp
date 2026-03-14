@@ -6,6 +6,7 @@
 #include <cstring>
 
 #include "mission/missionparse.h"
+#include "mainfrm.h"
 
 static struct mg_context *mcp_ctx = nullptr;
 
@@ -95,9 +96,112 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	json_object_set_new(tool, "inputSchema", schema);
 
 	json_array_append_new(tools, tool);
+
+	// Tool: load_mission
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("load_mission"));
+		json_object_set_new(t, "description",
+			json_string("Load a mission file into FRED2"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_t *props = json_object();
+		json_t *fp = json_object();
+		json_object_set_new(fp, "type", json_string("string"));
+		json_object_set_new(fp, "description", json_string("Absolute path to the mission file (.fs2 or .json)"));
+		json_object_set_new(props, "filepath", fp);
+		json_object_set_new(s, "properties", props);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("filepath"));
+		json_object_set_new(s, "required", req);
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
+	// Tool: save_mission
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("save_mission"));
+		json_object_set_new(t, "description",
+			json_string("Save the current mission in standard (.fs2) format"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_t *props = json_object();
+		json_t *fp = json_object();
+		json_object_set_new(fp, "type", json_string("string"));
+		json_object_set_new(fp, "description", json_string("Absolute path to save the mission file to"));
+		json_object_set_new(props, "filepath", fp);
+		json_object_set_new(s, "properties", props);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("filepath"));
+		json_object_set_new(s, "required", req);
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
+	// Tool: save_mission_json
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("save_mission_json"));
+		json_object_set_new(t, "description",
+			json_string("Save the current mission in JSON format"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_t *props = json_object();
+		json_t *fp = json_object();
+		json_object_set_new(fp, "type", json_string("string"));
+		json_object_set_new(fp, "description", json_string("Absolute path to save the JSON mission file to"));
+		json_object_set_new(props, "filepath", fp);
+		json_object_set_new(s, "properties", props);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("filepath"));
+		json_object_set_new(s, "required", req);
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
 	json_object_set_new(result, "tools", tools);
 
 	return result;
+}
+
+// Build an MCP tool result with a text content item
+static json_t *make_tool_result(const char *text, bool is_error = false)
+{
+	json_t *result = json_object();
+	json_t *content = json_array();
+	json_t *item = json_object();
+	json_object_set_new(item, "type", json_string("text"));
+	json_object_set_new(item, "text", json_string(text));
+	json_array_append_new(content, item);
+	json_object_set_new(result, "content", content);
+	if (is_error)
+		json_object_set_new(result, "isError", json_true());
+	return result;
+}
+
+// Marshal a tool call to the main MFC thread via SendMessage and return the result
+static json_t *execute_on_main_thread(McpToolId tool, const char *filepath)
+{
+	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
+		return make_tool_result("FRED2 main window is not available", true);
+
+	McpToolRequest req = {};
+	req.tool = tool;
+	strncpy(req.filepath, filepath, sizeof(req.filepath) - 1);
+	req.filepath[sizeof(req.filepath) - 1] = '\0';
+	req.success = false;
+	req.result_message[0] = '\0';
+
+	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
+
+	return make_tool_result(req.result_message, !req.success);
 }
 
 static json_t *handle_tools_call(json_t *params)
@@ -111,31 +215,36 @@ static json_t *handle_tools_call(json_t *params)
 		return nullptr;  // caller will send error
 
 	if (strcmp(tool_name, "get_server_info") == 0) {
-		// Build info string
 		char info[256];
 		const char *mission = (Mission_filename[0] != '\0') ? Mission_filename : "(none)";
 		snprintf(info, sizeof(info), "FRED2 MCP Server is running. Mission: %s", mission);
-
-		json_t *result = json_object();
-		json_t *content = json_array();
-		json_t *item = json_object();
-		json_object_set_new(item, "type", json_string("text"));
-		json_object_set_new(item, "text", json_string(info));
-		json_array_append_new(content, item);
-		json_object_set_new(result, "content", content);
-		return result;
+		return make_tool_result(info);
 	}
 
-	// Unknown tool
-	json_t *result = json_object();
-	json_t *content = json_array();
-	json_t *item = json_object();
-	json_object_set_new(item, "type", json_string("text"));
-	json_object_set_new(item, "text", json_string("Unknown tool"));
-	json_array_append_new(content, item);
-	json_object_set_new(result, "content", content);
-	json_object_set_new(result, "isError", json_true());
-	return result;
+	if (strcmp(tool_name, "load_mission") == 0 ||
+		strcmp(tool_name, "save_mission") == 0 ||
+		strcmp(tool_name, "save_mission_json") == 0)
+	{
+		// Extract filepath from arguments
+		json_t *arguments = json_object_get(params, "arguments");
+		json_t *fp_val = arguments ? json_object_get(arguments, "filepath") : nullptr;
+		const char *filepath = (fp_val && json_is_string(fp_val)) ? json_string_value(fp_val) : nullptr;
+
+		if (!filepath || filepath[0] == '\0')
+			return make_tool_result("Missing required parameter: filepath", true);
+
+		McpToolId tool;
+		if (strcmp(tool_name, "load_mission") == 0)
+			tool = McpToolId::LOAD_MISSION;
+		else if (strcmp(tool_name, "save_mission") == 0)
+			tool = McpToolId::SAVE_MISSION;
+		else
+			tool = McpToolId::SAVE_MISSION_JSON;
+
+		return execute_on_main_thread(tool, filepath);
+	}
+
+	return make_tool_result("Unknown tool", true);
 }
 
 // ---------------------------------------------------------------------------

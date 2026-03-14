@@ -235,6 +235,8 @@ protected:
 	 */
 	LRESULT OnMenuPopupTest(WPARAM wParam, LPARAM lParam);
 
+	afx_msg LRESULT OnMcpToolCall(WPARAM wParam, LPARAM lParam);
+
 	DECLARE_MESSAGE_MAP()
 };
 
