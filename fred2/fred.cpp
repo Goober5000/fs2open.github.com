@@ -17,6 +17,7 @@
 #include "FREDView.h"
 #include "MainFrm.h"
 #include "Management.h"
+#include "mcpserver.h"
 
 #include "CampaignEditorDlg.h"
 #include "CampaignTreeView.h"
@@ -196,6 +197,7 @@ CFREDApp::~CFREDApp() {
 }
 
 int CFREDApp::ExitInstance() {
+	mcp_server_stop();
 	return CWinApp::ExitInstance();
 }
 

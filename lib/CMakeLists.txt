@@ -18,10 +18,7 @@ endif()
 include(SDL2.cmake)
 
 ADD_SUBDIRECTORY(jansson)
-# These are only required for the web-ui which is non-Windows
-IF(UNIX)
-	ADD_SUBDIRECTORY(mongoose)
-ENDIF(UNIX)
+ADD_SUBDIRECTORY(mongoose)
 
 add_subdirectory(md5)
 
