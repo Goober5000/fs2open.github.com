@@ -24,6 +24,12 @@
 #include "iff_defs/iff_defs.h"
 #include "prop/prop.h"
 
+#include "mcpserver.h"
+#include "management.h"
+#include "fredrender.h"
+#include "mission/missionparse.h"
+#include "missioneditor/missionsave.h"
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
@@ -33,6 +39,7 @@ IMPLEMENT_DYNCREATE(CMainFrame, CFrameWnd)
 
 BEGIN_MESSAGE_MAP(CMainFrame, CFrameWnd)
 	ON_MESSAGE(WM_MENU_POPUP_EDIT, OnMenuPopupTest)
+	ON_MESSAGE(WM_MCP_TOOL_CALL, OnMcpToolCall)
 	ON_CBN_SELCHANGE(ID_NEW_SHIP_TYPE, OnNewShipTypeChange)
 
 	//{{AFX_MSG_MAP(CMainFrame)
@@ -686,4 +693,101 @@ bool url_launch(const char *url)
 	}
 
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// MCP tool call handler — runs on the main MFC thread
+// ---------------------------------------------------------------------------
+
+static void set_mission_filename_from_path(const char *pathname)
+{
+	auto sep_ch = strrchr(pathname, '\\');
+	if (!sep_ch)
+		sep_ch = strrchr(pathname, '/');
+	auto filename = (sep_ch != nullptr) ? (sep_ch + 1) : pathname;
+	auto len = strlen(filename);
+
+	// drop extension
+	auto ext_ch = strrchr(filename, '.');
+	if (ext_ch != nullptr)
+		len = ext_ch - filename;
+	if (len >= 80)
+		len = 79;
+	strncpy(Mission_filename, filename, len);
+	Mission_filename[len] = 0;
+}
+
+static void mcp_handle_load_mission(McpToolRequest *req)
+{
+	clean_up_selections();
+	set_mission_filename_from_path(req->filepath);
+
+	if (FREDDoc_ptr->load_mission(req->filepath)) {
+		FREDDoc_ptr->autosave("nothing");
+		Undo_count = 0;
+		req->success = true;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Mission loaded successfully: %s", Mission_filename);
+	} else {
+		Mission_filename[0] = '\0';
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to load mission: %s", req->filepath);
+	}
+}
+
+static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
+{
+	if (Mission_filename[0] == '\0') {
+		req->success = false;
+		strncpy(req->result_message, "No mission is currently loaded", sizeof(req->result_message) - 1);
+		return;
+	}
+
+	set_mission_filename_from_path(req->filepath);
+
+	Fred_mission_save save;
+	save.set_save_format(format);
+	save.set_always_save_display_names(Always_save_display_names);
+	save.set_view_pos(view_pos);
+	save.set_view_orient(view_orient);
+	save.set_fred_alt_names(Fred_alt_names);
+	save.set_fred_callsigns(Fred_callsigns);
+
+	if (save.save_mission_file(req->filepath) == 0) {
+		FREDDoc_ptr->SetModifiedFlag(FALSE);
+		req->success = true;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Mission saved successfully: %s", req->filepath);
+	} else {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to save mission: %s", req->filepath);
+	}
+}
+
+LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
+{
+	auto *req = reinterpret_cast<McpToolRequest*>(lParam);
+
+	switch (req->tool) {
+	case McpToolId::LOAD_MISSION:
+		mcp_handle_load_mission(req);
+		break;
+
+	case McpToolId::SAVE_MISSION:
+		mcp_handle_save_mission(req, MissionFormat::STANDARD);
+		break;
+
+	case McpToolId::SAVE_MISSION_JSON:
+		mcp_handle_save_mission(req, MissionFormat::JSON);
+		break;
+
+	default:
+		req->success = false;
+		strncpy(req->result_message, "Unknown MCP tool", sizeof(req->result_message) - 1);
+		break;
+	}
+
+	return 0;
 }
