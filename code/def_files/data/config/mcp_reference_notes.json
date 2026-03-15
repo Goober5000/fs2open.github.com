@@ -17,7 +17,7 @@
   {
     "topic": "sexp_overview",
     "title": "SEXP (S-Expression) System Overview",
-    "text": "SEXPs are the scripting language used in FreeSpace mission events. They use a Lisp-like S-expression syntax where each expression is an operator followed by its arguments in parentheses.\n\nSEXPs are organized into categories and subcategories. Use `list_sexp_categories` to see all categories, their subcategories, and operator counts. Use `list_sexp_operators` to list operators, optionally filtered by category, subcategory, or name. Use `get_sexp_operator` to get full details of a specific operator. Use `get_sexp_argument_type` and `get_sexp_return_type` to understand what values each argument type accepts.\n\nEvents use SEXPs as triggers and actions. A typical event has a conditional SEXP that, when true, fires one or more action SEXPs."
+    "text": "**Syntax**: SEXPs are the scripting language used in FreeSpace mission events. They use a Lisp-like S-expression syntax where each expression is an operator followed by its arguments in parentheses.\n\n**Discovery tools**: SEXPs are organized into categories and subcategories. Use `list_sexp_categories` to see all categories, their subcategories, and operator counts. Use `list_sexp_operators` to list operators, optionally filtered by category, subcategory, or name. Use `get_sexp_operator` to get full details of a specific operator. Use `get_sexp_argument_type` and `get_sexp_return_type` to understand what values each argument type accepts.\n\n**Data types**: Although strings (and data derived from strings, such as ship names and weapon names) can be accepted as arguments to SEXPs, they cannot be returned from SEXPs. SEXP return types are limited to boolean, number, and void (action operators). Furthermore, the only numbers that can be represented in the SEXP system — whether as arguments or return values — are integers. If a mission needs to work with floating-point values, this must be done in a Lua script.\n\n**Events**: Events use SEXPs as triggers and actions. A typical event has a conditional SEXP that, when true, fires one or more action SEXPs."
   },
   {
     "topic": "mission_structure",
@@ -33,6 +33,11 @@
     "topic": "subsystems",
     "title": "Ship Subsystems",
     "text": "Subsystems are targetable components of a ship, each with their own hitpoints. Common subsystem types include:\n\n- **Engines**: Disabling stops the ship from moving\n- **Weapons**: Disabling prevents the ship from firing\n- **Sensors/Communication**: Affects targeting and messaging\n- **Navigation**: Affects autopilot and warp capability\n- **Turrets**: Individual gun emplacements on larger ships\n- **Fighter bays**: Launch and recovery bays for carried craft\n\nSubsystems can be individually targeted, damaged, disabled, and repaired. Many SEXPs reference subsystems by name."
+  },
+  {
+    "topic": "scripts",
+    "title": "Lua Scripts and Dynamic SEXPs",
+    "text": "A mod can contain scripts written in Lua that provide additional functionality not coded into the game engine.\n\n**Invocation**: Scripts can be invoked via game hooks (events fired by the engine at specific points, such as on game start, on ship death, on frame render, etc.) or evaluated by the script-eval SEXPs.\n\n**Dynamic SEXPs**: It is also possible to call scripts from dynamic SEXPs. Dynamic SEXPs are provided by the mod rather than the game engine, by specifying SEXP operator metadata along with a script function. In terms of functionality and mission integration, they work just like built-in SEXPs."
   },
   {
     "topic": "coordinate_system",
