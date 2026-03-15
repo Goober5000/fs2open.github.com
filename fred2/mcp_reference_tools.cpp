@@ -1095,8 +1095,7 @@ static const reference_note Reference_notes[] = {
 		"- **Briefing**: Pre-mission briefing stages with text and camera positions\n"
 		"- **Debriefing**: Post-mission stages triggered by conditions\n"
 		"- **Reinforcements**: Ships/wings that can be called in mid-mission\n\n"
-		"FRED2 is the mission editor. Missions can be saved in .fs2 (standard) "
-		"or .json format."
+		"FRED2 is the mission editor. Missions are saved with the .fs2 extension."
 	},
 	{
 		"iff",
