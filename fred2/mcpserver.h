@@ -3,6 +3,7 @@
 
 #include "globalincs/pstypes.h"
 #include <jansson.h>
+#include <atomic>
 
 // Custom window message for marshaling MCP tool calls to the main MFC thread
 #define WM_MCP_TOOL_CALL (WM_USER + 100)
@@ -26,6 +27,10 @@ struct McpToolRequest {
 void mcp_server_start();
 void mcp_server_stop();
 bool mcp_server_is_running();
+
+// Flag indicating that FRED2 is fully initialized and MCP tools may run.
+// Set by fred_init() after all startup is complete.
+extern std::atomic<bool> mcp_fred_ready;
 
 // Build an MCP tool result with a text content item.
 // Shared with mcp_reference_tools.cpp.
