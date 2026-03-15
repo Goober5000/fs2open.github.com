@@ -339,7 +339,7 @@ void mcp_register_reference_tools(json_t *tools)
 	// list_sexp_operators
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "category", "Filter by category name (e.g. \"Objective\", \"Change\", \"Status\", \"Conditional\")");
+		add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\")");
 		add_string_prop(props, "search", "Substring search against operator names");
 		register_tool(tools, "list_sexp_operators",
 			"List SEXP (S-expression) operators used in mission event logic. "
