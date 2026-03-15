@@ -337,14 +337,21 @@ void mcp_register_reference_tools(json_t *tools)
 			props, req);
 	}
 
+	// list_sexp_categories
+	register_tool(tools, "list_sexp_categories",
+		"List all SEXP operator categories and their subcategories. "
+		"Use this to discover the category hierarchy before listing operators.",
+		json_object());
+
 	// list_sexp_operators
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\")");
+		add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\"). Use list_sexp_categories to see valid names.");
+		add_string_prop(props, "subcategory", "Filter by subcategory name (requires category to also be specified)");
 		add_string_prop(props, "search", "Substring search against operator names");
 		register_tool(tools, "list_sexp_operators",
 			"List SEXP (S-expression) operators used in mission event logic. "
-			"Optionally filter by category and/or name substring.",
+			"Optionally filter by category, subcategory, and/or name substring.",
 			props);
 	}
 
@@ -901,18 +908,77 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
+static const char *get_category_description(int category_id)
+{
+	switch (category_id) {
+		case OP_CATEGORY_OBJECTIVE:    return "Conditions for mission goals (is-destroyed, is-departed, etc.)";
+		case OP_CATEGORY_TIME:         return "Time-related checks and delays";
+		case OP_CATEGORY_LOGICAL:      return "Boolean logic (and, or, not, etc.)";
+		case OP_CATEGORY_ARITHMETIC:   return "Math operations (+, -, *, /, etc.)";
+		case OP_CATEGORY_STATUS:       return "Query game state (shield strength, distance, etc.)";
+		case OP_CATEGORY_CHANGE:       return "Modify game state (set hull, change AI, etc.)";
+		case OP_CATEGORY_CONDITIONAL:  return "Control flow (when, if-then-else, etc.)";
+		case OP_CATEGORY_AI:           return "AI orders and goals";
+		case OP_CATEGORY_GOAL_EVENT:   return "Operators used inside event and goal definitions";
+		case OP_CATEGORY_TRAINING:     return "Training mission specific operators";
+		default:                       return nullptr;
+	}
+}
+
+static json_t *handle_list_sexp_categories()
+{
+	json_t *arr = json_array();
+
+	for (size_t m = 0; m < op_menu.size(); m++) {
+		json_t *cat = json_object();
+		json_object_set_new(cat, "name", json_string(op_menu[m].name.c_str()));
+
+		const char *desc = get_category_description(op_menu[m].id);
+		if (desc)
+			json_object_set_new(cat, "description", json_string(desc));
+
+		// Find subcategories belonging to this category
+		json_t *subcats = json_array();
+		for (size_t s = 0; s < op_submenu.size(); s++) {
+			if (category_of_subcategory(op_submenu[s].id) == op_menu[m].id)
+				json_array_append_new(subcats, json_string(op_submenu[s].name.c_str()));
+		}
+		json_object_set_new(cat, "subcategories", subcats);
+
+		// Count operators in this category
+		int count = 0;
+		for (size_t i = 0; i < Operators.size(); i++) {
+			if (get_category(Operators[i].value) == op_menu[m].id)
+				count++;
+		}
+		json_object_set_new(cat, "operator_count", json_integer(count));
+
+		json_array_append_new(arr, cat);
+	}
+
+	return make_json_tool_result(arr);
+}
+
 static json_t *handle_list_sexp_operators(json_t *arguments)
 {
 	const char *filter_category = nullptr;
+	const char *filter_subcategory = nullptr;
 	const char *filter_search = nullptr;
 	if (arguments) {
 		json_t *v = json_object_get(arguments, "category");
 		if (v && json_is_string(v))
 			filter_category = json_string_value(v);
+		v = json_object_get(arguments, "subcategory");
+		if (v && json_is_string(v))
+			filter_subcategory = json_string_value(v);
 		v = json_object_get(arguments, "search");
 		if (v && json_is_string(v))
 			filter_search = json_string_value(v);
 	}
+
+	// Subcategory requires category (names can appear in multiple categories)
+	if (filter_subcategory && !filter_category)
+		return make_tool_result("The subcategory filter requires category to also be specified.", true);
 
 	// Resolve category name to ID if filtering
 	int filter_category_id = -1;
@@ -924,7 +990,21 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 			}
 		}
 		if (filter_category_id < 0)
-			return make_tool_result("Category not found. Use list_sexp_operators without a category filter to see valid categories.", true);
+			return make_tool_result("Category not found. Use list_sexp_categories to see valid names.", true);
+	}
+
+	// Resolve subcategory name to ID if filtering
+	int filter_subcategory_id = -1;
+	if (filter_subcategory) {
+		for (size_t i = 0; i < op_submenu.size(); i++) {
+			if (stricmp(op_submenu[i].name.c_str(), filter_subcategory) == 0 &&
+				category_of_subcategory(op_submenu[i].id) == filter_category_id) {
+				filter_subcategory_id = op_submenu[i].id;
+				break;
+			}
+		}
+		if (filter_subcategory_id < 0)
+			return make_tool_result("Subcategory not found in this category. Use list_sexp_categories to see valid names.", true);
 	}
 
 	json_t *arr = json_array();
@@ -935,6 +1015,13 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 		if (filter_category_id >= 0) {
 			int cat = get_category(op.value);
 			if (cat != filter_category_id)
+				continue;
+		}
+
+		// Subcategory filter
+		if (filter_subcategory_id >= 0) {
+			int subcat = get_subcategory(op.value);
+			if (subcat != filter_subcategory_id)
 				continue;
 		}
 
@@ -1717,6 +1804,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_intel_entries();
 	if (strcmp(tool_name, "get_intel_entry") == 0)
 		return handle_get_intel_entry(arguments);
+	if (strcmp(tool_name, "list_sexp_categories") == 0)
+		return handle_list_sexp_categories();
 	if (strcmp(tool_name, "list_sexp_operators") == 0)
 		return handle_list_sexp_operators(arguments);
 	if (strcmp(tool_name, "get_sexp_operator") == 0)
