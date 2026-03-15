@@ -11,6 +11,7 @@
 #include "weapon/weapon.h"
 #include "species_defs/species_defs.h"
 #include "parse/sexp.h"
+#include "parse/sexp/sexp_lookup.h"
 #include "menuui/techmenu.h"
 #include "iff_defs/iff_defs.h"
 #include "cfile/cfile.h"
@@ -362,7 +363,7 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_sexp_operator",
-			"Get full details of a SEXP operator, including help text, argument types, return type, and category.",
+			"Get full details of a SEXP operator, including help text, argument types, return type, category, and whether it is a dynamic (mod-provided) SEXP.",
 			props, req);
 	}
 
@@ -1093,6 +1094,9 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 			}
 		}
 	}
+
+	// Dynamic SEXP flag
+	json_object_set_new(obj, "is_dynamic", json_boolean(sexp::get_dynamic_sexp(op.value) != nullptr));
 
 	// Return type
 	int ret = query_operator_return_type(op.value);
