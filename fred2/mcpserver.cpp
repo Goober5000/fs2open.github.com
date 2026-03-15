@@ -145,6 +145,21 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_array_append_new(tools, t);
 	}
 
+	// Tool: new_mission
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("new_mission"));
+		json_object_set_new(t, "description",
+			json_string("Create a new empty mission, replacing any currently loaded mission"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_object_set_new(s, "properties", json_object());
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
 
@@ -227,6 +242,10 @@ static json_t *handle_tools_call(json_t *params)
 			tool = McpToolId::SAVE_MISSION;
 
 		return execute_on_main_thread(tool, filepath);
+	}
+
+	if (strcmp(tool_name, "new_mission") == 0) {
+		return execute_on_main_thread(McpToolId::NEW_MISSION, "");
 	}
 
 	// Try reference/discovery tools
