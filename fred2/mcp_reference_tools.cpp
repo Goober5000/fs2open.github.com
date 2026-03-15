@@ -293,7 +293,8 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_ship_class",
-			"Get detailed stats for a specific ship class, including hull, shields, speed, weapons, and subsystems.",
+			"Get detailed stats for a specific ship class, including hull, shields, "
+			"speed, weapons, subsystems, and per-bank weapon restrictions.",
 			props, req);
 	}
 
@@ -616,31 +617,116 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	// Afterburner
 	json_object_set_new(obj, "afterburner_fuel_capacity", json_real(sip.afterburner_fuel_capacity));
 
-	// Weapons
-	json_object_set_new(obj, "num_primary_banks", json_integer(sip.num_primary_banks));
+	// Weapons — per-bank details
 	{
-		json_t *primaries = json_array();
+		json_t *banks = json_array();
 		for (int b = 0; b < sip.num_primary_banks; b++) {
+			json_t *bank_obj = json_object();
+			json_object_set_new(bank_obj, "index", json_integer(b));
+
 			int wi = sip.primary_bank_weapons[b];
 			if (wi >= 0 && wi < weapon_info_size())
-				json_array_append_new(primaries, json_string(Weapon_info[wi].name));
+				json_object_set_new(bank_obj, "default_weapon", json_string(Weapon_info[wi].name));
 			else
-				json_array_append_new(primaries, json_string("(none)"));
+				json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
+
+			json_object_set_new(bank_obj, "ammo_capacity", json_integer(sip.primary_bank_ammo_capacity[b]));
+
+			// Per-bank restrictions (primaries use indices 0..MAX_SHIP_PRIMARY_BANKS-1)
+			bool has_regular = (b < (int)sip.restricted_loadout_flag.size())
+				&& (sip.restricted_loadout_flag[b] & REGULAR_WEAPON);
+			json_object_set_new(bank_obj, "restricted", json_boolean(has_regular));
+			if (has_regular && b < (int)sip.allowed_bank_restricted_weapons.size()) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[b].weapon_and_flags) {
+					if ((wf.second & REGULAR_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, "allowed_weapons", rw);
+			}
+
+			bool has_dogfight = (b < (int)sip.restricted_loadout_flag.size())
+				&& (sip.restricted_loadout_flag[b] & DOGFIGHT_WEAPON);
+			json_object_set_new(bank_obj, "restricted_dogfight", json_boolean(has_dogfight));
+			if (has_dogfight && b < (int)sip.allowed_bank_restricted_weapons.size()) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[b].weapon_and_flags) {
+					if ((wf.second & DOGFIGHT_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, "allowed_dogfight_weapons", rw);
+			}
+
+			json_array_append_new(banks, bank_obj);
 		}
-		json_object_set_new(obj, "default_primary_weapons", primaries);
+		json_object_set_new(obj, "primary_banks", banks);
 	}
 
-	json_object_set_new(obj, "num_secondary_banks", json_integer(sip.num_secondary_banks));
 	{
-		json_t *secondaries = json_array();
+		json_t *banks = json_array();
 		for (int b = 0; b < sip.num_secondary_banks; b++) {
+			json_t *bank_obj = json_object();
+			json_object_set_new(bank_obj, "index", json_integer(b));
+
 			int wi = sip.secondary_bank_weapons[b];
 			if (wi >= 0 && wi < weapon_info_size())
-				json_array_append_new(secondaries, json_string(Weapon_info[wi].name));
+				json_object_set_new(bank_obj, "default_weapon", json_string(Weapon_info[wi].name));
 			else
-				json_array_append_new(secondaries, json_string("(none)"));
+				json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
+
+			json_object_set_new(bank_obj, "ammo_capacity", json_integer(sip.secondary_bank_ammo_capacity[b]));
+
+			// Per-bank restrictions (secondaries use indices MAX_SHIP_PRIMARY_BANKS + b)
+			int ri = MAX_SHIP_PRIMARY_BANKS + b;
+			bool has_regular = (ri < (int)sip.restricted_loadout_flag.size())
+				&& (sip.restricted_loadout_flag[ri] & REGULAR_WEAPON);
+			json_object_set_new(bank_obj, "restricted", json_boolean(has_regular));
+			if (has_regular && ri < (int)sip.allowed_bank_restricted_weapons.size()) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
+					if ((wf.second & REGULAR_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, "allowed_weapons", rw);
+			}
+
+			bool has_dogfight = (ri < (int)sip.restricted_loadout_flag.size())
+				&& (sip.restricted_loadout_flag[ri] & DOGFIGHT_WEAPON);
+			json_object_set_new(bank_obj, "restricted_dogfight", json_boolean(has_dogfight));
+			if (has_dogfight && ri < (int)sip.allowed_bank_restricted_weapons.size()) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
+					if ((wf.second & DOGFIGHT_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, "allowed_dogfight_weapons", rw);
+			}
+
+			json_array_append_new(banks, bank_obj);
 		}
-		json_object_set_new(obj, "default_secondary_weapons", secondaries);
+		json_object_set_new(obj, "secondary_banks", banks);
+	}
+
+	// Global allowed weapons
+	{
+		json_t *aw = json_array();
+		json_t *daw = json_array();
+		for (const auto &wf : sip.allowed_weapons.weapon_and_flags) {
+			if (wf.first >= 0 && wf.first < weapon_info_size()) {
+				if (wf.second & REGULAR_WEAPON)
+					json_array_append_new(aw, json_string(Weapon_info[wf.first].name));
+				if (wf.second & DOGFIGHT_WEAPON)
+					json_array_append_new(daw, json_string(Weapon_info[wf.first].name));
+			}
+		}
+		if (json_array_size(aw) > 0)
+			json_object_set_new(obj, "allowed_weapons", aw);
+		else
+			json_decref(aw);
+		if (json_array_size(daw) > 0)
+			json_object_set_new(obj, "allowed_dogfight_weapons", daw);
+		else
+			json_decref(daw);
 	}
 
 	// Countermeasures
