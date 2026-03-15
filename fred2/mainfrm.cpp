@@ -747,12 +747,6 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 
 static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 {
-	if (Mission_filename[0] == '\0') {
-		req->success = false;
-		strncpy(req->result_message, "No mission is currently loaded", sizeof(req->result_message) - 1);
-		return;
-	}
-
 	auto ext = set_mission_filename_from_path(req->filepath);
 
 	Fred_mission_save save;
@@ -808,10 +802,17 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				snprintf(req->result_message, sizeof(req->result_message),
 					"Ship class not found: %s", req->filepath);
 			} else {
-				model_load(&Ship_info[sip_idx], false);
-				req->success = true;
-				snprintf(req->result_message, sizeof(req->result_message),
-					"Model loaded for %s", req->filepath);
+				int model_num = model_load(&Ship_info[sip_idx], false);
+				if (model_num >= 0) {
+					Ship_info[sip_idx].model_num = model_num;
+					req->success = true;
+					snprintf(req->result_message, sizeof(req->result_message),
+						"Model loaded for %s", req->filepath);
+				} else {
+					req->success = false;
+					snprintf(req->result_message, sizeof(req->result_message),
+						"Failed to load model for %s", req->filepath);
+				}
 			}
 		}
 		break;
