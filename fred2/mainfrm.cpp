@@ -790,10 +790,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		mcp_handle_save_mission(req, MissionFormat::STANDARD);
 		break;
 
-	case McpToolId::SAVE_MISSION_JSON:
-		mcp_handle_save_mission(req, MissionFormat::JSON);
-		break;
-
 	case McpToolId::LOAD_SHIP_MODEL:
 		{
 			// req->filepath is repurposed to hold the ship class name
