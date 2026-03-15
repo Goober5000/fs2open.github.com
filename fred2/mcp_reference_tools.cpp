@@ -988,7 +988,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 		json_t *arg_types = json_array();
 		int last_type = OPF_NONE;
 		for (int a = 0; a < max_to_check; a++) {
-			int atype = query_operator_argument_type(op.value, a);
+			int atype = query_operator_argument_type(op_index, a);
 			if (atype == OPF_NONE && a >= op.min)
 				break;
 			json_array_append_new(arg_types, json_string(opf_to_string(atype)));
