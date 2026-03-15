@@ -1123,6 +1123,34 @@ static const reference_note Reference_notes[] = {
 		"repaired. Many SEXPs reference subsystems by name."
 	},
 
+	{
+		"coordinate_system",
+		"Coordinate System and 3D Conventions",
+		"FreeSpace uses a **left-handed coordinate system**:\n\n"
+		"- **+X** is right\n"
+		"- **+Y** is up\n"
+		"- **+Z** is forward\n\n"
+		"A ship's nose points along the +Z axis.\n\n"
+		"**Units**: All distances are in **meters**.\n\n"
+		"**Orientations** are represented as 3x3 rotation matrices consisting of "
+		"three vectors in this order:\n"
+		"- **rvec** (right vector)\n"
+		"- **uvec** (up vector)\n"
+		"- **fvec** (forward vector)\n\n"
+		"An identity orientation (facing forward, no rotation) is: "
+		"rvec=(1,0,0) uvec=(0,1,0) fvec=(0,0,1).\n\n"
+		"**Euler angles**: heading (h) = rotation around the Y axis, "
+		"bank (b) = rotation around the Z axis, "
+		"pitch (p) = rotation around the X axis. "
+		"Rotations are applied in the order heading, bank, pitch "
+		"(i.e. Y, Z, X). Strictly speaking these are Tait-Bryan angles, "
+		"not classic Euler angles.\n\n"
+		"**Model bounding boxes**: The `mins` and `maxs` fields from "
+		"`get_ship_model_details` define the bounding box of the ship model "
+		"in the model's local coordinate frame. For example, "
+		"`maxs.z - mins.z` gives the overall length of the ship."
+	},
+
 	// sentinel
 	{ nullptr, nullptr, nullptr }
 };
