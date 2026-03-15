@@ -56,7 +56,7 @@ static const char *opf_to_string(int opf)
 {
 	switch (opf) {
 		case OPF_NONE:                         return "none";
-		case OPF_NULL:                         return "void";
+		case OPF_NULL:                         return "null";
 		case OPF_BOOL:                         return "boolean";
 		case OPF_NUMBER:                       return "number";
 		case OPF_SHIP:                         return "ship";
@@ -180,7 +180,7 @@ static const char *opr_to_string(int opr)
 		case OPR_NONE:               return "none";
 		case OPR_NUMBER:             return "number";
 		case OPR_BOOL:               return "boolean";
-		case OPR_NULL:               return "void";
+		case OPR_NULL:               return "null";
 		case OPR_AI_GOAL:            return "ai_goal";
 		case OPR_POSITIVE:           return "positive_number";
 		case OPR_STRING:             return "string";
@@ -621,14 +621,24 @@ static json_t *handle_get_ship_class(json_t *arguments)
 			const auto &ss = sip.subsystems[s];
 			json_t *ss_obj = json_object();
 
-			json_object_set_new(ss_obj, "name", json_string(ss.name));
-			json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
+			// Use subobj_name (from table parsing); the 'name' field is only
+			// populated after the model is loaded.
+			json_object_set_new(ss_obj, "name", json_string(ss.subobj_name));
+			if (ss.type != SUBSYSTEM_NONE)
+				json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
 
-			// Turret-specific info
-			if (ss.type == SUBSYSTEM_TURRET) {
-				json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
-				json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
+			// Turret-specific info — check type if model is loaded, or
+			// check for weapons/turning rate from table data
+			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
+				(ss.primary_banks[0] >= 0) || (ss.secondary_banks[0] >= 0) ||
+				(ss.turret_turning_rate > 0.0f);
+
+			if (has_turret_data) {
+				if (ss.turret_num_firing_points > 0)
+					json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
+				if (ss.turret_turning_rate > 0.0f)
+					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
 
 				// Convert FOV from dot-product to degrees for readability
 				if (ss.turret_fov > -1.0f && ss.turret_fov < 1.0f) {
