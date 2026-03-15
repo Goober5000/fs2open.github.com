@@ -111,7 +111,7 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_t *props = json_object();
 		json_t *fp = json_object();
 		json_object_set_new(fp, "type", json_string("string"));
-		json_object_set_new(fp, "description", json_string("Absolute path to the mission file (.fs2 or .json)"));
+		json_object_set_new(fp, "description", json_string("Absolute path to the mission file (.fs2 extension)"));
 		json_object_set_new(props, "filepath", fp);
 		json_object_set_new(s, "properties", props);
 		json_t *req = json_array();
@@ -135,29 +135,6 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_t *fp = json_object();
 		json_object_set_new(fp, "type", json_string("string"));
 		json_object_set_new(fp, "description", json_string("Absolute path to save the mission file to"));
-		json_object_set_new(props, "filepath", fp);
-		json_object_set_new(s, "properties", props);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("filepath"));
-		json_object_set_new(s, "required", req);
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
-	}
-
-	// Tool: save_mission_json
-	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("save_mission_json"));
-		json_object_set_new(t, "description",
-			json_string("Save the current mission in JSON format"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
-		json_t *props = json_object();
-		json_t *fp = json_object();
-		json_object_set_new(fp, "type", json_string("string"));
-		json_object_set_new(fp, "description", json_string("Absolute path to save the JSON mission file to"));
 		json_object_set_new(props, "filepath", fp);
 		json_object_set_new(s, "properties", props);
 		json_t *req = json_array();
@@ -233,8 +210,7 @@ static json_t *handle_tools_call(json_t *params)
 	}
 
 	if (strcmp(tool_name, "load_mission") == 0 ||
-		strcmp(tool_name, "save_mission") == 0 ||
-		strcmp(tool_name, "save_mission_json") == 0)
+		strcmp(tool_name, "save_mission") == 0)
 	{
 		// Extract filepath from arguments
 		json_t *arguments = json_object_get(params, "arguments");
@@ -247,10 +223,8 @@ static json_t *handle_tools_call(json_t *params)
 		McpToolId tool;
 		if (strcmp(tool_name, "load_mission") == 0)
 			tool = McpToolId::LOAD_MISSION;
-		else if (strcmp(tool_name, "save_mission") == 0)
-			tool = McpToolId::SAVE_MISSION;
 		else
-			tool = McpToolId::SAVE_MISSION_JSON;
+			tool = McpToolId::SAVE_MISSION;
 
 		return execute_on_main_thread(tool, filepath);
 	}
