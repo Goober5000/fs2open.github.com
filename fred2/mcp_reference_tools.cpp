@@ -343,7 +343,8 @@ void mcp_register_reference_tools(json_t *tools)
 	register_tool(tools, "list_sexp_categories",
 		"List all SEXP operator categories and their subcategories, with operator "
 		"counts per category. Use this to discover the category hierarchy before "
-		"listing operators.",
+		"listing operators. Includes 'Unlisted' (hidden operators) and "
+		"'Uncategorized' categories if any such operators exist.",
 		json_object());
 
 	// list_sexp_operators
@@ -1000,6 +1001,13 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
+static const char *mcp_category_name(int category_id)
+{
+	if (category_id == OP_CATEGORY_NONE)
+		return "Uncategorized";
+	return get_category_name(category_id);
+}
+
 static const char *get_category_description(int category_id)
 {
 	switch (category_id) {
@@ -1013,6 +1021,8 @@ static const char *get_category_description(int category_id)
 		case OP_CATEGORY_AI:           return "AI orders and goals";
 		case OP_CATEGORY_GOAL_EVENT:   return "Operators used inside event and goal definitions";
 		case OP_CATEGORY_TRAINING:     return "Training mission specific operators";
+		case OP_CATEGORY_UNLISTED:     return "Hidden operators which are not shown to mission designers, either because they are internal operators or because they are only used in campaign files";
+		case OP_CATEGORY_NONE:         return "Operators without an assigned category";
 		default:                       return nullptr;
 	}
 }
@@ -1048,6 +1058,28 @@ static json_t *handle_list_sexp_categories()
 		json_array_append_new(arr, cat);
 	}
 
+	// Add extra categories not in op_menu (only if they have operators)
+	static const int extra_categories[] = { OP_CATEGORY_NONE };
+	for (int extra_id : extra_categories) {
+		int count = 0;
+		for (size_t i = 0; i < Operators.size(); i++) {
+			if (get_category(Operators[i].value) == extra_id)
+				count++;
+		}
+		if (count > 0) {
+			json_t *cat = json_object();
+			json_object_set_new(cat, "name", json_string(mcp_category_name(extra_id)));
+
+			const char *desc = get_category_description(extra_id);
+			if (desc)
+				json_object_set_new(cat, "description", json_string(desc));
+
+			json_object_set_new(cat, "subcategories", json_array());
+			json_object_set_new(cat, "operator_count", json_integer(count));
+			json_array_append_new(arr, cat);
+		}
+	}
+
 	return make_json_tool_result(arr);
 }
 
@@ -1080,6 +1112,11 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 				filter_category_id = op_menu[i].id;
 				break;
 			}
+		}
+		// Check extra categories not in op_menu
+		if (filter_category_id < 0) {
+			if (stricmp(filter_category, "Uncategorized") == 0)
+				filter_category_id = OP_CATEGORY_NONE;
 		}
 		if (filter_category_id < 0)
 			return make_tool_result("Category not found. Use list_sexp_categories to see valid names.", true);
@@ -1133,9 +1170,7 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 		json_object_set_new(item, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
 
 		int cat_id = get_category(op.value);
-		const char *cat_name = get_category_name(cat_id);
-		if (cat_name)
-			json_object_set_new(item, "category", json_string(cat_name));
+		json_object_set_new(item, "category", json_string(mcp_category_name(cat_id)));
 
 		json_array_append_new(arr, item);
 	}
@@ -1171,9 +1206,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 	// Category and subcategory
 	int cat_id = get_category(op.value);
-	const char *cat_name = get_category_name(cat_id);
-	if (cat_name)
-		json_object_set_new(obj, "category", json_string(cat_name));
+	json_object_set_new(obj, "category", json_string(mcp_category_name(cat_id)));
 
 	int subcat_id = get_subcategory(op.value);
 	if (subcat_id != OP_SUBCATEGORY_NONE) {
