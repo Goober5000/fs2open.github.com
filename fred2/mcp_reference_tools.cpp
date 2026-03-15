@@ -1148,10 +1148,10 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 // Config file loading helper
 // ---------------------------------------------------------------------------
 
-// Load a file from the mod's data/config directory, falling back to the
-// built-in default embedded in the executable.  Returns the file content
-// as a string, or an empty string on failure.
-static SCP_string load_config_file(const char *filename)
+// Load a file from the mod's data/config directory.  If try_defaults is true,
+// falls back to the built-in default embedded in the executable.  Returns the
+// file content as a string, or an empty string on failure.
+static SCP_string load_config_file(const char *filename, bool try_defaults)
 {
 	SCP_string content;
 
@@ -1163,7 +1163,7 @@ static SCP_string load_config_file(const char *filename)
 			cfread(content.data(), len + 1, 1, fp);
 			cfclose(fp);
 		}
-	} else {
+	} else if (try_defaults) {
 		auto def = defaults_get_file(filename);
 		if (def.data)
 			content.assign(reinterpret_cast<const char *>(def.data), def.size);
@@ -1178,7 +1178,7 @@ static SCP_string load_config_file(const char *filename)
 
 static json_t *handle_get_mod_info()
 {
-	SCP_string content = load_config_file("MOD_INFO.md");
+	SCP_string content = load_config_file("MOD_INFO.md", false);
 	if (content.empty())
 		return make_tool_result(
 			"No MOD_INFO.md was provided for this mod. No mod-specific context is available.");
@@ -1192,7 +1192,7 @@ static json_t *handle_get_mod_info()
 
 static json_t *load_reference_notes()
 {
-	SCP_string content = load_config_file("mcp_reference_notes.json");
+	SCP_string content = load_config_file("mcp_reference_notes.json", true);
 	if (content.empty())
 		return nullptr;
 
