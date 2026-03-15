@@ -12,7 +12,7 @@
 #include "stdafx.h"
 #include "FRED.h"
 #include "MainFrm.h"
-#include "mcp_reference_tools.h"
+#include "mcpserver.h"
 #include "FREDDoc.h"
 #include "FREDView.h"
 #include "FredRender.h"
@@ -455,9 +455,6 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 
 	fred_preload_all_briefing_icons(); //phreak.  This needs to be done or else the briefing icons won't show up
 
-	// Signal that all game tables are loaded and safe for MCP reference tools to query
-	mcp_tables_ready.store(true);
-
 	fiction_viewer_reset();
 	cmd_brief_reset();
 
@@ -470,8 +467,11 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	gr_reset_clip();
 	g3_start_frame(0);
 	g3_set_view_matrix(&eye_pos, &eye_orient, 0.5f);
-	
+
 	Fred_main_wnd -> init_tools();
+
+	// Signal that FRED2 is fully initialized and MCP tools may run
+	mcp_fred_ready.store(true);
 
 	return true;
 }
