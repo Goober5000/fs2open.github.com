@@ -166,6 +166,36 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_array_append_new(tools, t);
 	}
 
+	// Tool: get_mission_info
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("get_mission_info"));
+		json_object_set_new(t, "description",
+			json_string("Returns metadata about the currently loaded mission (filename, title, author, notes, etc.)"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_object_set_new(s, "properties", json_object());
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
+	// Tool: get_ui_status
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("get_ui_status"));
+		json_object_set_new(t, "description",
+			json_string("Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_object_set_new(s, "properties", json_object());
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
 
@@ -201,6 +231,7 @@ static json_t *execute_on_main_thread(McpToolId tool, const char *filepath)
 	req.filepath[sizeof(req.filepath) - 1] = '\0';
 	req.success = false;
 	req.result_message[0] = '\0';
+	req.result_json = nullptr;
 
 	// Normalize path separators for the FreeSpace engine
 	for (char *p = req.filepath; *p; ++p) {
@@ -209,6 +240,10 @@ static json_t *execute_on_main_thread(McpToolId tool, const char *filepath)
 	}
 
 	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
+
+	// If the handler built a structured JSON result, return it directly
+	if (req.result_json)
+		return req.result_json;
 
 	return make_tool_result(req.result_message, !req.success);
 }
@@ -224,10 +259,11 @@ static json_t *handle_tools_call(json_t *params)
 		return nullptr;  // caller will send error
 
 	if (strcmp(tool_name, "get_server_info") == 0) {
-		char info[256];
-		const char *mission = (Mission_filename[0] != '\0') ? Mission_filename : "(none)";
-		snprintf(info, sizeof(info), "FRED2 MCP Server is running. Mission: %s", mission);
-		return make_tool_result(info);
+		if (!mcp_fred_ready.load())
+			return make_tool_result("FRED2 MCP Server is running. FRED2 is initializing. "
+				"Use get_mission_info for mission details and get_ui_status for UI state.");
+		return make_tool_result("FRED2 MCP Server is running. "
+			"Use get_mission_info for mission details and get_ui_status for UI state.");
 	}
 
 	// All tools below require FRED2 to be fully initialized
@@ -256,6 +292,14 @@ static json_t *handle_tools_call(json_t *params)
 
 	if (strcmp(tool_name, "new_mission") == 0) {
 		return execute_on_main_thread(McpToolId::NEW_MISSION, "");
+	}
+
+	if (strcmp(tool_name, "get_mission_info") == 0) {
+		return execute_on_main_thread(McpToolId::GET_MISSION_INFO, "");
+	}
+
+	if (strcmp(tool_name, "get_ui_status") == 0) {
+		return execute_on_main_thread(McpToolId::GET_UI_STATUS, "");
 	}
 
 	// Try reference/discovery tools
