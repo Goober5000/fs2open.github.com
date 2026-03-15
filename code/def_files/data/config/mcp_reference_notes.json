@@ -17,7 +17,7 @@
   {
     "topic": "sexp_overview",
     "title": "SEXP (S-Expression) System Overview",
-    "text": "SEXPs are the scripting language used in FreeSpace mission events. They use a Lisp-like S-expression syntax where each expression is an operator followed by its arguments in parentheses.\n\nSEXPs are organized into categories:\n- **Objective**: Conditions for mission goals (is-destroyed, is-departed, etc.)\n- **Time**: Time-related checks and delays\n- **Logical**: Boolean logic (and, or, not, etc.)\n- **Arithmetic**: Math operations (+, -, *, /, etc.)\n- **Status**: Query game state (shield strength, distance, etc.)\n- **Change**: Modify game state (set hull, change AI, etc.)\n- **Conditional**: Control flow (when, if-then-else, etc.)\n- **AI**: AI orders and goals\n- **Training**: Training mission specific operators\n\nEvents use SEXPs as triggers and actions. A typical event has a conditional SEXP that, when true, fires one or more action SEXPs."
+    "text": "SEXPs are the scripting language used in FreeSpace mission events. They use a Lisp-like S-expression syntax where each expression is an operator followed by its arguments in parentheses.\n\nSEXPs are organized into categories and subcategories. Use `list_sexp_categories` to see all categories, their subcategories, and operator counts. Use `list_sexp_operators` to list operators, optionally filtered by category, subcategory, or name. Use `get_sexp_operator` to get full details of a specific operator. Use `get_sexp_argument_type` and `get_sexp_return_type` to understand what values each argument type accepts.\n\nEvents use SEXPs as triggers and actions. A typical event has a conditional SEXP that, when true, fires one or more action SEXPs."
   },
   {
     "topic": "mission_structure",
