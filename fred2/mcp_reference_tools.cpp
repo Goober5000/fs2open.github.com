@@ -16,7 +16,6 @@
 #include "cfile/cfile.h"
 #include "def_files/def_files.h"
 
-std::atomic<bool> mcp_tables_ready{false};
 
 // ---------------------------------------------------------------------------
 // JSON helpers
@@ -1312,27 +1311,6 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 {
 	if (!tool_name)
 		return nullptr;
-
-	// Check if tables are loaded
-	if (!mcp_tables_ready.load()) {
-		// Only intercept if the name matches one of our tools
-		static const char *our_tools[] = {
-			"list_ship_types", "get_ship_type",
-			"list_ship_classes", "get_ship_class",
-			"list_weapon_classes", "get_weapon_class",
-			"list_species",
-			"list_intel_entries", "get_intel_entry",
-			"list_sexp_operators", "get_sexp_operator",
-			"get_reference_notes",
-			"get_ship_model_details",
-			nullptr
-		};
-		for (const char **t = our_tools; *t; t++) {
-			if (strcmp(tool_name, *t) == 0)
-				return make_tool_result("Game tables are not yet loaded. Please wait for FRED2 to finish initializing.", true);
-		}
-		return nullptr;
-	}
 
 	if (strcmp(tool_name, "list_ship_types") == 0)
 		return handle_list_ship_types();

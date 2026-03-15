@@ -10,6 +10,8 @@
 #include "mainfrm.h"
 #include "globalincs/pstypes.h"
 
+std::atomic<bool> mcp_fred_ready{false};
+
 static struct mg_context *mcp_ctx = nullptr;
 
 static const char *MCP_PROTOCOL_VERSION = "2025-06-18";
@@ -223,6 +225,10 @@ static json_t *handle_tools_call(json_t *params)
 		snprintf(info, sizeof(info), "FRED2 MCP Server is running. Mission: %s", mission);
 		return make_tool_result(info);
 	}
+
+	// All tools below require FRED2 to be fully initialized
+	if (!mcp_fred_ready.load())
+		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
 
 	if (strcmp(tool_name, "load_mission") == 0 ||
 		strcmp(tool_name, "save_mission") == 0)
