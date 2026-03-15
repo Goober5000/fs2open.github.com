@@ -1026,7 +1026,7 @@ static SCP_string load_config_file(const char *filename)
 	SCP_string content;
 
 	if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
-		CFILE *fp = cfopen(filename, "rt", CFILE_NORMAL, CF_TYPE_CONFIG);
+		CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
 		if (fp) {
 			int len = cfilelength(fp);
 			content.resize(len);
