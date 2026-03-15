@@ -732,6 +732,7 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 		title.Format("%s%s", Mission_filename, ext);
 		FREDDoc_ptr->autosave("nothing");
 		FREDDoc_ptr->SetTitle((LPCTSTR)title);
+		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		Undo_count = 0;
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
@@ -788,6 +789,14 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	case McpToolId::SAVE_MISSION:
 		mcp_handle_save_mission(req, MissionFormat::STANDARD);
+		break;
+
+	case McpToolId::NEW_MISSION:
+		create_new_mission();
+		FREDDoc_ptr->SetTitle("Untitled");
+		FREDDoc_ptr->SetModifiedFlag(FALSE);
+		req->success = true;
+		strncpy(req->result_message, "New empty mission created", sizeof(req->result_message) - 1);
 		break;
 
 	case McpToolId::LOAD_SHIP_MODEL:
