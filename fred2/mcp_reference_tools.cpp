@@ -359,6 +359,13 @@ void mcp_register_reference_tools(json_t *tools)
 			props, req);
 	}
 
+	// get_mod_info
+	register_tool(tools, "get_mod_info",
+		"Get information about the current mod, including its setting, factions, "
+		"lore, and mission design conventions. Returns Markdown. Call this early "
+		"in a session to understand the context you are working in.",
+		json_object());
+
 	// get_reference_notes
 	{
 		json_t *props = json_object();
@@ -1008,25 +1015,18 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
-// Reference notes — domain knowledge for AI agents
+// Config file loading helper
 // ---------------------------------------------------------------------------
 
-static const char *REFERENCE_NOTES_FILENAME = "mcp_reference_notes.json";
-
-// Load and parse the reference notes JSON file.  Tries the mod's config
-// directory first; falls back to the built-in default embedded in the
-// executable.  Returns a new reference (caller must json_decref), or
-// nullptr on failure.
-static json_t *load_reference_notes()
+// Load a file from the mod's data/config directory, falling back to the
+// built-in default embedded in the executable.  Returns the file content
+// as a string, or an empty string on failure.
+static SCP_string load_config_file(const char *filename)
 {
-	json_error_t err;
-	json_t *root = nullptr;
-
 	SCP_string content;
 
-	if (cf_exists_full(REFERENCE_NOTES_FILENAME, CF_TYPE_CONFIG)) {
-		// Read from the mod's data/config directory
-		CFILE *fp = cfopen(REFERENCE_NOTES_FILENAME, "rt", CFILE_NORMAL, CF_TYPE_CONFIG);
+	if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
+		CFILE *fp = cfopen(filename, "rt", CFILE_NORMAL, CF_TYPE_CONFIG);
 		if (fp) {
 			int len = cfilelength(fp);
 			content.resize(len);
@@ -1034,17 +1034,42 @@ static json_t *load_reference_notes()
 			cfclose(fp);
 		}
 	} else {
-		// Fall back to the built-in default
-		auto def = defaults_get_file(REFERENCE_NOTES_FILENAME);
+		auto def = defaults_get_file(filename);
 		if (def.data)
 			content.assign(reinterpret_cast<const char *>(def.data), def.size);
 	}
 
-	if (!content.empty()) {
-		root = json_loads(content.c_str(), 0, &err);
-		if (!root)
-			mprintf(("MCP: Failed to parse %s: %s (line %d)\n", REFERENCE_NOTES_FILENAME, err.text, err.line));
-	}
+	return content;
+}
+
+// ---------------------------------------------------------------------------
+// get_mod_info — mod context for AI agents
+// ---------------------------------------------------------------------------
+
+static json_t *handle_get_mod_info()
+{
+	SCP_string content = load_config_file("MOD_INFO.md");
+	if (content.empty())
+		return make_tool_result(
+			"No MOD_INFO.md was provided for this mod. No mod-specific context is available.");
+
+	return make_tool_result(content.c_str());
+}
+
+// ---------------------------------------------------------------------------
+// Reference notes — domain knowledge for AI agents
+// ---------------------------------------------------------------------------
+
+static json_t *load_reference_notes()
+{
+	SCP_string content = load_config_file("mcp_reference_notes.json");
+	if (content.empty())
+		return nullptr;
+
+	json_error_t err;
+	json_t *root = json_loads(content.c_str(), 0, &err);
+	if (!root)
+		mprintf(("MCP: Failed to parse mcp_reference_notes.json: %s (line %d)\n", err.text, err.line));
 
 	return root;
 }
@@ -1334,6 +1359,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_sexp_operators(arguments);
 	if (strcmp(tool_name, "get_sexp_operator") == 0)
 		return handle_get_sexp_operator(arguments);
+	if (strcmp(tool_name, "get_mod_info") == 0)
+		return handle_get_mod_info();
 	if (strcmp(tool_name, "get_reference_notes") == 0)
 		return handle_get_reference_notes(arguments);
 	if (strcmp(tool_name, "get_ship_model_details") == 0)
