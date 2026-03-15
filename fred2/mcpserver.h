@@ -10,7 +10,6 @@
 enum class McpToolId {
 	LOAD_MISSION,
 	SAVE_MISSION,
-	SAVE_MISSION_JSON,
 	LOAD_SHIP_MODEL
 };
 
