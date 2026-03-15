@@ -295,6 +295,10 @@ add_file_folder("Default files\\\\data\\\\scripts"
 	def_files/data/scripts/forwarders.lua
 )
 
+add_file_folder("Default files\\\\data\\\\config"
+	def_files/data/config/mcp_reference_notes.json
+)
+
 add_file_folder("Default files\\\\data\\\\tables"
 	def_files/data/tables/autopilot.tbl
 	def_files/data/tables/controlconfigdefaults.tbl
@@ -315,6 +319,7 @@ add_file_folder("Default files\\\\builtin"
 # Variable for all embedded files
 set(default_files_files
 	${files_Default_files_data}
+	${files_Default_files_data_config}
 	${files_Default_files_data_effects}
 	${files_Default_files_data_maps}
 	${files_Default_files_data_scripts}

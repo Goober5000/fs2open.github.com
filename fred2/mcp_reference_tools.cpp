@@ -13,6 +13,8 @@
 #include "parse/sexp.h"
 #include "menuui/techmenu.h"
 #include "iff_defs/iff_defs.h"
+#include "cfile/cfile.h"
+#include "def_files/def_files.h"
 
 std::atomic<bool> mcp_tables_ready{false};
 
@@ -1010,149 +1012,43 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 // Reference notes — domain knowledge for AI agents
 // ---------------------------------------------------------------------------
 
-struct reference_note {
-	const char *topic;
-	const char *title;
-	const char *text;
-};
+static const char *REFERENCE_NOTES_FILENAME = "mcp_reference_notes.json";
 
-static const reference_note Reference_notes[] = {
-	{
-		"weapon_categories",
-		"Weapon Categories and Banks",
-		"FreeSpace has two types of weapon banks: primary and secondary. "
-		"There are three logical categories of weapon:\n\n"
-		"- **Primary weapons** (subtype \"primary\"): Lasers and ballistic cannons. "
-		"They fire from primary weapon banks and typically have unlimited or "
-		"ammo-based ammunition.\n\n"
-		"- **Secondary weapons** (subtype \"secondary\"): Missiles, bombs, and "
-		"torpedoes. They fire from secondary weapon banks and consume finite "
-		"ammunition.\n\n"
-		"- **Beam weapons** (subtype \"beam\"): High-energy directed beams. "
-		"Although beams are a distinct category with unique mechanics, they "
-		"are always mounted on primary weapon banks because there are only "
-		"two physical bank types. In the game data, most beam weapons have "
-		"the internal subtype WP_LASER (not WP_BEAM) because they are defined "
-		"in the #Primary Weapons section of the table files. The `is_beam` "
-		"property in tool responses is the reliable way to identify them."
-	},
-	{
-		"ship_types_vs_classes",
-		"Ship Types vs. Ship Classes",
-		"A **ship type** (e.g. \"fighter\", \"bomber\", \"cruiser\", \"capital\") "
-		"is an abstract category that defines shared AI behaviors, targeting "
-		"rules, and gameplay properties. A **ship class** (e.g. \"GTF Ulysses\", "
-		"\"GVF Serapis\") is a specific model of ship with its own stats, "
-		"weapons, and visual appearance. Each ship class belongs to exactly "
-		"one ship type via its `class_type` field. Ship types control things "
-		"like whether the AI will accept player orders, auto-attack enemies, "
-		"attempt broadside maneuvers, or form into wings."
-	},
-	{
-		"species",
-		"Species in FreeSpace",
-		"Species define the major factions in the FreeSpace universe. The three "
-		"canonical species are:\n\n"
-		"- **Terran**: Humanity, part of the Galactic Terran-Vasudan Alliance (GTVA).\n"
-		"- **Vasudan**: An alien race, allied with Terrans in the GTVA after the "
-		"Terran-Vasudan War.\n"
-		"- **Shivan**: A mysterious and hostile alien race, the primary antagonist.\n\n"
-		"Each species has default settings for IFF (identification friend-or-foe), "
-		"AWACS multipliers, countermeasures, and support ships. Mods may add "
-		"additional species."
-	},
-	{
-		"sexp_overview",
-		"SEXP (S-Expression) System Overview",
-		"SEXPs are the scripting language used in FreeSpace mission events. "
-		"They use a Lisp-like S-expression syntax where each expression is "
-		"an operator followed by its arguments in parentheses.\n\n"
-		"SEXPs are organized into categories:\n"
-		"- **Objective**: Conditions for mission goals (is-destroyed, is-departed, etc.)\n"
-		"- **Time**: Time-related checks and delays\n"
-		"- **Logical**: Boolean logic (and, or, not, etc.)\n"
-		"- **Arithmetic**: Math operations (+, -, *, /, etc.)\n"
-		"- **Status**: Query game state (shield strength, distance, etc.)\n"
-		"- **Change**: Modify game state (set hull, change AI, etc.)\n"
-		"- **Conditional**: Control flow (when, if-then-else, etc.)\n"
-		"- **AI**: AI orders and goals\n"
-		"- **Training**: Training mission specific operators\n\n"
-		"Events use SEXPs as triggers and actions. A typical event has a "
-		"conditional SEXP that, when true, fires one or more action SEXPs."
-	},
-	{
-		"mission_structure",
-		"Mission File Structure",
-		"A FreeSpace mission file (.fs2) contains several major sections:\n\n"
-		"- **Mission Info**: Metadata (name, author, description, flags)\n"
-		"- **Ships**: All ships placed in the mission with positions, orientations, "
-		"loadouts, AI settings, and arrival/departure conditions\n"
-		"- **Wings**: Groups of ships that fly together in formation\n"
-		"- **Events**: SEXP-driven logic (triggers and actions)\n"
-		"- **Goals**: Mission objectives shown to the player\n"
-		"- **Waypoints**: Named paths for AI navigation\n"
-		"- **Messages**: In-mission dialogue with sender and audio\n"
-		"- **Briefing**: Pre-mission briefing stages with text and camera positions\n"
-		"- **Debriefing**: Post-mission stages triggered by conditions\n"
-		"- **Reinforcements**: Ships/wings that can be called in mid-mission\n\n"
-		"FRED2 is the mission editor. Missions are saved with the .fs2 extension."
-	},
-	{
-		"iff",
-		"IFF (Identification Friend or Foe)",
-		"IFF determines team allegiances in a mission. Standard IFF teams include "
-		"\"Friendly\", \"Hostile\", and \"Unknown\", but custom IFF entries can be "
-		"defined. Each IFF has an associated color for HUD display and "
-		"relationships with other IFF teams (friend, foe, or neutral). "
-		"Ships on the same IFF team are allies; ships on opposing IFF teams "
-		"are enemies. SEXPs can change IFF allegiances mid-mission."
-	},
-	{
-		"subsystems",
-		"Ship Subsystems",
-		"Subsystems are targetable components of a ship, each with their own "
-		"hitpoints. Common subsystem types include:\n\n"
-		"- **Engines**: Disabling stops the ship from moving\n"
-		"- **Weapons**: Disabling prevents the ship from firing\n"
-		"- **Sensors/Communication**: Affects targeting and messaging\n"
-		"- **Navigation**: Affects autopilot and warp capability\n"
-		"- **Turrets**: Individual gun emplacements on larger ships\n"
-		"- **Fighter bays**: Launch and recovery bays for carried craft\n\n"
-		"Subsystems can be individually targeted, damaged, disabled, and "
-		"repaired. Many SEXPs reference subsystems by name."
-	},
+// Load and parse the reference notes JSON file.  Tries the mod's config
+// directory first; falls back to the built-in default embedded in the
+// executable.  Returns a new reference (caller must json_decref), or
+// nullptr on failure.
+static json_t *load_reference_notes()
+{
+	json_error_t err;
+	json_t *root = nullptr;
 
-	{
-		"coordinate_system",
-		"Coordinate System and 3D Conventions",
-		"FreeSpace uses a **left-handed coordinate system**:\n\n"
-		"- **+X** is right\n"
-		"- **+Y** is up\n"
-		"- **+Z** is forward\n\n"
-		"A ship's nose points along the +Z axis.\n\n"
-		"**Units**: All distances are in **meters**.\n\n"
-		"**Orientations** are represented as 3x3 rotation matrices consisting of "
-		"three vectors in this order:\n"
-		"- **rvec** (right vector)\n"
-		"- **uvec** (up vector)\n"
-		"- **fvec** (forward vector)\n\n"
-		"An identity orientation (facing forward, no rotation) is: "
-		"rvec=(1,0,0) uvec=(0,1,0) fvec=(0,0,1).\n\n"
-		"**Euler angles**: heading (h) = rotation around the Y axis, "
-		"bank (b) = rotation around the Z axis, "
-		"pitch (p) = rotation around the X axis. "
-		"Rotations are applied in the order heading, bank, pitch "
-		"(i.e. Y, Z, X). Strictly speaking these are Tait-Bryan angles, "
-		"not classic Euler angles.\n\n"
-		"**Model bounding boxes**: The `mins` and `maxs` fields from "
-		"`get_ship_model_details` define the bounding box of the ship model "
-		"in the model's local coordinate frame. For example, "
-		"`maxs.z - mins.z` gives the overall length of the ship."
-	},
+	SCP_string content;
 
-	// sentinel
-	{ nullptr, nullptr, nullptr }
-};
+	if (cf_exists_full(REFERENCE_NOTES_FILENAME, CF_TYPE_CONFIG)) {
+		// Read from the mod's data/config directory
+		CFILE *fp = cfopen(REFERENCE_NOTES_FILENAME, "rt", CFILE_NORMAL, CF_TYPE_CONFIG);
+		if (fp) {
+			int len = cfilelength(fp);
+			content.resize(len);
+			cfread(content.data(), len + 1, 1, fp);
+			cfclose(fp);
+		}
+	} else {
+		// Fall back to the built-in default
+		auto def = defaults_get_file(REFERENCE_NOTES_FILENAME);
+		if (def.data)
+			content.assign(reinterpret_cast<const char *>(def.data), def.size);
+	}
+
+	if (!content.empty()) {
+		root = json_loads(content.c_str(), 0, &err);
+		if (!root)
+			mprintf(("MCP: Failed to parse %s: %s (line %d)\n", REFERENCE_NOTES_FILENAME, err.text, err.line));
+	}
+
+	return root;
+}
 
 static json_t *handle_get_reference_notes(json_t *arguments)
 {
@@ -1163,29 +1059,46 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 			topic = json_string_value(v);
 	}
 
+	json_t *notes = load_reference_notes();
+	if (!notes)
+		return make_tool_result("Failed to load reference notes.", true);
+
+	if (!json_is_array(notes)) {
+		json_decref(notes);
+		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
+	}
+
 	// If no topic specified, list all available topics
 	if (!topic || topic[0] == '\0') {
 		json_t *arr = json_array();
-		for (const reference_note *rn = Reference_notes; rn->topic; rn++) {
+		size_t index;
+		json_t *entry;
+		json_array_foreach(notes, index, entry) {
 			json_t *item = json_object();
-			json_object_set_new(item, "topic", json_string(rn->topic));
-			json_object_set_new(item, "title", json_string(rn->title));
+			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
+			json_object_set_new(item, "title", json_copy(json_object_get(entry, "title")));
 			json_array_append_new(arr, item);
 		}
+		json_decref(notes);
 		return make_json_tool_result(arr);
 	}
 
 	// Look up the requested topic (case-insensitive)
-	for (const reference_note *rn = Reference_notes; rn->topic; rn++) {
-		if (stricmp(topic, rn->topic) == 0) {
+	size_t index;
+	json_t *entry;
+	json_array_foreach(notes, index, entry) {
+		const char *t = json_string_value(json_object_get(entry, "topic"));
+		if (t && stricmp(topic, t) == 0) {
 			json_t *obj = json_object();
-			json_object_set_new(obj, "topic", json_string(rn->topic));
-			json_object_set_new(obj, "title", json_string(rn->title));
-			json_object_set_new(obj, "text", json_string(rn->text));
+			json_object_set_new(obj, "topic", json_copy(json_object_get(entry, "topic")));
+			json_object_set_new(obj, "title", json_copy(json_object_get(entry, "title")));
+			json_object_set_new(obj, "text", json_copy(json_object_get(entry, "text")));
+			json_decref(notes);
 			return make_json_tool_result(obj);
 		}
 	}
 
+	json_decref(notes);
 	return make_tool_result("Topic not found. Call get_reference_notes without arguments to list available topics.", true);
 }
 
