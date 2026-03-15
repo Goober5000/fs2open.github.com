@@ -340,8 +340,9 @@ void mcp_register_reference_tools(json_t *tools)
 
 	// list_sexp_categories
 	register_tool(tools, "list_sexp_categories",
-		"List all SEXP operator categories and their subcategories. "
-		"Use this to discover the category hierarchy before listing operators.",
+		"List all SEXP operator categories and their subcategories, with operator "
+		"counts per category. Use this to discover the category hierarchy before "
+		"listing operators.",
 		json_object());
 
 	// list_sexp_operators
@@ -352,7 +353,8 @@ void mcp_register_reference_tools(json_t *tools)
 		add_string_prop(props, "search", "Substring search against operator names");
 		register_tool(tools, "list_sexp_operators",
 			"List SEXP (S-expression) operators used in mission event logic. "
-			"Optionally filter by category, subcategory, and/or name substring.",
+			"Optionally filter by category, subcategory, and/or name substring. "
+			"max_args is -1 for variadic (unlimited argument) operators.",
 			props);
 	}
 
@@ -363,7 +365,10 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_sexp_operator",
-			"Get full details of a SEXP operator, including help text, argument types, return type, category, and whether it is a dynamic (mod-provided) SEXP.",
+			"Get full details of a SEXP operator, including help text, argument types, "
+			"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
+			"max_args is -1 for variadic operators; for these, variadic_arg_type "
+			"indicates the repeating argument type.",
 			props, req);
 	}
 
