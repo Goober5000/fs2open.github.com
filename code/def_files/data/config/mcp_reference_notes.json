@@ -1,0 +1,42 @@
+[
+  {
+    "topic": "weapon_categories",
+    "title": "Weapon Categories and Banks",
+    "text": "FreeSpace has two types of weapon banks: primary and secondary. There are three logical categories of weapon:\n\n- **Primary weapons** (subtype \"primary\"): Lasers and ballistic cannons. They fire from primary weapon banks and typically have unlimited or ammo-based ammunition.\n\n- **Secondary weapons** (subtype \"secondary\"): Missiles, bombs, and torpedoes. They fire from secondary weapon banks and consume finite ammunition.\n\n- **Beam weapons** (subtype \"beam\"): High-energy directed beams. Although beams are a distinct category with unique mechanics, they are always mounted on primary weapon banks because there are only two physical bank types. In the game data, most beam weapons have the internal subtype WP_LASER (not WP_BEAM) because they are defined in the #Primary Weapons section of the table files. The `is_beam` property in tool responses is the reliable way to identify them."
+  },
+  {
+    "topic": "ship_types_vs_classes",
+    "title": "Ship Types vs. Ship Classes",
+    "text": "A **ship type** (e.g. \"fighter\", \"bomber\", \"cruiser\", \"capital\") is an abstract category that defines shared AI behaviors, targeting rules, and gameplay properties. A **ship class** (e.g. \"GTF Ulysses\", \"GVF Serapis\") is a specific model of ship with its own stats, weapons, and visual appearance. Each ship class belongs to exactly one ship type via its `class_type` field. Ship types control things like whether the AI will accept player orders, auto-attack enemies, attempt broadside maneuvers, or form into wings."
+  },
+  {
+    "topic": "species",
+    "title": "Species in FreeSpace",
+    "text": "Species define the major factions in the FreeSpace universe. The three canonical species are:\n\n- **Terran**: Humanity, part of the Galactic Terran-Vasudan Alliance (GTVA).\n- **Vasudan**: An alien race, allied with Terrans in the GTVA after the Terran-Vasudan War.\n- **Shivan**: A mysterious and hostile alien race, the primary antagonist.\n\nEach species has default settings for IFF (identification friend-or-foe), AWACS multipliers, countermeasures, and support ships. Mods may add additional species."
+  },
+  {
+    "topic": "sexp_overview",
+    "title": "SEXP (S-Expression) System Overview",
+    "text": "SEXPs are the scripting language used in FreeSpace mission events. They use a Lisp-like S-expression syntax where each expression is an operator followed by its arguments in parentheses.\n\nSEXPs are organized into categories:\n- **Objective**: Conditions for mission goals (is-destroyed, is-departed, etc.)\n- **Time**: Time-related checks and delays\n- **Logical**: Boolean logic (and, or, not, etc.)\n- **Arithmetic**: Math operations (+, -, *, /, etc.)\n- **Status**: Query game state (shield strength, distance, etc.)\n- **Change**: Modify game state (set hull, change AI, etc.)\n- **Conditional**: Control flow (when, if-then-else, etc.)\n- **AI**: AI orders and goals\n- **Training**: Training mission specific operators\n\nEvents use SEXPs as triggers and actions. A typical event has a conditional SEXP that, when true, fires one or more action SEXPs."
+  },
+  {
+    "topic": "mission_structure",
+    "title": "Mission File Structure",
+    "text": "A FreeSpace mission file (.fs2) contains several major sections:\n\n- **Mission Info**: Metadata (name, author, description, flags)\n- **Ships**: All ships placed in the mission with positions, orientations, loadouts, AI settings, and arrival/departure conditions\n- **Wings**: Groups of ships that fly together in formation\n- **Events**: SEXP-driven logic (triggers and actions)\n- **Goals**: Mission objectives shown to the player\n- **Waypoints**: Named paths for AI navigation\n- **Messages**: In-mission dialogue with sender and audio\n- **Briefing**: Pre-mission briefing stages with text and camera positions\n- **Debriefing**: Post-mission stages triggered by conditions\n- **Reinforcements**: Ships/wings that can be called in mid-mission\n\nFRED2 is the mission editor. Missions are saved with the .fs2 extension."
+  },
+  {
+    "topic": "iff",
+    "title": "IFF (Identification Friend or Foe)",
+    "text": "IFF determines team allegiances in a mission. Standard IFF teams include \"Friendly\", \"Hostile\", and \"Unknown\", but custom IFF entries can be defined. Each IFF has an associated color for HUD display and relationships with other IFF teams (friend, foe, or neutral). Ships on the same IFF team are allies; ships on opposing IFF teams are enemies. SEXPs can change IFF allegiances mid-mission."
+  },
+  {
+    "topic": "subsystems",
+    "title": "Ship Subsystems",
+    "text": "Subsystems are targetable components of a ship, each with their own hitpoints. Common subsystem types include:\n\n- **Engines**: Disabling stops the ship from moving\n- **Weapons**: Disabling prevents the ship from firing\n- **Sensors/Communication**: Affects targeting and messaging\n- **Navigation**: Affects autopilot and warp capability\n- **Turrets**: Individual gun emplacements on larger ships\n- **Fighter bays**: Launch and recovery bays for carried craft\n\nSubsystems can be individually targeted, damaged, disabled, and repaired. Many SEXPs reference subsystems by name."
+  },
+  {
+    "topic": "coordinate_system",
+    "title": "Coordinate System and 3D Conventions",
+    "text": "FreeSpace uses a **left-handed coordinate system**:\n\n- **+X** is right\n- **+Y** is up\n- **+Z** is forward\n\nA ship's nose points along the +Z axis.\n\n**Units**: All distances are in **meters**.\n\n**Orientations** are represented as 3x3 rotation matrices consisting of three vectors in this order:\n- **rvec** (right vector)\n- **uvec** (up vector)\n- **fvec** (forward vector)\n\nAn identity orientation (facing forward, no rotation) is: rvec=(1,0,0) uvec=(0,1,0) fvec=(0,0,1).\n\n**Euler angles**: heading (h) = rotation around the Y axis, bank (b) = rotation around the Z axis, pitch (p) = rotation around the X axis. Rotations are applied in the order heading, bank, pitch (i.e. Y, Z, X). Strictly speaking these are Tait-Bryan angles, not classic Euler angles.\n\n**Model bounding boxes**: The `mins` and `maxs` fields from `get_ship_model_details` define the bounding box of the ship model in the model's local coordinate frame. For example, `maxs.z - mins.z` gives the overall length of the ship."
+  }
+]
