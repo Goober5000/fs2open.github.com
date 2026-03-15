@@ -12,7 +12,9 @@ enum class McpToolId {
 	LOAD_MISSION,
 	SAVE_MISSION,
 	NEW_MISSION,
-	LOAD_SHIP_MODEL
+	LOAD_SHIP_MODEL,
+	GET_MISSION_INFO,
+	GET_UI_STATUS
 };
 
 struct McpToolRequest {
@@ -22,6 +24,9 @@ struct McpToolRequest {
 	// Result fields, filled by main thread handler
 	bool success;
 	char result_message[512];
+
+	// Optional structured result (caller must json_decref if non-null)
+	json_t *result_json;
 };
 
 void mcp_server_start();

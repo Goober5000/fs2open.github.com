@@ -30,6 +30,9 @@
 #include "fredrender.h"
 #include "mission/missionparse.h"
 #include "missioneditor/missionsave.h"
+#include "eventeditor.h"
+#include "missiongoalsdlg.h"
+#include "missioncutscenesdlg.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -814,6 +817,123 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 						"Failed to load model for %s", req->filepath);
 				}
 			}
+		}
+		break;
+
+	case McpToolId::GET_MISSION_INFO:
+		{
+			json_t *info = json_object();
+
+			// Full filename with extension
+			if (Mission_filename[0] != '\0') {
+				char full_name[256];
+				snprintf(full_name, sizeof(full_name), "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
+				json_object_set_new(info, "filename", json_string(full_name));
+			} else {
+				json_object_set_new(info, "filename", json_string(""));
+			}
+
+			json_object_set_new(info, "title", json_string(The_mission.name));
+			json_object_set_new(info, "author", json_string(The_mission.author));
+			json_object_set_new(info, "created", json_string(The_mission.created));
+			json_object_set_new(info, "modified", json_string(The_mission.modified));
+			json_object_set_new(info, "notes", json_string(The_mission.notes));
+			json_object_set_new(info, "mission_desc", json_string(The_mission.mission_desc));
+
+			// Game type as human-readable string
+			{
+				const char *type_str = "unknown";
+				int gt = The_mission.game_type;
+				if (gt & MISSION_TYPE_MULTI_DOGFIGHT)
+					type_str = "multiplayer dogfight";
+				else if (gt & MISSION_TYPE_MULTI_TEAMS)
+					type_str = "multiplayer team-versus-team";
+				else if (gt & MISSION_TYPE_MULTI_COOP)
+					type_str = "multiplayer co-op";
+				else if (gt & MISSION_TYPE_TRAINING)
+					type_str = "single-player training";
+				else if (gt & MISSION_TYPE_SINGLE)
+					type_str = "single-player";
+				json_object_set_new(info, "game_type", json_string(type_str));
+			}
+
+			// Build the tool result with structured content
+			json_t *text_item = json_object();
+			json_object_set_new(text_item, "type", json_string("text"));
+			char *info_str = json_dumps(info, JSON_INDENT(2));
+			json_object_set_new(text_item, "text", json_string(info_str));
+			free(info_str);
+			json_decref(info);
+
+			json_t *content = json_array();
+			json_array_append_new(content, text_item);
+
+			req->result_json = json_object();
+			json_object_set_new(req->result_json, "content", content);
+			req->success = true;
+		}
+		break;
+
+	case McpToolId::GET_UI_STATUS:
+		{
+			char buf[512];
+			int pos = 0;
+
+			// Check if a modal dialog is blocking the main window
+			bool modal_active = !IsWindowEnabled();
+			pos += snprintf(buf + pos, sizeof(buf) - pos, "modal_dialog_active: %s\n",
+				modal_active ? "true" : "false");
+
+			if (!modal_active) {
+				pos += snprintf(buf + pos, sizeof(buf) - pos, "open_editors:");
+
+				// Persistent (always-exist) modeless dialogs
+				struct { CWnd *wnd; const char *name; } persistent[] = {
+					{ &Ship_editor_dialog, "Ship Editor" },
+					{ &Wing_editor_dialog, "Wing Editor" },
+					{ &Prop_editor_dialog, "Properties Editor" },
+					{ &Waypoint_editor_dialog, "Waypoint Editor" },
+					{ &Jumpnode_editor_dialog, "Jump Node Editor" },
+					{ &Music_player_dialog, "Music Player" },
+				};
+
+				bool any_open = false;
+				for (auto &d : persistent) {
+					if (d.wnd->IsWindowVisible()) {
+						pos += snprintf(buf + pos, sizeof(buf) - pos, " %s,", d.name);
+						any_open = true;
+					}
+				}
+
+				// On-demand (pointer-based) modeless dialogs
+				struct { CWnd **ptr; const char *name; } on_demand[] = {
+					{ (CWnd **)&Briefing_dialog, "Briefing Editor" },
+					{ (CWnd **)&Bg_bitmap_dialog, "Background Editor" },
+					{ (CWnd **)&Event_editor_dlg, "Event Editor" },
+					{ (CWnd **)&Goal_editor_dlg, "Goals Editor" },
+					{ (CWnd **)&Message_editor_dlg, "Message Editor" },
+					{ (CWnd **)&Cutscene_editor_dlg, "Cutscene Editor" },
+				};
+
+				for (auto &d : on_demand) {
+					if (*d.ptr != nullptr && (*d.ptr)->IsWindowVisible()) {
+						pos += snprintf(buf + pos, sizeof(buf) - pos, " %s,", d.name);
+						any_open = true;
+					}
+				}
+
+				if (!any_open) {
+					pos += snprintf(buf + pos, sizeof(buf) - pos, " none");
+				} else {
+					// Remove trailing comma
+					if (pos > 0 && buf[pos - 1] == ',')
+						buf[pos - 1] = '\0';
+				}
+			}
+
+			req->success = true;
+			strncpy(req->result_message, buf, sizeof(req->result_message) - 1);
+			req->result_message[sizeof(req->result_message) - 1] = '\0';
 		}
 		break;
 
