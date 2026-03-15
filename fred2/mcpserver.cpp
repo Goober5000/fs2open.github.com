@@ -23,14 +23,18 @@ static const char *MCP_PROTOCOL_VERSION = "2025-06-18";
 static void send_json_response(struct mg_connection *conn, json_t *response)
 {
 	char *body = json_dumps(response, JSON_COMPACT);
+	size_t body_len = strlen(body);
+
+	// Write header and body separately so that large responses are not
+	// limited by mg_printf's internal buffer (8 KB on Windows).
 	mg_printf(conn,
 		"HTTP/1.1 200 OK\r\n"
 		"Content-Type: application/json\r\n"
 		"Connection: close\r\n"
 		"Content-Length: %d\r\n"
-		"\r\n"
-		"%s",
-		(int)strlen(body), body);
+		"\r\n",
+		(int)body_len);
+	mg_write(conn, body, body_len);
 	free(body);
 }
 
