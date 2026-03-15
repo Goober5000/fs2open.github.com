@@ -834,7 +834,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			}
 
 			json_object_set_new(info, "title", json_string(The_mission.name));
-			json_object_set_new(info, "author", json_string(The_mission.author));
+			json_object_set_new(info, "author", json_string(The_mission.author.c_str()));
 			json_object_set_new(info, "created", json_string(The_mission.created));
 			json_object_set_new(info, "modified", json_string(The_mission.modified));
 			json_object_set_new(info, "notes", json_string(The_mission.notes));
