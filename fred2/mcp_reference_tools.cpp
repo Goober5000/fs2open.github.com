@@ -377,6 +377,30 @@ void mcp_register_reference_tools(json_t *tools)
 			props);
 	}
 
+	// get_sexp_argument_type
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Argument type name as returned by get_sexp_operator (e.g. \"ship\", \"ship_or_wing\"). "
+			"Omit to list all known argument types.");
+		register_tool(tools, "get_sexp_argument_type",
+			"Get details about a SEXP argument type, including what values it accepts. "
+			"Call without arguments to list all known argument types.",
+			props);
+	}
+
+	// get_sexp_return_type
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Return type name as returned by get_sexp_operator (e.g. \"boolean\", \"number\"). "
+			"Omit to list all known return types.");
+		register_tool(tools, "get_sexp_return_type",
+			"Get details about a SEXP return type, including what argument types it is compatible with. "
+			"Call without arguments to list all known return types.",
+			props);
+	}
+
 	// get_ship_model_details
 	{
 		json_t *props = json_object();
@@ -1137,6 +1161,334 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// SEXP argument and return type metadata
+// ---------------------------------------------------------------------------
+
+// Metadata for a SEXP argument type (OPF_*)
+struct opf_type_info {
+	const char *name;        // string from opf_to_string
+	const char *description; // what this type accepts
+	const char **accepts;    // null-terminated list of value categories
+	const char *notes;       // optional extra context (may be nullptr)
+};
+
+// Value category labels used in the "accepts" arrays
+static const char *ac_number[]          = { "number", nullptr };
+static const char *ac_positive[]        = { "positive_number", nullptr };
+static const char *ac_boolean[]         = { "boolean_expression", nullptr };
+static const char *ac_string[]          = { "string", nullptr };
+static const char *ac_ship[]            = { "ship_name", nullptr };
+static const char *ac_wing[]            = { "wing_name", nullptr };
+static const char *ac_ship_wing[]       = { "ship_name", "wing_name", nullptr };
+static const char *ac_ship_point[]      = { "ship_name", "waypoint_name", nullptr };
+static const char *ac_ship_wing_point[] = { "ship_name", "wing_name", "waypoint_name", nullptr };
+static const char *ac_ship_wing_point_none[] = { "ship_name", "wing_name", "waypoint_name", "<none>", nullptr };
+static const char *ac_ship_wing_team[]  = { "ship_name", "wing_name", "iff_team", nullptr };
+static const char *ac_ship_wing_team_point[] = { "ship_name", "wing_name", "iff_team", "waypoint_name", nullptr };
+static const char *ac_order_recipient[] = { "ship_name", "wing_name", "All Fighters", nullptr };
+static const char *ac_ship_none[]       = { "ship_name", "<none>", nullptr };
+static const char *ac_ship_prop[]       = { "ship_name", "prop_name", nullptr };
+static const char *ac_subsystem[]       = { "subsystem_name", nullptr };
+static const char *ac_subsystem_none[]  = { "subsystem_name", "<none>", nullptr };
+static const char *ac_subsys_generic[]  = { "subsystem_name", "subsystem_type_name", nullptr };
+static const char *ac_point[]           = { "waypoint_name", "3d_coordinate", nullptr };
+static const char *ac_waypoint[]        = { "waypoint_path_name", nullptr };
+static const char *ac_iff[]             = { "iff_name", nullptr };
+static const char *ac_message[]         = { "message_name", nullptr };
+static const char *ac_message_string[]  = { "message_name", "string", nullptr };
+static const char *ac_who_from[]        = { "ship_name", "wing_name", "#Command", "#Terran Command", "#Vasudan Command", "<any wingman>", "<none>", nullptr };
+static const char *ac_priority[]        = { "Low", "Normal", "High", nullptr };
+static const char *ac_table_name[]      = { "table_entry_name", nullptr };
+static const char *ac_variable[]        = { "sexp_variable_name", nullptr };
+static const char *ac_container[]       = { "container_name", nullptr };
+static const char *ac_anything[]        = { "any_value", nullptr };
+static const char *ac_ai_goal[]         = { "ai_goal_expression", nullptr };
+static const char *ac_ai_order[]        = { "ai_order_name", nullptr };
+static const char *ac_enum[]            = { "enumerated_value", nullptr };
+static const char *ac_none[]            = { nullptr };
+
+static const opf_type_info Opf_type_info[] = {
+	// Value types
+	{ "number",          "Any integer (positive or negative)", ac_number, nullptr },
+	{ "positive_number", "Non-negative integer (>= 0)", ac_positive, nullptr },
+	{ "boolean",         "A boolean sub-expression (true/false)", ac_boolean, nullptr },
+	{ "string",          "An arbitrary text string", ac_string, nullptr },
+	{ "anything",        "Any value", ac_anything, nullptr },
+
+	// Game objects from the mission
+	{ "ship",            "A ship name from the current mission", ac_ship, nullptr },
+	{ "wing",            "A wing name from the current mission", ac_wing, nullptr },
+	{ "subsystem",       "A subsystem name on a ship", ac_subsystem, nullptr },
+	{ "point",           "A waypoint name or 3D coordinate", ac_point, nullptr },
+	{ "waypoint_path",   "A waypoint path name from the current mission", ac_waypoint, nullptr },
+	{ "message",         "A message name defined in the mission", ac_message, nullptr },
+	{ "prop",            "A prop (scenery object) name from the current mission", ac_table_name, nullptr },
+
+	// Composite object types
+	{ "ship_or_wing",    "A ship name or wing name", ac_ship_wing, nullptr },
+	{ "ship_or_waypoint","A ship name or waypoint name", ac_ship_point, nullptr },
+	{ "ship_or_wing_or_waypoint", "A ship, wing, or waypoint name", ac_ship_wing_point, nullptr },
+	{ "ship_or_wing_or_waypoint_or_none", "A ship, wing, or waypoint name; or <none>", ac_ship_wing_point_none, "Use the literal string \"<none>\" to indicate no target." },
+	{ "ship_or_wing_or_team", "A ship name, wing name, or IFF team name (to target all ships on that team)", ac_ship_wing_team, nullptr },
+	{ "ship_or_wing_or_team_or_waypoint", "A ship, wing, IFF team, or waypoint name", ac_ship_wing_team_point, nullptr },
+	{ "order_recipient", "A ship, wing, or the special value \"All Fighters\"", ac_order_recipient, nullptr },
+	{ "ship_or_none",    "A ship name or <none>", ac_ship_none, "Use the literal string \"<none>\" to indicate no ship." },
+	{ "ship_not_player", "Any ship in the mission except the player ship", ac_ship, nullptr },
+	{ "ship_with_bay",   "A ship that has a fighter bay subsystem", ac_ship, nullptr },
+	{ "ship_or_prop",    "A ship name or prop name", ac_ship_prop, nullptr },
+
+	// Subsystem variants
+	{ "subsystem_or_none",    "A subsystem name or <none>", ac_subsystem_none, "Use the literal string \"<none>\" to indicate no subsystem." },
+	{ "subsystem_type",       "A generic subsystem type name (e.g. \"Engines\", \"Weapons\", \"Navigation\"), not a specific subsystem instance", ac_enum, nullptr },
+	{ "subsystem_or_generic", "A specific subsystem name or a generic subsystem type name", ac_subsys_generic, nullptr },
+	{ "awacs_subsystem",      "A subsystem with AWACS (sensor) capability", ac_subsystem, nullptr },
+	{ "rotating_subsystem",   "A rotating subsystem", ac_subsystem, nullptr },
+	{ "translating_subsystem","A translating subsystem", ac_subsystem, nullptr },
+
+	// Table lookups (names from game data tables)
+	{ "ship_class_name",    "A ship class name from ships.tbl (e.g. \"GTF Ulysses\")", ac_table_name, "Use list_ship_classes to see available classes." },
+	{ "ship_type",          "A ship type category (e.g. \"fighter\", \"bomber\", \"cruiser\")", ac_table_name, "Use list_ship_types to see available types." },
+	{ "weapon_name",        "A weapon class name from weapons.tbl", ac_table_name, "Use list_weapon_classes to see available weapons." },
+	{ "huge_weapon",        "A bomb-type secondary weapon (large anti-capital-ship ordnance)", ac_table_name, nullptr },
+	{ "iff",                "An IFF team name (e.g. \"Friendly\", \"Hostile\", \"Unknown\")", ac_iff, nullptr },
+	{ "species",            "A species name (e.g. \"Terran\", \"Vasudan\", \"Shivan\")", ac_table_name, "Use list_species to see available species." },
+	{ "ai_class",           "An AI class name that controls AI skill/behavior", ac_table_name, nullptr },
+	{ "intel_name",         "A tech database (intel) entry name", ac_table_name, "Use list_intel_entries to see available entries." },
+	{ "support_ship_class", "A support ship class name", ac_table_name, nullptr },
+	{ "armor_type",         "An armor type name, or \"<none>\" for no armor", ac_table_name, nullptr },
+	{ "damage_type",        "A damage type name, or \"<none>\" for default damage", ac_table_name, nullptr },
+	{ "prop_class_name",    "A prop class name from props.tbl", ac_table_name, nullptr },
+
+	// Message/communication types
+	{ "who_from",           "The sender of a message: a ship name, wing name, or a special sender token", ac_who_from, nullptr },
+	{ "priority",           "Message priority level", ac_priority, nullptr },
+	{ "message_or_string",  "A message name or an arbitrary string", ac_message_string, nullptr },
+	{ "message_type",       "A message type category", ac_enum, nullptr },
+	{ "persona",            "A character persona name", ac_table_name, nullptr },
+
+	// Mission/campaign references
+	{ "mission_name",       "A mission filename", ac_table_name, nullptr },
+	{ "goal_name",          "A mission goal name", ac_table_name, nullptr },
+	{ "event_name",         "A mission event name", ac_table_name, nullptr },
+	{ "mission_custom_string", "A custom string defined in the mission", ac_string, nullptr },
+	{ "arrival_location",   "Where a ship or wing arrives (e.g. \"Hyperspace\", \"Near Ship\", \"In Front of Ship\")", ac_enum, nullptr },
+	{ "departure_location", "Where a ship or wing departs (e.g. \"Hyperspace\", \"Bay\")", ac_enum, nullptr },
+	{ "arrival_anchor",     "What a ship arrives near (a ship, waypoint, or special anchor)", ac_anything, nullptr },
+
+	// AI and behavioral
+	{ "ai_goal",            "An AI goal sub-expression", ac_ai_goal, "Must be an ai-goals SEXP operator." },
+	{ "ai_order",           "A squadron order that the player can issue to ships", ac_ai_order, nullptr },
+	{ "skill_level",        "A difficulty/skill level name", ac_enum, nullptr },
+	{ "lua_general_order",  "A general order defined in sexps.tbl (Lua scripted)", ac_table_name, nullptr },
+
+	// Docking
+	{ "docker_point",       "A docking point on the docker (the ship that initiates docking)", ac_table_name, nullptr },
+	{ "dockee_point",       "A docking point on the dockee (the ship being docked with)", ac_table_name, nullptr },
+
+	// Navigation
+	{ "jump_node_name",     "A jump node name from the mission", ac_table_name, nullptr },
+	{ "nav_point",          "A navigation point name", ac_table_name, nullptr },
+
+	// Audio/sound
+	{ "soundtrack_name",    "A music soundtrack name", ac_table_name, nullptr },
+	{ "game_sound",         "A game sound name or index", ac_table_name, nullptr },
+	{ "sound_environment",  "An EAX/EFX sound environment preset name", ac_enum, nullptr },
+	{ "sound_environment_option", "A sound environment option", ac_enum, nullptr },
+	{ "audio_volume_option","An audio volume option", ac_enum, nullptr },
+	{ "explosion_option",   "An explosion option", ac_enum, nullptr },
+
+	// Visual/HUD
+	{ "custom_hud_gauge",   "A custom HUD gauge name", ac_table_name, nullptr },
+	{ "builtin_hud_gauge",  "A built-in HUD gauge name", ac_enum, nullptr },
+	{ "any_hud_gauge",      "Any HUD gauge name (custom or built-in)", ac_table_name, nullptr },
+	{ "hud_element",        "A specific HUD element name", ac_enum, nullptr },
+	{ "keypress",           "A keyboard key name", ac_string, nullptr },
+	{ "skybox_model_name",  "A skybox model filename", ac_table_name, nullptr },
+	{ "skybox_flags",       "A skybox flag", ac_enum, nullptr },
+	{ "background_bitmap",  "A background bitmap name", ac_table_name, nullptr },
+	{ "sun_bitmap",         "A sun bitmap name", ac_table_name, nullptr },
+	{ "nebula_storm_type",  "A nebula storm type name", ac_table_name, nullptr },
+	{ "nebula_poof",        "A nebula poof effect name", ac_table_name, nullptr },
+	{ "nebula_pattern",     "A full nebula background pattern name", ac_table_name, nullptr },
+	{ "post_effect",        "A post-processing effect type", ac_enum, nullptr },
+	{ "ship_effect",        "A per-ship visual effect name", ac_table_name, nullptr },
+
+	// Weapons/combat details
+	{ "weapon_bank_number", "A weapon bank number or \"all\"", ac_enum, nullptr },
+	{ "turret_target_order","A turret target type priority", ac_enum, nullptr },
+	{ "turret_type",        "A turret type", ac_enum, nullptr },
+	{ "target_priorities",  "A target priority setting", ac_table_name, nullptr },
+
+	// Flags
+	{ "ship_flag",          "A ship flag name", ac_enum, nullptr },
+	{ "wing_flag",          "A wing flag name", ac_enum, nullptr },
+	{ "team_color",         "A team color setting name", ac_table_name, nullptr },
+
+	// Variables and containers
+	{ "variable_name",      "A SEXP variable name (variables are prefixed with '$' in the SEXP tree)", ac_variable, nullptr },
+	{ "ambiguous",          "Type determined by the target variable (used with modify-variable)", ac_anything, nullptr },
+	{ "container_name",     "A SEXP container name (list or map)", ac_container, nullptr },
+	{ "list_container_name","A list container name", ac_container, nullptr },
+	{ "map_container_name", "A map container name", ac_container, nullptr },
+	{ "container_value",    "A value appropriate for the container's data type", ac_anything, nullptr },
+	{ "data_or_string_container", "A data or string-keyed container name", ac_container, nullptr },
+
+	// Miscellaneous
+	{ "cargo",              "A cargo type string", ac_string, nullptr },
+	{ "fireball",           "A fireball entry name or index", ac_table_name, nullptr },
+	{ "bolt_type",          "A lightning bolt type name", ac_table_name, nullptr },
+	{ "medal_name",         "A medal or award name", ac_table_name, nullptr },
+	{ "font",               "A font name", ac_table_name, nullptr },
+	{ "animation_type",     "An animation type", ac_enum, nullptr },
+	{ "animation_name",     "An animation name", ac_string, nullptr },
+	{ "mission_mood",       "A mission mood (determines built-in message selection)", ac_enum, nullptr },
+	{ "wing_formation",     "A wing formation name", ac_enum, nullptr },
+	{ "asteroid_type",      "An asteroid type name", ac_table_name, nullptr },
+	{ "debris_type",        "A debris type name", ac_table_name, nullptr },
+	{ "motion_debris",      "A motion debris type name", ac_table_name, nullptr },
+	{ "ssm_class",          "A subspace missile class name", ac_table_name, nullptr },
+	{ "traitor_override",   "A traitor override setting", ac_enum, nullptr },
+	{ "language",           "A language identifier", ac_enum, nullptr },
+	{ "functional_when_eval_type", "A functional evaluation type for when operators", ac_enum, nullptr },
+	{ "flexible_argument",  "A flexible argument (used with when-argument operators)", ac_anything, nullptr },
+	{ "child_lua_enum",     "A Lua-defined enum value", ac_enum, nullptr },
+
+	// Special
+	{ "none",               "No argument expected at this position", ac_none, nullptr },
+	{ "null",               "Null type (used for type matching)", ac_none, nullptr },
+
+	// sentinel
+	{ nullptr, nullptr, nullptr, nullptr }
+};
+
+static const opf_type_info *find_opf_type_info(const char *name)
+{
+	for (const opf_type_info *t = Opf_type_info; t->name; t++) {
+		if (stricmp(name, t->name) == 0)
+			return t;
+	}
+	return nullptr;
+}
+
+static json_t *handle_get_sexp_argument_type(json_t *arguments)
+{
+	const char *name = nullptr;
+	if (arguments) {
+		json_t *v = json_object_get(arguments, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+	}
+
+	// List all types if no name given
+	if (!name || name[0] == '\0') {
+		json_t *arr = json_array();
+		for (const opf_type_info *t = Opf_type_info; t->name; t++) {
+			json_t *item = json_object();
+			json_object_set_new(item, "name", json_string(t->name));
+			json_object_set_new(item, "description", json_string(t->description));
+			json_array_append_new(arr, item);
+		}
+		return make_json_tool_result(arr);
+	}
+
+	const opf_type_info *info = find_opf_type_info(name);
+	if (!info)
+		return make_tool_result("Unknown argument type. Call get_sexp_argument_type without arguments to list all types.", true);
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(info->name));
+	json_object_set_new(obj, "description", json_string(info->description));
+
+	json_t *accepts = json_array();
+	if (info->accepts) {
+		for (const char **a = info->accepts; *a; a++)
+			json_array_append_new(accepts, json_string(*a));
+	}
+	json_object_set_new(obj, "accepts", accepts);
+
+	if (info->notes)
+		json_object_set_new(obj, "notes", json_string(info->notes));
+
+	return make_json_tool_result(obj);
+}
+
+// ---------------------------------------------------------------------------
+// SEXP return type metadata
+// ---------------------------------------------------------------------------
+
+struct opr_type_info {
+	const char *name;
+	const char *description;
+	const char **compatible_with; // null-terminated list of argument type names this can satisfy
+};
+
+static const char *compat_number[]    = { "number", "positive_number", nullptr };
+static const char *compat_positive[]  = { "positive_number", "number", nullptr };
+static const char *compat_boolean[]   = { "boolean", nullptr };
+static const char *compat_null[]      = { nullptr };
+static const char *compat_ai_goal[]   = { "ai_goal", nullptr };
+static const char *compat_flexible[]  = { "flexible_argument", nullptr };
+static const char *compat_ambiguous[] = { "ambiguous", nullptr };
+static const char *compat_string[]    = { nullptr };
+
+static const opr_type_info Opr_type_info[] = {
+	{ "number",            "Returns any integer (positive or negative)", compat_number },
+	{ "positive_number",   "Returns a non-negative integer (>= 0)", compat_positive },
+	{ "boolean",           "Returns true or false", compat_boolean },
+	{ "null",              "Action operator that does not return a value", compat_null },
+	{ "ai_goal",           "Returns an AI goal (used as argument to ai-goals operators)", compat_ai_goal },
+	{ "string",            "Returns a string value", compat_string },
+	{ "ambiguous",         "Return type depends on variable type (used with variables)", compat_ambiguous },
+	{ "flexible_argument", "Flexible argument return (used with when-argument operators)", compat_flexible },
+	{ "none",              "No return type", compat_null },
+
+	// sentinel
+	{ nullptr, nullptr, nullptr }
+};
+
+static json_t *handle_get_sexp_return_type(json_t *arguments)
+{
+	const char *name = nullptr;
+	if (arguments) {
+		json_t *v = json_object_get(arguments, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+	}
+
+	// List all types if no name given
+	if (!name || name[0] == '\0') {
+		json_t *arr = json_array();
+		for (const opr_type_info *t = Opr_type_info; t->name; t++) {
+			json_t *item = json_object();
+			json_object_set_new(item, "name", json_string(t->name));
+			json_object_set_new(item, "description", json_string(t->description));
+			json_array_append_new(arr, item);
+		}
+		return make_json_tool_result(arr);
+	}
+
+	// Look up the type
+	for (const opr_type_info *t = Opr_type_info; t->name; t++) {
+		if (stricmp(name, t->name) == 0) {
+			json_t *obj = json_object();
+			json_object_set_new(obj, "name", json_string(t->name));
+			json_object_set_new(obj, "description", json_string(t->description));
+
+			json_t *compat = json_array();
+			if (t->compatible_with) {
+				for (const char **c = t->compatible_with; *c; c++)
+					json_array_append_new(compat, json_string(*c));
+			}
+			json_object_set_new(obj, "compatible_with", compat);
+
+			return make_json_tool_result(obj);
+		}
+	}
+
+	return make_tool_result("Unknown return type. Call get_sexp_return_type without arguments to list all types.", true);
+}
+
+// ---------------------------------------------------------------------------
 // get_ship_model_details — requires model loading on main thread
 // ---------------------------------------------------------------------------
 
@@ -1373,6 +1725,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_mod_info();
 	if (strcmp(tool_name, "get_reference_notes") == 0)
 		return handle_get_reference_notes(arguments);
+	if (strcmp(tool_name, "get_sexp_argument_type") == 0)
+		return handle_get_sexp_argument_type(arguments);
+	if (strcmp(tool_name, "get_sexp_return_type") == 0)
+		return handle_get_sexp_return_type(arguments);
 	if (strcmp(tool_name, "get_ship_model_details") == 0)
 		return handle_get_ship_model_details(arguments);
 
