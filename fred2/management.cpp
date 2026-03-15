@@ -457,6 +457,7 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 
 	// Signal that all game tables are loaded and safe for MCP reference tools to query
 	mcp_tables_ready.store(true);
+
 	fiction_viewer_reset();
 	cmd_brief_reset();
 
