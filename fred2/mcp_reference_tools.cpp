@@ -374,8 +374,9 @@ void mcp_register_reference_tools(json_t *tools)
 		register_tool(tools, "get_sexp_operator",
 			"Get full details of a SEXP operator, including help text, argument types, "
 			"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
-			"max_args is -1 for variadic operators; for these, variadic_arg_type "
-			"indicates the repeating argument type.",
+			"max_args is -1 for variadic operators; for these, argument_types contains "
+			"only the fixed argument group and variadic_arg_types contains the "
+			"repeating argument group.",
 			props, req);
 	}
 
@@ -1210,30 +1211,86 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 		}
 	}
 
-	// Argument types — enumerate up to max args, capped at 20 for variadic operators
+	// Argument types
 	{
-		int max_to_check = op.max;
-		if (max_to_check == INT_MAX || max_to_check > 20)
-			max_to_check = 20;
-		if (max_to_check < op.min)
-			max_to_check = op.min;
+		bool is_variadic = (op.max == INT_MAX);
 
-		json_t *arg_types = json_array();
-		int last_type = OPF_NONE;
-		for (int a = 0; a < max_to_check; a++) {
-			int atype = query_operator_argument_type(op_index, a);
-			if (atype == OPF_NONE && a >= op.min)
+		if (is_variadic) {
+			// For variadic operators, separate the fixed prefix from the
+			// repeating cycle.  Collect types for the first min_args positions,
+			// then query min_args more to detect where the cycle begins.
+			// The cycle length L is the smallest value where the last L types
+			// repeat into the extended range, and the cycle is self-consistent.
+
+			// Collect the first min_args types
+			SCP_vector<int> types;
+			for (int a = 0; a < op.min; a++)
+				types.push_back(query_operator_argument_type(op_index, a));
+
+			// Query min_args additional positions to detect cycle
+			SCP_vector<int> extended_types;
+			for (int a = 0; a < op.min; a++)
+				extended_types.push_back(query_operator_argument_type(op_index, op.min + a));
+
+			// Find the cycle length.  The cycle is the smallest L (1..min_args)
+			// where the pattern at the tail of types[] repeats into
+			// extended_types[].  Specifically, the last L entries of types[]
+			// must equal the first L entries of extended_types[], AND for any
+			// additional repetitions within types[] the cycle must hold.
+			int cycle_len = op.min;
+			for (int L = 1; L <= op.min; L++) {
+				// The cycle covers positions [min_args - L .. min_args - 1].
+				// Verify it repeats at [min_args .. min_args + L - 1].
+				bool match = true;
+				for (int i = 0; i < L; i++) {
+					if (types[op.min - L + i] != extended_types[i]) {
+						match = false;
+						break;
+					}
+				}
+				if (!match)
+					continue;
+
+				// Verify the cycle is self-consistent within types[] —
+				// i.e., for the cycle region, type[a] == type[a - L]
+				int prefix_len = op.min - L;
+				for (int a = prefix_len + L; a < op.min; a++) {
+					if (types[a] != types[a - L]) {
+						match = false;
+						break;
+					}
+				}
+				if (!match)
+					continue;
+
+				cycle_len = L;
 				break;
-			json_array_append_new(arg_types, json_string(opf_to_string(atype)));
-			last_type = atype;
-		}
+			}
 
-		// If variadic and we stopped early, note the repeating type
-		if (op.max == INT_MAX && last_type != OPF_NONE) {
-			json_object_set_new(obj, "variadic_arg_type", json_string(opf_to_string(last_type)));
-		}
+			int prefix_len = op.min - cycle_len;
 
-		json_object_set_new(obj, "argument_types", arg_types);
+			// Fixed prefix (argument_types)
+			json_t *arg_types = json_array();
+			for (int a = 0; a < prefix_len; a++)
+				json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
+			json_object_set_new(obj, "argument_types", arg_types);
+
+			// Repeating group (variadic_arg_types)
+			json_t *var_types = json_array();
+			for (int a = prefix_len; a < op.min; a++)
+				json_array_append_new(var_types, json_string(opf_to_string(types[a])));
+			json_object_set_new(obj, "variadic_arg_types", var_types);
+		} else {
+			// Non-variadic: just list all argument types
+			json_t *arg_types = json_array();
+			for (int a = 0; a < op.max; a++) {
+				int atype = query_operator_argument_type(op_index, a);
+				if (atype == OPF_NONE)
+					break;
+				json_array_append_new(arg_types, json_string(opf_to_string(atype)));
+			}
+			json_object_set_new(obj, "argument_types", arg_types);
+		}
 	}
 
 	return make_json_tool_result(obj);
