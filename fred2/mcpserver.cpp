@@ -197,6 +197,44 @@ static json_t *handle_tools_list(json_t * /*params*/)
 		json_array_append_new(tools, t);
 	}
 
+	// Tool: get_timeout
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("get_timeout"));
+		json_object_set_new(t, "description",
+			json_string("Returns the current timeout (in seconds) for MCP operations that run on the FRED2 UI thread"));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_object_set_new(s, "properties", json_object());
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
+	// Tool: set_timeout
+	{
+		json_t *t = json_object();
+		json_object_set_new(t, "name", json_string("set_timeout"));
+		json_object_set_new(t, "description",
+			json_string("Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10."));
+
+		json_t *s = json_object();
+		json_object_set_new(s, "type", json_string("object"));
+		json_t *props = json_object();
+		json_t *sec = json_object();
+		json_object_set_new(sec, "type", json_string("number"));
+		json_object_set_new(sec, "description", json_string("Timeout in seconds (1-300)"));
+		json_object_set_new(props, "seconds", sec);
+		json_object_set_new(s, "properties", props);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("seconds"));
+		json_object_set_new(s, "required", req);
+		json_object_set_new(t, "inputSchema", s);
+
+		json_array_append_new(tools, t);
+	}
+
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
 
@@ -221,7 +259,7 @@ json_t *make_tool_result(const char *text, bool is_error)
 }
 
 // Timeout for PostMessage + WaitForSingleObject, in milliseconds
-static const DWORD MCP_TOOL_TIMEOUT_MS = 30000;
+static std::atomic<DWORD> mcp_tool_timeout_ms{10000};  // default 10 seconds
 
 // Clean up a heap-allocated McpToolRequest (event handle, json, struct)
 static void mcp_cleanup_request(McpToolRequest *req)
@@ -232,7 +270,7 @@ static void mcp_cleanup_request(McpToolRequest *req)
 	delete req;
 }
 
-// Marshal a tool call to the main MFC thread with a 30-second timeout.
+// Marshal a tool call to the main MFC thread with a configurable timeout.
 // Uses PostMessage so the mongoose thread is not blocked indefinitely
 // if the UI thread handler triggers a modal dialog.
 json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
@@ -263,7 +301,8 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
 	}
 
-	DWORD wait_result = WaitForSingleObject(req->completion_event, MCP_TOOL_TIMEOUT_MS);
+	DWORD timeout_ms = mcp_tool_timeout_ms.load(std::memory_order_relaxed);
+	DWORD wait_result = WaitForSingleObject(req->completion_event, timeout_ms);
 
 	if (wait_result == WAIT_OBJECT_0) {
 		// Normal completion — extract result before releasing
@@ -289,9 +328,11 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 	}
 	// else: handler still running and will clean up when it finishes
 
-	return make_tool_result(
-		"Operation timed out (30s). A modal dialog may be blocking the FRED2 UI. "
-		"Use get_ui_status to check.", true);
+	char timeout_msg[256];
+	snprintf(timeout_msg, sizeof(timeout_msg),
+		"Operation timed out (%us). A modal dialog may be blocking the FRED2 UI. "
+		"Use get_ui_status to check.", timeout_ms / 1000);
+	return make_tool_result(timeout_msg, true);
 }
 
 // Called by the UI thread handler after filling results.
@@ -322,6 +363,29 @@ static json_t *handle_tools_call(json_t *params)
 			server_info += "FRED2 is initializing. ";
 		server_info += "Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state.";
 		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, server_info.c_str());
+	}
+
+	if (strcmp(tool_name, "get_timeout") == 0) {
+		char buf[64];
+		snprintf(buf, sizeof(buf), "timeout_seconds: %u", mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000);
+		return make_tool_result(buf);
+	}
+
+	if (strcmp(tool_name, "set_timeout") == 0) {
+		json_t *arguments = json_object_get(params, "arguments");
+		json_t *sec_val = arguments ? json_object_get(arguments, "seconds") : nullptr;
+		if (!sec_val || !json_is_number(sec_val))
+			return make_tool_result("Missing required parameter: seconds (number)", true);
+
+		int seconds = (int)json_number_value(sec_val);
+		if (seconds < 1 || seconds > 300)
+			return make_tool_result("Timeout must be between 1 and 300 seconds", true);
+
+		mcp_tool_timeout_ms.store((DWORD)(seconds * 1000), std::memory_order_relaxed);
+
+		char buf[64];
+		snprintf(buf, sizeof(buf), "timeout_seconds: %d", seconds);
+		return make_tool_result(buf);
 	}
 
 	// All tools below require FRED2 to be fully initialized
