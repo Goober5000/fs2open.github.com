@@ -10,6 +10,7 @@
 #include "ship/ship.h"
 #include "weapon/weapon.h"
 #include "species_defs/species_defs.h"
+#include "parse/parselo.h"
 #include "parse/sexp.h"
 #include "parse/sexp/sexp_lookup.h"
 #include "menuui/techmenu.h"
@@ -428,6 +429,38 @@ void mcp_register_reference_tools(json_t *tools)
 			"fighter bay arrival/departure). Note: if the model is not already loaded, "
 			"this tool may take several seconds to respond while the model is loaded "
 			"into memory.",
+			props, req);
+	}
+
+	// subsystem_names_compare
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name1", "First subsystem name");
+		add_string_prop(props, "name2", "Second subsystem name");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name1"));
+		json_array_append_new(req, json_string("name2"));
+		register_tool(tools, "subsystem_names_compare",
+			"Compare the ordering of two subsystem names using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
+			"Returns an integer: negative if name1 < name2, 0 if equal, positive if name1 > name2 (like strcmp). "
+			"Use this for sorting; use subsystem_names_equal for simple equality checks. Always use one of these tools "
+			"instead of common string comparison for subsystem names.",
+			props, req);
+	}
+
+	// subsystem_names_equal
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name1", "First subsystem name");
+		add_string_prop(props, "name2", "Second subsystem name");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name1"));
+		json_array_append_new(req, json_string("name2"));
+		register_tool(tools, "subsystem_names_equal",
+			"Check whether two subsystem names are considered equal using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
+			"Returns a boolean. "
+			"Use this for simple equality checks; use subsystem_names_compare for sorting. Always use one of these tools "
+			"instead of common string comparison for subsystem names.",
 			props, req);
 	}
 }
@@ -1346,6 +1379,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		json_t *arr = json_array();
 		size_t index;
 		json_t *entry;
+#pragma warning(suppress: 4706)
 		json_array_foreach(notes, index, entry) {
 			json_t *item = json_object();
 			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
@@ -1359,6 +1393,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 	// Look up the requested topic (case-insensitive)
 	size_t index;
 	json_t *entry;
+#pragma warning(suppress: 4706)
 	json_array_foreach(notes, index, entry) {
 		const char *t = json_string_value(json_object_get(entry, "topic"));
 		if (t && stricmp(topic, t) == 0) {
@@ -1906,6 +1941,55 @@ static json_t *handle_get_ship_model_details(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// Subsystem name comparison
+// ---------------------------------------------------------------------------
+
+static json_t *handle_subsystem_names_compare(json_t *arguments)
+{
+	json_t *v1 = arguments ? json_object_get(arguments, "name1") : nullptr;
+	json_t *v2 = arguments ? json_object_get(arguments, "name2") : nullptr;
+	const char *name1 = (v1 && json_is_string(v1)) ? json_string_value(v1) : nullptr;
+	const char *name2 = (v2 && json_is_string(v2)) ? json_string_value(v2) : nullptr;
+	if (!name1 || !name2)
+		return make_tool_result("Missing required parameters: name1 and name2", true);
+
+	int cmp = subsystem_stricmp(name1, name2);
+
+	char buf[64];
+	snprintf(buf, sizeof(buf), "Comparison result: %d (%s)", cmp,
+		cmp == 0 ? "equal" : "not equal");
+	json_t *result = make_tool_result(buf);
+
+	json_t *sc = json_object();
+	json_object_set_new(sc, "result", json_integer(cmp));
+	json_object_set_new(result, "structuredContent", sc);
+
+	return result;
+}
+
+static json_t *handle_subsystem_names_equal(json_t *arguments)
+{
+	json_t *v1 = arguments ? json_object_get(arguments, "name1") : nullptr;
+	json_t *v2 = arguments ? json_object_get(arguments, "name2") : nullptr;
+	const char *name1 = (v1 && json_is_string(v1)) ? json_string_value(v1) : nullptr;
+	const char *name2 = (v2 && json_is_string(v2)) ? json_string_value(v2) : nullptr;
+	if (!name1 || !name2)
+		return make_tool_result("Missing required parameters: name1 and name2", true);
+
+	bool equal = subsystem_stricmp(name1, name2) == 0;
+
+	json_t *result = make_tool_result(equal
+		? "The subsystem names are equal."
+		: "The subsystem names are not equal.");
+
+	json_t *sc = json_object();
+	json_object_set_new(sc, "equal", json_boolean(equal));
+	json_object_set_new(result, "structuredContent", sc);
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -1948,6 +2032,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_return_type(arguments);
 	if (strcmp(tool_name, "get_ship_model_details") == 0)
 		return handle_get_ship_model_details(arguments);
+	if (strcmp(tool_name, "subsystem_names_compare") == 0)
+		return handle_subsystem_names_compare(arguments);
+	if (strcmp(tool_name, "subsystem_names_equal") == 0)
+		return handle_subsystem_names_equal(arguments);
 
 	return nullptr;  // not one of our tools
 }
