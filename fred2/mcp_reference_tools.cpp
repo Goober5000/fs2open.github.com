@@ -1220,18 +1220,20 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 			// repeating cycle.  We query enough positions to reliably detect
 			// the cycle pattern, then verify it repeats into an extended range.
 			//
-			// We need at least 4 positions even when min_args is small (e.g. 0)
+			// We need at least 8 positions even when min_args is small (e.g. 0)
 			// so that we have enough data to detect multi-element cycles.
-			int query_count = std::max(op.min, 4);
+			int query_count = std::max(op.min * 2, 8);
 
 			// Collect types for positions 0..query_count-1
 			SCP_vector<int> types;
 			for (int a = 0; a < query_count; a++)
 				types.push_back(query_operator_argument_type(op_index, a));
 
-			// Query query_count additional positions to verify the cycle
+			// Query 2 * query_count additional positions to verify the cycle,
+			// ensuring even the largest candidate cycle gets a second-period check.
+			int extended_count = 2 * query_count;
 			SCP_vector<int> extended_types;
-			for (int a = 0; a < query_count; a++)
+			for (int a = 0; a < extended_count; a++)
 				extended_types.push_back(query_operator_argument_type(op_index, query_count + a));
 
 			// Find the cycle length.  The cycle is the smallest L (1..query_count)
@@ -1305,9 +1307,9 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 				json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
 			json_object_set_new(obj, "argument_types", arg_types);
 
-			// Repeating group (variadic_arg_types)
+			// Repeating group (variadic_arg_types) — emit exactly one cycle
 			json_t *var_types = json_array();
-			for (int a = prefix_len; a < query_count; a++)
+			for (int a = prefix_len; a < prefix_len + cycle_len; a++)
 				json_array_append_new(var_types, json_string(opf_to_string(types[a])));
 			json_object_set_new(obj, "variadic_arg_types", var_types);
 		} else {
