@@ -7,6 +7,7 @@
 #include <cstring>
 
 #include "mission/missionparse.h"
+#include "mod_table/mod_table.h"
 #include "mainfrm.h"
 #include "globalincs/pstypes.h"
 
@@ -96,7 +97,7 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	json_t *tool = json_object();
 	json_object_set_new(tool, "name", json_string("get_server_info"));
 	json_object_set_new(tool, "description",
-		json_string("Returns basic information about the running FRED2 instance"));
+		json_string("Returns information about the running FRED2 instance, including the currently loaded mission and active mod if applicable"));
 
 	json_t *schema = json_object();
 	json_object_set_new(schema, "type", json_string("object"));
@@ -316,11 +317,11 @@ static json_t *handle_tools_call(json_t *params)
 		return nullptr;  // caller will send error
 
 	if (strcmp(tool_name, "get_server_info") == 0) {
+		SCP_string server_info = "FRED2 MCP Server is running. ";
 		if (!mcp_fred_ready.load())
-			return make_tool_result("FRED2 MCP Server is running. FRED2 is initializing. "
-				"Use get_mission_info for mission details and get_ui_status for UI state.");
-		return make_tool_result("FRED2 MCP Server is running. "
-			"Use get_mission_info for mission details and get_ui_status for UI state.");
+			server_info += "FRED2 is initializing. ";
+		server_info += "Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state.";
+		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, server_info.c_str());
 	}
 
 	// All tools below require FRED2 to be fully initialized
