@@ -27,6 +27,10 @@ struct McpToolRequest {
 
 	// Optional structured result (caller must json_decref if non-null)
 	json_t *result_json;
+
+	// Async completion support (used by PostMessage + WaitForSingleObject path)
+	HANDLE completion_event;
+	std::atomic<int> refcount;  // init to 2: one for caller, one for handler
 };
 
 void mcp_server_start();
@@ -40,5 +44,13 @@ extern std::atomic<bool> mcp_fred_ready;
 // Build an MCP tool result with a text content item.
 // Shared with mcp_reference_tools.cpp.
 json_t *make_tool_result(const char *text, bool is_error = false);
+
+// Marshal a tool call to the main MFC thread with a 30-second timeout.
+// Heap-allocates the request internally. Returns MCP tool result JSON.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param);
+
+// Called by the UI thread handler after filling results. Signals the
+// completion event and handles cleanup if the caller already timed out.
+void mcp_signal_completion(McpToolRequest *req);
 
 #endif // _MCPSERVER_H
