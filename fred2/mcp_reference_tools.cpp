@@ -229,8 +229,8 @@ static const char *subsystem_type_str(int type)
 		case SUBSYSTEM_COMMUNICATION: return "communication";
 		case SUBSYSTEM_WEAPONS:       return "weapons";
 		case SUBSYSTEM_SENSORS:       return "sensors";
-		case SUBSYSTEM_SOLAR:         return "solar";
-		case SUBSYSTEM_GAS_COLLECT:   return "gas_collect";
+		case SUBSYSTEM_SOLAR:         return "solar panel";
+		case SUBSYSTEM_GAS_COLLECT:   return "gas collector";
 		case SUBSYSTEM_ACTIVATION:    return "activation";
 		case SUBSYSTEM_UNKNOWN:       return "unknown";
 		default: return "unknown";
@@ -838,11 +838,16 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	}
 
 	// Classification helpers
-	json_object_set_new(obj, "is_small_ship", json_boolean(sip.is_small_ship()));
-	json_object_set_new(obj, "is_big_ship", json_boolean(sip.is_big_ship()));
-	json_object_set_new(obj, "is_huge_ship", json_boolean(sip.is_huge_ship()));
-	json_object_set_new(obj, "is_flyable", json_boolean(sip.is_flyable()));
-	json_object_set_new(obj, "is_fighter_bomber", json_boolean(sip.is_fighter_bomber()));
+	auto size_classification = "unspecified";
+	if (sip.is_huge_ship())
+		size_classification = "huge";
+	else if (sip.is_big_ship())
+		size_classification = "big";
+	else if (sip.is_small_ship())
+		size_classification = "small";
+	json_object_set_new(obj, "size_classification", json_string(size_classification));
+	json_object_set_new(obj, "can_fly_around", json_boolean(sip.is_flyable()));
+	json_object_set_new(obj, "is_fighter_or_bomber", json_boolean(sip.is_fighter_bomber()));
 	json_object_set_new(obj, "in_tech_database", json_boolean(sip.flags[Ship::Info_Flags::In_tech_database]));
 
 	return make_json_tool_result(obj);
