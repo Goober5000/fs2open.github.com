@@ -1217,33 +1217,35 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 		if (is_variadic) {
 			// For variadic operators, separate the fixed prefix from the
-			// repeating cycle.  Collect types for the first min_args positions,
-			// then query min_args more to detect where the cycle begins.
-			// The cycle length L is the smallest value where the last L types
-			// repeat into the extended range, and the cycle is self-consistent.
+			// repeating cycle.  We query enough positions to reliably detect
+			// the cycle pattern, then verify it repeats into an extended range.
+			//
+			// We need at least 4 positions even when min_args is small (e.g. 0)
+			// so that we have enough data to detect multi-element cycles.
+			int query_count = std::max(op.min, 4);
 
-			// Collect the first min_args types
+			// Collect types for positions 0..query_count-1
 			SCP_vector<int> types;
-			for (int a = 0; a < op.min; a++)
+			for (int a = 0; a < query_count; a++)
 				types.push_back(query_operator_argument_type(op_index, a));
 
-			// Query min_args additional positions to detect cycle
+			// Query query_count additional positions to verify the cycle
 			SCP_vector<int> extended_types;
-			for (int a = 0; a < op.min; a++)
-				extended_types.push_back(query_operator_argument_type(op_index, op.min + a));
+			for (int a = 0; a < query_count; a++)
+				extended_types.push_back(query_operator_argument_type(op_index, query_count + a));
 
-			// Find the cycle length.  The cycle is the smallest L (1..min_args)
+			// Find the cycle length.  The cycle is the smallest L (1..query_count)
 			// where the pattern at the tail of types[] repeats into
 			// extended_types[].  Specifically, the last L entries of types[]
 			// must equal the first L entries of extended_types[], AND for any
 			// additional repetitions within types[] the cycle must hold.
-			int cycle_len = op.min;
-			for (int L = 1; L <= op.min; L++) {
-				// The cycle covers positions [min_args - L .. min_args - 1].
-				// Verify it repeats at [min_args .. min_args + L - 1].
+			int cycle_len = query_count;
+			for (int L = 1; L <= query_count; L++) {
+				// The cycle covers positions [query_count - L .. query_count - 1].
+				// Verify it repeats at [query_count .. query_count + L - 1].
 				bool match = true;
 				for (int i = 0; i < L; i++) {
-					if (types[op.min - L + i] != extended_types[i]) {
+					if (types[query_count - L + i] != extended_types[i]) {
 						match = false;
 						break;
 					}
@@ -1253,11 +1255,24 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 				// Verify the cycle is self-consistent within types[] —
 				// i.e., for the cycle region, type[a] == type[a - L]
-				int prefix_len = op.min - L;
-				for (int a = prefix_len + L; a < op.min; a++) {
+				int prefix_len = query_count - L;
+				for (int a = prefix_len + L; a < query_count; a++) {
 					if (types[a] != types[a - L]) {
 						match = false;
 						break;
+					}
+				}
+				if (!match)
+					continue;
+
+				// Verify a second period in extended_types to guard
+				// against a coincidental single-period boundary match
+				if (L * 2 <= static_cast<int>(extended_types.size())) {
+					for (int i = 0; i < L; i++) {
+						if (extended_types[i] != extended_types[L + i]) {
+							match = false;
+							break;
+						}
 					}
 				}
 				if (!match)
@@ -1267,7 +1282,22 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 				break;
 			}
 
-			int prefix_len = op.min - cycle_len;
+			int prefix_len = query_count - cycle_len;
+
+			// The cycle may begin earlier than query_count - cycle_len.
+			// Walk backwards while the prefix tail matches the cycle.
+			while (prefix_len >= cycle_len) {
+				bool matches = true;
+				for (int i = 0; i < cycle_len; i++) {
+					if (types[prefix_len - cycle_len + i] != types[prefix_len + i]) {
+						matches = false;
+						break;
+					}
+				}
+				if (!matches)
+					break;
+				prefix_len -= cycle_len;
+			}
 
 			// Fixed prefix (argument_types)
 			json_t *arg_types = json_array();
@@ -1277,7 +1307,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 			// Repeating group (variadic_arg_types)
 			json_t *var_types = json_array();
-			for (int a = prefix_len; a < op.min; a++)
+			for (int a = prefix_len; a < query_count; a++)
 				json_array_append_new(var_types, json_string(opf_to_string(types[a])));
 			json_object_set_new(obj, "variadic_arg_types", var_types);
 		} else {
