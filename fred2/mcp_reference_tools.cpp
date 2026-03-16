@@ -2,7 +2,10 @@
 #include "mcp_reference_tools.h"
 #include "mcpserver.h"
 
+#pragma warning(push)
+#pragma warning(disable: 4706)
 #include <jansson.h>
+#pragma warning(pop)
 #include <climits>
 #include <cstring>
 
@@ -1384,15 +1387,12 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		json_t *arr = json_array();
 		size_t index;
 		json_t *entry;
-#pragma warning(push)
-#pragma warning(disable: 4706)
 		json_array_foreach(notes, index, entry) {
 			json_t *item = json_object();
 			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
 			json_object_set_new(item, "title", json_copy(json_object_get(entry, "title")));
 			json_array_append_new(arr, item);
 		}
-#pragma warning(pop)
 		json_decref(notes);
 		return make_json_tool_result(arr);
 	}
@@ -1400,8 +1400,6 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 	// Look up the requested topic (case-insensitive)
 	size_t index;
 	json_t *entry;
-#pragma warning(push)
-#pragma warning(disable: 4706)
 	json_array_foreach(notes, index, entry) {
 		const char *t = json_string_value(json_object_get(entry, "topic"));
 		if (t && stricmp(topic, t) == 0) {
@@ -1413,7 +1411,6 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 			return make_json_tool_result(obj);
 		}
 	}
-#pragma warning(pop)
 
 	json_decref(notes);
 	return make_tool_result("Topic not found. Call get_reference_notes without arguments to list available topics.", true);
