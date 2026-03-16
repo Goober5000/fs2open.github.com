@@ -1384,13 +1384,15 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		json_t *arr = json_array();
 		size_t index;
 		json_t *entry;
-#pragma warning(suppress: 4706)
+#pragma warning(push)
+#pragma warning(disable: 4706)
 		json_array_foreach(notes, index, entry) {
 			json_t *item = json_object();
 			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
 			json_object_set_new(item, "title", json_copy(json_object_get(entry, "title")));
 			json_array_append_new(arr, item);
 		}
+#pragma warning(pop)
 		json_decref(notes);
 		return make_json_tool_result(arr);
 	}
@@ -1398,7 +1400,8 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 	// Look up the requested topic (case-insensitive)
 	size_t index;
 	json_t *entry;
-#pragma warning(suppress: 4706)
+#pragma warning(push)
+#pragma warning(disable: 4706)
 	json_array_foreach(notes, index, entry) {
 		const char *t = json_string_value(json_object_get(entry, "topic"));
 		if (t && stricmp(topic, t) == 0) {
@@ -1410,6 +1413,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 			return make_json_tool_result(obj);
 		}
 	}
+#pragma warning(pop)
 
 	json_decref(notes);
 	return make_tool_result("Topic not found. Call get_reference_notes without arguments to list available topics.", true);
@@ -1787,20 +1791,13 @@ static json_t *handle_get_ship_model_details(json_t *arguments)
 		return make_tool_result("Ship class not found", true);
 
 	// Marshal model_load() to the main thread
-	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
-		return make_tool_result("FRED2 main window is not available", true);
+	json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
 
-	McpToolRequest req = {};
-	req.tool = McpToolId::LOAD_SHIP_MODEL;
-	strncpy(req.filepath, name, sizeof(req.filepath) - 1);
-	req.filepath[sizeof(req.filepath) - 1] = '\0';
-	req.success = false;
-	req.result_message[0] = '\0';
-
-	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
-
-	if (!req.success)
-		return make_tool_result(req.result_message, true);
+	// Check if load failed or timed out
+	json_t *is_err = json_object_get(load_result, "isError");
+	if (is_err && json_is_true(is_err))
+		return load_result;
+	json_decref(load_result);
 
 	// Model is now loaded — read polymodel data
 	const auto &sip = Ship_info[sip_idx];
