@@ -943,5 +943,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		break;
 	}
 
+	mcp_signal_completion(req);
 	return 0;
 }
