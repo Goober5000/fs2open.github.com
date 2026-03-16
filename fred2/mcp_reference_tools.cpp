@@ -1241,7 +1241,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 			// extended_types[].  Specifically, the last L entries of types[]
 			// must equal the first L entries of extended_types[], AND for any
 			// additional repetitions within types[] the cycle must hold.
-			int cycle_len = query_count;
+			int cycle_len = 0;
 			for (int L = 1; L <= query_count; L++) {
 				// The cycle covers positions [query_count - L .. query_count - 1].
 				// Verify it repeats at [query_count .. query_count + L - 1].
@@ -1269,12 +1269,10 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 				// Verify a second period in extended_types to guard
 				// against a coincidental single-period boundary match
-				if (L * 2 <= static_cast<int>(extended_types.size())) {
-					for (int i = 0; i < L; i++) {
-						if (extended_types[i] != extended_types[L + i]) {
-							match = false;
-							break;
-						}
+				for (int i = 0; i < L; i++) {
+					if (extended_types[i] != extended_types[L + i]) {
+						match = false;
+						break;
 					}
 				}
 				if (!match)
@@ -1284,34 +1282,44 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 				break;
 			}
 
-			int prefix_len = query_count - cycle_len;
+			bool cycle_found = (cycle_len > 0);
 
-			// The cycle may begin earlier than query_count - cycle_len.
-			// Walk backwards while the prefix tail matches the cycle.
-			while (prefix_len >= cycle_len) {
-				bool matches = true;
-				for (int i = 0; i < cycle_len; i++) {
-					if (types[prefix_len - cycle_len + i] != types[prefix_len + i]) {
-						matches = false;
-						break;
+			if (cycle_found) {
+				int prefix_len = query_count - cycle_len;
+
+				// The cycle may begin earlier than query_count - cycle_len.
+				// Walk backwards while the prefix tail matches the cycle.
+				while (prefix_len >= cycle_len) {
+					bool matches = true;
+					for (int i = 0; i < cycle_len; i++) {
+						if (types[prefix_len - cycle_len + i] != types[prefix_len + i]) {
+							matches = false;
+							break;
+						}
 					}
+					if (!matches)
+						break;
+					prefix_len -= cycle_len;
 				}
-				if (!matches)
-					break;
-				prefix_len -= cycle_len;
+
+				// Fixed prefix (argument_types)
+				json_t *arg_types = json_array();
+				for (int a = 0; a < prefix_len; a++)
+					json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
+				json_object_set_new(obj, "argument_types", arg_types);
+
+				// Repeating group (variadic_arg_types) — emit exactly one cycle
+				json_t *var_types = json_array();
+				for (int a = prefix_len; a < prefix_len + cycle_len; a++)
+					json_array_append_new(var_types, json_string(opf_to_string(types[a])));
+				json_object_set_new(obj, "variadic_arg_types", var_types);
+			} else {
+				// No cycle detected — emit only the min_args types as argument_types
+				json_t *arg_types = json_array();
+				for (int a = 0; a < op.min; a++)
+					json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
+				json_object_set_new(obj, "argument_types", arg_types);
 			}
-
-			// Fixed prefix (argument_types)
-			json_t *arg_types = json_array();
-			for (int a = 0; a < prefix_len; a++)
-				json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
-			json_object_set_new(obj, "argument_types", arg_types);
-
-			// Repeating group (variadic_arg_types) — emit exactly one cycle
-			json_t *var_types = json_array();
-			for (int a = prefix_len; a < prefix_len + cycle_len; a++)
-				json_array_append_new(var_types, json_string(opf_to_string(types[a])));
-			json_object_set_new(obj, "variadic_arg_types", var_types);
 		} else {
 			// Non-variadic: just list all argument types
 			json_t *arg_types = json_array();
