@@ -219,33 +219,90 @@ json_t *make_tool_result(const char *text, bool is_error)
 	return result;
 }
 
-// Marshal a tool call to the main MFC thread via SendMessage and return the result
-static json_t *execute_on_main_thread(McpToolId tool, const char *filepath)
+// Timeout for PostMessage + WaitForSingleObject, in milliseconds
+static const DWORD MCP_TOOL_TIMEOUT_MS = 30000;
+
+// Clean up a heap-allocated McpToolRequest (event handle, json, struct)
+static void mcp_cleanup_request(McpToolRequest *req)
+{
+	CloseHandle(req->completion_event);
+	if (req->result_json)
+		json_decref(req->result_json);
+	delete req;
+}
+
+// Marshal a tool call to the main MFC thread with a 30-second timeout.
+// Uses PostMessage so the mongoose thread is not blocked indefinitely
+// if the UI thread handler triggers a modal dialog.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 {
 	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
 		return make_tool_result("FRED2 main window is not available", true);
 
-	McpToolRequest req = {};
-	req.tool = tool;
-	strncpy(req.filepath, filepath, sizeof(req.filepath) - 1);
-	req.filepath[sizeof(req.filepath) - 1] = '\0';
-	req.success = false;
-	req.result_message[0] = '\0';
-	req.result_json = nullptr;
+	// Heap-allocate because the request may outlive this stack frame on timeout
+	auto *req = new McpToolRequest();
+	req->tool = tool;
+	strncpy(req->filepath, param, sizeof(req->filepath) - 1);
+	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	req->success = false;
+	req->result_message[0] = '\0';
+	req->result_json = nullptr;
+	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+	req->refcount.store(2, std::memory_order_relaxed);
 
 	// Normalize path separators for the FreeSpace engine
-	for (char *p = req.filepath; *p; ++p) {
+	for (char *p = req->filepath; *p; ++p) {
 		if (*p == '/' || *p == '\\')
 			*p = DIR_SEPARATOR_CHAR;
 	}
 
-	::SendMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)&req);
+	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
+		// PostMessage failed — we are the sole owner
+		mcp_cleanup_request(req);
+		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
+	}
 
-	// If the handler built a structured JSON result, return it directly
-	if (req.result_json)
-		return req.result_json;
+	DWORD wait_result = WaitForSingleObject(req->completion_event, MCP_TOOL_TIMEOUT_MS);
 
-	return make_tool_result(req.result_message, !req.success);
+	if (wait_result == WAIT_OBJECT_0) {
+		// Normal completion — extract result before releasing
+		json_t *result;
+		if (req->result_json) {
+			result = req->result_json;
+			req->result_json = nullptr;  // take ownership
+		} else {
+			result = make_tool_result(req->result_message, !req->success);
+		}
+
+		// Release our reference; if handler already released, we clean up
+		if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
+			mcp_cleanup_request(req);
+
+		return result;
+	}
+
+	// Timeout — release our reference
+	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+		// Handler already finished between timeout and our fetch_sub
+		mcp_cleanup_request(req);
+	}
+	// else: handler still running and will clean up when it finishes
+
+	return make_tool_result(
+		"Operation timed out (30s). A modal dialog may be blocking the FRED2 UI. "
+		"Use get_ui_status to check.", true);
+}
+
+// Called by the UI thread handler after filling results.
+// Signals the completion event, then releases the handler's reference.
+void mcp_signal_completion(McpToolRequest *req)
+{
+	// Signal first so the caller can wake up before we decrement
+	SetEvent(req->completion_event);
+
+	// Release handler's reference; if caller already timed out, we clean up
+	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
+		mcp_cleanup_request(req);
 }
 
 static json_t *handle_tools_call(json_t *params)
@@ -287,19 +344,19 @@ static json_t *handle_tools_call(json_t *params)
 		else
 			tool = McpToolId::SAVE_MISSION;
 
-		return execute_on_main_thread(tool, filepath);
+		return mcp_execute_on_main_thread(tool, filepath);
 	}
 
 	if (strcmp(tool_name, "new_mission") == 0) {
-		return execute_on_main_thread(McpToolId::NEW_MISSION, "");
+		return mcp_execute_on_main_thread(McpToolId::NEW_MISSION, "");
 	}
 
 	if (strcmp(tool_name, "get_mission_info") == 0) {
-		return execute_on_main_thread(McpToolId::GET_MISSION_INFO, "");
+		return mcp_execute_on_main_thread(McpToolId::GET_MISSION_INFO, "");
 	}
 
 	if (strcmp(tool_name, "get_ui_status") == 0) {
-		return execute_on_main_thread(McpToolId::GET_UI_STATUS, "");
+		return mcp_execute_on_main_thread(McpToolId::GET_UI_STATUS, "");
 	}
 
 	// Try reference/discovery tools
