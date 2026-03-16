@@ -2,10 +2,7 @@
 #include "mcp_reference_tools.h"
 #include "mcpserver.h"
 
-#pragma warning(push)
-#pragma warning(disable: 4706)
 #include <jansson.h>
-#pragma warning(pop)
 #include <climits>
 #include <cstring>
 
@@ -1288,7 +1285,8 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 				int prefix_len = query_count - cycle_len;
 
 				// The cycle may begin earlier than query_count - cycle_len.
-				// Walk backwards while the prefix tail matches the cycle.
+				// Walk backwards in full-cycle steps while the prefix tail
+				// matches the cycle.
 				while (prefix_len >= cycle_len) {
 					bool matches = true;
 					for (int i = 0; i < cycle_len; i++) {
@@ -1300,6 +1298,12 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 					if (!matches)
 						break;
 					prefix_len -= cycle_len;
+				}
+
+				// Fine-tune: the prefix may end partway through a cycle
+				// period.  Trim one position at a time if it matches.
+				while (prefix_len > 0 && types[prefix_len - 1] == types[prefix_len - 1 + cycle_len]) {
+					prefix_len--;
 				}
 
 				// Fixed prefix (argument_types)
