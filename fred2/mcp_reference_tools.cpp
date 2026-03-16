@@ -755,14 +755,8 @@ static json_t *handle_get_ship_class(json_t *arguments)
 					json_array_append_new(daw, json_string(Weapon_info[wf.first].name));
 			}
 		}
-		if (json_array_size(aw) > 0)
-			json_object_set_new(obj, "allowed_weapons", aw);
-		else
-			json_decref(aw);
-		if (json_array_size(daw) > 0)
-			json_object_set_new(obj, "allowed_dogfight_weapons", daw);
-		else
-			json_decref(daw);
+		json_object_set_new(obj, "allowed_weapons", aw);
+		json_object_set_new(obj, "allowed_dogfight_weapons", daw);
 	}
 
 	// Countermeasures
@@ -1905,10 +1899,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				if (spline_idx >= 0 && spline_idx < pm->n_paths)
 					json_array_append_new(spline_names, json_string(pm->paths[spline_idx].name));
 			}
-			if (json_array_size(spline_names) > 0)
-				json_object_set_new(dock_obj, "spline_path_names", spline_names);
-			else
-				json_decref(spline_names);
+			json_object_set_new(dock_obj, "spline_path_names", spline_names);
 
 			json_array_append_new(docks, dock_obj);
 		}
@@ -2007,10 +1998,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 					if (ss.primary_banks[b] >= 0 && ss.primary_banks[b] < weapon_info_size())
 						json_array_append_new(t_pri, json_string(Weapon_info[ss.primary_banks[b]].name));
 				}
-				if (json_array_size(t_pri) > 0)
-					json_object_set_new(ss_obj, "primary_weapons", t_pri);
-				else
-					json_decref(t_pri);
+				json_object_set_new(ss_obj, "primary_weapons", t_pri);
 
 				// Turret secondary weapons
 				json_t *t_sec = json_array();
@@ -2018,10 +2006,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 					if (ss.secondary_banks[b] >= 0 && ss.secondary_banks[b] < weapon_info_size())
 						json_array_append_new(t_sec, json_string(Weapon_info[ss.secondary_banks[b]].name));
 				}
-				if (json_array_size(t_sec) > 0)
-					json_object_set_new(ss_obj, "secondary_weapons", t_sec);
-				else
-					json_decref(t_sec);
+				json_object_set_new(ss_obj, "secondary_weapons", t_sec);
 			}
 
 			// AWACS info
