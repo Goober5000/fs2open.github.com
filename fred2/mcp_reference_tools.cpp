@@ -298,7 +298,8 @@ void mcp_register_reference_tools(json_t *tools)
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_ship_class",
 			"Get detailed stats for a specific ship class, including hull, shields, "
-			"speed, weapons, subsystems, and per-bank weapon restrictions.",
+			"speed, weapons, and per-bank weapon restrictions. See also get_ship_class_model_details "
+			"for ship class information that depends on the 3D model.",
 			props, req);
 	}
 
@@ -420,15 +421,15 @@ void mcp_register_reference_tools(json_t *tools)
 			props);
 	}
 
-	// get_ship_model_details
+	// get_ship_class_model_details
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Name of the ship class (e.g. \"GTD Orion\")");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_ship_model_details",
-			"Get 3D model details for a ship class, including bounding box dimensions, "
-			"docking bays, and navigation paths (for subsystem attack, docking, and "
+		register_tool(tools, "get_ship_class_model_details",
+			"Get 3D model details for a ship class, including subsystems, bounding box "
+			"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
 			"fighter bay arrival/departure). Note: if the model is not already loaded, "
 			"this tool may take several seconds to respond while the model is loaded "
 			"into memory.",
@@ -773,72 +774,6 @@ static json_t *handle_get_ship_class(json_t *arguments)
 
 	// Score
 	json_object_set_new(obj, "score", json_integer(sip.score));
-
-	// Subsystems
-	{
-		json_t *subsys = json_array();
-		for (int s = 0; s < sip.n_subsystems; s++) {
-			const auto &ss = sip.subsystems[s];
-			json_t *ss_obj = json_object();
-
-			// Use subobj_name (from table parsing); the 'name' field is only
-			// populated after the model is loaded.
-			json_object_set_new(ss_obj, "name", json_string(ss.subobj_name));
-			if (ss.type != SUBSYSTEM_NONE)
-				json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
-			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
-
-			// Turret-specific info — check type if model is loaded, or
-			// check for weapons/turning rate from table data
-			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
-				(ss.primary_banks[0] >= 0) || (ss.secondary_banks[0] >= 0) ||
-				(ss.turret_turning_rate > 0.0f);
-
-			if (has_turret_data) {
-				if (ss.turret_num_firing_points > 0)
-					json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
-				if (ss.turret_turning_rate > 0.0f)
-					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
-
-				// Convert FOV from dot-product to degrees for readability
-				if (ss.turret_fov > -1.0f && ss.turret_fov < 1.0f) {
-					float fov_deg = acosf(ss.turret_fov) * (180.0f / PI);
-					json_object_set_new(ss_obj, "turret_fov_degrees", json_real(fov_deg));
-				}
-
-				// Turret primary weapons
-				json_t *t_pri = json_array();
-				for (int b = 0; b < MAX_SHIP_PRIMARY_BANKS; b++) {
-					if (ss.primary_banks[b] >= 0 && ss.primary_banks[b] < weapon_info_size())
-						json_array_append_new(t_pri, json_string(Weapon_info[ss.primary_banks[b]].name));
-				}
-				if (json_array_size(t_pri) > 0)
-					json_object_set_new(ss_obj, "primary_weapons", t_pri);
-				else
-					json_decref(t_pri);
-
-				// Turret secondary weapons
-				json_t *t_sec = json_array();
-				for (int b = 0; b < MAX_SHIP_SECONDARY_BANKS; b++) {
-					if (ss.secondary_banks[b] >= 0 && ss.secondary_banks[b] < weapon_info_size())
-						json_array_append_new(t_sec, json_string(Weapon_info[ss.secondary_banks[b]].name));
-				}
-				if (json_array_size(t_sec) > 0)
-					json_object_set_new(ss_obj, "secondary_weapons", t_sec);
-				else
-					json_decref(t_sec);
-			}
-
-			// AWACS info
-			if (ss.awacs_intensity > 0.0f) {
-				json_object_set_new(ss_obj, "awacs_intensity", json_real(ss.awacs_intensity));
-				json_object_set_new(ss_obj, "awacs_radius", json_real(ss.awacs_radius));
-			}
-
-			json_array_append_new(subsys, ss_obj);
-		}
-		json_object_set_new(obj, "subsystems", subsys);
-	}
 
 	// Classification helpers
 	auto size_classification = "unspecified";
@@ -1745,7 +1680,7 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
-// get_ship_model_details — requires model loading on main thread
+// get_ship_class_model_details — requires model loading on main thread
 // ---------------------------------------------------------------------------
 
 // Determine usage annotation for a path by checking if it's referenced
@@ -1776,7 +1711,7 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 	return "other";
 }
 
-static json_t *handle_get_ship_model_details(json_t *arguments)
+static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
 	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
@@ -1936,6 +1871,69 @@ static json_t *handle_get_ship_model_details(json_t *arguments)
 		json_object_set_new(obj, "ship_bay", bay_obj);
 	}
 
+	// Subsystems (model is loaded at this point, so types are reliable)
+	{
+		json_t *subsys = json_array();
+		for (int s = 0; s < sip.n_subsystems; s++) {
+			const auto &ss = sip.subsystems[s];
+			json_t *ss_obj = json_object();
+
+			json_object_set_new(ss_obj, "name", json_string(ss.subobj_name));
+			if (ss.type != SUBSYSTEM_NONE)
+				json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
+			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
+
+			// Turret-specific info
+			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
+				(ss.primary_banks[0] >= 0) || (ss.secondary_banks[0] >= 0) ||
+				(ss.turret_turning_rate > 0.0f);
+
+			if (has_turret_data) {
+				if (ss.turret_num_firing_points > 0)
+					json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
+				if (ss.turret_turning_rate > 0.0f)
+					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
+
+				// Convert FOV from dot-product to degrees for readability
+				if (ss.turret_fov > -1.0f && ss.turret_fov < 1.0f) {
+					float fov_deg = acosf(ss.turret_fov) * (180.0f / PI);
+					json_object_set_new(ss_obj, "turret_fov_degrees", json_real(fov_deg));
+				}
+
+				// Turret primary weapons
+				json_t *t_pri = json_array();
+				for (int b = 0; b < MAX_SHIP_PRIMARY_BANKS; b++) {
+					if (ss.primary_banks[b] >= 0 && ss.primary_banks[b] < weapon_info_size())
+						json_array_append_new(t_pri, json_string(Weapon_info[ss.primary_banks[b]].name));
+				}
+				if (json_array_size(t_pri) > 0)
+					json_object_set_new(ss_obj, "primary_weapons", t_pri);
+				else
+					json_decref(t_pri);
+
+				// Turret secondary weapons
+				json_t *t_sec = json_array();
+				for (int b = 0; b < MAX_SHIP_SECONDARY_BANKS; b++) {
+					if (ss.secondary_banks[b] >= 0 && ss.secondary_banks[b] < weapon_info_size())
+						json_array_append_new(t_sec, json_string(Weapon_info[ss.secondary_banks[b]].name));
+				}
+				if (json_array_size(t_sec) > 0)
+					json_object_set_new(ss_obj, "secondary_weapons", t_sec);
+				else
+					json_decref(t_sec);
+			}
+
+			// AWACS info
+			if (ss.awacs_intensity > 0.0f) {
+				json_object_set_new(ss_obj, "awacs_intensity", json_real(ss.awacs_intensity));
+				json_object_set_new(ss_obj, "awacs_radius", json_real(ss.awacs_radius));
+			}
+
+			json_array_append_new(subsys, ss_obj);
+		}
+		json_object_set_new(obj, "subsystems", subsys);
+	}
+
 	return make_json_tool_result(obj);
 }
 
@@ -2029,8 +2027,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_argument_type(arguments);
 	if (strcmp(tool_name, "get_sexp_return_type") == 0)
 		return handle_get_sexp_return_type(arguments);
-	if (strcmp(tool_name, "get_ship_model_details") == 0)
-		return handle_get_ship_model_details(arguments);
+	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
+		return handle_get_ship_class_model_details(arguments);
 	if (strcmp(tool_name, "subsystem_names_compare") == 0)
 		return handle_subsystem_names_compare(arguments);
 	if (strcmp(tool_name, "subsystem_names_equal") == 0)
