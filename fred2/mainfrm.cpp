@@ -25,6 +25,7 @@
 #include "prop/prop.h"
 
 #include "mcpserver.h"
+#include "mod_table/mod_table.h"
 #include "management.h"
 #include "ship/ship.h"
 #include "fredrender.h"
@@ -817,6 +818,42 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 						"Failed to load model for %s", req->filepath);
 				}
 			}
+		}
+		break;
+
+	case McpToolId::GET_SERVER_INFO:
+		{
+			json_t *info = json_object();
+			json_object_set_new(info, "status", json_string("running"));
+
+			// Mission context (if loaded)
+			if (Mission_filename[0] != '\0') {
+				char full_name[256];
+				snprintf(full_name, sizeof(full_name), "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
+				json_object_set_new(info, "mission_filename", json_string(full_name));
+				json_object_set_new(info, "mission_title", json_string(The_mission.name));
+			}
+
+			// Mod context (if available)
+			if (!Mod_title.empty())
+				json_object_set_new(info, "mod_title", json_string(Mod_title.c_str()));
+			if (!Mod_version.empty())
+				json_object_set_new(info, "mod_version", json_string(Mod_version.c_str()));
+
+			// Build tool result
+			json_t *text_item = json_object();
+			json_object_set_new(text_item, "type", json_string("text"));
+			char *info_str = json_dumps(info, JSON_INDENT(2));
+			json_object_set_new(text_item, "text", json_string(info_str));
+			free(info_str);
+			json_decref(info);
+
+			json_t *content = json_array();
+			json_array_append_new(content, text_item);
+
+			req->result_json = json_object();
+			json_object_set_new(req->result_json, "content", content);
+			req->success = true;
 		}
 		break;
 
