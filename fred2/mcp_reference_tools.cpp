@@ -28,7 +28,7 @@
 // Takes ownership of `data` (decrefs it after serializing).
 static json_t *make_json_tool_result(json_t *data)
 {
-	char *text = json_dumps(data, JSON_INDENT(2));
+	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
 	json_t *result = make_tool_result(text);
 	free(text);
 	json_decref(data);
@@ -762,7 +762,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	json_object_set_new(obj, "countermeasure_max", json_integer(sip.cmeasure_max));
 
 	// Score
-	json_object_set_new(obj, "score", json_integer(sip.score));
+	json_object_set_new(obj, "kill_score", json_integer(sip.score));
 
 	// Classification helpers
 	auto size_classification = "unspecified";
@@ -862,7 +862,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 			"max_speed", "standard_range",
 			"damage_hull", "dps_hull", "damage_shield", "dps_shield",
 			"damage_subsystem", "dps_subsystem",
-			"energy_consumption_rate", "fire_interval", "rate_of_fire",
+			"energy_consumption_rate", "fire_interval", "fire_rate",
 			"reload_rate", "has_area_effect"
 		};
 
@@ -870,6 +870,8 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 		for (const char *key : stat_keys) {
 			auto it = stats.find(key);
 			if (it == stats.end())
+				continue;
+			if (wip.is_beam() && !stricmp(key, "max_speed"))
 				continue;
 			if (auto *f = std::get_if<float>(&it->second))
 				json_object_set_new(obj, key, json_real(*f));
@@ -902,7 +904,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	json_object_set_new(obj, "is_beam", json_boolean(wip.is_beam()));
 
 	// EMP
-	if (wip.emp_intensity > 0.0f) {
+	if (wip.wi_flags[Weapon::Info_Flags::Emp]) {
 		json_object_set_new(obj, "emp_intensity", json_real(wip.emp_intensity));
 		json_object_set_new(obj, "emp_time", json_real(wip.emp_time));
 	}
