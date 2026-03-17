@@ -460,7 +460,19 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	// TODO: if !force, check whether message is referenced in SEXPs and return error with details
+	// Check for SEXP references unless force is set
+	if (!force) {
+		int node;
+		auto ref = query_referenced_in_sexp(sexp_ref_type::SHIP, Messages[idx].name, node);
+		if (ref.second != sexp_src::NONE) {
+			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Message '%s' is referenced in %s. Use force=true to delete anyway "
+				"(references will be invalidated).", name, desc.c_str());
+			return;
+		}
+	}
 
 	// Free allocated strings
 	if (Messages[idx].avi_info.name)
