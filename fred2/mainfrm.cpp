@@ -821,6 +821,27 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		}
 		break;
 
+	case McpToolId::UNLOAD_SHIP_MODEL:
+		{
+			// req->filepath is repurposed to hold the ship class name
+			int sip_idx = ship_info_lookup(req->filepath);
+			if (sip_idx < 0) {
+				req->success = false;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Ship class not found: %s", req->filepath);
+			} else if (Ship_info[sip_idx].model_num >= 0) {
+				model_unload(Ship_info[sip_idx].model_num);
+				req->success = true;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Model unloaded for %s", req->filepath);
+			} else {
+				req->success = true;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Model was not loaded for %s", req->filepath);
+			}
+		}
+		break;
+
 	case McpToolId::GET_SERVER_INFO:
 		{
 			json_t *info = json_object();
