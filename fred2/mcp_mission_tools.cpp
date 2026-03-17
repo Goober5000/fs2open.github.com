@@ -1,0 +1,618 @@
+#include "stdafx.h"
+#include "mcp_mission_tools.h"
+#include "mcpserver.h"
+
+#include <jansson.h>
+#include <cstring>
+
+#include "mission/missionmessage.h"
+#include "parse/sexp.h"
+#include "freddoc.h"
+#include "fred.h"
+
+// ---------------------------------------------------------------------------
+// JSON helpers (mirror mcp_reference_tools.cpp patterns)
+// ---------------------------------------------------------------------------
+
+// Build an MCP tool-result whose text content is pretty-printed JSON.
+// Takes ownership of `data` (decrefs it after serializing).
+static json_t *make_json_tool_result(json_t *data)
+{
+	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
+	json_t *result = make_tool_result(text);
+	free(text);
+	json_decref(data);
+	return result;
+}
+
+static void add_string_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("string"));
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
+static void add_integer_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("integer"));
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
+static void add_bool_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("boolean"));
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
+static void register_tool(json_t *tools, const char *name, const char *description,
+	json_t *properties, json_t *required_arr = nullptr)
+{
+	json_t *tool = json_object();
+	json_object_set_new(tool, "name", json_string(name));
+	json_object_set_new(tool, "description", json_string(description));
+
+	json_t *schema = json_object();
+	json_object_set_new(schema, "type", json_string("object"));
+	json_object_set_new(schema, "properties", properties ? properties : json_object());
+	if (required_arr)
+		json_object_set_new(schema, "required", required_arr);
+	json_object_set_new(tool, "inputSchema", schema);
+
+	json_array_append_new(tools, tool);
+}
+
+// ---------------------------------------------------------------------------
+// Persona helpers
+// ---------------------------------------------------------------------------
+
+static const char *persona_name_from_index(int persona_index)
+{
+	if (persona_index >= 0 && persona_index < (int)Personas.size())
+		return Personas[persona_index].name;
+	return nullptr;
+}
+
+static int persona_index_from_name(const char *name)
+{
+	if (!name || !name[0])
+		return -1;
+	for (int i = 0; i < (int)Personas.size(); i++) {
+		if (!stricmp(Personas[i].name, name))
+			return i;
+	}
+	return -1;
+}
+
+// ---------------------------------------------------------------------------
+// Message tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static void handle_list_messages(json_t * /*input*/, McpToolRequest *req)
+{
+	json_t *arr = json_array();
+
+	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+		json_t *entry = json_object();
+		json_object_set_new(entry, "name", json_string(Messages[i].name));
+		json_object_set_new(entry, "message", json_string(Messages[i].message));
+
+		const char *persona = persona_name_from_index(Messages[i].persona_index);
+		if (persona)
+			json_object_set_new(entry, "persona", json_string(persona));
+
+		json_array_append_new(arr, entry);
+	}
+
+	json_t *data = json_object();
+	json_object_set_new(data, "messages", arr);
+	json_object_set_new(data, "count", json_integer(Num_messages - Num_builtin_messages));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_get_message(json_t *input, McpToolRequest *req)
+{
+	const char *name = nullptr;
+	if (input) {
+		json_t *v = json_object_get(input, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+	}
+	if (!name || !name[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
+		return;
+	}
+
+	// Find the message
+	int idx = -1;
+	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+		if (!stricmp(Messages[i].name, name)) {
+			idx = i;
+			break;
+		}
+	}
+	if (idx < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		return;
+	}
+
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(Messages[idx].name));
+	json_object_set_new(data, "message", json_string(Messages[idx].message));
+
+	const char *persona = persona_name_from_index(Messages[idx].persona_index);
+	if (persona)
+		json_object_set_new(data, "persona", json_string(persona));
+
+	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
+
+	if (Messages[idx].avi_info.name)
+		json_object_set_new(data, "avi", json_string(Messages[idx].avi_info.name));
+	if (Messages[idx].wave_info.name)
+		json_object_set_new(data, "wave", json_string(Messages[idx].wave_info.name));
+
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_create_message(json_t *input, McpToolRequest *req)
+{
+	const char *name = nullptr;
+	const char *message = nullptr;
+	const char *persona_str = nullptr;
+	const char *avi = nullptr;
+	const char *wave = nullptr;
+	int team = -1;
+
+	if (input) {
+		json_t *v;
+
+		v = json_object_get(input, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+
+		v = json_object_get(input, "message");
+		if (v && json_is_string(v))
+			message = json_string_value(v);
+
+		v = json_object_get(input, "persona");
+		if (v && json_is_string(v))
+			persona_str = json_string_value(v);
+
+		v = json_object_get(input, "avi");
+		if (v && json_is_string(v))
+			avi = json_string_value(v);
+
+		v = json_object_get(input, "wave");
+		if (v && json_is_string(v))
+			wave = json_string_value(v);
+
+		v = json_object_get(input, "team");
+		if (v && json_is_number(v))
+			team = (int)json_number_value(v);
+	}
+
+	if (!name || !name[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
+		return;
+	}
+	if (!message || !message[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: message");
+		return;
+	}
+	if (strlen(name) >= NAME_LENGTH) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Name too long (max %d characters)", NAME_LENGTH - 1);
+		return;
+	}
+	if (strlen(message) >= MESSAGE_LENGTH) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Message too long (max %d characters)", MESSAGE_LENGTH - 1);
+		return;
+	}
+
+	// Check for duplicate name
+	for (int i = 0; i < Num_messages; i++) {
+		if (!stricmp(Messages[i].name, name)) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"A message with name '%s' already exists", name);
+			return;
+		}
+	}
+
+	// Look up persona by name
+	int persona_index = -1;
+	if (persona_str) {
+		persona_index = persona_index_from_name(persona_str);
+		if (persona_index < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Unknown persona: %s", persona_str);
+			return;
+		}
+	}
+
+	// Ensure the Messages vector has room at index Num_messages
+	if (Num_messages >= (int)Messages.size())
+		Messages.resize(Num_messages + 1);
+
+	MMessage &msg = Messages[Num_messages];
+	memset(&msg, 0, sizeof(MMessage));
+	strcpy_s(msg.name, name);
+	strcpy_s(msg.message, message);
+	msg.persona_index = persona_index;
+	msg.multi_team = team;
+	msg.avi_info.name = avi ? strdup(avi) : nullptr;
+	msg.wave_info.name = wave ? strdup(wave) : nullptr;
+	Num_messages++;
+
+	set_modified();
+	if (FREDDoc_ptr) {
+		char desc[128];
+		snprintf(desc, sizeof(desc), "MCP: create message %s", name);
+		FREDDoc_ptr->autosave(desc);
+	}
+
+	// Return the created message
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(name));
+	json_object_set_new(data, "message", json_string(message));
+	if (persona_str)
+		json_object_set_new(data, "persona", json_string(persona_str));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_update_message(json_t *input, McpToolRequest *req)
+{
+	const char *name = nullptr;
+	if (input) {
+		json_t *v = json_object_get(input, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+	}
+	if (!name || !name[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
+		return;
+	}
+
+	// Find the message (mission-specific only)
+	int idx = -1;
+	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+		if (!stricmp(Messages[i].name, name)) {
+			idx = i;
+			break;
+		}
+	}
+	if (idx < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		return;
+	}
+
+	bool changed = false;
+
+	// Update message text
+	json_t *v = json_object_get(input, "message");
+	if (v && json_is_string(v)) {
+		const char *new_msg = json_string_value(v);
+		if (strlen(new_msg) >= MESSAGE_LENGTH) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Message too long (max %d characters)", MESSAGE_LENGTH - 1);
+			return;
+		}
+		if (strcmp(Messages[idx].message, new_msg) != 0) {
+			strcpy_s(Messages[idx].message, new_msg);
+			changed = true;
+		}
+	}
+
+	// Update persona
+	v = json_object_get(input, "persona");
+	if (v && json_is_string(v)) {
+		const char *persona_str = json_string_value(v);
+		int persona_index = persona_index_from_name(persona_str);
+		if (persona_index < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Unknown persona: %s", persona_str);
+			return;
+		}
+		if (Messages[idx].persona_index != persona_index) {
+			Messages[idx].persona_index = persona_index;
+			changed = true;
+		}
+	}
+
+	// Update AVI
+	v = json_object_get(input, "avi");
+	if (v && json_is_string(v)) {
+		const char *new_avi = json_string_value(v);
+		if (Messages[idx].avi_info.name)
+			free(Messages[idx].avi_info.name);
+		Messages[idx].avi_info.name = (new_avi[0] != '\0') ? strdup(new_avi) : nullptr;
+		changed = true;
+	}
+
+	// Update wave
+	v = json_object_get(input, "wave");
+	if (v && json_is_string(v)) {
+		const char *new_wave = json_string_value(v);
+		if (Messages[idx].wave_info.name)
+			free(Messages[idx].wave_info.name);
+		Messages[idx].wave_info.name = (new_wave[0] != '\0') ? strdup(new_wave) : nullptr;
+		changed = true;
+	}
+
+	// Update team
+	v = json_object_get(input, "team");
+	if (v && json_is_number(v)) {
+		int new_team = (int)json_number_value(v);
+		if (Messages[idx].multi_team != new_team) {
+			Messages[idx].multi_team = new_team;
+			changed = true;
+		}
+	}
+
+	// Update name (must be last — invalidates `name` pointer and updates SEXP refs)
+	v = json_object_get(input, "new_name");
+	if (v && json_is_string(v)) {
+		const char *new_name = json_string_value(v);
+		if (strlen(new_name) >= NAME_LENGTH) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"New name too long (max %d characters)", NAME_LENGTH - 1);
+			return;
+		}
+		if (stricmp(Messages[idx].name, new_name) != 0) {
+			// Check for duplicate
+			for (int i = 0; i < Num_messages; i++) {
+				if (i != idx && !stricmp(Messages[i].name, new_name)) {
+					req->success = false;
+					snprintf(req->result_message, sizeof(req->result_message),
+						"A message with name '%s' already exists", new_name);
+					return;
+				}
+			}
+
+			// Update SEXP references before changing the name
+			update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE);
+			update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE_OR_STRING);
+			strcpy_s(Messages[idx].name, new_name);
+			changed = true;
+		}
+	}
+
+	if (changed) {
+		set_modified();
+		if (FREDDoc_ptr) {
+			char desc[128];
+			snprintf(desc, sizeof(desc), "MCP: update message %s", Messages[idx].name);
+			FREDDoc_ptr->autosave(desc);
+		}
+	}
+
+	// Return the updated message
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(Messages[idx].name));
+	json_object_set_new(data, "message", json_string(Messages[idx].message));
+	const char *persona = persona_name_from_index(Messages[idx].persona_index);
+	if (persona)
+		json_object_set_new(data, "persona", json_string(persona));
+	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
+	if (Messages[idx].avi_info.name)
+		json_object_set_new(data, "avi", json_string(Messages[idx].avi_info.name));
+	if (Messages[idx].wave_info.name)
+		json_object_set_new(data, "wave", json_string(Messages[idx].wave_info.name));
+
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_delete_message(json_t *input, McpToolRequest *req)
+{
+	const char *name = nullptr;
+	bool force = false;
+
+	if (input) {
+		json_t *v = json_object_get(input, "name");
+		if (v && json_is_string(v))
+			name = json_string_value(v);
+
+		v = json_object_get(input, "force");
+		if (v && json_is_boolean(v))
+			force = json_is_true(v);
+	}
+	if (!name || !name[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
+		return;
+	}
+
+	// Find the message (mission-specific only)
+	int idx = -1;
+	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+		if (!stricmp(Messages[i].name, name)) {
+			idx = i;
+			break;
+		}
+	}
+	if (idx < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		return;
+	}
+
+	// TODO: if !force, check whether message is referenced in SEXPs and return error with details
+
+	// Free allocated strings
+	if (Messages[idx].avi_info.name)
+		free(Messages[idx].avi_info.name);
+	if (Messages[idx].wave_info.name)
+		free(Messages[idx].wave_info.name);
+
+	// Invalidate SEXP references (wrap name in angle brackets)
+	char buf[NAME_LENGTH + 4];
+	snprintf(buf, sizeof(buf), "<%s>", Messages[idx].name);
+	update_sexp_references(Messages[idx].name, buf, OPF_MESSAGE);
+	update_sexp_references(Messages[idx].name, buf, OPF_MESSAGE_OR_STRING);
+
+	// Remove from array by shifting (matches FRED's CMessageEditorDlg::OnDelete pattern)
+	for (int i = idx; i < Num_messages - 1; i++)
+		Messages[i] = Messages[i + 1];
+	Num_messages--;
+
+	set_modified();
+	if (FREDDoc_ptr) {
+		char desc[128];
+		snprintf(desc, sizeof(desc), "MCP: delete message %s", name);
+		FREDDoc_ptr->autosave(desc);
+	}
+
+	snprintf(req->result_message, sizeof(req->result_message), "Deleted message: %s", name);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// Known mission tool names (for routing)
+// ---------------------------------------------------------------------------
+
+static const char *mission_tool_names[] = {
+	"list_messages",
+	"get_message",
+	"create_message",
+	"update_message",
+	"delete_message",
+	nullptr
+};
+
+// ---------------------------------------------------------------------------
+// Tool registration
+// ---------------------------------------------------------------------------
+
+void mcp_register_mission_tools(json_t *tools)
+{
+	// list_messages
+	{
+		register_tool(tools, "list_messages",
+			"List all mission-specific messages (excluding built-in engine messages). "
+			"Returns each message's name, text, and persona.",
+			json_object());
+	}
+
+	// get_message
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the message to retrieve");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "get_message",
+			"Get full details of a mission message by name, including text, persona, "
+			"AVI head animation, wave audio file, and team assignment.",
+			props, req);
+	}
+
+	// create_message
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Unique name for the message");
+		add_string_prop(props, "message", "The message text displayed in-game");
+		add_string_prop(props, "persona",
+			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
+		add_string_prop(props, "avi", "Filename for the head animation (talking head)");
+		add_string_prop(props, "wave", "Filename for the voice audio file");
+		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("message"));
+		register_tool(tools, "create_message",
+			"Create a new mission message. Messages are used by send-message SEXPs to "
+			"display in-game dialogue with optional voice and head animation.",
+			props, req);
+	}
+
+	// update_message
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the existing message to update");
+		add_string_prop(props, "new_name", "New name for the message (updates SEXP references)");
+		add_string_prop(props, "message", "New message text");
+		add_string_prop(props, "persona",
+			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
+		add_string_prop(props, "avi", "Filename for the head animation (empty string to clear)");
+		add_string_prop(props, "wave", "Filename for the voice audio file (empty string to clear)");
+		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_message",
+			"Update properties of an existing mission message. Only specified fields are "
+			"changed; omitted fields are left unchanged. Renaming automatically updates "
+			"all SEXP references to the message.",
+			props, req);
+	}
+
+	// delete_message
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the message to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if the message is referenced in SEXPs (references "
+			"will be invalidated). Default: false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "delete_message",
+			"Delete a mission message. SEXP references to the deleted message are "
+			"invalidated (wrapped in angle brackets).",
+			props, req);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Routing (called on mongoose thread — marshals to main thread)
+// ---------------------------------------------------------------------------
+
+json_t *mcp_route_mission_tool(const char *tool_name, json_t *arguments)
+{
+	for (const char **p = mission_tool_names; *p; p++) {
+		if (strcmp(tool_name, *p) == 0)
+			return mcp_execute_on_main_thread(McpToolId::MISSION_TOOL, tool_name, arguments);
+	}
+	return nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Main-thread dispatch
+// ---------------------------------------------------------------------------
+
+void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+{
+	if (strcmp(tool_name, "list_messages") == 0) {
+		handle_list_messages(input_json, req);
+	} else if (strcmp(tool_name, "get_message") == 0) {
+		handle_get_message(input_json, req);
+	} else if (strcmp(tool_name, "create_message") == 0) {
+		handle_create_message(input_json, req);
+	} else if (strcmp(tool_name, "update_message") == 0) {
+		handle_update_message(input_json, req);
+	} else if (strcmp(tool_name, "delete_message") == 0) {
+		handle_delete_message(input_json, req);
+	} else {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Unknown mission tool: %s", tool_name);
+	}
+}
