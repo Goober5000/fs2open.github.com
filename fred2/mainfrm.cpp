@@ -25,6 +25,7 @@
 #include "prop/prop.h"
 
 #include "mcpserver.h"
+#include "mcp_mission_tools.h"
 #include "mod_table/mod_table.h"
 #include "management.h"
 #include "ship/ship.h"
@@ -993,6 +994,10 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			strncpy(req->result_message, buf, sizeof(req->result_message) - 1);
 			req->result_message[sizeof(req->result_message) - 1] = '\0';
 		}
+		break;
+
+	case McpToolId::MISSION_TOOL:
+		mcp_handle_mission_tool(req->filepath, req->input_json, req);
 		break;
 
 	default:
