@@ -7,8 +7,6 @@
 #include <cstring>
 
 #include "mission/missionmessage.h"
-#include "mod_table/mod_table.h"
-#include "species_defs/species_defs.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
@@ -40,59 +38,6 @@ static const char *persona_name_from_index(int persona_index)
 	if (persona_index >= 0 && persona_index < (int)Personas.size())
 		return Personas[persona_index].name;
 	return nullptr;
-}
-
-// ---------------------------------------------------------------------------
-// Persona tool handlers (run on main thread)
-// ---------------------------------------------------------------------------
-
-static void handle_list_persona_types(json_t * /*input*/, McpToolRequest *req)
-{
-	json_t *arr = json_array();
-	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
-		json_array_append_new(arr, json_string(Persona_type_names[i]));
-
-	json_t *data = json_object();
-	json_object_set_new(data, "persona_types", arr);
-	json_object_set_new(data, "count", json_integer(MAX_PERSONA_TYPES));
-	req->result_json = make_json_tool_result(data);
-	req->success = true;
-}
-
-static void handle_list_personas(json_t * /*input*/, McpToolRequest *req)
-{
-	json_t *arr = json_array();
-
-	for (const auto &p : Personas) {
-		json_t *entry = json_object();
-		json_object_set_new(entry, "name", json_string(p.name));
-
-		// Derive persona_type from type flag bits
-		const char *persona_type = "unknown";
-		for (int j = 0; j < MAX_PERSONA_TYPES; j++) {
-			if (p.flags & (1 << j)) {
-				persona_type = Persona_type_names[j];
-				break;
-			}
-		}
-		json_object_set_new(entry, "persona_type", json_string(persona_type));
-
-		// Decode species_bitfield into species name array
-		json_t *species_arr = json_array();
-		for (int j = 0; j < (int)Species_info.size(); j++) {
-			if (p.species_bitfield & (1 << j))
-				json_array_append_new(species_arr, json_string(Species_info[j].species_name));
-		}
-		json_object_set_new(entry, "species", species_arr);
-
-		json_array_append_new(arr, entry);
-	}
-
-	json_t *data = json_object();
-	json_object_set_new(data, "personas", arr);
-	json_object_set_new(data, "count", json_integer((int)Personas.size()));
-	req->result_json = make_json_tool_result(data);
-	req->success = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -142,57 +87,6 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	json_t *data = json_object();
 	json_object_set_new(data, "messages", arr);
 	json_object_set_new(data, "count", json_integer(end - start));
-	req->result_json = make_json_tool_result(data);
-	req->success = true;
-}
-
-static void handle_list_talking_heads(json_t * /*input*/, McpToolRequest *req)
-{
-	// Collect unique head names, matching event_editor::OnInitDialog() logic
-	SCP_vector<SCP_string> heads;
-	auto maybe_add = [&](const char *name) {
-		for (const auto &h : heads) {
-			if (!stricmp(h.c_str(), name))
-				return;
-		}
-		heads.push_back(name);
-	};
-
-	// Heads referenced by existing builtin messages
-	for (int i = 0; i < Num_builtin_messages; i++) {
-		if (Messages[i].avi_info.name)
-			maybe_add(Messages[i].avi_info.name);
-	}
-
-	// Hardcoded heads (unless disabled by mod table)
-	if (!Disable_hc_message_ani) {
-		maybe_add("Head-TP2");
-		maybe_add("Head-VC2");
-		maybe_add("Head-TP4");
-		maybe_add("Head-TP5");
-		maybe_add("Head-TP6");
-		maybe_add("Head-TP7");
-		maybe_add("Head-TP8");
-		maybe_add("Head-VP2");
-		maybe_add("Head-CM2");
-		maybe_add("Head-CM3");
-		maybe_add("Head-CM4");
-		maybe_add("Head-CM5");
-		maybe_add("Head-BSH");
-	}
-
-	// Custom heads from mod table
-	for (const auto &h : Custom_head_anis) {
-		maybe_add(h.c_str());
-	}
-
-	json_t *arr = json_array();
-	for (const auto &h : heads)
-		json_array_append_new(arr, json_string(h.c_str()));
-
-	json_t *data = json_object();
-	json_object_set_new(data, "talking_heads", arr);
-	json_object_set_new(data, "count", json_integer((int)heads.size()));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -621,10 +515,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 // ---------------------------------------------------------------------------
 
 static const char *mission_tool_names[] = {
-	"list_persona_types",
-	"list_personas",
 	"list_messages",
-	"list_talking_heads",
 	"get_message",
 	"create_message",
 	"update_message",
@@ -638,23 +529,6 @@ static const char *mission_tool_names[] = {
 
 void mcp_register_mission_tools(json_t *tools)
 {
-	// list_persona_types
-	{
-		register_tool(tools, "list_persona_types",
-			"List all persona type strings (e.g. \"wingman\", \"support\", \"large\", \"command\").",
-			json_object());
-	}
-
-	// list_personas
-	{
-		register_tool(tools, "list_personas",
-			"List all available personas. Personas define who delivers a message "
-			"(e.g. a wingman, support ship, or command). Returns each persona's name, "
-			"type, and compatible species. Use persona names with create_message and "
-			"update_message.",
-			json_object());
-	}
-
 	// list_messages
 	{
 		json_t *props = json_object();
@@ -666,16 +540,6 @@ void mcp_register_mission_tools(json_t *tools)
 			"Use source=\"builtin\" to list built-in engine messages instead. "
 			"Returns each message's name, text, and persona.",
 			props);
-	}
-
-	// list_talking_heads
-	{
-		register_tool(tools, "list_talking_heads",
-			"List all available talking head animations. Includes heads referenced by "
-			"existing messages, hardcoded heads (unless disabled by mod), and custom "
-			"heads defined in the mod table. Message talking heads are almost always "
-			"assigned from this list, but on rare occasions can be unique.",
-			json_object());
 	}
 
 	// get_message
@@ -764,14 +628,8 @@ json_t *mcp_route_mission_tool(const char *tool_name, json_t *arguments)
 
 void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
 {
-	if (strcmp(tool_name, "list_persona_types") == 0) {
-		handle_list_persona_types(input_json, req);
-	} else if (strcmp(tool_name, "list_personas") == 0) {
-		handle_list_personas(input_json, req);
-	} else if (strcmp(tool_name, "list_messages") == 0) {
+	if (strcmp(tool_name, "list_messages") == 0) {
 		handle_list_messages(input_json, req);
-	} else if (strcmp(tool_name, "list_talking_heads") == 0) {
-		handle_list_talking_heads(input_json, req);
 	} else if (strcmp(tool_name, "get_message") == 0) {
 		handle_get_message(input_json, req);
 	} else if (strcmp(tool_name, "create_message") == 0) {
