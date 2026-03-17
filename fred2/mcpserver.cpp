@@ -581,6 +581,7 @@ void mcp_server_stop()
 		mg_stop(mcp_ctx);
 		mcp_ctx = nullptr;
 	}
+	mcp_reference_tools_cleanup();
 }
 
 bool mcp_server_is_running()
