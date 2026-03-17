@@ -192,21 +192,6 @@ static const char *opr_to_string(int opr)
 	}
 }
 
-static const char *sexp_oper_type_str(sexp_oper_type t)
-{
-	switch (t) {
-		case sexp_oper_type::NONE:         return "none";
-		case sexp_oper_type::CONDITIONAL:  return "conditional";
-		case sexp_oper_type::ARGUMENT:     return "argument";
-		case sexp_oper_type::ACTION:       return "action";
-		case sexp_oper_type::ARITHMETIC:   return "arithmetic";
-		case sexp_oper_type::BOOLEAN:      return "boolean";
-		case sexp_oper_type::INTEGER:      return "integer";
-		case sexp_oper_type::GOAL:         return "goal";
-		default: return "unknown";
-	}
-}
-
 // Returns the effective weapon category.  Most beam weapons have subtype
 // WP_LASER (because they appear in #Primary Weapons), so we use is_beam()
 // rather than relying on the raw subtype field.
@@ -281,7 +266,7 @@ void mcp_register_reference_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "species", "Filter by species name (e.g. \"Terran\")");
-		add_string_prop(props, "type", "Filter by ship type name (e.g. \"fighter\")");
+		add_string_prop(props, "ship_type", "Filter by ship type name (e.g. \"fighter\")");
 		register_tool(tools, "list_ship_classes",
 			"List all ship classes with summary info. Optionally filter by species and/or ship type.",
 			props);
@@ -372,7 +357,7 @@ void mcp_register_reference_tools(json_t *tools)
 			"Get full details of a SEXP operator, including help text, argument types, "
 			"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
 			"max_args is -1 for variadic operators; for these, argument_types contains "
-			"only the fixed argument group and variadic_arg_types contains the "
+			"only the fixed argument group and variadic_argument_types contains the "
 			"repeating argument group.",
 			props, req);
 	}
@@ -549,7 +534,7 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 		json_t *v = json_object_get(arguments, "species");
 		if (v && json_is_string(v))
 			filter_species = json_string_value(v);
-		v = json_object_get(arguments, "type");
+		v = json_object_get(arguments, "ship_type");
 		if (v && json_is_string(v))
 			filter_type = json_string_value(v);
 	}
@@ -586,9 +571,7 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 			json_object_set_new(item, "species", json_string(Species_info[sip.species].species_name));
 
 		if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
-			json_object_set_new(item, "type", json_string(Ship_types[sip.class_type].name));
-
-		json_object_set_new(item, "in_tech_database", json_boolean(sip.flags[Ship::Info_Flags::In_tech_database]));
+			json_object_set_new(item, "ship_type", json_string(Ship_types[sip.class_type].name));
 
 		json_array_append_new(arr, item);
 	}
@@ -618,18 +601,24 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	if (sip.species >= 0 && sip.species < (int)Species_info.size())
 		json_object_set_new(obj, "species", json_string(Species_info[sip.species].species_name));
 	if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
-		json_object_set_new(obj, "type", json_string(Ship_types[sip.class_type].name));
+		json_object_set_new(obj, "ship_type", json_string(Ship_types[sip.class_type].name));
 
-	// Descriptive strings
-	set_optional_string(obj, "type_str", sip.type_str.get());
-	set_optional_string(obj, "manufacturer", sip.manufacturer_str.get());
-	set_optional_string(obj, "description", sip.desc.get());
-	set_optional_string(obj, "tech_description", sip.tech_desc.get());
-	set_optional_string(obj, "armor", sip.armor_str.get());
-	set_optional_string(obj, "maneuverability", sip.maneuverability_str.get());
-	set_optional_string(obj, "ship_length", sip.ship_length.get());
-	set_optional_string(obj, "gun_mounts", sip.gun_mounts.get());
-	set_optional_string(obj, "missile_banks", sip.missile_banks.get());
+	// flags
+	json_object_set_new(obj, "allowed_for_player", json_boolean(sip.flags[Ship::Info_Flags::Player_ship]));
+
+	// Tech room strings
+	{
+		json_t* tech = json_object();
+		set_optional_string(tech, "role", sip.type_str.get());
+		set_optional_string(tech, "manufacturer", sip.manufacturer_str.get());
+		set_optional_string(tech, "description", sip.tech_desc.get());
+		set_optional_string(tech, "armor", sip.armor_str.get());
+		set_optional_string(tech, "maneuverability", sip.maneuverability_str.get());
+		set_optional_string(tech, "ship_length", sip.ship_length.get());
+		set_optional_string(tech, "gun_mounts", sip.gun_mounts.get());
+		set_optional_string(tech, "missile_banks", sip.missile_banks.get());
+		json_object_set_new(tech, "tech_lore", tech);
+	}
 
 	// Physics
 	{
@@ -666,7 +655,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 			else
 				json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
 
-			json_object_set_new(bank_obj, "ammo_capacity", json_integer(sip.primary_bank_ammo_capacity[b]));
+			json_object_set_new(bank_obj, "capacity_in_ammo_units", json_integer(sip.primary_bank_ammo_capacity[b]));
 
 			// Per-bank restrictions (primaries use indices 0..MAX_SHIP_PRIMARY_BANKS-1)
 			bool has_regular = (b < (int)sip.restricted_loadout_flag.size())
@@ -710,7 +699,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 			else
 				json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
 
-			json_object_set_new(bank_obj, "ammo_capacity", json_integer(sip.secondary_bank_ammo_capacity[b]));
+			json_object_set_new(bank_obj, "capacity_in_ammo_units", json_integer(sip.secondary_bank_ammo_capacity[b]));
 
 			// Per-bank restrictions (secondaries use indices MAX_SHIP_PRIMARY_BANKS + b)
 			int ri = MAX_SHIP_PRIMARY_BANKS + b;
@@ -776,9 +765,8 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	else if (sip.is_small_ship())
 		size_classification = "small";
 	json_object_set_new(obj, "size_classification", json_string(size_classification));
-	json_object_set_new(obj, "can_fly_around", json_boolean(sip.is_flyable()));
+	json_object_set_new(obj, "can_move_under_its_own_power", json_boolean(sip.is_flyable()));
 	json_object_set_new(obj, "is_fighter_or_bomber", json_boolean(sip.is_fighter_bomber()));
-	json_object_set_new(obj, "in_tech_database", json_boolean(sip.flags[Ship::Info_Flags::In_tech_database]));
 
 	return make_json_tool_result(obj);
 }
@@ -820,8 +808,6 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 		if (wip.has_display_name())
 			json_object_set_new(item, "display_name", json_string(wip.get_display_name()));
 		json_object_set_new(item, "subtype", json_string(weapon_category_str(wip)));
-		set_optional_string(item, "title", wip.title);
-		json_object_set_new(item, "in_tech_database", json_boolean(wip.wi_flags[Weapon::Info_Flags::In_tech_database]));
 
 		json_array_append_new(arr, item);
 	}
@@ -848,24 +834,38 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	if (wip.has_display_name())
 		json_object_set_new(obj, "display_name", json_string(wip.get_display_name()));
 	json_object_set_new(obj, "subtype", json_string(weapon_category_str(wip)));
-	set_optional_string(obj, "title", wip.title);
-	set_optional_string(obj, "description", wip.desc.get());
-	set_optional_string(obj, "tech_description", wip.tech_desc.get());
+
+	// Loadout and Tech screen strings
+	{
+		json_t* loadout = json_object();
+		set_optional_string(loadout, "title", wip.title);
+		set_optional_string(loadout, "description", wip.desc.get());
+		json_object_set_new(obj, "loadout_ui", loadout);
+
+		json_t* tech = json_object();
+		set_optional_string(tech, "title", wip.tech_title);
+		set_optional_string(tech, "description", wip.tech_desc.get());
+		json_object_set_new(obj, "tech_lore", tech);
+	}
 
 	// Performance
 	json_object_set_new(obj, "damage", json_real(wip.damage));
-	json_object_set_new(obj, "armor_factor", json_real(wip.armor_factor));
+	json_object_set_new(obj, "hull_factor", json_real(wip.armor_factor));
 	json_object_set_new(obj, "shield_factor", json_real(wip.shield_factor));
 	json_object_set_new(obj, "subsystem_factor", json_real(wip.subsystem_factor));
 	json_object_set_new(obj, "max_speed", json_real(wip.max_speed));
 	json_object_set_new(obj, "lifetime", json_real(wip.lifetime));
-	json_object_set_new(obj, "fire_wait", json_real(wip.fire_wait));
-	json_object_set_new(obj, "weapon_range", json_real(wip.weapon_range));
-	json_object_set_new(obj, "optimum_range", json_real(wip.optimum_range));
+	json_object_set_new(obj, "fire_interval", json_real(wip.fire_wait));
+	json_object_set_new(obj, "ai_max_targeting_range", json_real(wip.weapon_range));
+	json_object_set_new(obj, "ai_min_targeting_range", json_real(wip.weapon_min_range));
+	json_object_set_new(obj, "ai_preferred_range", json_real(wip.optimum_range));
+
+	if (wip.cargo_size > 0.0f)
+		json_object_set_new(obj, "size_in_ammo_units", json_real(wip.cargo_size));
 
 	// Missile-specific
 	if (wip.is_secondary()) {
-		json_object_set_new(obj, "cargo_size", json_real(wip.cargo_size));
+		json_object_set_new(obj, "is_interceptable", json_boolean(wip.is_interceptable()));
 		json_object_set_new(obj, "is_homing", json_boolean(wip.is_homing()));
 		json_object_set_new(obj, "is_locked_homing", json_boolean(wip.is_locked_homing()));
 		if (wip.is_homing()) {
@@ -895,8 +895,8 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	}
 
 	// Flags
+	json_object_set_new(obj, "allowed_for_player", json_boolean(wip.wi_flags[Weapon::Info_Flags::Player_allowed]));
 	json_object_set_new(obj, "hurts_big_ships", json_boolean(wip.hurts_big_ships()));
-	json_object_set_new(obj, "in_tech_database", json_boolean(wip.wi_flags[Weapon::Info_Flags::In_tech_database]));
 
 	return make_json_tool_result(obj);
 }
@@ -915,7 +915,7 @@ static json_t *handle_list_species()
 
 		json_object_set_new(item, "awacs_multiplier", json_real(sp.awacs_multiplier));
 		set_optional_string(item, "countermeasure", sp.cmeasure_name);
-		set_optional_string(item, "support_ship", sp.support_ship_name);
+		set_optional_string(item, "support_ship_class", sp.support_ship_name);
 
 		json_array_append_new(arr, item);
 	}
@@ -931,7 +931,6 @@ static json_t *handle_list_intel_entries()
 		const auto &entry = Intel_info[i];
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(entry.name));
-		json_object_set_new(item, "in_tech_database", json_boolean((entry.flags & IIF_IN_TECH_DATABASE) != 0));
 
 		json_array_append_new(arr, item);
 	}
@@ -953,9 +952,7 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 	const auto &entry = Intel_info[idx];
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(entry.name));
-	json_object_set_new(obj, "description", json_string(entry.desc.c_str()));
-	json_object_set_new(obj, "in_tech_database", json_boolean((entry.flags & IIF_IN_TECH_DATABASE) != 0));
-	json_object_set_new(obj, "default_in_tech_database", json_boolean((entry.flags & IIF_DEFAULT_IN_TECH_DATABASE) != 0));
+	json_object_set_new(obj, "lore", json_string(entry.desc.c_str()));
 
 	// Custom data
 	if (!entry.custom_data.empty()) {
@@ -1168,7 +1165,6 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	json_t *obj = json_object();
 
 	json_object_set_new(obj, "name", json_string(op.text.c_str()));
-	json_object_set_new(obj, "type", json_string(sexp_oper_type_str(op.type)));
 	json_object_set_new(obj, "min_args", json_integer(op.min));
 	json_object_set_new(obj, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
 
@@ -1306,11 +1302,11 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 					json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
 				json_object_set_new(obj, "argument_types", arg_types);
 
-				// Repeating group (variadic_arg_types) — emit exactly one cycle
+				// Repeating group (variadic_argument_types) — emit exactly one cycle
 				json_t *var_types = json_array();
 				for (int a = prefix_len; a < prefix_len + cycle_len; a++)
 					json_array_append_new(var_types, json_string(opf_to_string(types[a])));
-				json_object_set_new(obj, "variadic_arg_types", var_types);
+				json_object_set_new(obj, "variadic_argument_types", var_types);
 			} else {
 				// No cycle detected — emit only the min_args types as argument_types
 				json_t *arg_types = json_array();
@@ -1972,7 +1968,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 			json_object_set_new(ss_obj, "name", json_string(ss.subobj_name));
 			if (ss.type != SUBSYSTEM_NONE)
-				json_object_set_new(ss_obj, "type", json_string(subsystem_type_str(ss.type)));
+				json_object_set_new(ss_obj, "subsystem_type", json_string(subsystem_type_str(ss.type)));
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
 
 			// Turret-specific info
