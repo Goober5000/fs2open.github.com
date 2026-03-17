@@ -9771,6 +9771,184 @@ bool weapon_info::has_display_name() const
 	return wi_flags[Weapon::Info_Flags::Has_display_name];
 }
 
+SCP_map<SCP_string, weapon_stat_value> weapon_get_stats(const weapon_info &wi)
+{
+	SCP_map<SCP_string, weapon_stat_value> stats;
+
+	bool is_beam = wi.wi_flags[Weapon::Info_Flags::Beam];
+	bool primary = wi.is_primary();
+
+	stats["type"] = SCP_string(primary ? "primary" : "secondary");
+	stats["is_beam"] = is_beam;
+	stats["allowed_for_player"] = (bool)wi.wi_flags[Weapon::Info_Flags::Player_allowed];
+
+	// Velocity and range
+	if (is_beam) {
+		stats["max_speed"] = 0.0f;
+		stats["standard_range"] = wi.b_info.range;
+	} else {
+		stats["max_speed"] = wi.max_speed;
+		stats["standard_range"] = wi.max_speed * wi.lifetime;
+	}
+
+	// Per-hit damage (beams: total damage over beam lifetime)
+	float damage;
+	if (is_beam)
+		damage = wi.damage * wi.b_info.beam_life * (1000.0f / static_cast<float>(BEAM_DAMAGE_TIME));
+	else
+		damage = wi.damage;
+
+	// Fire rate (shots/sec).
+	// Primaries account for burst fire; secondaries use simple 1/fire_wait
+	// (matching the existing weapon_spew_stats behavior).
+	float fire_rate;
+	if (primary && wi.burst_shots > 1 && wi.burst_flags[Weapon::Burst_Flags::Random_length])
+		fire_rate = (wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1)) + (1 / wi.fire_wait)) / 2;
+	else if (primary && wi.burst_shots > 1)
+		fire_rate = wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1));
+	else
+		fire_rate = 1 / wi.fire_wait;
+
+	// Damage multipliers
+	float hull_multiplier = 1.0f;
+	float shield_multiplier = 1.0f;
+	float subsys_multiplier = 1.0f;
+
+	// Area effect: inner/outer radius > 0
+	bool area_effect = (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f);
+	if (area_effect) {
+		hull_multiplier = 2.0f;
+		shield_multiplier = 2.0f;
+	}
+
+	// Shockwave: speed > 0
+	bool has_shockwave = (wi.shockwave.speed > 0.0f);
+	if (has_shockwave) {
+		subsys_multiplier = 2.0f;
+	}
+
+	// Puncture
+	if (wi.wi_flags[Weapon::Info_Flags::Puncture])
+		hull_multiplier /= 4;
+
+	// Damage factors (beams ignore unless specified)
+	float armor_factor = wi.armor_factor;
+	float shield_factor = wi.shield_factor;
+	float subsys_factor = wi.subsystem_factor;
+	if (is_beam && !Beams_use_damage_factors)
+		armor_factor = shield_factor = subsys_factor = 1.0f;
+
+	stats["damage_hull"] = hull_multiplier * damage * armor_factor;
+	stats["dps_hull"] = hull_multiplier * damage * armor_factor * fire_rate;
+	stats["damage_shield"] = shield_multiplier * damage * shield_factor;
+	stats["dps_shield"] = shield_multiplier * damage * shield_factor * fire_rate;
+	stats["damage_subsystem"] = subsys_multiplier * damage * subsys_factor;
+	stats["dps_subsystem"] = subsys_multiplier * damage * subsys_factor * fire_rate;
+
+	stats["fire_interval"] = wi.fire_wait;
+	stats["fire_rate"] = fire_rate;
+	stats["has_area_effect"] = area_effect;
+	stats["has_shockwave"] = has_shockwave;
+
+	// Primary-only: power use
+	if (primary)
+		stats["energy_consumption_rate"] = wi.energy_consumed / wi.fire_wait;
+	else
+		stats["energy_consumption_rate"] = 0.0f;
+
+	// Secondary-only: reload
+	if (!primary) {
+		stats["reload_rate"] = wi.reloaded_per_batch / wi.rearm_rate;
+		stats["reload_rate_reciprocal"] = wi.rearm_rate / wi.reloaded_per_batch;
+	} else {
+		stats["reload_rate"] = 0.0f;
+		stats["reload_rate_reciprocal"] = 0.0f;
+	}
+
+	return stats;
+}
+
+// Strip trailing ".0" from a formatted number string, e.g. "5.0" -> "5"
+static void strip_trailing_zero(char *buf)
+{
+	char *p = strstr(buf, ".0");
+	if (p)
+		*p = '\0';
+}
+
+SCP_string weapon_get_stats_text(const weapon_info &wi)
+{
+	auto stats = weapon_get_stats(wi);
+
+	bool primary = wi.is_primary();
+	bool is_beam = std::get<bool>(stats["is_beam"]);
+
+	SCP_string result;
+	char buf[256];
+
+	// Name
+	sprintf(buf, "%s\n", wi.name);
+	result += buf;
+
+	// Velocity and range
+	if (is_beam) {
+		sprintf(buf, "\tVelocity: N/A        Range: %.0f\n", std::get<float>(stats["standard_range"]));
+	} else {
+		sprintf(buf, "\tVelocity: %-11.0fRange: %.0f\n", std::get<float>(stats["max_speed"]), std::get<float>(stats["standard_range"]));
+	}
+	result += buf;
+
+	if (primary) {
+		// DPS line (burst-aware, already computed in map)
+		sprintf(buf, "\tDPS: %.0f Hull, %.0f Shield, %.0f Subsystem\n",
+			std::get<float>(stats["dps_hull"]),
+			std::get<float>(stats["dps_shield"]),
+			std::get<float>(stats["dps_subsystem"]));
+		result += buf;
+
+		// Power Use (burst-aware: energy_consumed * ROF) and ROF
+		float fire_rate = std::get<float>(stats["fire_rate"]);
+		char watts[NAME_LENGTH];
+		sprintf(watts, "%.1f", wi.energy_consumed * fire_rate);
+		strip_trailing_zero(watts);
+		strcat(watts, "W");
+
+		char rof[NAME_LENGTH];
+		sprintf(rof, "%.1f", fire_rate);
+		strip_trailing_zero(rof);
+		strcat(rof, "/s");
+
+		sprintf(buf, "\tPower Use: %-10sROF: %s\n\n", watts, rof);
+		result += buf;
+	} else {
+		// Damage line (per-hit, not DPS)
+		sprintf(buf, "\tDamage: %.0f Hull, %.0f Shield, %.0f Subsystem\n",
+			std::get<float>(stats["damage_hull"]),
+			std::get<float>(stats["damage_shield"]),
+			std::get<float>(stats["damage_subsystem"]));
+		result += buf;
+
+		// Fire Wait and Reload
+		char wait[NAME_LENGTH];
+		sprintf(wait, "%.1f", std::get<float>(stats["fire_interval"]));
+		strip_trailing_zero(wait);
+		strcat(wait, "s");
+
+		bool flip = wi.rearm_rate <= 1.0f;
+		char flip_str[NAME_LENGTH];
+		sprintf(flip_str, "%d/", wi.reloaded_per_batch);
+
+		char reload[NAME_LENGTH];
+		sprintf(reload, "%.1f", flip ? wi.reloaded_per_batch / wi.rearm_rate : wi.rearm_rate);
+		strip_trailing_zero(reload);
+
+		sprintf(buf, "\tFire Wait: %-10sReload: %s%s%ss\n\n", wait, !flip ? flip_str : "", reload, flip ? "/" : "");
+		result += buf;
+	}
+
+	return result;
+}
+
 void weapon_spew_stats(WeaponSpewType type)
 {
 #ifndef NDEBUG
@@ -9778,289 +9956,129 @@ void weapon_spew_stats(WeaponSpewType type)
 		return;	// then why did we even call the function?
 	bool all_weapons = (type == WeaponSpewType::ALL);
 
-	// csv weapon stats for comparisons
-	mprintf(("Name,Type,Velocity,Range,Damage Hull,DPS Hull,Damage Shield,DPS Shield,Damage Subsystem,DPS Subsystem,Power Use,Fire Wait,ROF,Reload,1/Reload,Area Effect,Shockwave%s\n", all_weapons ? ",Player Allowed" : ""));
-	for (auto &wi : Weapon_info)
-	{
-		if (!wi.is_primary())
-			continue;
+	// CSV column definitions: display header and corresponding map key
+	struct csv_column { const char *header; const char *key; };
+	static const csv_column columns[] = {
+		{"Name",              nullptr},
+		{"Type",              "type"},
+		{"Velocity",          "max_speed"},
+		{"Range",             "standard_range"},
+		{"Damage Hull",       "damage_hull"},
+		{"DPS Hull",          "dps_hull"},
+		{"Damage Shield",     "damage_shield"},
+		{"DPS Shield",        "dps_shield"},
+		{"Damage Subsystem",  "damage_subsystem"},
+		{"DPS Subsystem",     "dps_subsystem"},
+		{"Power Use",         "energy_consumption_rate"},
+		{"Fire Wait",         "fire_interval"},
+		{"ROF",               "fire_rate"},
+		{"Reload",            "reload_rate"},
+		{"1/Reload",          "reload_rate_reciprocal"},
+		{"Area Effect",       "has_area_effect"},
+		{"Shockwave",         "has_shockwave"},
+		{"Player Allowed",    "allowed_for_player"},
+	};
+	static const int num_columns = sizeof(columns) / sizeof(columns[0]);
 
-		if (all_weapons || wi.wi_flags[Weapon::Info_Flags::Player_allowed])
-		{
-			mprintf(("%s,%s,", wi.name, "Primary"));
-			//Beam range is set in the b_info and velocity isn't very relevant to them.
-			if (wi.wi_flags[Weapon::Info_Flags::Beam])
-				mprintf((",%.2f,",wi.b_info.range));
-			else
-				mprintf(("%.2f,%.2f,", wi.max_speed, wi.max_speed * wi.lifetime));
-
-			float damage;
-			if (wi.wi_flags[Weapon::Info_Flags::Beam])
-				damage = wi.damage * wi.b_info.beam_life * (1000.0f / i2fl(BEAM_DAMAGE_TIME));
-			else
-				damage = wi.damage;
-
-			float fire_rate;
-			//To get overall fire rate, divide the number of shots in a firing cycle by the length of that cycle
-			//In random length bursts, average between the longest and shortest firing cycle to get average rof
-			if (wi.burst_shots > 1 && (wi.burst_flags[Weapon::Burst_Flags::Random_length]))
-				fire_rate = (wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1)) + (1 / wi.fire_wait)) / 2;
-			else if (wi.burst_shots > 1)
-				fire_rate = wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1));
-			else
-				fire_rate = 1 / wi.fire_wait;
-
-			// doubled damage is handled strangely...
-			float hull_multiplier = 1.0f;
-			float shield_multiplier = 1.0f;
-			float subsys_multiplier = 1.0f;
-
-			// area effect?
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-			{
-				hull_multiplier = 2.0f;
-				shield_multiplier = 2.0f;
-
-				// shockwave?
-				if (wi.shockwave.speed > 0.0f)
-				{
-					subsys_multiplier = 2.0f;
-				}
-			}
-
-			// puncture?
-			if (wi.wi_flags[Weapon::Info_Flags::Puncture])
-				hull_multiplier /= 4;
-
-			// beams ignore factors unless specified
-			float armor_factor = wi.armor_factor;
-			float shield_factor = wi.shield_factor;
-			float subsys_factor = wi.subsystem_factor;
-			if (wi.wi_flags[Weapon::Info_Flags::Beam] && !Beams_use_damage_factors)
-				armor_factor = shield_factor = subsys_factor = 1.0f;
-
-			mprintf(("%.2f,%.2f,", hull_multiplier * damage * armor_factor, hull_multiplier * damage * armor_factor * fire_rate));
-			mprintf(("%.2f,%.2f,", shield_multiplier * damage * shield_factor, shield_multiplier * damage * shield_factor * fire_rate));
-			mprintf(("%.2f,%.2f,", subsys_multiplier * damage * subsys_factor, subsys_multiplier * damage * subsys_factor * fire_rate));
-
-			mprintf(("%.2f,", wi.energy_consumed / wi.fire_wait));
-			mprintf(("%.2f,%.2f,", wi.fire_wait, fire_rate));
-			mprintf((",,"));	// no reload for primaries
-
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-				mprintf(("Yes,"));
-			else
-				mprintf((","));
-
-			if (wi.shockwave.speed > 0.0f)
-				mprintf(("Yes"));
-
-			if (all_weapons)
-			{
-				mprintf((","));
-				mprintf((wi.wi_flags[Weapon::Info_Flags::Player_allowed] ? "Yes" : ""));
-			}
-
-			mprintf(("\n"));
+	// Format a variant value as a CSV cell
+	auto format_csv = [](const weapon_stat_value &val, bool blank) -> SCP_string {
+		if (blank)
+			return "";
+		if (auto *f = std::get_if<float>(&val)) {
+			char buf[64];
+			sprintf(buf, "%.2f", *f);
+			return buf;
 		}
-	}
-	for (auto &wi : Weapon_info)
-	{
-		if (!wi.is_secondary())
+		if (auto *b = std::get_if<bool>(&val))
+			return *b ? "Yes" : "";
+		return std::get<SCP_string>(val);
+	};
+
+	// Determine whether a CSV cell should be blank based on weapon type and map key
+	auto is_blank = [](const char *key, bool primary, bool is_beam) -> bool {
+		if (!key)
+			return false;
+		if (is_beam && !strcmp(key, "max_speed"))
+			return true;
+		if (primary && (!strcmp(key, "reload_rate") || !strcmp(key, "reload_rate_reciprocal")))
+			return true;
+		if (!primary && !strcmp(key, "energy_consumption_rate"))
+			return true;
+		return false;
+	};
+
+	// CSV header
+	for (int i = 0; i < num_columns; i++) {
+		if (!all_weapons && !strcmp(columns[i].header, "Player Allowed"))
 			continue;
-
-		if (all_weapons || wi.wi_flags[Weapon::Info_Flags::Player_allowed] || wi.wi_flags[Weapon::Info_Flags::Child])
-		{
-			mprintf(("%s,%s,", wi.name, "Secondary"));
-			mprintf(("%.2f,%.2f,", wi.max_speed, wi.max_speed * wi.lifetime));
-
-			// doubled damage is handled strangely...
-			float hull_multiplier = 1.0f;
-			float shield_multiplier = 1.0f;
-			float subsys_multiplier = 1.0f;
-
-			// area effect?
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-			{
-				hull_multiplier = 2.0f;
-				shield_multiplier = 2.0f;
-
-				// shockwave?
-				if (wi.shockwave.speed > 0.0f)
-				{
-					subsys_multiplier = 2.0f;
-				}
-			}
-
-			// puncture?
-			if (wi.wi_flags[Weapon::Info_Flags::Puncture])
-				hull_multiplier /= 4;
-
-			mprintf(("%.2f,%.2f,", hull_multiplier * wi.damage * wi.armor_factor, hull_multiplier * wi.damage * wi.armor_factor / wi.fire_wait));
-			mprintf(("%.2f,%.2f,", shield_multiplier * wi.damage * wi.shield_factor, shield_multiplier * wi.damage * wi.shield_factor / wi.fire_wait));
-			mprintf(("%.2f,%.2f,", subsys_multiplier * wi.damage * wi.subsystem_factor, subsys_multiplier * wi.damage * wi.subsystem_factor / wi.fire_wait));
-
-			mprintf((","));	// no power use for secondaries
-			mprintf(("%.2f,%.2f,", wi.fire_wait, 1.0f / wi.fire_wait));
-			mprintf(("%.2f,%.2f,", wi.reloaded_per_batch / wi.rearm_rate, wi.rearm_rate / wi.reloaded_per_batch));	// rearm_rate is actually the reciprocal of what is in weapons.tbl
-
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-				mprintf(("Yes,"));
-			else
-				mprintf((","));
-
-			if (wi.shockwave.speed > 0.0f)
-				mprintf(("Yes"));
-
-			if (all_weapons)
-			{
-				mprintf((","));
-				mprintf((wi.wi_flags[Weapon::Info_Flags::Player_allowed] ? "Yes" : ""));
-			}
-
-			mprintf(("\n"));
-		}
+		if (i > 0)
+			mprintf((","));
+		mprintf(("%s", columns[i].header));
 	}
-
-	// mvp-style stats
 	mprintf(("\n"));
-	for (auto &wi : Weapon_info)
-	{
+
+	// CSV rows — primaries
+	for (auto &wi : Weapon_info) {
 		if (!wi.is_primary())
 			continue;
-
-		if (all_weapons || wi.wi_flags[Weapon::Info_Flags::Player_allowed])
-		{
-			mprintf(("%s\n", wi.name));
-			//Beam range is set in the b_info and velocity isn't very relevant to them.
-			if (wi.wi_flags[Weapon::Info_Flags::Beam])
-				mprintf(("\tVelocity: N/A        Range: %.0f\n", wi.b_info.range));
-			else
-				mprintf(("\tVelocity: %-11.0fRange: %.0f\n", wi.max_speed, wi.max_speed* wi.lifetime));
-
-			float damage;
-			if (wi.wi_flags[Weapon::Info_Flags::Beam])
-				damage = wi.damage * wi.b_info.beam_life * (1000.0f / i2fl(BEAM_DAMAGE_TIME));
-			else
-				damage = wi.damage;
-
-			float fire_rate;
-			//We need to count the length of a firing cycle and then divide by the number of shots in that cycle
-			//In random length bursts, average between the longest and shortest firing cycle to get average rof
-			if (wi.burst_shots > 1 && (wi.burst_flags[Weapon::Burst_Flags::Random_length]))
-				fire_rate = (wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1)) + (1 / wi.fire_wait)) / 2;
-			else if (wi.burst_shots > 1)
-				fire_rate = wi.burst_shots / (wi.fire_wait + wi.burst_delay * (wi.burst_shots - 1));
-			else
-				fire_rate = 1 / wi.fire_wait;
-
-			// doubled damage is handled strangely...
-			float hull_multiplier = 1.0f;
-			float shield_multiplier = 1.0f;
-			float subsys_multiplier = 1.0f;
-
-			// area effect?
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-			{
-				hull_multiplier = 2.0f;
-				shield_multiplier = 2.0f;
-
-				// shockwave?
-				if (wi.shockwave.speed > 0.0f)
-				{
-					subsys_multiplier = 2.0f;
-				}
-			}
-
-			// puncture?
-			if (wi.wi_flags[Weapon::Info_Flags::Puncture])
-				hull_multiplier /= 4;
-
-			// beams ignore factors unless specified
-			float armor_factor = wi.armor_factor;
-			float shield_factor = wi.shield_factor;
-			float subsys_factor = wi.subsystem_factor;
-			if (wi.wi_flags[Weapon::Info_Flags::Beam] && !Beams_use_damage_factors)
-				armor_factor = shield_factor = subsys_factor = 1.0f;
-
-			mprintf(("\tDPS: "));
-			mprintf(("%.0f Hull, ", hull_multiplier * damage * armor_factor * fire_rate));
-			mprintf(("%.0f Shield, ", shield_multiplier * damage * shield_factor * fire_rate));
-			mprintf(("%.0f Subsystem\n", subsys_multiplier * damage * subsys_factor * fire_rate));
-
-			char watts[NAME_LENGTH];
-			sprintf(watts, "%.1f", wi.energy_consumed * fire_rate);
-			char *p = strstr(watts, ".0");
-			if (p)
-				*p = 0;
-			strcat(watts, "W");
-
-			char rof[NAME_LENGTH];
-			sprintf(rof, "%.1f", fire_rate);
-			p = strstr(rof, ".0");
-			if (p)
-				*p = 0;
-			strcat(rof, "/s");
-
-			mprintf(("\tPower Use: %-10sROF: %s\n\n", watts, rof));
-		}
-	}
-	for (auto &wi : Weapon_info)
-	{
-		if (!wi.is_secondary())
+		if (!all_weapons && !wi.wi_flags[Weapon::Info_Flags::Player_allowed])
 			continue;
 
-		if (all_weapons || wi.wi_flags[Weapon::Info_Flags::Player_allowed] || wi.wi_flags[Weapon::Info_Flags::Child])
-		{
-			mprintf(("%s\n", wi.name));
-			mprintf(("\tVelocity: %-11.0fRange: %.0f\n", wi.max_speed, wi.max_speed * wi.lifetime));
+		auto stats = weapon_get_stats(wi);
+		bool is_beam = std::get<bool>(stats["is_beam"]);
 
-			// doubled damage is handled strangely...
-			float hull_multiplier = 1.0f;
-			float shield_multiplier = 1.0f;
-			float subsys_multiplier = 1.0f;
-
-			// area effect?
-			if (wi.shockwave.inner_rad > 0.0f || wi.shockwave.outer_rad > 0.0f)
-			{
-				hull_multiplier = 2.0f;
-				shield_multiplier = 2.0f;
-
-				// shockwave?
-				if (wi.shockwave.speed > 0.0f)
-				{
-					subsys_multiplier = 2.0f;
-				}
-			}
-
-			// puncture?
-			if (wi.wi_flags[Weapon::Info_Flags::Puncture])
-				hull_multiplier /= 4;
-
-			mprintf(("\tDamage: "));
-			mprintf(("%.0f Hull, ", hull_multiplier * wi.damage * wi.armor_factor));
-			mprintf(("%.0f Shield, ", shield_multiplier * wi.damage * wi.shield_factor));
-			mprintf(("%.0f Subsystem\n", subsys_multiplier * wi.damage * wi.subsystem_factor));
-
-			char wait[NAME_LENGTH];
-			sprintf(wait, "%.1f", wi.fire_wait);
-			char *p = strstr(wait, ".0");
-			if (p)
-				*p = 0;
-			strcat(wait, "s");
-
-			bool flip = wi.rearm_rate <= 1.0f;
-			char flip_str[NAME_LENGTH];
-			sprintf(flip_str, "%d/", wi.reloaded_per_batch);
-
-			char reload[NAME_LENGTH];
-			sprintf(reload, "%.1f", flip ? wi.reloaded_per_batch / wi.rearm_rate : wi.rearm_rate);
-			p = strstr(reload, ".0");
-			if (p)
-				*p = 0;
-
-			mprintf(("\tFire Wait: %-10sReload: %s%s%ss\n\n", wait, !flip ? flip_str : "", reload, flip ? "/" : ""));
+		for (int i = 0; i < num_columns; i++) {
+			if (!all_weapons && !strcmp(columns[i].header, "Player Allowed"))
+				continue;
+			if (i > 0)
+				mprintf((","));
+			const char *key = columns[i].key;
+			if (key)
+				mprintf(("%s", format_csv(stats[key], is_blank(key, true, is_beam)).c_str()));
+			else
+				mprintf(("%s", wi.name));
 		}
+		mprintf(("\n"));
+	}
+
+	// CSV rows — secondaries
+	for (auto &wi : Weapon_info) {
+		if (!wi.is_secondary())
+			continue;
+		if (!all_weapons && !wi.wi_flags[Weapon::Info_Flags::Player_allowed] && !wi.wi_flags[Weapon::Info_Flags::Child])
+			continue;
+
+		auto stats = weapon_get_stats(wi);
+
+		for (int i = 0; i < num_columns; i++) {
+			if (!all_weapons && !strcmp(columns[i].header, "Player Allowed"))
+				continue;
+			if (i > 0)
+				mprintf((","));
+			const char *key = columns[i].key;
+			if (key)
+				mprintf(("%s", format_csv(stats[key], is_blank(key, false, false)).c_str()));
+			else
+				mprintf(("%s", wi.name));
+		}
+		mprintf(("\n"));
+	}
+
+	// MediaVP-style stats
+	mprintf(("\n"));
+	for (auto &wi : Weapon_info) {
+		if (!wi.is_primary())
+			continue;
+		if (!all_weapons && !wi.wi_flags[Weapon::Info_Flags::Player_allowed])
+			continue;
+		mprintf(("%s", weapon_get_stats_text(wi).c_str()));
+	}
+	for (auto &wi : Weapon_info) {
+		if (!wi.is_secondary())
+			continue;
+		if (!all_weapons && !wi.wi_flags[Weapon::Info_Flags::Player_allowed] && !wi.wi_flags[Weapon::Info_Flags::Child])
+			continue;
+		mprintf(("%s", weapon_get_stats_text(wi).c_str()));
 	}
 #endif
 }

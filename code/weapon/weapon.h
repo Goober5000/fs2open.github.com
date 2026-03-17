@@ -1086,5 +1086,15 @@ bool weapon_multilock_can_lock_on_target(object* shooter, object* target_objp, w
 // Return whether the weapon has a target it is currently homing on
 bool weapon_has_homing_object(weapon* wp);
 
+// Variant type for weapon stat values: numeric, boolean, or string
+using weapon_stat_value = std::variant<float, bool, SCP_string>;
+
+// Returns a map of combat stats for a single weapon (keyed by column name).
+// Works for any weapon type (primary, secondary, beam).
+SCP_map<SCP_string, weapon_stat_value> weapon_get_stats(const weapon_info &wi);
+
+// Returns MediaVP-style human-readable text block for a single weapon.
+SCP_string weapon_get_stats_text(const weapon_info &wi);
+
 
 #endif
