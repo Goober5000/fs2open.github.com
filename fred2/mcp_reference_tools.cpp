@@ -318,6 +318,22 @@ void mcp_register_reference_tools(json_t *tools)
 		"List all species defined in the game (e.g. Terran, Vasudan, Shivan).",
 		json_object());
 
+	// list_iffs
+	register_tool(tools, "list_iffs",
+		"List all IFF (Identify Friend or Foe) definitions. IFFs define faction allegiances and determine who attacks whom.",
+		json_object());
+
+	// get_iff
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the IFF (e.g. \"Friendly\")");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "get_iff",
+			"Get details for a specific IFF, including color, attack relationships, and flags.",
+			props, req);
+	}
+
 	// list_intel_entries
 	register_tool(tools, "list_intel_entries",
 		"List all intel/tech database entries. These contain universe lore and descriptions.",
@@ -946,6 +962,63 @@ static json_t *handle_list_species()
 	}
 
 	return make_json_tool_result(arr);
+}
+
+static json_t *handle_list_iffs()
+{
+	json_t *arr = json_array();
+
+	for (size_t i = 0; i < Iff_info.size(); i++) {
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(Iff_info[i].iff_name));
+		json_array_append_new(arr, item);
+	}
+
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_get_iff(json_t *arguments)
+{
+	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
+	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
+	if (!name || name[0] == '\0')
+		return make_tool_result("Missing required parameter: name", true);
+
+	int idx = iff_lookup(name);
+	if (idx < 0)
+		return make_tool_result("IFF not found", true);
+
+	const auto &iff = Iff_info[idx];
+	json_t *obj = json_object();
+
+	// Identity
+	json_object_set_new(obj, "name", json_string(iff.iff_name));
+
+	// Color (RGB array from the non-bright variant)
+	{
+		color *c = iff_get_color(iff.color_index, 0);
+		json_t *color_arr = json_array();
+		json_array_append_new(color_arr, json_integer(c->red));
+		json_array_append_new(color_arr, json_integer(c->green));
+		json_array_append_new(color_arr, json_integer(c->blue));
+		json_object_set_new(obj, "color", color_arr);
+	}
+
+	// Attacks
+	{
+		json_t *attacks = json_array();
+		for (int j = 0; j < (int)Iff_info.size(); j++) {
+			if (iff_x_attacks_y(idx, j))
+				json_array_append_new(attacks, json_string(Iff_info[j].iff_name));
+		}
+		json_object_set_new(obj, "attacks", attacks);
+	}
+
+	// Flags
+	json_object_set_new(obj, "support_allowed", json_boolean(iff.flags & IFFF_SUPPORT_ALLOWED));
+	json_object_set_new(obj, "exempt_from_all_teams_at_war", json_boolean(iff.flags & IFFF_EXEMPT_FROM_ALL_TEAMS_AT_WAR));
+
+	return make_json_tool_result(obj);
 }
 
 static json_t *handle_list_intel_entries()
@@ -2143,6 +2216,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_weapon_class(arguments);
 	if (strcmp(tool_name, "list_species") == 0)
 		return handle_list_species();
+	if (strcmp(tool_name, "list_iffs") == 0)
+		return handle_list_iffs();
+	if (strcmp(tool_name, "get_iff") == 0)
+		return handle_get_iff(arguments);
 	if (strcmp(tool_name, "list_intel_entries") == 0)
 		return handle_list_intel_entries();
 	if (strcmp(tool_name, "get_intel_entry") == 0)
