@@ -79,8 +79,8 @@ static void handle_list_talking_heads(json_t * /*input*/, McpToolRequest *req)
 		heads.push_back(name);
 	};
 
-	// Heads referenced by existing messages
-	for (int i = 0; i < Num_messages; i++) {
+	// Heads referenced by existing builtin messages
+	for (int i = 0; i < Num_builtin_messages; i++) {
 		if (Messages[i].avi_info.name)
 			maybe_add(Messages[i].avi_info.name);
 	}
