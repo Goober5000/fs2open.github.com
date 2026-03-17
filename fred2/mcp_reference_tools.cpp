@@ -17,6 +17,8 @@
 #include "parse/sexp/sexp_lookup.h"
 #include "menuui/techmenu.h"
 #include "iff_defs/iff_defs.h"
+#include "mission/missionmessage.h"
+#include "mod_table/mod_table.h"
 #include "cfile/cfile.h"
 #include "def_files/def_files.h"
 
@@ -426,6 +428,33 @@ void mcp_register_reference_tools(json_t *tools)
 			"Use this for simple equality checks; use subsystem_names_compare for sorting. Always use one of these tools "
 			"instead of common string comparison for subsystem names.",
 			props, req);
+	}
+
+	// list_persona_types
+	{
+		register_tool(tools, "list_persona_types",
+			"List all persona type strings (e.g. \"wingman\", \"support\", \"large\", \"command\").",
+			json_object());
+	}
+
+	// list_personas
+	{
+		register_tool(tools, "list_personas",
+			"List all available personas. Personas define who delivers a message "
+			"(e.g. a wingman, support ship, or command). Returns each persona's name, "
+			"type, and compatible species. Use persona names with create_message and "
+			"update_message.",
+			json_object());
+	}
+
+	// list_talking_heads
+	{
+		register_tool(tools, "list_talking_heads",
+			"List all available talking head animations. Includes heads referenced by "
+			"existing messages, hardcoded heads (unless disabled by mod), and custom "
+			"heads defined in the mod table. Message talking heads are almost always "
+			"assigned from this list, but on rare occasions can be unique.",
+			json_object());
 	}
 }
 
@@ -2147,6 +2176,107 @@ static json_t *handle_subsystem_names_equal(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// Persona and talking head reference tools
+// ---------------------------------------------------------------------------
+
+static json_t *handle_list_persona_types()
+{
+	json_t *arr = json_array();
+	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
+		json_array_append_new(arr, json_string(Persona_type_names[i]));
+
+	json_t *data = json_object();
+	json_object_set_new(data, "persona_types", arr);
+	json_object_set_new(data, "count", json_integer(MAX_PERSONA_TYPES));
+	return make_json_tool_result(data);
+}
+
+static json_t *handle_list_personas()
+{
+	json_t *arr = json_array();
+
+	for (const auto &p : Personas) {
+		json_t *entry = json_object();
+		json_object_set_new(entry, "name", json_string(p.name));
+
+		// Derive persona_type from type flag bits
+		const char *persona_type = "unknown";
+		for (int j = 0; j < MAX_PERSONA_TYPES; j++) {
+			if (p.flags & (1 << j)) {
+				persona_type = Persona_type_names[j];
+				break;
+			}
+		}
+		json_object_set_new(entry, "persona_type", json_string(persona_type));
+
+		// Decode species_bitfield into species name array
+		json_t *species_arr = json_array();
+		for (int j = 0; j < (int)Species_info.size(); j++) {
+			if (p.species_bitfield & (1 << j))
+				json_array_append_new(species_arr, json_string(Species_info[j].species_name));
+		}
+		json_object_set_new(entry, "species", species_arr);
+
+		json_array_append_new(arr, entry);
+	}
+
+	json_t *data = json_object();
+	json_object_set_new(data, "personas", arr);
+	json_object_set_new(data, "count", json_integer((int)Personas.size()));
+	return make_json_tool_result(data);
+}
+
+static json_t *handle_list_talking_heads()
+{
+	// Collect unique head names, matching event_editor::OnInitDialog() logic
+	SCP_vector<SCP_string> heads;
+	auto maybe_add = [&](const char *name) {
+		for (const auto &h : heads) {
+			if (!stricmp(h.c_str(), name))
+				return;
+		}
+		heads.push_back(name);
+	};
+
+	// Heads referenced by existing builtin messages
+	for (int i = 0; i < Num_builtin_messages; i++) {
+		if (Messages[i].avi_info.name)
+			maybe_add(Messages[i].avi_info.name);
+	}
+
+	// Hardcoded heads (unless disabled by mod table)
+	if (!Disable_hc_message_ani) {
+		maybe_add("Head-TP2");
+		maybe_add("Head-VC2");
+		maybe_add("Head-TP4");
+		maybe_add("Head-TP5");
+		maybe_add("Head-TP6");
+		maybe_add("Head-TP7");
+		maybe_add("Head-TP8");
+		maybe_add("Head-VP2");
+		maybe_add("Head-CM2");
+		maybe_add("Head-CM3");
+		maybe_add("Head-CM4");
+		maybe_add("Head-CM5");
+		maybe_add("Head-BSH");
+	}
+
+	// Custom heads from mod table
+	for (const auto &h : Custom_head_anis) {
+		maybe_add(h.c_str());
+	}
+
+	json_t *arr = json_array();
+	for (const auto &h : heads)
+		json_array_append_new(arr, json_string(h.c_str()));
+
+	json_t *data = json_object();
+	json_object_set_new(data, "talking_heads", arr);
+	json_object_set_new(data, "count", json_integer((int)heads.size()));
+	return make_json_tool_result(data);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -2197,6 +2327,12 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_subsystem_names_compare(arguments);
 	if (strcmp(tool_name, "subsystem_names_equal") == 0)
 		return handle_subsystem_names_equal(arguments);
+	if (strcmp(tool_name, "list_persona_types") == 0)
+		return handle_list_persona_types();
+	if (strcmp(tool_name, "list_personas") == 0)
+		return handle_list_personas();
+	if (strcmp(tool_name, "list_talking_heads") == 0)
+		return handle_list_talking_heads();
 
 	return nullptr;  // not one of our tools
 }
