@@ -537,6 +537,158 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+static void handle_move_message(json_t *input, McpToolRequest *req)
+{
+	const char *conflict = check_dialog_conflict_for_messages();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
+	int from_index = -1;
+	int to_index = -1;
+
+	if (input) {
+		json_t *v;
+
+		v = json_object_get(input, "from_index");
+		if (v && json_is_number(v))
+			from_index = (int)json_number_value(v);
+
+		v = json_object_get(input, "to_index");
+		if (v && json_is_number(v))
+			to_index = (int)json_number_value(v);
+	}
+
+	int num_mission_msgs = Num_messages - Num_builtin_messages;
+
+	if (from_index < 0 || from_index >= num_mission_msgs) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid from_index %d: must be 0 to %d", from_index, num_mission_msgs - 1);
+		return;
+	}
+	if (to_index < 0 || to_index >= num_mission_msgs) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid to_index %d: must be 0 to %d", to_index, num_mission_msgs - 1);
+		return;
+	}
+
+	if (from_index == to_index) {
+		// No-op: already at the target position
+		int abs_idx = Num_builtin_messages + from_index;
+		json_t *data = json_object();
+		json_object_set_new(data, "name", json_string(Messages[abs_idx].name));
+		json_object_set_new(data, "index", json_integer(from_index));
+		req->result_json = make_json_tool_result(data);
+		req->success = true;
+		return;
+	}
+
+	int abs_from = Num_builtin_messages + from_index;
+	int abs_to = Num_builtin_messages + to_index;
+
+	// Save the message being moved
+	MMessage temp = Messages[abs_from];
+
+	// Shift to close the gap at abs_from, then open a slot at abs_to
+	if (abs_from < abs_to) {
+		for (int i = abs_from; i < abs_to; i++)
+			Messages[i] = Messages[i + 1];
+	} else {
+		for (int i = abs_from; i > abs_to; i--)
+			Messages[i] = Messages[i - 1];
+	}
+
+	Messages[abs_to] = temp;
+
+	set_modified();
+	if (FREDDoc_ptr) {
+		char desc[128];
+		snprintf(desc, sizeof(desc), "MCP: move message %s from %d to %d", temp.name, from_index, to_index);
+		FREDDoc_ptr->autosave(desc);
+	}
+
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(Messages[abs_to].name));
+	json_object_set_new(data, "index", json_integer(to_index));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_swap_messages(json_t *input, McpToolRequest *req)
+{
+	const char *conflict = check_dialog_conflict_for_messages();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
+	int index_a = -1;
+	int index_b = -1;
+
+	if (input) {
+		json_t *v;
+
+		v = json_object_get(input, "index_a");
+		if (v && json_is_number(v))
+			index_a = (int)json_number_value(v);
+
+		v = json_object_get(input, "index_b");
+		if (v && json_is_number(v))
+			index_b = (int)json_number_value(v);
+	}
+
+	int num_mission_msgs = Num_messages - Num_builtin_messages;
+
+	if (index_a < 0 || index_a >= num_mission_msgs) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid index_a %d: must be 0 to %d", index_a, num_mission_msgs - 1);
+		return;
+	}
+	if (index_b < 0 || index_b >= num_mission_msgs) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid index_b %d: must be 0 to %d", index_b, num_mission_msgs - 1);
+		return;
+	}
+
+	int abs_a = Num_builtin_messages + index_a;
+	int abs_b = Num_builtin_messages + index_b;
+
+	if (index_a != index_b) {
+		MMessage temp = Messages[abs_a];
+		Messages[abs_a] = Messages[abs_b];
+		Messages[abs_b] = temp;
+
+		set_modified();
+		if (FREDDoc_ptr) {
+			char desc[128];
+			snprintf(desc, sizeof(desc), "MCP: swap messages %s and %s",
+				Messages[abs_a].name, Messages[abs_b].name);
+			FREDDoc_ptr->autosave(desc);
+		}
+	}
+
+	json_t *data = json_object();
+	json_t *a_obj = json_object();
+	json_object_set_new(a_obj, "name", json_string(Messages[abs_a].name));
+	json_object_set_new(a_obj, "index", json_integer(index_a));
+	json_t *b_obj = json_object();
+	json_object_set_new(b_obj, "name", json_string(Messages[abs_b].name));
+	json_object_set_new(b_obj, "index", json_integer(index_b));
+	json_object_set_new(data, "a", a_obj);
+	json_object_set_new(data, "b", b_obj);
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
 // ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
@@ -547,6 +699,8 @@ static const char *mission_tool_names[] = {
 	"create_message",
 	"update_message",
 	"delete_message",
+	"move_message",
+	"swap_messages",
 	nullptr
 };
 
@@ -637,6 +791,38 @@ void mcp_register_mission_tools(json_t *tools)
 			"invalidated (wrapped in angle brackets).",
 			props, req);
 	}
+
+	// move_message
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the message among mission messages");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the message to");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_message",
+			"Move a mission message from one position to another. "
+			"Indices are 0-based within mission messages.",
+			props, req);
+	}
+
+	// swap_messages
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first message among mission messages");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second message among mission messages");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_messages",
+			"Swap two mission messages at the given positions. "
+			"Indices are 0-based within mission messages.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -668,6 +854,10 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_update_message(input_json, req);
 	} else if (strcmp(tool_name, "delete_message") == 0) {
 		handle_delete_message(input_json, req);
+	} else if (strcmp(tool_name, "move_message") == 0) {
+		handle_move_message(input_json, req);
+	} else if (strcmp(tool_name, "swap_messages") == 0) {
+		handle_swap_messages(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
