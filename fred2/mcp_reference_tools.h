@@ -11,4 +11,8 @@ void mcp_register_reference_tools(json_t *tools);
 // recognized (so the caller can fall through to other handlers).
 json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments);
 
+// Release cached model detail results.
+// Must be called after all mongoose threads have stopped (i.e., after mg_stop()).
+void mcp_reference_tools_cleanup();
+
 #endif // _MCP_REFERENCE_TOOLS_H
