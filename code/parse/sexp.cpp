@@ -35113,6 +35113,79 @@ std::pair<int, sexp_src> query_referenced_in_sexp(sexp_ref_type  /*type*/, const
 	return std::make_pair(-1, sexp_src::UNKNOWN);
 }
 
+const char *sexp_src_to_string(sexp_src src)
+{
+	switch (src) {
+		case sexp_src::SHIP_ARRIVAL:     return "a ship arrival cue";
+		case sexp_src::SHIP_DEPARTURE:   return "a ship departure cue";
+		case sexp_src::WING_ARRIVAL:     return "a wing arrival cue";
+		case sexp_src::WING_DEPARTURE:   return "a wing departure cue";
+		case sexp_src::EVENT:            return "an event";
+		case sexp_src::MISSION_GOAL:     return "a mission goal";
+		case sexp_src::MISSION_CUTSCENE: return "a cutscene";
+		case sexp_src::SHIP_ORDER:       return "a ship order";
+		case sexp_src::WING_ORDER:       return "a wing order";
+		case sexp_src::DEBRIEFING:       return "a debriefing stage";
+		case sexp_src::BRIEFING:         return "a briefing stage";
+		default:                         return "an unknown source";
+	}
+}
+
+SCP_string sexp_src_to_description(int index, sexp_src src)
+{
+	SCP_string desc;
+
+	switch (src) {
+		case sexp_src::SHIP_ARRIVAL:
+		case sexp_src::SHIP_DEPARTURE:
+			if (index >= 0 && index < MAX_SHIPS && Ships[index].objnum >= 0) {
+				const char *cue = (src == sexp_src::SHIP_ARRIVAL) ? "arrival" : "departure";
+				sprintf(desc, "the %s cue for ship '%s'", cue, Ships[index].ship_name);
+			}
+			break;
+		case sexp_src::WING_ARRIVAL:
+		case sexp_src::WING_DEPARTURE:
+			if (index >= 0 && index < MAX_WINGS && Wings[index].wave_count) {
+				const char *cue = (src == sexp_src::WING_ARRIVAL) ? "arrival" : "departure";
+				sprintf(desc, "the %s cue for wing '%s'", cue, Wings[index].name);
+			}
+			break;
+		case sexp_src::EVENT:
+			if (index >= 0 && index < static_cast<int>(Mission_events.size()))
+				sprintf(desc, "event '%s'", Mission_events[index].name.c_str());
+			break;
+		case sexp_src::MISSION_GOAL:
+			if (index >= 0 && index < static_cast<int>(Mission_goals.size()))
+				sprintf(desc, "mission goal '%s'", Mission_goals[index].name.c_str());
+			break;
+		case sexp_src::MISSION_CUTSCENE:
+			if (index >= 0 && index < static_cast<int>(The_mission.cutscenes.size()))
+				sprintf(desc, "cutscene '%s'", The_mission.cutscenes[index].filename);
+			break;
+		case sexp_src::SHIP_ORDER:
+			if (index >= 0 && index < MAX_SHIPS && Ships[index].objnum >= 0)
+				sprintf(desc, "an order for ship '%s'", Ships[index].ship_name);
+			break;
+		case sexp_src::WING_ORDER:
+			if (index >= 0 && index < MAX_WINGS && Wings[index].wave_count)
+				sprintf(desc, "an order for wing '%s'", Wings[index].name);
+			break;
+		case sexp_src::DEBRIEFING:
+			sprintf(desc, "debriefing stage %d", index + 1);
+			break;
+		case sexp_src::BRIEFING:
+			sprintf(desc, "briefing stage %d", index + 1);
+			break;
+		default:
+			break;
+	}
+
+	if (desc.empty())
+		desc = sexp_src_to_string(src);
+
+	return desc;
+}
+
 void skip_white(const char **str)
 {
 	if ((**str == ' ') || (**str == '\t')) {
