@@ -160,6 +160,8 @@ set(FRED2_SOURCES
 	mcpserver.h
 	mcp_reference_tools.cpp
 	mcp_reference_tools.h
+	mcp_mission_tools.cpp
+	mcp_mission_tools.h
 	fred.rc
 	version.rc2
 )
