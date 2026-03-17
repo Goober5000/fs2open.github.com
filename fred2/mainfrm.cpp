@@ -915,7 +915,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				json_object_set_new(info, "game_type", json_string(type_str));
 			}
 
-			// Build the tool result with structured content
+			// Build tool result
 			json_t *text_item = json_object();
 			json_object_set_new(text_item, "type", json_string("text"));
 			char *info_str = json_dumps(info, JSON_INDENT(2));
