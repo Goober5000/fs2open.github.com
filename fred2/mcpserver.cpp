@@ -23,7 +23,7 @@ static const char *MCP_PROTOCOL_VERSION = "2025-06-18";
 
 static void send_json_response(struct mg_connection *conn, json_t *response)
 {
-	char *body = json_dumps(response, JSON_COMPACT);
+	char *body = json_dumps(response, JSON_COMPACT | JSON_REAL_PRECISION(6));
 	size_t body_len = strlen(body);
 
 	// Write header and body separately so that large responses are not
