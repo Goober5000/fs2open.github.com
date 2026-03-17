@@ -309,7 +309,7 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_weapon_class",
-			"Get detailed stats for a specific weapon, including damage, speed, range, and special properties.",
+			"Get detailed stats for a specific weapon, including damage and damage-per-second (dps) against hulls, shields, and subsystems.",
 			props, req);
 	}
 
@@ -856,14 +856,29 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 		json_object_set_new(obj, "tech_lore", tech);
 	}
 
-	// Performance
-	json_object_set_new(obj, "damage", json_real(wip.damage));
-	json_object_set_new(obj, "hull_factor", json_real(wip.armor_factor));
-	json_object_set_new(obj, "shield_factor", json_real(wip.shield_factor));
-	json_object_set_new(obj, "subsystem_factor", json_real(wip.subsystem_factor));
-	json_object_set_new(obj, "max_speed", json_real(wip.max_speed));
-	json_object_set_new(obj, "lifetime", json_real(wip.lifetime));
-	json_object_set_new(obj, "fire_interval", json_real(wip.fire_wait));
+	// Performance — computed stats from weapon_get_stats
+	{
+		static const char *stat_keys[] = {
+			"max_speed", "standard_range",
+			"damage_hull", "dps_hull", "damage_shield", "dps_shield",
+			"damage_subsystem", "dps_subsystem",
+			"energy_consumption_rate", "fire_interval", "rate_of_fire",
+			"reload_rate", "has_area_effect"
+		};
+
+		auto stats = weapon_get_stats(wip);
+		for (const char *key : stat_keys) {
+			auto it = stats.find(key);
+			if (it == stats.end())
+				continue;
+			if (auto *f = std::get_if<float>(&it->second))
+				json_object_set_new(obj, key, json_real(*f));
+			else if (auto *b = std::get_if<bool>(&it->second))
+				json_object_set_new(obj, key, json_boolean(*b));
+		}
+	}
+
+	// AI targeting ranges
 	json_object_set_new(obj, "ai_max_targeting_range", json_real(wip.weapon_range));
 	json_object_set_new(obj, "ai_min_targeting_range", json_real(wip.weapon_min_range));
 	json_object_set_new(obj, "ai_preferred_range", json_real(wip.optimum_range));
