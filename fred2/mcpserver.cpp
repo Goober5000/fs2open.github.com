@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "mcpserver.h"
 #include "mcp_reference_tools.h"
+#include "mcp_mission_tools.h"
 #include "mongoose.h"
 
 #include <jansson.h>
@@ -238,6 +239,9 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
 
+	// Mission CRUD tools (messages, etc.)
+	mcp_register_mission_tools(tools);
+
 	json_object_set_new(result, "tools", tools);
 
 	return result;
@@ -265,6 +269,8 @@ static std::atomic<DWORD> mcp_tool_timeout_ms{10000};  // default 10 seconds
 static void mcp_cleanup_request(McpToolRequest *req)
 {
 	CloseHandle(req->completion_event);
+	if (req->input_json)
+		json_decref(req->input_json);
 	if (req->result_json)
 		json_decref(req->result_json);
 	delete req;
@@ -283,6 +289,7 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 	req->tool = tool;
 	strncpy(req->filepath, param, sizeof(req->filepath) - 1);
 	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	req->input_json = nullptr;
 	req->success = false;
 	req->result_message[0] = '\0';
 	req->result_json = nullptr;
@@ -345,6 +352,59 @@ void mcp_signal_completion(McpToolRequest *req)
 	// Release handler's reference; if caller already timed out, we clean up
 	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
 		mcp_cleanup_request(req);
+}
+
+// Overload for MISSION_TOOL: passes tool_name in filepath (no path normalization)
+// and structured JSON arguments via input_json.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t *input_json)
+{
+	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
+		return make_tool_result("FRED2 main window is not available", true);
+
+	auto *req = new McpToolRequest();
+	req->tool = tool;
+	strncpy(req->filepath, tool_name, sizeof(req->filepath) - 1);
+	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	// No path separator normalization — filepath holds a tool name, not a path
+	req->input_json = input_json ? json_incref(input_json) : nullptr;
+	req->success = false;
+	req->result_message[0] = '\0';
+	req->result_json = nullptr;
+	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+	req->refcount.store(2, std::memory_order_relaxed);
+
+	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
+		mcp_cleanup_request(req);
+		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
+	}
+
+	DWORD timeout_ms = mcp_tool_timeout_ms.load(std::memory_order_relaxed);
+	DWORD wait_result = WaitForSingleObject(req->completion_event, timeout_ms);
+
+	if (wait_result == WAIT_OBJECT_0) {
+		json_t *result;
+		if (req->result_json) {
+			result = req->result_json;
+			req->result_json = nullptr;
+		} else {
+			result = make_tool_result(req->result_message, !req->success);
+		}
+
+		if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
+			mcp_cleanup_request(req);
+
+		return result;
+	}
+
+	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+		mcp_cleanup_request(req);
+	}
+
+	char timeout_msg[256];
+	snprintf(timeout_msg, sizeof(timeout_msg),
+		"Operation timed out (%us). A modal dialog may be blocking the FRED2 UI. "
+		"Use get_ui_status to check.", timeout_ms / 1000);
+	return make_tool_result(timeout_msg, true);
 }
 
 static json_t *handle_tools_call(json_t *params)
@@ -424,11 +484,21 @@ static json_t *handle_tools_call(json_t *params)
 		return mcp_execute_on_main_thread(McpToolId::GET_UI_STATUS, "");
 	}
 
+	// Try mission CRUD tools (marshaled to main thread)
+	{
+		json_t *arguments = json_object_get(params, "arguments");
+		json_t *mission_result = mcp_route_mission_tool(tool_name, arguments);
+		if (mission_result)
+			return mission_result;
+	}
+
 	// Try reference/discovery tools
-	json_t *arguments = json_object_get(params, "arguments");
-	json_t *ref_result = mcp_handle_reference_tool(tool_name, arguments);
-	if (ref_result)
-		return ref_result;
+	{
+		json_t *arguments = json_object_get(params, "arguments");
+		json_t *ref_result = mcp_handle_reference_tool(tool_name, arguments);
+		if (ref_result)
+			return ref_result;
+	}
 
 	return make_tool_result("Unknown tool", true);
 }
@@ -457,22 +527,33 @@ static void serve_html_status(struct mg_connection *conn)
 		MCP_PROTOCOL_VERSION);
 }
 
+static const size_t MAX_POST_BODY = 256 * 1024;  // 256 KB
+
 static void handle_mcp_post(struct mg_connection *conn)
 {
-	// Read POST body
-	char body[8192];
-	int body_len = mg_read(conn, body, sizeof(body) - 1);
-	if (body_len <= 0) {
+	// Read POST body dynamically — CRUD tools may send larger payloads
+	SCP_string body;
+	char chunk[4096];
+	int n;
+	while ((n = mg_read(conn, chunk, sizeof(chunk))) > 0) {
+		body.append(chunk, n);
+		if (body.size() > MAX_POST_BODY) {
+			json_t *resp = make_error_response(nullptr, -32700, "Request body too large");
+			send_json_response(conn, resp);
+			json_decref(resp);
+			return;
+		}
+	}
+	if (body.empty()) {
 		json_t *resp = make_error_response(nullptr, -32700, "Empty request body");
 		send_json_response(conn, resp);
 		json_decref(resp);
 		return;
 	}
-	body[body_len] = '\0';
 
 	// Parse JSON
 	json_error_t error;
-	json_t *request = json_loads(body, 0, &error);
+	json_t *request = json_loads(body.c_str(), 0, &error);
 	if (!request) {
 		json_t *resp = make_error_response(nullptr, -32700, "Parse error");
 		send_json_response(conn, resp);
