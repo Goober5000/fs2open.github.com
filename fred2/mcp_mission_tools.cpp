@@ -26,11 +26,28 @@ static const char *persona_name_from_index(int persona_index)
 // Message tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
 
-static void handle_list_messages(json_t * /*input*/, McpToolRequest *req)
+static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
-	json_t *arr = json_array();
+	// Determine range based on "source" parameter
+	const char *source = nullptr;
+	if (input) {
+		json_t *v = json_object_get(input, "source");
+		if (v && json_is_string(v))
+			source = json_string_value(v);
+	}
 
-	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+	int start, end;
+	if (source && !stricmp(source, "builtin")) {
+		start = 0;
+		end = Num_builtin_messages;
+	} else {
+		// Default: mission messages
+		start = Num_builtin_messages;
+		end = Num_messages;
+	}
+
+	json_t *arr = json_array();
+	for (int i = start; i < end; i++) {
 		json_t *entry = json_object();
 		json_object_set_new(entry, "name", json_string(Messages[i].name));
 		json_object_set_new(entry, "message", json_string(Messages[i].message));
@@ -44,7 +61,7 @@ static void handle_list_messages(json_t * /*input*/, McpToolRequest *req)
 
 	json_t *data = json_object();
 	json_object_set_new(data, "messages", arr);
-	json_object_set_new(data, "count", json_integer(Num_messages - Num_builtin_messages));
+	json_object_set_new(data, "count", json_integer(end - start));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -65,7 +82,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 	// Find the message
 	int idx = -1;
-	for (int i = Num_builtin_messages; i < Num_messages; i++) {
+	for (int i = 0; i < Num_messages; i++) {
 		if (!stricmp(Messages[i].name, name)) {
 			idx = i;
 			break;
@@ -442,10 +459,15 @@ void mcp_register_mission_tools(json_t *tools)
 {
 	// list_messages
 	{
+		json_t *props = json_object();
+		add_string_prop(props, "source",
+			"Which messages to list: \"mission\" (default) for mission-specific messages, "
+			"or \"builtin\" for built-in engine messages from messages.tbl");
 		register_tool(tools, "list_messages",
-			"List all mission-specific messages (excluding built-in engine messages). "
+			"List messages. By default lists mission-specific messages. "
+			"Use source=\"builtin\" to list built-in engine messages instead. "
 			"Returns each message's name, text, and persona.",
-			json_object());
+			props);
 	}
 
 	// get_message
@@ -455,7 +477,7 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_message",
-			"Get full details of a mission message by name, including text, persona, "
+			"Get full details of a message by name, including text, persona, "
 			"talking head animation, voice file, and team assignment.",
 			props, req);
 	}
