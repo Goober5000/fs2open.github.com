@@ -247,21 +247,6 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	return result;
 }
 
-// Build an MCP tool result with a text content item
-json_t *make_tool_result(const char *text, bool is_error)
-{
-	json_t *result = json_object();
-	json_t *content = json_array();
-	json_t *item = json_object();
-	json_object_set_new(item, "type", json_string("text"));
-	json_object_set_new(item, "text", json_string(text));
-	json_array_append_new(content, item);
-	json_object_set_new(result, "content", content);
-	if (is_error)
-		json_object_set_new(result, "isError", json_true());
-	return result;
-}
-
 // Timeout for PostMessage + WaitForSingleObject, in milliseconds
 static std::atomic<DWORD> mcp_tool_timeout_ms{10000};  // default 10 seconds
 
