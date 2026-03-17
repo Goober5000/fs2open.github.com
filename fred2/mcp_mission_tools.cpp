@@ -2,6 +2,7 @@
 #include "mcp_mission_tools.h"
 #include "mcpserver.h"
 #include "mcp_json.h"
+#include "mcp_array_utils.h"
 
 #include <jansson.h>
 #include <cstring>
@@ -261,13 +262,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Ensure the Messages vector has room
-	if (Num_messages >= (int)Messages.size())
-		Messages.resize(Num_messages + 1);
-
-	// Shift messages after the insertion point
-	for (int i = Num_messages; i > target_index; i--)
-		Messages[i] = Messages[i - 1];
+	// Insert a slot at the target position
+	array_insert_slot(Messages, Num_messages, target_index);
 
 	MMessage &msg = Messages[target_index];
 	memset(&msg, 0, sizeof(MMessage));
@@ -277,7 +273,6 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	msg.multi_team = team;
 	msg.avi_info.name = talking_head ? strdup(talking_head) : nullptr;
 	msg.wave_info.name = voice_file ? strdup(voice_file) : nullptr;
-	Num_messages++;
 
 	set_modified();
 	if (FREDDoc_ptr) {
@@ -522,9 +517,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	update_sexp_references(Messages[idx].name, buf, OPF_MESSAGE_OR_STRING);
 
 	// Remove from array by shifting (matches FRED's CMessageEditorDlg::OnDelete pattern)
-	for (int i = idx; i < Num_messages - 1; i++)
-		Messages[i] = Messages[i + 1];
-	Num_messages--;
+	array_remove_slot(Messages, Num_messages, idx);
 
 	set_modified();
 	if (FREDDoc_ptr) {
@@ -591,24 +584,12 @@ static void handle_move_message(json_t *input, McpToolRequest *req)
 	int abs_from = Num_builtin_messages + from_index;
 	int abs_to = Num_builtin_messages + to_index;
 
-	// Save the message being moved
-	MMessage temp = Messages[abs_from];
-
-	// Shift to close the gap at abs_from, then open a slot at abs_to
-	if (abs_from < abs_to) {
-		for (int i = abs_from; i < abs_to; i++)
-			Messages[i] = Messages[i + 1];
-	} else {
-		for (int i = abs_from; i > abs_to; i--)
-			Messages[i] = Messages[i - 1];
-	}
-
-	Messages[abs_to] = temp;
+	array_move_element(Messages, abs_from, abs_to);
 
 	set_modified();
 	if (FREDDoc_ptr) {
 		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: move message %s from %d to %d", temp.name, from_index, to_index);
+		snprintf(desc, sizeof(desc), "MCP: move message %s from %d to %d", Messages[abs_to].name, from_index, to_index);
 		FREDDoc_ptr->autosave(desc);
 	}
 
@@ -663,9 +644,7 @@ static void handle_swap_messages(json_t *input, McpToolRequest *req)
 	int abs_b = Num_builtin_messages + index_b;
 
 	if (index_a != index_b) {
-		MMessage temp = Messages[abs_a];
-		Messages[abs_a] = Messages[abs_b];
-		Messages[abs_b] = temp;
+		std::swap(Messages[abs_a], Messages[abs_b]);
 
 		set_modified();
 		if (FREDDoc_ptr) {
