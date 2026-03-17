@@ -269,6 +269,7 @@ struct Persona {
 };
 
 extern SCP_vector<Persona> Personas;
+extern const char *Persona_type_names[MAX_PERSONA_TYPES];
 
 extern int Default_command_persona;
 extern int Praise_self_percentage;
