@@ -158,6 +158,8 @@ set(FRED2_SOURCES
 	MFCGraphicsOperations.h
 	mcpserver.cpp
 	mcpserver.h
+	mcp_json.cpp
+	mcp_json.h
 	mcp_reference_tools.cpp
 	mcp_reference_tools.h
 	mcp_mission_tools.cpp
