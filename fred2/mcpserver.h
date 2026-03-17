@@ -16,12 +16,16 @@ enum class McpToolId {
 	UNLOAD_SHIP_MODEL,
 	GET_SERVER_INFO,
 	GET_MISSION_INFO,
-	GET_UI_STATUS
+	GET_UI_STATUS,
+	MISSION_TOOL
 };
 
 struct McpToolRequest {
 	McpToolId tool;
 	char filepath[MAX_PATH_LEN];
+
+	// Structured input arguments for MISSION_TOOL calls (incref'd by caller)
+	json_t *input_json;
 
 	// Result fields, filled by main thread handler
 	bool success;
@@ -47,9 +51,13 @@ extern std::atomic<bool> mcp_fred_ready;
 // Shared with mcp_reference_tools.cpp.
 json_t *make_tool_result(const char *text, bool is_error = false);
 
-// Marshal a tool call to the main MFC thread with a 30-second timeout.
+// Marshal a tool call to the main MFC thread with a configurable timeout.
 // Heap-allocates the request internally. Returns MCP tool result JSON.
 json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param);
+
+// Overload for MISSION_TOOL: passes tool_name in filepath (no path normalization)
+// and structured JSON arguments via input_json.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t *input_json);
 
 // Called by the UI thread handler after filling results. Signals the
 // completion event and handles cleanup if the caller already timed out.
