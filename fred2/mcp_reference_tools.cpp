@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "mcp_reference_tools.h"
 #include "mcpserver.h"
+#include "mcp_json.h"
 
 #include <jansson.h>
 #include <climits>
@@ -19,37 +20,6 @@
 #include "cfile/cfile.h"
 #include "def_files/def_files.h"
 
-
-// ---------------------------------------------------------------------------
-// JSON helpers
-// ---------------------------------------------------------------------------
-
-// Build an MCP tool-result whose text content is pretty-printed JSON.
-// Takes ownership of `data` (decrefs it after serializing).
-static json_t *make_json_tool_result(json_t *data)
-{
-	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
-	json_t *result = make_tool_result(text);
-	free(text);
-	json_decref(data);
-	return result;
-}
-
-// Convenience: add a string property schema to a properties object.
-static void add_string_prop(json_t *props, const char *name, const char *description)
-{
-	json_t *p = json_object();
-	json_object_set_new(p, "type", json_string("string"));
-	json_object_set_new(p, "description", json_string(description));
-	json_object_set_new(props, name, p);
-}
-
-// Helper: set a string field only if the source is non-null and non-empty.
-static void set_optional_string(json_t *obj, const char *key, const char *value)
-{
-	if (value && value[0] != '\0')
-		json_object_set_new(obj, key, json_string(value));
-}
 
 // ---------------------------------------------------------------------------
 // Model details cache
@@ -233,23 +203,6 @@ static const char *subsystem_type_str(int type)
 // ---------------------------------------------------------------------------
 // Tool schema registration
 // ---------------------------------------------------------------------------
-
-// Helper: build a tool schema object and append it to the tools array.
-static void register_tool(json_t *tools, const char *name, const char *description, json_t *properties, json_t *required_arr = nullptr)
-{
-	json_t *tool = json_object();
-	json_object_set_new(tool, "name", json_string(name));
-	json_object_set_new(tool, "description", json_string(description));
-
-	json_t *schema = json_object();
-	json_object_set_new(schema, "type", json_string("object"));
-	json_object_set_new(schema, "properties", properties ? properties : json_object());
-	if (required_arr)
-		json_object_set_new(schema, "required", required_arr);
-	json_object_set_new(tool, "inputSchema", schema);
-
-	json_array_append_new(tools, tool);
-}
 
 void mcp_register_reference_tools(json_t *tools)
 {

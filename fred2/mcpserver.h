@@ -2,6 +2,7 @@
 #define _MCPSERVER_H
 
 #include "globalincs/pstypes.h"
+#include "mcp_json.h"
 #include <jansson.h>
 #include <atomic>
 
@@ -46,10 +47,6 @@ bool mcp_server_is_running();
 // Flag indicating that FRED2 is fully initialized and MCP tools may run.
 // Set by fred_init() after all startup is complete.
 extern std::atomic<bool> mcp_fred_ready;
-
-// Build an MCP tool result with a text content item.
-// Shared with mcp_reference_tools.cpp.
-json_t *make_tool_result(const char *text, bool is_error = false);
 
 // Marshal a tool call to the main MFC thread with a configurable timeout.
 // Heap-allocates the request internally. Returns MCP tool result JSON.

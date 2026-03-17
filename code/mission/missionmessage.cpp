@@ -2472,6 +2472,9 @@ int message_is_playing()
 // given a character string, try to find the persona index
 int message_persona_name_lookup(const char* name)
 {
+	if (!name || !name[0])
+		return -1;
+
 	int i;
 
 	for (i = 0; i < (int)Personas.size(); i++) {
