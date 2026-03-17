@@ -165,6 +165,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	const char *talking_head = nullptr;
 	const char *voice_file = nullptr;
 	int team = -1;
+	int insert_index = -1;  // -1 means append to end
 
 	if (input) {
 		json_t *v;
@@ -192,6 +193,10 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		v = json_object_get(input, "team");
 		if (v && json_is_number(v))
 			team = (int)json_number_value(v);
+
+		v = json_object_get(input, "index");
+		if (v && json_is_number(v))
+			insert_index = (int)json_number_value(v);
 	}
 
 	if (!name || !name[0]) {
@@ -239,11 +244,32 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Ensure the Messages vector has room at index Num_messages
+	// Validate and resolve insert index
+	int target_index;
+	if (insert_index < 0) {
+		// Default: append to end
+		target_index = Num_messages;
+	} else {
+		// Caller specifies a mission-relative index (0 = first mission message)
+		target_index = Num_builtin_messages + insert_index;
+		if (target_index < Num_builtin_messages || target_index > Num_messages) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Invalid index %d: must be 0 to %d (number of mission messages)",
+				insert_index, Num_messages - Num_builtin_messages);
+			return;
+		}
+	}
+
+	// Ensure the Messages vector has room
 	if (Num_messages >= (int)Messages.size())
 		Messages.resize(Num_messages + 1);
 
-	MMessage &msg = Messages[Num_messages];
+	// Shift messages after the insertion point
+	for (int i = Num_messages; i > target_index; i--)
+		Messages[i] = Messages[i - 1];
+
+	MMessage &msg = Messages[target_index];
 	memset(&msg, 0, sizeof(MMessage));
 	strcpy_s(msg.name, name);
 	strcpy_s(msg.message, message);
@@ -264,6 +290,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
 	json_object_set_new(data, "message", json_string(message));
+	json_object_set_new(data, "index", json_integer(target_index - Num_builtin_messages));
 	if (persona_str)
 		json_object_set_new(data, "persona", json_string(persona_str));
 	req->result_json = make_json_tool_result(data);
@@ -564,6 +591,9 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "talking_head", "Filename for the talking head animation");
 		add_string_prop(props, "voice_file", "Filename for the voice audio");
 		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
+		add_integer_prop(props, "index",
+			"Position to insert the message among mission messages (0 = first). "
+			"If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("message"));
