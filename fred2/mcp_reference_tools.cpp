@@ -5,6 +5,7 @@
 #include <jansson.h>
 #include <climits>
 #include <cstring>
+#include <mutex>
 
 #include "mainfrm.h"
 #include "ship/ship.h"
@@ -49,6 +50,13 @@ static void set_optional_string(json_t *obj, const char *key, const char *value)
 	if (value && value[0] != '\0')
 		json_object_set_new(obj, key, json_string(value));
 }
+
+// ---------------------------------------------------------------------------
+// Model details cache
+// ---------------------------------------------------------------------------
+
+static std::mutex model_cache_mutex;
+static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
 
 // ---------------------------------------------------------------------------
 // OPF / OPR enum-to-string helpers
@@ -1813,20 +1821,32 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	if (sip_idx < 0)
 		return make_tool_result("Ship class not found", true);
 
-	// Marshal model_load() to the main thread
-	json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
+	// Check cache (use canonical name from Ship_info for consistent keys)
+	const char *canonical_name = Ship_info[sip_idx].name;
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		auto it = model_details_cache.find(canonical_name);
+		if (it != model_details_cache.end())
+			return json_incref(it->second);
+	}
 
-	// Check if load failed or timed out
-	json_t *is_err = json_object_get(load_result, "isError");
-	if (is_err && json_is_true(is_err))
-		return load_result;
-	json_decref(load_result);
+	// Load the model if not already loaded
+	const auto &sip = Ship_info[sip_idx];
+	bool we_loaded_model = false;
+	if (sip.model_num < 0) {
+		json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
+
+		json_t *is_err = json_object_get(load_result, "isError");
+		if (is_err && json_is_true(is_err))
+			return load_result;
+		json_decref(load_result);
+
+		if (sip.model_num < 0)
+			return make_tool_result("Model failed to load", true);
+		we_loaded_model = true;
+	}
 
 	// Model is now loaded — read polymodel data
-	const auto &sip = Ship_info[sip_idx];
-	if (sip.model_num < 0)
-		return make_tool_result("Model failed to load", true);
-
 	polymodel *pm = model_get(sip.model_num);
 	if (!pm)
 		return make_tool_result("Model data unavailable", true);
@@ -2016,7 +2036,22 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 		json_object_set_new(obj, "subsystems", subsys);
 	}
 
-	return make_json_tool_result(obj);
+	json_t *result = make_json_tool_result(obj);
+
+	// Cache the result for future calls
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		if (model_details_cache.find(canonical_name) == model_details_cache.end())
+			model_details_cache.emplace(SCP_string(canonical_name), json_incref(result));
+	}
+
+	// Unload the model if we were the ones who loaded it
+	if (we_loaded_model) {
+		json_t *unload_result = mcp_execute_on_main_thread(McpToolId::UNLOAD_SHIP_MODEL, canonical_name);
+		json_decref(unload_result);
+	}
+
+	return result;
 }
 
 // ---------------------------------------------------------------------------
@@ -2117,4 +2152,16 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_subsystem_names_equal(arguments);
 
 	return nullptr;  // not one of our tools
+}
+
+// ---------------------------------------------------------------------------
+// Cleanup
+// ---------------------------------------------------------------------------
+
+void mcp_reference_tools_cleanup()
+{
+	// Called after mg_stop() — no mongoose threads running, no lock needed.
+	for (auto &pair : model_details_cache)
+		json_decref(pair.second);
+	model_details_cache.clear();
 }
