@@ -11,6 +11,24 @@
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
+#include "messageeditordlg.h"
+#include "eventeditor.h"
+
+// ---------------------------------------------------------------------------
+// Dialog conflict guards
+// ---------------------------------------------------------------------------
+
+// Returns nullptr if no conflicting dialog is open, or an error message if one is.
+static const char *check_dialog_conflict_for_messages()
+{
+	if (Message_editor_dlg && Message_editor_dlg->IsWindowVisible())
+		return "Cannot modify messages while the Message Editor is open. "
+			"Close it first, or use get_ui_status to check which editors are open.";
+	if (Event_editor_dlg && Event_editor_dlg->IsWindowVisible())
+		return "Cannot modify messages while the Event Editor is open. "
+			"Close it first, or use get_ui_status to check which editors are open.";
+	return nullptr;
+}
 
 // ---------------------------------------------------------------------------
 // Persona helpers
@@ -42,7 +60,14 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 		start = 0;
 		end = Num_builtin_messages;
 	} else {
-		// Default: mission messages
+		// Default: mission messages — check for conflicting dialogs
+		const char *conflict = check_dialog_conflict_for_messages();
+		if (conflict) {
+			req->success = false;
+			strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+			req->result_message[sizeof(req->result_message) - 1] = '\0';
+			return;
+		}
 		start = Num_builtin_messages;
 		end = Num_messages;
 	}
@@ -146,6 +171,17 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	// Check for conflicting dialogs if this is a mission-specific message
+	if (idx >= Num_builtin_messages) {
+		const char *conflict = check_dialog_conflict_for_messages();
+		if (conflict) {
+			req->success = false;
+			strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+			req->result_message[sizeof(req->result_message) - 1] = '\0';
+			return;
+		}
+	}
+
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(Messages[idx].name));
 	json_object_set_new(data, "message", json_string(Messages[idx].message));
@@ -167,6 +203,14 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 static void handle_create_message(json_t *input, McpToolRequest *req)
 {
+	const char *conflict = check_dialog_conflict_for_messages();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
 	const char *name = nullptr;
 	const char *message = nullptr;
 	const char *persona_str = nullptr;
@@ -280,6 +324,14 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 static void handle_update_message(json_t *input, McpToolRequest *req)
 {
+	const char *conflict = check_dialog_conflict_for_messages();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
 	const char *name = nullptr;
 	if (input) {
 		json_t *v = json_object_get(input, "name");
@@ -428,6 +480,14 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
+	const char *conflict = check_dialog_conflict_for_messages();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
 	const char *name = nullptr;
 	bool force = false;
 
