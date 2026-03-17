@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "mcp_mission_tools.h"
 #include "mcpserver.h"
+#include "mcp_json.h"
 
 #include <jansson.h>
 #include <cstring>
@@ -11,62 +12,6 @@
 #include "fred.h"
 
 // ---------------------------------------------------------------------------
-// JSON helpers (mirror mcp_reference_tools.cpp patterns)
-// ---------------------------------------------------------------------------
-
-// Build an MCP tool-result whose text content is pretty-printed JSON.
-// Takes ownership of `data` (decrefs it after serializing).
-static json_t *make_json_tool_result(json_t *data)
-{
-	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
-	json_t *result = make_tool_result(text);
-	free(text);
-	json_decref(data);
-	return result;
-}
-
-static void add_string_prop(json_t *props, const char *name, const char *description)
-{
-	json_t *p = json_object();
-	json_object_set_new(p, "type", json_string("string"));
-	json_object_set_new(p, "description", json_string(description));
-	json_object_set_new(props, name, p);
-}
-
-static void add_integer_prop(json_t *props, const char *name, const char *description)
-{
-	json_t *p = json_object();
-	json_object_set_new(p, "type", json_string("integer"));
-	json_object_set_new(p, "description", json_string(description));
-	json_object_set_new(props, name, p);
-}
-
-static void add_bool_prop(json_t *props, const char *name, const char *description)
-{
-	json_t *p = json_object();
-	json_object_set_new(p, "type", json_string("boolean"));
-	json_object_set_new(p, "description", json_string(description));
-	json_object_set_new(props, name, p);
-}
-
-static void register_tool(json_t *tools, const char *name, const char *description,
-	json_t *properties, json_t *required_arr = nullptr)
-{
-	json_t *tool = json_object();
-	json_object_set_new(tool, "name", json_string(name));
-	json_object_set_new(tool, "description", json_string(description));
-
-	json_t *schema = json_object();
-	json_object_set_new(schema, "type", json_string("object"));
-	json_object_set_new(schema, "properties", properties ? properties : json_object());
-	if (required_arr)
-		json_object_set_new(schema, "required", required_arr);
-	json_object_set_new(tool, "inputSchema", schema);
-
-	json_array_append_new(tools, tool);
-}
-
-// ---------------------------------------------------------------------------
 // Persona helpers
 // ---------------------------------------------------------------------------
 
@@ -75,17 +20,6 @@ static const char *persona_name_from_index(int persona_index)
 	if (persona_index >= 0 && persona_index < (int)Personas.size())
 		return Personas[persona_index].name;
 	return nullptr;
-}
-
-static int persona_index_from_name(const char *name)
-{
-	if (!name || !name[0])
-		return -1;
-	for (int i = 0; i < (int)Personas.size(); i++) {
-		if (!stricmp(Personas[i].name, name))
-			return i;
-	}
-	return -1;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,9 +88,9 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
 
 	if (Messages[idx].avi_info.name)
-		json_object_set_new(data, "avi", json_string(Messages[idx].avi_info.name));
+		json_object_set_new(data, "talking_head", json_string(Messages[idx].avi_info.name));
 	if (Messages[idx].wave_info.name)
-		json_object_set_new(data, "wave", json_string(Messages[idx].wave_info.name));
+		json_object_set_new(data, "voice_file", json_string(Messages[idx].wave_info.name));
 
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
@@ -167,8 +101,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	const char *name = nullptr;
 	const char *message = nullptr;
 	const char *persona_str = nullptr;
-	const char *avi = nullptr;
-	const char *wave = nullptr;
+	const char *talking_head = nullptr;
+	const char *voice_file = nullptr;
 	int team = -1;
 
 	if (input) {
@@ -186,13 +120,13 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		if (v && json_is_string(v))
 			persona_str = json_string_value(v);
 
-		v = json_object_get(input, "avi");
+		v = json_object_get(input, "talking_head");
 		if (v && json_is_string(v))
-			avi = json_string_value(v);
+			talking_head = json_string_value(v);
 
-		v = json_object_get(input, "wave");
+		v = json_object_get(input, "voice_file");
 		if (v && json_is_string(v))
-			wave = json_string_value(v);
+			voice_file = json_string_value(v);
 
 		v = json_object_get(input, "team");
 		if (v && json_is_number(v))
@@ -235,7 +169,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Look up persona by name
 	int persona_index = -1;
 	if (persona_str) {
-		persona_index = persona_index_from_name(persona_str);
+		persona_index = message_persona_name_lookup(persona_str);
 		if (persona_index < 0) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -254,8 +188,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	strcpy_s(msg.message, message);
 	msg.persona_index = persona_index;
 	msg.multi_team = team;
-	msg.avi_info.name = avi ? strdup(avi) : nullptr;
-	msg.wave_info.name = wave ? strdup(wave) : nullptr;
+	msg.avi_info.name = talking_head ? strdup(talking_head) : nullptr;
+	msg.wave_info.name = voice_file ? strdup(voice_file) : nullptr;
 	Num_messages++;
 
 	set_modified();
@@ -325,7 +259,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	v = json_object_get(input, "persona");
 	if (v && json_is_string(v)) {
 		const char *persona_str = json_string_value(v);
-		int persona_index = persona_index_from_name(persona_str);
+		int persona_index = message_persona_name_lookup(persona_str);
 		if (persona_index < 0) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -338,23 +272,23 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Update AVI
-	v = json_object_get(input, "avi");
+	// Update talking head
+	v = json_object_get(input, "talking_head");
 	if (v && json_is_string(v)) {
-		const char *new_avi = json_string_value(v);
+		const char *new_head = json_string_value(v);
 		if (Messages[idx].avi_info.name)
 			free(Messages[idx].avi_info.name);
-		Messages[idx].avi_info.name = (new_avi[0] != '\0') ? strdup(new_avi) : nullptr;
+		Messages[idx].avi_info.name = (new_head[0] != '\0') ? strdup(new_head) : nullptr;
 		changed = true;
 	}
 
-	// Update wave
-	v = json_object_get(input, "wave");
+	// Update voice file
+	v = json_object_get(input, "voice_file");
 	if (v && json_is_string(v)) {
-		const char *new_wave = json_string_value(v);
+		const char *new_voice = json_string_value(v);
 		if (Messages[idx].wave_info.name)
 			free(Messages[idx].wave_info.name);
-		Messages[idx].wave_info.name = (new_wave[0] != '\0') ? strdup(new_wave) : nullptr;
+		Messages[idx].wave_info.name = (new_voice[0] != '\0') ? strdup(new_voice) : nullptr;
 		changed = true;
 	}
 
@@ -415,9 +349,9 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		json_object_set_new(data, "persona", json_string(persona));
 	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
 	if (Messages[idx].avi_info.name)
-		json_object_set_new(data, "avi", json_string(Messages[idx].avi_info.name));
+		json_object_set_new(data, "talking_head", json_string(Messages[idx].avi_info.name));
 	if (Messages[idx].wave_info.name)
-		json_object_set_new(data, "wave", json_string(Messages[idx].wave_info.name));
+		json_object_set_new(data, "voice_file", json_string(Messages[idx].wave_info.name));
 
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
@@ -522,7 +456,7 @@ void mcp_register_mission_tools(json_t *tools)
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "get_message",
 			"Get full details of a mission message by name, including text, persona, "
-			"AVI head animation, wave audio file, and team assignment.",
+			"talking head animation, voice file, and team assignment.",
 			props, req);
 	}
 
@@ -533,15 +467,15 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "message", "The message text displayed in-game");
 		add_string_prop(props, "persona",
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
-		add_string_prop(props, "avi", "Filename for the head animation (talking head)");
-		add_string_prop(props, "wave", "Filename for the voice audio file");
+		add_string_prop(props, "talking_head", "Filename for the talking head animation");
+		add_string_prop(props, "voice_file", "Filename for the voice audio");
 		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("message"));
 		register_tool(tools, "create_message",
 			"Create a new mission message. Messages are used by send-message SEXPs to "
-			"display in-game dialogue with optional voice and head animation.",
+			"display in-game dialogue with optional voice and talking head animation.",
 			props, req);
 	}
 
@@ -553,8 +487,8 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "message", "New message text");
 		add_string_prop(props, "persona",
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
-		add_string_prop(props, "avi", "Filename for the head animation (empty string to clear)");
-		add_string_prop(props, "wave", "Filename for the voice audio file (empty string to clear)");
+		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
+		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
 		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
