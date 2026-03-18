@@ -6,6 +6,7 @@
 
 #include <jansson.h>
 #include <cstring>
+#include <functional>
 
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
@@ -539,144 +540,6 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-static void handle_move_message(json_t *input, McpToolRequest *req)
-{
-	const char *conflict = check_dialog_conflict_for_messages();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
-
-	int from_index = -1;
-	int to_index = -1;
-
-	if (input) {
-		json_t *v;
-
-		v = json_object_get(input, "from_index");
-		if (v && json_is_number(v))
-			from_index = (int)json_number_value(v);
-
-		v = json_object_get(input, "to_index");
-		if (v && json_is_number(v))
-			to_index = (int)json_number_value(v);
-	}
-
-	int num_mission_msgs = Num_messages - Num_builtin_messages;
-
-	if (from_index < 0 || from_index >= num_mission_msgs) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid from_index %d: must be 0 to %d", from_index, num_mission_msgs - 1);
-		return;
-	}
-	if (to_index < 0 || to_index >= num_mission_msgs) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid to_index %d: must be 0 to %d", to_index, num_mission_msgs - 1);
-		return;
-	}
-
-	if (from_index == to_index) {
-		// No-op: already at the target position
-		int abs_idx = Num_builtin_messages + from_index;
-		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(Messages[abs_idx].name));
-		json_object_set_new(data, "index", json_integer(from_index));
-		req->result_json = make_json_tool_result(data);
-		req->success = true;
-		return;
-	}
-
-	int abs_from = Num_builtin_messages + from_index;
-	int abs_to = Num_builtin_messages + to_index;
-
-	array_move_element(Messages, abs_from, abs_to);
-
-	set_modified();
-	if (FREDDoc_ptr) {
-		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: move message %s from %d to %d", Messages[abs_to].name, from_index, to_index);
-		FREDDoc_ptr->autosave(desc);
-	}
-
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(Messages[abs_to].name));
-	json_object_set_new(data, "index", json_integer(to_index));
-	req->result_json = make_json_tool_result(data);
-	req->success = true;
-}
-
-static void handle_swap_messages(json_t *input, McpToolRequest *req)
-{
-	const char *conflict = check_dialog_conflict_for_messages();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
-
-	int index_a = -1;
-	int index_b = -1;
-
-	if (input) {
-		json_t *v;
-
-		v = json_object_get(input, "index_a");
-		if (v && json_is_number(v))
-			index_a = (int)json_number_value(v);
-
-		v = json_object_get(input, "index_b");
-		if (v && json_is_number(v))
-			index_b = (int)json_number_value(v);
-	}
-
-	int num_mission_msgs = Num_messages - Num_builtin_messages;
-
-	if (index_a < 0 || index_a >= num_mission_msgs) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_a %d: must be 0 to %d", index_a, num_mission_msgs - 1);
-		return;
-	}
-	if (index_b < 0 || index_b >= num_mission_msgs) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_b %d: must be 0 to %d", index_b, num_mission_msgs - 1);
-		return;
-	}
-
-	int abs_a = Num_builtin_messages + index_a;
-	int abs_b = Num_builtin_messages + index_b;
-
-	if (index_a != index_b) {
-		std::swap(Messages[abs_a], Messages[abs_b]);
-
-		set_modified();
-		if (FREDDoc_ptr) {
-			char desc[128];
-			snprintf(desc, sizeof(desc), "MCP: swap messages %s and %s",
-				Messages[abs_a].name, Messages[abs_b].name);
-			FREDDoc_ptr->autosave(desc);
-		}
-	}
-
-	json_t *data = json_object();
-	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(Messages[abs_a].name));
-	json_object_set_new(a_obj, "index", json_integer(index_a));
-	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(Messages[abs_b].name));
-	json_object_set_new(b_obj, "index", json_integer(index_b));
-	json_object_set_new(data, "a", a_obj);
-	json_object_set_new(data, "b", b_obj);
-	req->result_json = make_json_tool_result(data);
-	req->success = true;
-}
-
 // ---------------------------------------------------------------------------
 // Event annotation path helpers
 // ---------------------------------------------------------------------------
@@ -718,12 +581,23 @@ static void update_annotation_paths_for_swap(int a, int b)
 }
 
 // ---------------------------------------------------------------------------
-// Event tool handlers (run on main thread)
+// Generic move/swap handlers
 // ---------------------------------------------------------------------------
 
-static void handle_move_event(json_t *input, McpToolRequest *req)
+// Configuration for entity-specific move/swap behavior.
+// Lambdas encapsulate offsets, annotation updates, and array access.
+struct MoveSwapConfig {
+	const char *entity_name;
+	int count;
+	std::function<const char *()> check_conflict;
+	std::function<const char *(int)> get_name;
+	std::function<void(int, int)> do_move;
+	std::function<void(int, int)> do_swap;
+};
+
+static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	const char *conflict = check_dialog_conflict_for_events();
+	const char *conflict = cfg.check_conflict();
 	if (conflict) {
 		req->success = false;
 		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
@@ -746,51 +620,48 @@ static void handle_move_event(json_t *input, McpToolRequest *req)
 			to_index = (int)json_number_value(v);
 	}
 
-	int num_events = (int)Mission_events.size();
-
-	if (from_index < 0 || from_index >= num_events) {
+	if (from_index < 0 || from_index >= cfg.count) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid from_index %d: must be 0 to %d", from_index, num_events - 1);
+			"Invalid from_index %d: must be 0 to %d", from_index, cfg.count - 1);
 		return;
 	}
-	if (to_index < 0 || to_index >= num_events) {
+	if (to_index < 0 || to_index >= cfg.count) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid to_index %d: must be 0 to %d", to_index, num_events - 1);
+			"Invalid to_index %d: must be 0 to %d", to_index, cfg.count - 1);
 		return;
 	}
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(Mission_events[from_index].name.c_str()));
+		json_object_set_new(data, "name", json_string(cfg.get_name(from_index)));
 		json_object_set_new(data, "index", json_integer(from_index));
 		req->result_json = make_json_tool_result(data);
 		req->success = true;
 		return;
 	}
 
-	update_annotation_paths_for_move(from_index, to_index);
-	array_move_element(Mission_events, from_index, to_index);
+	cfg.do_move(from_index, to_index);
 
 	set_modified();
 	if (FREDDoc_ptr) {
 		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: move event %s from %d to %d",
-			Mission_events[to_index].name.c_str(), from_index, to_index);
+		snprintf(desc, sizeof(desc), "MCP: move %s %s from %d to %d",
+			cfg.entity_name, cfg.get_name(to_index), from_index, to_index);
 		FREDDoc_ptr->autosave(desc);
 	}
 
 	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(Mission_events[to_index].name.c_str()));
+	json_object_set_new(data, "name", json_string(cfg.get_name(to_index)));
 	json_object_set_new(data, "index", json_integer(to_index));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
 
-static void handle_swap_events(json_t *input, McpToolRequest *req)
+static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	const char *conflict = check_dialog_conflict_for_events();
+	const char *conflict = cfg.check_conflict();
 	if (conflict) {
 		req->success = false;
 		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
@@ -813,45 +684,108 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 			index_b = (int)json_number_value(v);
 	}
 
-	int num_events = (int)Mission_events.size();
-
-	if (index_a < 0 || index_a >= num_events) {
+	if (index_a < 0 || index_a >= cfg.count) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_a %d: must be 0 to %d", index_a, num_events - 1);
+			"Invalid index_a %d: must be 0 to %d", index_a, cfg.count - 1);
 		return;
 	}
-	if (index_b < 0 || index_b >= num_events) {
+	if (index_b < 0 || index_b >= cfg.count) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_b %d: must be 0 to %d", index_b, num_events - 1);
+			"Invalid index_b %d: must be 0 to %d", index_b, cfg.count - 1);
 		return;
 	}
 
 	if (index_a != index_b) {
-		update_annotation_paths_for_swap(index_a, index_b);
-		std::swap(Mission_events[index_a], Mission_events[index_b]);
+		cfg.do_swap(index_a, index_b);
 
 		set_modified();
 		if (FREDDoc_ptr) {
 			char desc[128];
-			snprintf(desc, sizeof(desc), "MCP: swap events %s and %s",
-				Mission_events[index_a].name.c_str(), Mission_events[index_b].name.c_str());
+			snprintf(desc, sizeof(desc), "MCP: swap %ss %s and %s",
+				cfg.entity_name, cfg.get_name(index_a), cfg.get_name(index_b));
 			FREDDoc_ptr->autosave(desc);
 		}
 	}
 
 	json_t *data = json_object();
 	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(Mission_events[index_a].name.c_str()));
+	json_object_set_new(a_obj, "name", json_string(cfg.get_name(index_a)));
 	json_object_set_new(a_obj, "index", json_integer(index_a));
 	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(Mission_events[index_b].name.c_str()));
+	json_object_set_new(b_obj, "name", json_string(cfg.get_name(index_b)));
 	json_object_set_new(b_obj, "index", json_integer(index_b));
 	json_object_set_new(data, "a", a_obj);
 	json_object_set_new(data, "b", b_obj);
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// Entity-specific move/swap configs
+// ---------------------------------------------------------------------------
+
+static MoveSwapConfig make_message_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "message";
+	cfg.count = Num_messages - Num_builtin_messages;
+	cfg.check_conflict = check_dialog_conflict_for_messages;
+	cfg.get_name = [](int i) -> const char * {
+		return Messages[Num_builtin_messages + i].name;
+	};
+	cfg.do_move = [](int from, int to) {
+		array_move_element(Messages, Num_builtin_messages + from, Num_builtin_messages + to);
+	};
+	cfg.do_swap = [](int a, int b) {
+		std::swap(Messages[Num_builtin_messages + a], Messages[Num_builtin_messages + b]);
+	};
+	return cfg;
+}
+
+static MoveSwapConfig make_event_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "event";
+	cfg.count = (int)Mission_events.size();
+	cfg.check_conflict = check_dialog_conflict_for_events;
+	cfg.get_name = [](int i) -> const char * {
+		return Mission_events[i].name.c_str();
+	};
+	cfg.do_move = [](int from, int to) {
+		update_annotation_paths_for_move(from, to);
+		array_move_element(Mission_events, from, to);
+	};
+	cfg.do_swap = [](int a, int b) {
+		update_annotation_paths_for_swap(a, b);
+		std::swap(Mission_events[a], Mission_events[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_message(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_message_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_messages(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_message_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+static void handle_move_event(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_event_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_events(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_event_move_swap_config();
+	handle_generic_swap(input, req, cfg);
 }
 
 // ---------------------------------------------------------------------------
