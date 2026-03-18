@@ -362,8 +362,23 @@ void FredView::syncViewOptions() {
 
 	connectActionToViewSetting(ui->actionLighting_from_Suns, &_viewport->view.Lighting_on);
 
-
 	connectActionToViewSetting(ui->actionShowDistances, &_viewport->view.Show_distances);
+
+	// Outline LOD submenu — mutually exclusive options
+	QAction* outlineLodActions[] = {
+		ui->actionOutline_LOD_0, ui->actionOutline_LOD_1, ui->actionOutline_LOD_2,
+		ui->actionOutline_LOD_3, ui->actionOutline_LOD_4
+	};
+	for (int i = 0; i < 5; i++) {
+		auto action = outlineLodActions[i];
+		connect(this, &FredView::viewIdle, this, [action, this, i]() {
+			action->setChecked(_viewport->view.Outline_lod == i);
+		});
+		connect(action, &QAction::triggered, this, [this, i]() {
+			_viewport->view.Outline_lod = i;
+			_viewport->needsUpdate();
+		});
+	}
 }
 void FredView::initializeStatusBar() {
 	_statusBarViewmode = new QLabel();
