@@ -8,6 +8,7 @@
 #include <cstring>
 
 #include "mission/missionmessage.h"
+#include "mission/missiongoals.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
@@ -26,6 +27,14 @@ static const char *check_dialog_conflict_for_messages()
 			"Close it first, or use get_ui_status to check which editors are open.";
 	if (Event_editor_dlg && Event_editor_dlg->IsWindowVisible())
 		return "Cannot modify messages while the Event Editor is open. "
+			"Close it first, or use get_ui_status to check which editors are open.";
+	return nullptr;
+}
+
+static const char *check_dialog_conflict_for_events()
+{
+	if (Event_editor_dlg && Event_editor_dlg->IsWindowVisible())
+		return "Cannot modify events while the Event Editor is open. "
 			"Close it first, or use get_ui_status to check which editors are open.";
 	return nullptr;
 }
@@ -669,6 +678,183 @@ static void handle_swap_messages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Event annotation path helpers
+// ---------------------------------------------------------------------------
+
+// After moving an event from `from` to `to`, update all annotation paths
+// so that the first element (which is the event index) stays correct.
+static void update_annotation_paths_for_move(int from, int to)
+{
+	for (auto &ea : Event_annotations) {
+		if (ea.path.empty())
+			continue;
+		int &event_idx = ea.path.front();
+		if (event_idx == from) {
+			event_idx = to;
+		} else if (from < to) {
+			// Elements in (from, to] shifted down by 1
+			if (event_idx > from && event_idx <= to)
+				event_idx--;
+		} else {
+			// Elements in [to, from) shifted up by 1
+			if (event_idx >= to && event_idx < from)
+				event_idx++;
+		}
+	}
+}
+
+// After swapping events at indices a and b, update all annotation paths.
+static void update_annotation_paths_for_swap(int a, int b)
+{
+	for (auto &ea : Event_annotations) {
+		if (ea.path.empty())
+			continue;
+		int &event_idx = ea.path.front();
+		if (event_idx == a)
+			event_idx = b;
+		else if (event_idx == b)
+			event_idx = a;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Event tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static void handle_move_event(json_t *input, McpToolRequest *req)
+{
+	const char *conflict = check_dialog_conflict_for_events();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
+	int from_index = -1;
+	int to_index = -1;
+
+	if (input) {
+		json_t *v;
+
+		v = json_object_get(input, "from_index");
+		if (v && json_is_number(v))
+			from_index = (int)json_number_value(v);
+
+		v = json_object_get(input, "to_index");
+		if (v && json_is_number(v))
+			to_index = (int)json_number_value(v);
+	}
+
+	int num_events = (int)Mission_events.size();
+
+	if (from_index < 0 || from_index >= num_events) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid from_index %d: must be 0 to %d", from_index, num_events - 1);
+		return;
+	}
+	if (to_index < 0 || to_index >= num_events) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid to_index %d: must be 0 to %d", to_index, num_events - 1);
+		return;
+	}
+
+	if (from_index == to_index) {
+		json_t *data = json_object();
+		json_object_set_new(data, "name", json_string(Mission_events[from_index].name.c_str()));
+		json_object_set_new(data, "index", json_integer(from_index));
+		req->result_json = make_json_tool_result(data);
+		req->success = true;
+		return;
+	}
+
+	update_annotation_paths_for_move(from_index, to_index);
+	array_move_element(Mission_events, from_index, to_index);
+
+	set_modified();
+	if (FREDDoc_ptr) {
+		char desc[128];
+		snprintf(desc, sizeof(desc), "MCP: move event %s from %d to %d",
+			Mission_events[to_index].name.c_str(), from_index, to_index);
+		FREDDoc_ptr->autosave(desc);
+	}
+
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(Mission_events[to_index].name.c_str()));
+	json_object_set_new(data, "index", json_integer(to_index));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_swap_events(json_t *input, McpToolRequest *req)
+{
+	const char *conflict = check_dialog_conflict_for_events();
+	if (conflict) {
+		req->success = false;
+		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return;
+	}
+
+	int index_a = -1;
+	int index_b = -1;
+
+	if (input) {
+		json_t *v;
+
+		v = json_object_get(input, "index_a");
+		if (v && json_is_number(v))
+			index_a = (int)json_number_value(v);
+
+		v = json_object_get(input, "index_b");
+		if (v && json_is_number(v))
+			index_b = (int)json_number_value(v);
+	}
+
+	int num_events = (int)Mission_events.size();
+
+	if (index_a < 0 || index_a >= num_events) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid index_a %d: must be 0 to %d", index_a, num_events - 1);
+		return;
+	}
+	if (index_b < 0 || index_b >= num_events) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid index_b %d: must be 0 to %d", index_b, num_events - 1);
+		return;
+	}
+
+	if (index_a != index_b) {
+		update_annotation_paths_for_swap(index_a, index_b);
+		std::swap(Mission_events[index_a], Mission_events[index_b]);
+
+		set_modified();
+		if (FREDDoc_ptr) {
+			char desc[128];
+			snprintf(desc, sizeof(desc), "MCP: swap events %s and %s",
+				Mission_events[index_a].name.c_str(), Mission_events[index_b].name.c_str());
+			FREDDoc_ptr->autosave(desc);
+		}
+	}
+
+	json_t *data = json_object();
+	json_t *a_obj = json_object();
+	json_object_set_new(a_obj, "name", json_string(Mission_events[index_a].name.c_str()));
+	json_object_set_new(a_obj, "index", json_integer(index_a));
+	json_t *b_obj = json_object();
+	json_object_set_new(b_obj, "name", json_string(Mission_events[index_b].name.c_str()));
+	json_object_set_new(b_obj, "index", json_integer(index_b));
+	json_object_set_new(data, "a", a_obj);
+	json_object_set_new(data, "b", b_obj);
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -680,6 +866,8 @@ static const char *mission_tool_names[] = {
 	"delete_message",
 	"move_message",
 	"swap_messages",
+	"move_event",
+	"swap_events",
 	nullptr
 };
 
@@ -802,6 +990,38 @@ void mcp_register_mission_tools(json_t *tools)
 			"Indices are 0-based within mission messages.",
 			props, req);
 	}
+
+	// move_event
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the event");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the event to");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_event",
+			"Move a mission event from one position to another. "
+			"Indices are 0-based. Updates event annotation paths.",
+			props, req);
+	}
+
+	// swap_events
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first event");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second event");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_events",
+			"Swap two mission events at the given positions. "
+			"Indices are 0-based. Updates event annotation paths.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -837,6 +1057,10 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_message(input_json, req);
 	} else if (strcmp(tool_name, "swap_messages") == 0) {
 		handle_swap_messages(input_json, req);
+	} else if (strcmp(tool_name, "move_event") == 0) {
+		handle_move_event(input_json, req);
+	} else if (strcmp(tool_name, "swap_events") == 0) {
+		handle_swap_events(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
