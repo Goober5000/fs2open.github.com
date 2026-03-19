@@ -59,6 +59,16 @@ bool SCP_vector_contains(const SCP_vector<T>& vector, const T& item) {
 }
 
 template <typename T>
+bool SCP_vector_contains_lcase(const SCP_vector<T>& vector, const T& item) {
+	return std::find_if(vector.begin(), vector.end(), [&item](const T& iterator_item) { return lcase_equal(iterator_item, item); }) != vector.end();
+}
+
+template <typename T>
+bool SCP_vector_contains_lcase(const SCP_vector<T>& vector, const char* item) {
+	return std::find_if(vector.begin(), vector.end(), [&item](const T& iterator_item) { return !stricmp(iterator_item.c_str(), item); }) != vector.end();
+}
+
+template <typename T>
 inline bool SCP_vector_inbounds(const SCP_vector<T>& vector, int idx) {
 	return ((idx >= 0) && (static_cast<size_t>(idx) < vector.size()));
 }
