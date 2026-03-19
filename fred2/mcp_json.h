@@ -19,6 +19,7 @@ void set_optional_string(json_t *obj, const char *key, const char *value);
 // Schema property helpers for tool registration.
 void add_string_prop(json_t *props, const char *name, const char *description);
 void add_integer_prop(json_t *props, const char *name, const char *description);
+void add_number_prop(json_t *props, const char *name, const char *description);
 void add_bool_prop(json_t *props, const char *name, const char *description);
 
 // Register an MCP tool schema in the tools array.

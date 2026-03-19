@@ -49,6 +49,14 @@ void add_integer_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
+void add_number_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("number"));
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
 void add_bool_prop(json_t *props, const char *name, const char *description)
 {
 	json_t *p = json_object();
