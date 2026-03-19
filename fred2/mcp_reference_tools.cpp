@@ -8,6 +8,8 @@
 #include <cstring>
 #include <mutex>
 
+#include "globalincs/utility.h"
+
 #include "mainfrm.h"
 #include "ship/ship.h"
 #include "weapon/weapon.h"
@@ -1147,12 +1149,9 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 	// Resolve category name to ID if filtering
 	int filter_category_id = -1;
 	if (filter_category) {
-		for (size_t i = 0; i < op_menu.size(); i++) {
-			if (stricmp(op_menu[i].name.c_str(), filter_category) == 0) {
-				filter_category_id = op_menu[i].id;
-				break;
-			}
-		}
+		int found_idx = find_item_with_string(op_menu, &op_menu_struct::name, filter_category);
+		if (found_idx >= 0)
+			filter_category_id = op_menu[found_idx].id;
 		// Check extra categories not in op_menu
 		if (filter_category_id < 0) {
 			if (stricmp(filter_category, "Uncategorized") == 0)
@@ -1225,13 +1224,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	if (!name) return err;
 
 	// Find operator by name
-	int op_index = -1;
-	for (size_t i = 0; i < Operators.size(); i++) {
-		if (stricmp(Operators[i].text.c_str(), name) == 0) {
-			op_index = static_cast<int>(i);
-			break;
-		}
-	}
+	int op_index = find_item_with_string(Operators, &sexp_oper::text, name);
 	if (op_index < 0)
 		return make_tool_result("SEXP operator not found", true);
 
@@ -1249,12 +1242,9 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	int subcat_id = get_subcategory(op.value);
 	if (subcat_id != OP_SUBCATEGORY_NONE) {
 		// Find subcategory name in op_submenu
-		for (size_t i = 0; i < op_submenu.size(); i++) {
-			if (op_submenu[i].id == subcat_id) {
-				json_object_set_new(obj, "subcategory", json_string(op_submenu[i].name.c_str()));
-				break;
-			}
-		}
+		int found_idx = find_item_with_field(op_submenu, &op_menu_struct::id, subcat_id);
+		if (found_idx >= 0)
+			json_object_set_new(obj, "subcategory", json_string(op_submenu[found_idx].name.c_str()));
 	}
 
 	// Dynamic SEXP flag
@@ -1265,12 +1255,9 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	json_object_set_new(obj, "return_type", json_string(opr_to_string(ret)));
 
 	// Help text
-	for (size_t i = 0; i < Sexp_help.size(); i++) {
-		if (Sexp_help[i].id == op.value) {
-			json_object_set_new(obj, "help", json_string(Sexp_help[i].help.c_str()));
-			break;
-		}
-	}
+	int help_idx = find_item_with_field(Sexp_help, &sexp_help_struct::id, op.value);
+	if (help_idx >= 0)
+		json_object_set_new(obj, "help", json_string(Sexp_help[help_idx].help.c_str()));
 
 	// Argument types
 	{
@@ -1802,6 +1789,15 @@ static const opr_type_info Opr_type_info[] = {
 	{ nullptr, nullptr, nullptr }
 };
 
+static const opr_type_info *find_opr_type_info(const char *name)
+{
+	for (const opr_type_info *t = Opr_type_info; t->name; t++) {
+		if (stricmp(name, t->name) == 0)
+			return t;
+	}
+	return nullptr;
+}
+
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
 	const char *name = nullptr;
@@ -1824,24 +1820,22 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 	}
 
 	// Look up the type
-	for (const opr_type_info *t = Opr_type_info; t->name; t++) {
-		if (stricmp(name, t->name) == 0) {
-			json_t *obj = json_object();
-			json_object_set_new(obj, "name", json_string(t->name));
-			json_object_set_new(obj, "description", json_string(t->description));
+	const opr_type_info *info = find_opr_type_info(name);
+	if (!info)
+		return make_tool_result("Unknown return type. Call get_sexp_return_type without arguments to list all types.", true);
 
-			json_t *compat = json_array();
-			if (t->compatible_with) {
-				for (const char **c = t->compatible_with; *c; c++)
-					json_array_append_new(compat, json_string(*c));
-			}
-			json_object_set_new(obj, "compatible_with", compat);
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(info->name));
+	json_object_set_new(obj, "description", json_string(info->description));
 
-			return make_json_tool_result(obj);
-		}
+	json_t *compat = json_array();
+	if (info->compatible_with) {
+		for (const char **c = info->compatible_with; *c; c++)
+			json_array_append_new(compat, json_string(*c));
 	}
+	json_object_set_new(obj, "compatible_with", compat);
 
-	return make_tool_result("Unknown return type. Call get_sexp_return_type without arguments to list all types.", true);
+	return make_json_tool_result(obj);
 }
 
 // ---------------------------------------------------------------------------
@@ -2224,11 +2218,8 @@ static json_t *handle_list_talking_heads()
 	// Collect unique head names, matching event_editor::OnInitDialog() logic
 	SCP_vector<SCP_string> heads;
 	auto maybe_add = [&](const char *name) {
-		for (const auto &h : heads) {
-			if (!stricmp(h.c_str(), name))
-				return;
-		}
-		heads.push_back(name);
+		if (!SCP_vector_contains_lcase(heads, name))
+			heads.push_back(name);
 	};
 
 	// Heads referenced by existing builtin messages
