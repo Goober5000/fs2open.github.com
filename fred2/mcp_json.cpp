@@ -122,3 +122,9 @@ const char *get_required_string(json_t *arguments, const char *param_name, json_
 	}
 	return str;
 }
+
+const char *get_optional_string(json_t *arguments, const char *param_name)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	return (val && json_is_string(val)) ? json_string_value(val) : nullptr;
+}

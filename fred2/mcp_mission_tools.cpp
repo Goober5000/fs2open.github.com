@@ -78,12 +78,7 @@ static void mark_modified(const char *fmt, ...)
 static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
 	// Determine range based on "source" parameter
-	const char *source = nullptr;
-	if (input) {
-		json_t *v = json_object_get(input, "source");
-		if (v && json_is_string(v))
-			source = json_string_value(v);
-	}
+	const char *source = get_optional_string(input, "source");
 
 	int start, end;
 	if (source && !stricmp(source, "builtin")) {
@@ -165,28 +160,14 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	int team = -1;
 	int insert_index = -1;  // -1 means append to end
 
+	name         = get_optional_string(input, "name");
+	message      = get_optional_string(input, "message");
+	persona_str  = get_optional_string(input, "persona");
+	talking_head = get_optional_string(input, "talking_head");
+	voice_file   = get_optional_string(input, "voice_file");
+
 	if (input) {
 		json_t *v;
-
-		v = json_object_get(input, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-
-		v = json_object_get(input, "message");
-		if (v && json_is_string(v))
-			message = json_string_value(v);
-
-		v = json_object_get(input, "persona");
-		if (v && json_is_string(v))
-			persona_str = json_string_value(v);
-
-		v = json_object_get(input, "talking_head");
-		if (v && json_is_string(v))
-			talking_head = json_string_value(v);
-
-		v = json_object_get(input, "voice_file");
-		if (v && json_is_string(v))
-			voice_file = json_string_value(v);
 
 		v = json_object_get(input, "team");
 		if (v && json_is_number(v))
@@ -300,9 +281,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	bool changed = false;
 
 	// Update message text
-	json_t *v = json_object_get(input, "message");
-	if (v && json_is_string(v)) {
-		const char *new_msg = json_string_value(v);
+	const char *new_msg = get_optional_string(input, "message");
+	if (new_msg) {
 		if (strlen(new_msg) >= MESSAGE_LENGTH) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -316,9 +296,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update persona
-	v = json_object_get(input, "persona");
-	if (v && json_is_string(v)) {
-		const char *persona_str = json_string_value(v);
+	const char *persona_str = get_optional_string(input, "persona");
+	if (persona_str) {
 		int persona_index = message_persona_name_lookup(persona_str);
 		if (persona_index < 0) {
 			req->success = false;
@@ -333,9 +312,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update talking head
-	v = json_object_get(input, "talking_head");
-	if (v && json_is_string(v)) {
-		const char *new_head = json_string_value(v);
+	const char *new_head = get_optional_string(input, "talking_head");
+	if (new_head) {
 		if (Messages[idx].avi_info.name)
 			free(Messages[idx].avi_info.name);
 		Messages[idx].avi_info.name = (new_head[0] != '\0') ? strdup(new_head) : nullptr;
@@ -343,9 +321,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update voice file
-	v = json_object_get(input, "voice_file");
-	if (v && json_is_string(v)) {
-		const char *new_voice = json_string_value(v);
+	const char *new_voice = get_optional_string(input, "voice_file");
+	if (new_voice) {
 		if (Messages[idx].wave_info.name)
 			free(Messages[idx].wave_info.name);
 		Messages[idx].wave_info.name = (new_voice[0] != '\0') ? strdup(new_voice) : nullptr;
@@ -353,19 +330,20 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update team
-	v = json_object_get(input, "team");
-	if (v && json_is_number(v)) {
-		int new_team = (int)json_number_value(v);
-		if (Messages[idx].multi_team != new_team) {
-			Messages[idx].multi_team = new_team;
-			changed = true;
+	{
+		json_t *v = json_object_get(input, "team");
+		if (v && json_is_number(v)) {
+			int new_team = (int)json_number_value(v);
+			if (Messages[idx].multi_team != new_team) {
+				Messages[idx].multi_team = new_team;
+				changed = true;
+			}
 		}
 	}
 
 	// Update name (must be last — invalidates `name` pointer and updates SEXP refs)
-	v = json_object_get(input, "new_name");
-	if (v && json_is_string(v)) {
-		const char *new_name = json_string_value(v);
+	const char *new_name = get_optional_string(input, "new_name");
+	if (new_name) {
 		if (strlen(new_name) >= NAME_LENGTH) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
