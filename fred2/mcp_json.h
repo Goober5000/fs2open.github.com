@@ -34,13 +34,35 @@ bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check
 // req->success=false with an error message if the parameter is missing or empty.
 const char *require_string_param(json_t *input, const char *param_name, McpToolRequest *req);
 
+// Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
+// req->success=false with an error message if the parameter is missing or the wrong type.
+bool require_integer_param(json_t *input, const char *param_name, McpToolRequest *req, int *out);
+bool require_double_param(json_t *input, const char *param_name, McpToolRequest *req, double *out);
+bool require_float_param(json_t *input, const char *param_name, McpToolRequest *req, float *out);
+bool require_bool_param(json_t *input, const char *param_name, McpToolRequest *req, bool *out);
+
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
 // if the parameter is missing or empty.
 const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out);
 
+// Extracts required integer, double, float, or bool parameters from arguments JSON (for reference
+// tools that return json_t* directly). Returns false and sets *error_out to an error result
+// if the parameter is missing or the wrong type.
+bool get_required_integer(json_t *arguments, const char *param_name, json_t **error_out, int *out);
+bool get_required_double(json_t *arguments, const char *param_name, json_t **error_out, double *out);
+bool get_required_float(json_t *arguments, const char *param_name, json_t **error_out, float *out);
+bool get_required_bool(json_t *arguments, const char *param_name, json_t **error_out, bool *out);
+
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or empty.
 const char *get_optional_string(json_t *arguments, const char *param_name);
+
+// Extracts optional integer, double, float, or bool parameters from arguments JSON (for reference
+// tools that return json_t* directly). Returns true and sets *out if present, false if absent.
+bool get_optional_integer(json_t *arguments, const char *param_name, int *out);
+bool get_optional_double(json_t *arguments, const char *param_name, double *out);
+bool get_optional_float(json_t *arguments, const char *param_name, float *out);
+bool get_optional_bool(json_t *arguments, const char *param_name, bool *out);
 
 #endif // _MCP_JSON_H
