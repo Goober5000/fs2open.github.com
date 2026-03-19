@@ -487,10 +487,9 @@ static json_t *handle_list_ship_types()
 
 static json_t *handle_get_ship_type(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int idx = ship_type_name_lookup(name);
 	if (idx < 0)
@@ -587,10 +586,9 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 
 static json_t *handle_get_ship_class(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int idx = ship_info_lookup(name);
 	if (idx < 0)
@@ -823,10 +821,9 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 
 static json_t *handle_get_weapon_class(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int idx = weapon_info_lookup(name);
 	if (idx < 0)
@@ -961,10 +958,9 @@ static json_t *handle_list_iffs()
 
 static json_t *handle_get_iff(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int idx = iff_lookup(name);
 	if (idx < 0)
@@ -1020,10 +1016,9 @@ static json_t *handle_list_intel_entries()
 
 static json_t *handle_get_intel_entry(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int idx = intel_info_lookup(name);
 	if (idx < 0)
@@ -1225,10 +1220,9 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 
 static json_t *handle_get_sexp_operator(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	// Find operator by name
 	int op_index = -1;
@@ -1884,10 +1878,9 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
-	json_t *name_val = arguments ? json_object_get(arguments, "name") : nullptr;
-	const char *name = (name_val && json_is_string(name_val)) ? json_string_value(name_val) : nullptr;
-	if (!name || name[0] == '\0')
-		return make_tool_result("Missing required parameter: name", true);
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);
 	if (sip_idx < 0)
