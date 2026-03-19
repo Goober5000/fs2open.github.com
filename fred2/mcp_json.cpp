@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "mcp_json.h"
+#include "mcpserver.h"
 
 #include <jansson.h>
 
@@ -71,4 +72,45 @@ void register_tool(json_t *tools, const char *name, const char *description,
 	json_object_set_new(tool, "inputSchema", schema);
 
 	json_array_append_new(tools, tool);
+}
+
+bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn)
+{
+	const char *conflict = check_fn();
+	if (!conflict)
+		return false;
+	req->success = false;
+	strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+	req->result_message[sizeof(req->result_message) - 1] = '\0';
+	return true;
+}
+
+const char *require_string_param(json_t *input, const char *param_name, McpToolRequest *req)
+{
+	const char *value = nullptr;
+	if (input) {
+		json_t *v = json_object_get(input, param_name);
+		if (v && json_is_string(v))
+			value = json_string_value(v);
+	}
+	if (!value || !value[0]) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Missing required parameter: %s", param_name);
+		return nullptr;
+	}
+	return value;
+}
+
+const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	const char *str = (val && json_is_string(val)) ? json_string_value(val) : nullptr;
+	if (!str || str[0] == '\0') {
+		char buf[64];
+		snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
+		*error_out = make_tool_result(buf, true);
+		return nullptr;
+	}
+	return str;
 }

@@ -5,8 +5,11 @@
 #include "mcp_array_utils.h"
 
 #include <jansson.h>
+#include <cstdarg>
 #include <cstring>
 #include <functional>
+
+#include "globalincs/utility.h"
 
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
@@ -52,6 +55,23 @@ static const char *persona_name_from_index(int persona_index)
 }
 
 // ---------------------------------------------------------------------------
+// Autosave helper
+// ---------------------------------------------------------------------------
+
+static void mark_modified(const char *fmt, ...)
+{
+	set_modified();
+	if (FREDDoc_ptr) {
+		char desc[128];
+		va_list args;
+		va_start(args, fmt);
+		vsnprintf(desc, sizeof(desc), fmt, args);
+		va_end(args);
+		FREDDoc_ptr->autosave(desc);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Message tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
 
@@ -71,13 +91,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 		end = Num_builtin_messages;
 	} else {
 		// Default: mission messages — check for conflicting dialogs
-		const char *conflict = check_dialog_conflict_for_messages();
-		if (conflict) {
-			req->success = false;
-			strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-			req->result_message[sizeof(req->result_message) - 1] = '\0';
-			return;
-		}
+		if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 		start = Num_builtin_messages;
 		end = Num_messages;
 	}
@@ -104,26 +118,11 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
-	const char *name = nullptr;
-	if (input) {
-		json_t *v = json_object_get(input, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-	}
-	if (!name || !name[0]) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
-		return;
-	}
+	const char *name = require_string_param(input, "name", req);
+	if (!name) return;
 
 	// Find the message
-	int idx = -1;
-	for (int i = 0; i < Num_messages; i++) {
-		if (!stricmp(Messages[i].name, name)) {
-			idx = i;
-			break;
-		}
-	}
+	int idx = find_item_with_string(Messages, &MMessage::name, name);
 	if (idx < 0) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
@@ -132,13 +131,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 	// Check for conflicting dialogs if this is a mission-specific message
 	if (idx >= Num_builtin_messages) {
-		const char *conflict = check_dialog_conflict_for_messages();
-		if (conflict) {
-			req->success = false;
-			strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-			req->result_message[sizeof(req->result_message) - 1] = '\0';
-			return;
-		}
+		if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 	}
 
 	json_t *data = json_object();
@@ -162,13 +155,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 static void handle_create_message(json_t *input, McpToolRequest *req)
 {
-	const char *conflict = check_dialog_conflict_for_messages();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
+	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
 	const char *name = nullptr;
 	const char *message = nullptr;
@@ -284,12 +271,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	msg.avi_info.name = talking_head ? strdup(talking_head) : nullptr;
 	msg.wave_info.name = voice_file ? strdup(voice_file) : nullptr;
 
-	set_modified();
-	if (FREDDoc_ptr) {
-		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: create message %s", name);
-		FREDDoc_ptr->autosave(desc);
-	}
+	mark_modified("MCP: create message %s", name);
 
 	// Return the created message
 	json_t *data = json_object();
@@ -304,34 +286,13 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 static void handle_update_message(json_t *input, McpToolRequest *req)
 {
-	const char *conflict = check_dialog_conflict_for_messages();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
+	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	const char *name = nullptr;
-	if (input) {
-		json_t *v = json_object_get(input, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-	}
-	if (!name || !name[0]) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
-		return;
-	}
+	const char *name = require_string_param(input, "name", req);
+	if (!name) return;
 
 	// Find the message (mission-specific only)
-	int idx = -1;
-	for (int i = Num_builtin_messages; i < Num_messages; i++) {
-		if (!stricmp(Messages[i].name, name)) {
-			idx = i;
-			break;
-		}
-	}
+	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
@@ -433,12 +394,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	if (changed) {
-		set_modified();
-		if (FREDDoc_ptr) {
-			char desc[128];
-			snprintf(desc, sizeof(desc), "MCP: update message %s", Messages[idx].name);
-			FREDDoc_ptr->autosave(desc);
-		}
+		mark_modified("MCP: update message %s", Messages[idx].name);
 	}
 
 	// Return the updated message
@@ -460,40 +416,20 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
-	const char *conflict = check_dialog_conflict_for_messages();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
+	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	const char *name = nullptr;
 	bool force = false;
-
 	if (input) {
-		json_t *v = json_object_get(input, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-
-		v = json_object_get(input, "force");
+		json_t *v = json_object_get(input, "force");
 		if (v && json_is_boolean(v))
 			force = json_is_true(v);
 	}
-	if (!name || !name[0]) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
-		return;
-	}
+
+	const char *name = require_string_param(input, "name", req);
+	if (!name) return;
 
 	// Find the message (mission-specific only)
-	int idx = -1;
-	for (int i = Num_builtin_messages; i < Num_messages; i++) {
-		if (!stricmp(Messages[i].name, name)) {
-			idx = i;
-			break;
-		}
-	}
+	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
@@ -529,12 +465,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Remove from array by shifting (matches FRED's CMessageEditorDlg::OnDelete pattern)
 	array_remove_slot(Messages, Num_messages, idx);
 
-	set_modified();
-	if (FREDDoc_ptr) {
-		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: delete message %s", name);
-		FREDDoc_ptr->autosave(desc);
-	}
+	mark_modified("MCP: delete message %s", name);
 
 	snprintf(req->result_message, sizeof(req->result_message), "Deleted message: %s", name);
 	req->success = true;
@@ -597,13 +528,7 @@ struct MoveSwapConfig {
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	const char *conflict = cfg.check_conflict();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
+	if (set_conflict_error(req, cfg.check_conflict)) return;
 
 	int from_index = -1;
 	int to_index = -1;
@@ -644,13 +569,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	cfg.do_move(from_index, to_index);
 
-	set_modified();
-	if (FREDDoc_ptr) {
-		char desc[128];
-		snprintf(desc, sizeof(desc), "MCP: move %s %s from %d to %d",
-			cfg.entity_name, cfg.get_name(to_index), from_index, to_index);
-		FREDDoc_ptr->autosave(desc);
-	}
+	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(to_index), from_index, to_index);
 
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(cfg.get_name(to_index)));
@@ -661,13 +580,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	const char *conflict = cfg.check_conflict();
-	if (conflict) {
-		req->success = false;
-		strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
-		return;
-	}
+	if (set_conflict_error(req, cfg.check_conflict)) return;
 
 	int index_a = -1;
 	int index_b = -1;
@@ -700,13 +613,7 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 	if (index_a != index_b) {
 		cfg.do_swap(index_a, index_b);
 
-		set_modified();
-		if (FREDDoc_ptr) {
-			char desc[128];
-			snprintf(desc, sizeof(desc), "MCP: swap %ss %s and %s",
-				cfg.entity_name, cfg.get_name(index_a), cfg.get_name(index_b));
-			FREDDoc_ptr->autosave(desc);
-		}
+		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, cfg.get_name(index_a), cfg.get_name(index_b));
 	}
 
 	json_t *data = json_object();
