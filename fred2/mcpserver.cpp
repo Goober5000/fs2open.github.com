@@ -632,13 +632,17 @@ void mcp_server_start()
 	if (mcp_ctx != nullptr)
 		return;
 
+	char listen_addr[32];
+	snprintf(listen_addr, sizeof(listen_addr), "127.0.0.1:%d", Mcp_server_port);
+
 	const char *options[] = {
-		"listening_ports", "127.0.0.1:8080",
+		"listening_ports", listen_addr,
 		"num_threads", "2",
 		nullptr
 	};
 
 	mcp_ctx = mg_start(mcp_request_handler, nullptr, options);
+	mprintf(("MCP server listening on 127.0.0.1:%d\n", Mcp_server_port));
 }
 
 void mcp_server_stop()
