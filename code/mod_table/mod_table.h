@@ -82,6 +82,7 @@ extern bool Always_reset_selected_wep_on_loadout_open;
 extern bool Weapons_inherit_parent_collision_group;
 extern bool Flight_controls_follow_eyepoint_orientation;
 extern int FS2NetD_port;
+extern int Mcp_server_port;
 extern int Default_multi_object_update_level;
 extern float Briefing_window_FOV;
 extern int Briefing_window_resolution[2];
