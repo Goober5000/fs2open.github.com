@@ -57,7 +57,7 @@
   {
     "topic": "subsystem_names",
     "title": "Subsystem Name Comparison",
-    "text": "**Important**: Subsystem names must NEVER be compared using plain string comparison. The game engine allows minor variations in subsystem names (such as the presence or absence of a trailing 's'), so two names that look different as strings may refer to the same subsystem.\n\nAlways use the `subsystem_names_equal` tool to check if two subsystem names match, or `subsystem_names_compare` for ordering. These tools use the engine's internal comparison function that correctly handles all allowable variations."
+    "text": "**Important**: Subsystem names must NEVER be compared using common string comparison. The game engine allows minor variations in subsystem names (such as the presence or absence of a trailing 's'), so two names that look different as strings may refer to the same subsystem.\n\nAlways use the `subsystem_names_equal` tool to check if two subsystem names match, or `subsystem_names_compare` for ordering. These tools use the engine's internal comparison function that correctly handles all allowable variations."
   },
   {
     "topic": "timeouts",
