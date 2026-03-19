@@ -606,28 +606,24 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 		json_object_set_new(bank_obj, "capacity_in_ammo_units", json_integer(bank_ammo_capacity[b]));
 
 		int ri = restriction_offset + b;
-		bool has_regular = (ri < (int)sip.restricted_loadout_flag.size())
-			&& (sip.restricted_loadout_flag[ri] & REGULAR_WEAPON);
-		json_object_set_new(bank_obj, "restricted", json_boolean(has_regular));
-		if (has_regular && ri < (int)sip.allowed_bank_restricted_weapons.size()) {
-			json_t *rw = json_array();
-			for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
-				if ((wf.second & REGULAR_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
-					json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+		std::array<std::tuple<int, const char*, const char*>, 2> restriction_types = { {
+			{ REGULAR_WEAPON, "restricted", "allowed_weapons" },
+			{ DOGFIGHT_WEAPON, "restricted_dogfight", "allowed_dogfight_weapons" }
+		} };
+		for (auto &rt : restriction_types) {
+			auto flag = std::get<0>(rt);
+			auto tag = std::get<1>(rt);
+			auto bag = std::get<2>(rt);
+			bool has_restriction = (ri < (int)sip.restricted_loadout_flag.size()) && (sip.restricted_loadout_flag[ri] & flag);
+			json_object_set_new(bank_obj, tag, json_boolean(has_restriction));
+			if (has_restriction && (ri < (int)sip.allowed_bank_restricted_weapons.size())) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
+					if ((wf.second & flag) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, bag, rw);
 			}
-			json_object_set_new(bank_obj, "allowed_weapons", rw);
-		}
-
-		bool has_dogfight = (ri < (int)sip.restricted_loadout_flag.size())
-			&& (sip.restricted_loadout_flag[ri] & DOGFIGHT_WEAPON);
-		json_object_set_new(bank_obj, "restricted_dogfight", json_boolean(has_dogfight));
-		if (has_dogfight && ri < (int)sip.allowed_bank_restricted_weapons.size()) {
-			json_t *rw = json_array();
-			for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
-				if ((wf.second & DOGFIGHT_WEAPON) && wf.first >= 0 && wf.first < weapon_info_size())
-					json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
-			}
-			json_object_set_new(bank_obj, "allowed_dogfight_weapons", rw);
 		}
 
 		json_array_append_new(banks, bank_obj);
