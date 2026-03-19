@@ -535,16 +535,8 @@ static json_t *handle_get_ship_type(json_t *arguments)
 static json_t *handle_list_ship_classes(json_t *arguments)
 {
 	// Optional filters
-	const char *filter_species = nullptr;
-	const char *filter_type = nullptr;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "species");
-		if (v && json_is_string(v))
-			filter_species = json_string_value(v);
-		v = json_object_get(arguments, "ship_type");
-		if (v && json_is_string(v))
-			filter_type = json_string_value(v);
-	}
+	const char *filter_species = get_optional_string(arguments, "species");
+	const char *filter_type    = get_optional_string(arguments, "ship_type");
 
 	int filter_species_idx = -1;
 	if (filter_species) {
@@ -746,19 +738,16 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
 	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "subtype");
-		if (v && json_is_string(v)) {
-			const char *st = json_string_value(v);
-			if (stricmp(st, "primary") == 0)
-				filter = FILTER_PRIMARY;
-			else if (stricmp(st, "secondary") == 0)
-				filter = FILTER_SECONDARY;
-			else if (stricmp(st, "beam") == 0)
-				filter = FILTER_BEAM;
-			else
-				return make_tool_result("Invalid subtype. Use \"primary\", \"secondary\", or \"beam\".", true);
-		}
+	const char *st = get_optional_string(arguments, "subtype");
+	if (st) {
+		if (stricmp(st, "primary") == 0)
+			filter = FILTER_PRIMARY;
+		else if (stricmp(st, "secondary") == 0)
+			filter = FILTER_SECONDARY;
+		else if (stricmp(st, "beam") == 0)
+			filter = FILTER_BEAM;
+		else
+			return make_tool_result("Invalid subtype. Use \"primary\", \"secondary\", or \"beam\".", true);
 	}
 
 	json_t *arr = json_array();
@@ -1090,20 +1079,9 @@ static json_t *handle_list_sexp_categories()
 
 static json_t *handle_list_sexp_operators(json_t *arguments)
 {
-	const char *filter_category = nullptr;
-	const char *filter_subcategory = nullptr;
-	const char *filter_search = nullptr;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "category");
-		if (v && json_is_string(v))
-			filter_category = json_string_value(v);
-		v = json_object_get(arguments, "subcategory");
-		if (v && json_is_string(v))
-			filter_subcategory = json_string_value(v);
-		v = json_object_get(arguments, "search");
-		if (v && json_is_string(v))
-			filter_search = json_string_value(v);
-	}
+	const char *filter_category    = get_optional_string(arguments, "category");
+	const char *filter_subcategory = get_optional_string(arguments, "subcategory");
+	const char *filter_search      = get_optional_string(arguments, "search");
 
 	// Subcategory requires category (names can appear in multiple categories)
 	if (filter_subcategory && !filter_category)
@@ -1416,12 +1394,7 @@ static json_t *load_reference_notes()
 
 static json_t *handle_get_reference_notes(json_t *arguments)
 {
-	const char *topic = nullptr;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "topic");
-		if (v && json_is_string(v))
-			topic = json_string_value(v);
-	}
+	const char *topic = get_optional_string(arguments, "topic");
 
 	json_t *notes = load_reference_notes();
 	if (!notes)
@@ -1678,12 +1651,7 @@ static const opf_type_info *find_opf_type_info(const char *name)
 
 static json_t *handle_get_sexp_argument_type(json_t *arguments)
 {
-	const char *name = nullptr;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-	}
+	const char *name = get_optional_string(arguments, "name");
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -1763,12 +1731,7 @@ static const opr_type_info *find_opr_type_info(const char *name)
 
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
-	const char *name = nullptr;
-	if (arguments) {
-		json_t *v = json_object_get(arguments, "name");
-		if (v && json_is_string(v))
-			name = json_string_value(v);
-	}
+	const char *name = get_optional_string(arguments, "name");
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -2082,10 +2045,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
-	json_t *v1 = arguments ? json_object_get(arguments, "name1") : nullptr;
-	json_t *v2 = arguments ? json_object_get(arguments, "name2") : nullptr;
-	const char *name1 = (v1 && json_is_string(v1)) ? json_string_value(v1) : nullptr;
-	const char *name2 = (v2 && json_is_string(v2)) ? json_string_value(v2) : nullptr;
+	const char *name1 = get_optional_string(arguments, "name1");
+	const char *name2 = get_optional_string(arguments, "name2");
 	if (!name1 || !name2)
 		return make_tool_result("Missing required parameters: name1 and name2", true);
 
@@ -2105,10 +2066,8 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 
 static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
-	json_t *v1 = arguments ? json_object_get(arguments, "name1") : nullptr;
-	json_t *v2 = arguments ? json_object_get(arguments, "name2") : nullptr;
-	const char *name1 = (v1 && json_is_string(v1)) ? json_string_value(v1) : nullptr;
-	const char *name2 = (v2 && json_is_string(v2)) ? json_string_value(v2) : nullptr;
+	const char *name1 = get_optional_string(arguments, "name1");
+	const char *name2 = get_optional_string(arguments, "name2");
 	if (!name1 || !name2)
 		return make_tool_result("Missing required parameters: name1 and name2", true);
 
