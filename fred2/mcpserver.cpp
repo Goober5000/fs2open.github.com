@@ -40,7 +40,7 @@ static void send_json_response(struct mg_connection *conn, json_t *response)
 	free(body);
 }
 
-static json_t *make_response(json_t *id, json_t *result)
+static json_t *make_base_response(json_t *id)
 {
 	json_t *resp = json_object();
 	json_object_set_new(resp, "jsonrpc", json_string("2.0"));
@@ -48,18 +48,19 @@ static json_t *make_response(json_t *id, json_t *result)
 		json_object_set(resp, "id", id);
 	else
 		json_object_set_new(resp, "id", json_null());
+	return resp;
+}
+
+static json_t *make_response(json_t *id, json_t *result)
+{
+	json_t *resp = make_base_response(id);
 	json_object_set_new(resp, "result", result);
 	return resp;
 }
 
 static json_t *make_error_response(json_t *id, int code, const char *message)
 {
-	json_t *resp = json_object();
-	json_object_set_new(resp, "jsonrpc", json_string("2.0"));
-	if (id)
-		json_object_set(resp, "id", id);
-	else
-		json_object_set_new(resp, "id", json_null());
+	json_t *resp = make_base_response(id);
 
 	json_t *err = json_object();
 	json_object_set_new(err, "code", json_integer(code));
@@ -261,38 +262,10 @@ static void mcp_cleanup_request(McpToolRequest *req)
 	delete req;
 }
 
-// Marshal a tool call to the main MFC thread with a configurable timeout.
-// Uses PostMessage so the mongoose thread is not blocked indefinitely
-// if the UI thread handler triggers a modal dialog.
-json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
+// Wait for a previously posted McpToolRequest to complete, then extract and return the result.
+// Handles timeout and reference-counted cleanup in both the normal and timeout paths.
+static json_t *mcp_wait_for_result(McpToolRequest *req)
 {
-	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
-		return make_tool_result("FRED2 main window is not available", true);
-
-	// Heap-allocate because the request may outlive this stack frame on timeout
-	auto *req = new McpToolRequest();
-	req->tool = tool;
-	strncpy(req->filepath, param, sizeof(req->filepath) - 1);
-	req->filepath[sizeof(req->filepath) - 1] = '\0';
-	req->input_json = nullptr;
-	req->success = false;
-	req->result_message[0] = '\0';
-	req->result_json = nullptr;
-	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
-	req->refcount.store(2, std::memory_order_relaxed);
-
-	// Normalize path separators for the FreeSpace engine
-	for (char *p = req->filepath; *p; ++p) {
-		if (*p == '/' || *p == '\\')
-			*p = DIR_SEPARATOR_CHAR;
-	}
-
-	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
-		// PostMessage failed — we are the sole owner
-		mcp_cleanup_request(req);
-		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
-	}
-
 	DWORD timeout_ms = mcp_tool_timeout_ms.load(std::memory_order_relaxed);
 	DWORD wait_result = WaitForSingleObject(req->completion_event, timeout_ms);
 
@@ -325,6 +298,41 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 		"Operation timed out (%us). A modal dialog may be blocking the FRED2 UI. "
 		"Use get_ui_status to check.", timeout_ms / 1000);
 	return make_tool_result(timeout_msg, true);
+}
+
+// Marshal a tool call to the main MFC thread with a configurable timeout.
+// Uses PostMessage so the mongoose thread is not blocked indefinitely
+// if the UI thread handler triggers a modal dialog.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
+{
+	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
+		return make_tool_result("FRED2 main window is not available", true);
+
+	// Heap-allocate because the request may outlive this stack frame on timeout
+	auto *req = new McpToolRequest();
+	req->tool = tool;
+	strncpy(req->filepath, param, sizeof(req->filepath) - 1);
+	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	req->input_json = nullptr;
+	req->success = false;
+	req->result_message[0] = '\0';
+	req->result_json = nullptr;
+	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+	req->refcount.store(2, std::memory_order_relaxed);
+
+	// Normalize path separators for the FreeSpace engine
+	for (char *p = req->filepath; *p; ++p) {
+		if (*p == '/' || *p == '\\')
+			*p = DIR_SEPARATOR_CHAR;
+	}
+
+	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
+		// PostMessage failed — we are the sole owner
+		mcp_cleanup_request(req);
+		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
+	}
+
+	return mcp_wait_for_result(req);
 }
 
 // Called by the UI thread handler after filling results.
@@ -363,33 +371,7 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
 	}
 
-	DWORD timeout_ms = mcp_tool_timeout_ms.load(std::memory_order_relaxed);
-	DWORD wait_result = WaitForSingleObject(req->completion_event, timeout_ms);
-
-	if (wait_result == WAIT_OBJECT_0) {
-		json_t *result;
-		if (req->result_json) {
-			result = req->result_json;
-			req->result_json = nullptr;
-		} else {
-			result = make_tool_result(req->result_message, !req->success);
-		}
-
-		if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
-			mcp_cleanup_request(req);
-
-		return result;
-	}
-
-	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-		mcp_cleanup_request(req);
-	}
-
-	char timeout_msg[256];
-	snprintf(timeout_msg, sizeof(timeout_msg),
-		"Operation timed out (%us). A modal dialog may be blocking the FRED2 UI. "
-		"Use get_ui_status to check.", timeout_ms / 1000);
-	return make_tool_result(timeout_msg, true);
+	return mcp_wait_for_result(req);
 }
 
 static json_t *handle_tools_call(json_t *params)
