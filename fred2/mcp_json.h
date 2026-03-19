@@ -39,4 +39,8 @@ const char *require_string_param(json_t *input, const char *param_name, McpToolR
 // if the parameter is missing or empty.
 const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out);
 
+// Extracts an optional string parameter from arguments JSON (for reference tools that
+// return json_t* directly). Returns nullptr if the parameter is missing or empty.
+const char *get_optional_string(json_t *arguments, const char *param_name);
+
 #endif // _MCP_JSON_H
