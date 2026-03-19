@@ -61,6 +61,7 @@ bool Always_reset_selected_wep_on_loadout_open;
 bool Weapons_inherit_parent_collision_group;
 bool Flight_controls_follow_eyepoint_orientation;
 int FS2NetD_port;
+int Mcp_server_port;
 int Default_multi_object_update_level;
 float Briefing_window_FOV;
 int Briefing_window_resolution[2];
@@ -1011,6 +1012,14 @@ void parse_mod_table(const char *filename)
 					mprintf(("Game Settings Table: FS2NetD connecting to port %i\n", FS2NetD_port));
 			}
 
+			if (optional_string("$Model Context Protocol Port:")) {
+				stuff_int(&Mcp_server_port);
+				if (Mcp_server_port < 1 || Mcp_server_port > 65535) {
+					Warning(LOCATION, "$Model Context Protocol Port: must be between 1 and 65535, got %d. Using default 8080.", Mcp_server_port);
+					Mcp_server_port = 8080;
+				}
+			}
+
 			if (optional_string("$Default object update level for multiplayer:")) {
 				int object_update;
 				stuff_int(&object_update);
@@ -1890,6 +1899,7 @@ void mod_table_reset()
 	Shield_percent_skips_damage = 0.1f;
 	Min_radius_for_persistent_debris = 50.0f;
 	Zero_radius_explosions_skip_fireballs = false;
+	Mcp_server_port = 8080;
 }
 
 void mod_table_set_version_flags()
