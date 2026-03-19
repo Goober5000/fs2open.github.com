@@ -221,13 +221,11 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Check for duplicate name
-	for (int i = 0; i < Num_messages; i++) {
-		if (!stricmp(Messages[i].name, name)) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"A message with name '%s' already exists", name);
-			return;
-		}
+	if (find_item_with_string(Messages, &MMessage::name, name) >= 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"A message with name '%s' already exists", name);
+		return;
 	}
 
 	// Look up persona by name
@@ -376,13 +374,11 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		}
 		if (stricmp(Messages[idx].name, new_name) != 0) {
 			// Check for duplicate
-			for (int i = 0; i < Num_messages; i++) {
-				if (i != idx && !stricmp(Messages[i].name, new_name)) {
-					req->success = false;
-					snprintf(req->result_message, sizeof(req->result_message),
-						"A message with name '%s' already exists", new_name);
-					return;
-				}
+			if (find_item_with_string(Messages, &MMessage::name, new_name) >= 0) {
+				req->success = false;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"A message with name '%s' already exists", new_name);
+				return;
 			}
 
 			// Update SEXP references before changing the name
