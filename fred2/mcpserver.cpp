@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "mcpserver.h"
+#include "mcp_json.h"
 #include "mcp_reference_tools.h"
 #include "mcp_mission_tools.h"
 #include "mongoose.h"
@@ -141,7 +142,7 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	// Tool: set_timeout
 	{
 		json_t *props = json_object();
-		add_number_prop(props, "seconds", "Timeout in seconds (1-300)");
+		add_integer_prop(props, "seconds", "Timeout in seconds (1-300)");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("seconds"));
 		register_tool(tools, "set_timeout",
@@ -288,10 +289,7 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 
 static json_t *handle_tools_call(json_t *params)
 {
-	const char *tool_name = nullptr;
-	json_t *name_val = json_object_get(params, "name");
-	if (name_val && json_is_string(name_val))
-		tool_name = json_string_value(name_val);
+	const char *tool_name = get_optional_string(params, "name");
 
 	if (!tool_name)
 		return nullptr;  // caller will send error
@@ -312,11 +310,10 @@ static json_t *handle_tools_call(json_t *params)
 
 	if (strcmp(tool_name, "set_timeout") == 0) {
 		json_t *arguments = json_object_get(params, "arguments");
-		json_t *sec_val = arguments ? json_object_get(arguments, "seconds") : nullptr;
-		if (!sec_val || !json_is_number(sec_val))
-			return make_tool_result("Missing required parameter: seconds (number)", true);
-
-		int seconds = (int)json_number_value(sec_val);
+		json_t *err = nullptr;
+		int seconds;
+		if (!get_required_integer(arguments, "seconds", &err, &seconds))
+			return err;
 		if (seconds < 1 || seconds > 300)
 			return make_tool_result("Timeout must be between 1 and 300 seconds", true);
 
@@ -336,11 +333,9 @@ static json_t *handle_tools_call(json_t *params)
 	{
 		// Extract filepath from arguments
 		json_t *arguments = json_object_get(params, "arguments");
-		json_t *fp_val = arguments ? json_object_get(arguments, "filepath") : nullptr;
-		const char *filepath = (fp_val && json_is_string(fp_val)) ? json_string_value(fp_val) : nullptr;
-
-		if (!filepath || filepath[0] == '\0')
-			return make_tool_result("Missing required parameter: filepath", true);
+		json_t *err = nullptr;
+		const char *filepath = get_required_string(arguments, "filepath", &err);
+		if (!filepath) return err;
 
 		McpToolId tool;
 		if (strcmp(tool_name, "load_mission") == 0)
