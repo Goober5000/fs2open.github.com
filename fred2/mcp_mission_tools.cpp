@@ -160,34 +160,16 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	int team = -1;
 	int insert_index = -1;  // -1 means append to end
 
-	name         = get_optional_string(input, "name");
-	message      = get_optional_string(input, "message");
+	name    = require_string_param(input, "name", req);
+	if (!name) return;
+	message = require_string_param(input, "message", req);
+	if (!message) return;
+
 	persona_str  = get_optional_string(input, "persona");
 	talking_head = get_optional_string(input, "talking_head");
 	voice_file   = get_optional_string(input, "voice_file");
-
-	if (input) {
-		json_t *v;
-
-		v = json_object_get(input, "team");
-		if (v && json_is_number(v))
-			team = (int)json_number_value(v);
-
-		v = json_object_get(input, "index");
-		if (v && json_is_number(v))
-			insert_index = (int)json_number_value(v);
-	}
-
-	if (!name || !name[0]) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: name");
-		return;
-	}
-	if (!message || !message[0]) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Missing required parameter: message");
-		return;
-	}
+	get_optional_integer(input, "team", &team);
+	get_optional_integer(input, "index", &insert_index);
 	if (strlen(name) >= NAME_LENGTH) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
@@ -330,14 +312,11 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update team
-	{
-		json_t *v = json_object_get(input, "team");
-		if (v && json_is_number(v)) {
-			int new_team = (int)json_number_value(v);
-			if (Messages[idx].multi_team != new_team) {
-				Messages[idx].multi_team = new_team;
-				changed = true;
-			}
+	int new_team;
+	if (get_optional_integer(input, "team", &new_team)) {
+		if (Messages[idx].multi_team != new_team) {
+			Messages[idx].multi_team = new_team;
+			changed = true;
 		}
 	}
 
@@ -393,11 +372,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
 	bool force = false;
-	if (input) {
-		json_t *v = json_object_get(input, "force");
-		if (v && json_is_boolean(v))
-			force = json_is_true(v);
-	}
+	get_optional_bool(input, "force", &force);
 
 	const char *name = require_string_param(input, "name", req);
 	if (!name) return;
@@ -506,18 +481,8 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	int from_index = -1;
 	int to_index = -1;
-
-	if (input) {
-		json_t *v;
-
-		v = json_object_get(input, "from_index");
-		if (v && json_is_number(v))
-			from_index = (int)json_number_value(v);
-
-		v = json_object_get(input, "to_index");
-		if (v && json_is_number(v))
-			to_index = (int)json_number_value(v);
-	}
+	get_optional_integer(input, "from_index", &from_index);
+	get_optional_integer(input, "to_index", &to_index);
 
 	if (from_index < 0 || from_index >= cfg.count) {
 		req->success = false;
@@ -558,18 +523,8 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 
 	int index_a = -1;
 	int index_b = -1;
-
-	if (input) {
-		json_t *v;
-
-		v = json_object_get(input, "index_a");
-		if (v && json_is_number(v))
-			index_a = (int)json_number_value(v);
-
-		v = json_object_get(input, "index_b");
-		if (v && json_is_number(v))
-			index_b = (int)json_number_value(v);
-	}
+	get_optional_integer(input, "index_a", &index_a);
+	get_optional_integer(input, "index_b", &index_b);
 
 	if (index_a < 0 || index_a >= cfg.count) {
 		req->success = false;
