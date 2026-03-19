@@ -110,6 +110,58 @@ const char *require_string_param(json_t *input, const char *param_name, McpToolR
 	return value;
 }
 
+bool require_integer_param(json_t *input, const char *param_name, McpToolRequest *req, int *out)
+{
+	json_t *v = input ? json_object_get(input, param_name) : nullptr;
+	if (v && json_is_integer(v)) {
+		*out = (int)json_integer_value(v);
+		return true;
+	}
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Missing required parameter: %s", param_name);
+	return false;
+}
+
+bool require_double_param(json_t *input, const char *param_name, McpToolRequest *req, double *out)
+{
+	json_t *v = input ? json_object_get(input, param_name) : nullptr;
+	if (v && json_is_number(v)) {
+		*out = json_number_value(v);
+		return true;
+	}
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Missing required parameter: %s", param_name);
+	return false;
+}
+
+bool require_float_param(json_t *input, const char *param_name, McpToolRequest *req, float *out)
+{
+	json_t *v = input ? json_object_get(input, param_name) : nullptr;
+	if (v && json_is_number(v)) {
+		*out = (float)json_number_value(v);
+		return true;
+	}
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Missing required parameter: %s", param_name);
+	return false;
+}
+
+bool require_bool_param(json_t *input, const char *param_name, McpToolRequest *req, bool *out)
+{
+	json_t *v = input ? json_object_get(input, param_name) : nullptr;
+	if (v && json_is_boolean(v)) {
+		*out = json_is_true(v);
+		return true;
+	}
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Missing required parameter: %s", param_name);
+	return false;
+}
+
 const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
@@ -123,8 +175,100 @@ const char *get_required_string(json_t *arguments, const char *param_name, json_
 	return str;
 }
 
+bool get_required_integer(json_t *arguments, const char *param_name, json_t **error_out, int *out)
+{
+	json_t *v = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (v && json_is_integer(v)) {
+		*out = (int)json_integer_value(v);
+		return true;
+	}
+	char buf[64];
+	snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
+	*error_out = make_tool_result(buf, true);
+	return false;
+}
+
+bool get_required_double(json_t *arguments, const char *param_name, json_t **error_out, double *out)
+{
+	json_t *v = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (v && json_is_number(v)) {
+		*out = json_number_value(v);
+		return true;
+	}
+	char buf[64];
+	snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
+	*error_out = make_tool_result(buf, true);
+	return false;
+}
+
+bool get_required_float(json_t *arguments, const char *param_name, json_t **error_out, float *out)
+{
+	json_t *v = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (v && json_is_number(v)) {
+		*out = (float)json_number_value(v);
+		return true;
+	}
+	char buf[64];
+	snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
+	*error_out = make_tool_result(buf, true);
+	return false;
+}
+
+bool get_required_bool(json_t *arguments, const char *param_name, json_t **error_out, bool *out)
+{
+	json_t *v = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (v && json_is_boolean(v)) {
+		*out = json_is_true(v);
+		return true;
+	}
+	char buf[64];
+	snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
+	*error_out = make_tool_result(buf, true);
+	return false;
+}
+
 const char *get_optional_string(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	return (val && json_is_string(val)) ? json_string_value(val) : nullptr;
+}
+
+bool get_optional_integer(json_t *arguments, const char *param_name, int *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (val && json_is_integer(val)) {
+		*out = (int)json_integer_value(val);
+		return true;
+	}
+	return false;
+}
+
+bool get_optional_double(json_t *arguments, const char *param_name, double *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (val && json_is_number(val)) {
+		*out = json_number_value(val);
+		return true;
+	}
+	return false;
+}
+
+bool get_optional_float(json_t *arguments, const char *param_name, float *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (val && json_is_number(val)) {
+		*out = (float)json_number_value(val);
+		return true;
+	}
+	return false;
+}
+
+bool get_optional_bool(json_t *arguments, const char *param_name, bool *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (val && json_is_boolean(val)) {
+		*out = json_is_true(val);
+		return true;
+	}
+	return false;
 }
