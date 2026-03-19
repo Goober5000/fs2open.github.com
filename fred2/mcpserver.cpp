@@ -96,145 +96,57 @@ static json_t *handle_tools_list(json_t * /*params*/)
 	json_t *tools = json_array();
 
 	// Tool: get_server_info
-	json_t *tool = json_object();
-	json_object_set_new(tool, "name", json_string("get_server_info"));
-	json_object_set_new(tool, "description",
-		json_string("Returns information about the running FRED2 instance, including the currently loaded mission and active mod if applicable"));
-
-	json_t *schema = json_object();
-	json_object_set_new(schema, "type", json_string("object"));
-	json_object_set_new(schema, "properties", json_object());
-	json_object_set_new(tool, "inputSchema", schema);
-
-	json_array_append_new(tools, tool);
+	register_tool(tools, "get_server_info",
+		"Returns information about the running FRED2 instance, including the currently loaded mission and active mod if applicable",
+		nullptr);
 
 	// Tool: load_mission
 	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("load_mission"));
-		json_object_set_new(t, "description",
-			json_string("Load a mission file into FRED2"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
 		json_t *props = json_object();
-		json_t *fp = json_object();
-		json_object_set_new(fp, "type", json_string("string"));
-		json_object_set_new(fp, "description", json_string("Absolute path to the mission file (.fs2 extension)"));
-		json_object_set_new(props, "filepath", fp);
-		json_object_set_new(s, "properties", props);
+		add_string_prop(props, "filepath", "Absolute path to the mission file (.fs2 extension)");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("filepath"));
-		json_object_set_new(s, "required", req);
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
+		register_tool(tools, "load_mission", "Load a mission file into FRED2", props, req);
 	}
 
 	// Tool: save_mission
 	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("save_mission"));
-		json_object_set_new(t, "description",
-			json_string("Save the current mission in standard (.fs2) format"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
 		json_t *props = json_object();
-		json_t *fp = json_object();
-		json_object_set_new(fp, "type", json_string("string"));
-		json_object_set_new(fp, "description", json_string("Absolute path to save the mission file to"));
-		json_object_set_new(props, "filepath", fp);
-		json_object_set_new(s, "properties", props);
+		add_string_prop(props, "filepath", "Absolute path to save the mission file to");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("filepath"));
-		json_object_set_new(s, "required", req);
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
+		register_tool(tools, "save_mission", "Save the current mission in standard (.fs2) format", props, req);
 	}
 
 	// Tool: new_mission
-	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("new_mission"));
-		json_object_set_new(t, "description",
-			json_string("Create a new empty mission, replacing any currently loaded mission"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
-		json_object_set_new(s, "properties", json_object());
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
-	}
+	register_tool(tools, "new_mission",
+		"Create a new empty mission, replacing any currently loaded mission",
+		nullptr);
 
 	// Tool: get_mission_info
-	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("get_mission_info"));
-		json_object_set_new(t, "description",
-			json_string("Returns metadata about the currently loaded mission (filename, title, author, notes, etc.)"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
-		json_object_set_new(s, "properties", json_object());
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
-	}
+	register_tool(tools, "get_mission_info",
+		"Returns metadata about the currently loaded mission (filename, title, author, notes, etc.)",
+		nullptr);
 
 	// Tool: get_ui_status
-	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("get_ui_status"));
-		json_object_set_new(t, "description",
-			json_string("Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
-		json_object_set_new(s, "properties", json_object());
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
-	}
+	register_tool(tools, "get_ui_status",
+		"Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open",
+		nullptr);
 
 	// Tool: get_timeout
-	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("get_timeout"));
-		json_object_set_new(t, "description",
-			json_string("Returns the current timeout (in seconds) for MCP operations that run on the FRED2 UI thread"));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
-		json_object_set_new(s, "properties", json_object());
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
-	}
+	register_tool(tools, "get_timeout",
+		"Returns the current timeout (in seconds) for MCP operations that run on the FRED2 UI thread",
+		nullptr);
 
 	// Tool: set_timeout
 	{
-		json_t *t = json_object();
-		json_object_set_new(t, "name", json_string("set_timeout"));
-		json_object_set_new(t, "description",
-			json_string("Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10."));
-
-		json_t *s = json_object();
-		json_object_set_new(s, "type", json_string("object"));
 		json_t *props = json_object();
-		json_t *sec = json_object();
-		json_object_set_new(sec, "type", json_string("number"));
-		json_object_set_new(sec, "description", json_string("Timeout in seconds (1-300)"));
-		json_object_set_new(props, "seconds", sec);
-		json_object_set_new(s, "properties", props);
+		add_number_prop(props, "seconds", "Timeout in seconds (1-300)");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("seconds"));
-		json_object_set_new(s, "required", req);
-		json_object_set_new(t, "inputSchema", s);
-
-		json_array_append_new(tools, t);
+		register_tool(tools, "set_timeout",
+			"Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10.",
+			props, req);
 	}
 
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
