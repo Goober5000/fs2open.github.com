@@ -464,16 +464,6 @@ void mcp_register_reference_tools(json_t *tools)
 // Tool handlers
 // ---------------------------------------------------------------------------
 
-// Build a JSON string array from a list of Ship_types indices.
-static json_t *build_ship_type_name_array(const SCP_vector<int> &indices)
-{
-	json_t *arr = json_array();
-	for (int idx : indices)
-		if (idx >= 0 && idx < (int)Ship_types.size())
-			json_array_append_new(arr, json_string(Ship_types[idx].name));
-	return arr;
-}
-
 static json_t *handle_list_ship_types()
 {
 	json_t *arr = json_array();
@@ -482,9 +472,7 @@ static json_t *handle_list_ship_types()
 		const auto &st = Ship_types[i];
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(st.name));
-
-		json_object_set_new(item, "actively_pursues", build_ship_type_name_array(st.ai_actively_pursues));
-
+		json_object_set_new(item, "actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
 		json_array_append_new(arr, item);
 	}
 
@@ -517,8 +505,8 @@ static json_t *handle_get_ship_type(json_t *arguments)
 	json_object_set_new(flags, "ai_protected_on_cripple", json_boolean(st.flags[Ship::Type_Info_Flags::AI_protected_on_cripple]));
 	json_object_set_new(obj, "flags", flags);
 
-	json_object_set_new(obj, "ai_actively_pursues", build_ship_type_name_array(st.ai_actively_pursues));
-	json_object_set_new(obj, "ai_cripple_ignores", build_ship_type_name_array(st.ai_cripple_ignores));
+	json_object_set_new(obj, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
+	json_object_set_new(obj, "ai_cripple_ignores", build_array_with_field(st.ai_cripple_ignores, Ship_types, &ship_type_info::name));
 
 	return make_json_tool_result(obj);
 }
@@ -2011,10 +1999,7 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 
 	int cmp = subsystem_stricmp(name1, name2);
 
-	char buf[64];
-	snprintf(buf, sizeof(buf), "Comparison result: %d (%s)", cmp,
-		cmp == 0 ? "equal" : "not equal");
-	json_t *result = make_tool_result(buf);
+	json_t *result = make_tool_result(false, "Comparison result: %d (%s)", cmp, cmp == 0 ? "equal" : "not equal");
 
 	json_t *sc = json_object();
 	json_object_set_new(sc, "result", json_integer(cmp));
