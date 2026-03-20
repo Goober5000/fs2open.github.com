@@ -3,6 +3,7 @@
 #include "mcpserver.h"
 
 #include <jansson.h>
+#include "globalincs/pstypes.h"
 
 json_t *make_tool_result(const char *text, bool is_error)
 {
@@ -223,4 +224,19 @@ bool get_optional_bool(json_t *arguments, const char *param_name, bool *out)
 		return true;
 	}
 	return false;
+}
+
+json_t *build_vec3_json(const vec3d &v)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "x", json_real(v.xyz.x));
+	json_object_set_new(obj, "y", json_real(v.xyz.y));
+	json_object_set_new(obj, "z", json_real(v.xyz.z));
+	return obj;
+}
+
+void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name)
+{
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message), "%s not found: %s", entity_type, name);
 }
