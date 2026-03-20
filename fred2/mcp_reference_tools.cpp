@@ -38,126 +38,130 @@ static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
 // OPF / OPR enum-to-string helpers
 // ---------------------------------------------------------------------------
 
+static const std::pair<int, const char *> s_opf_names[] = {
+	{ OPF_NONE,                        "none"                           },
+	{ OPF_NULL,                        "null"                           },
+	{ OPF_BOOL,                        "boolean"                        },
+	{ OPF_NUMBER,                      "number"                         },
+	{ OPF_SHIP,                        "ship"                           },
+	{ OPF_WING,                        "wing"                           },
+	{ OPF_SUBSYSTEM,                   "subsystem"                      },
+	{ OPF_POINT,                       "point"                          },
+	{ OPF_IFF,                         "iff"                            },
+	{ OPF_AI_GOAL,                     "ai_goal"                        },
+	{ OPF_DOCKER_POINT,                "docker_point"                   },
+	{ OPF_DOCKEE_POINT,                "dockee_point"                   },
+	{ OPF_MESSAGE,                     "message"                        },
+	{ OPF_WHO_FROM,                    "who_from"                       },
+	{ OPF_PRIORITY,                    "priority"                       },
+	{ OPF_WAYPOINT_PATH,               "waypoint_path"                  },
+	{ OPF_POSITIVE,                    "positive_number"                },
+	{ OPF_MISSION_NAME,                "mission_name"                   },
+	{ OPF_SHIP_POINT,                  "ship_or_waypoint"               },
+	{ OPF_GOAL_NAME,                   "goal_name"                      },
+	{ OPF_SHIP_WING,                   "ship_or_wing"                   },
+	{ OPF_SHIP_WING_WHOLETEAM,         "ship_or_wing_or_team"           },
+	{ OPF_SHIP_WING_SHIPONTEAM_POINT,  "ship_or_wing_or_team_or_waypoint" },
+	{ OPF_SHIP_WING_POINT,             "ship_or_wing_or_waypoint"       },
+	{ OPF_SHIP_WING_POINT_OR_NONE,     "ship_or_wing_or_waypoint_or_none" },
+	{ OPF_SHIP_TYPE,                   "ship_type"                      },
+	{ OPF_KEYPRESS,                    "keypress"                       },
+	{ OPF_EVENT_NAME,                  "event_name"                     },
+	{ OPF_AI_ORDER,                    "ai_order"                       },
+	{ OPF_SKILL_LEVEL,                 "skill_level"                    },
+	{ OPF_MEDAL_NAME,                  "medal_name"                     },
+	{ OPF_WEAPON_NAME,                 "weapon_name"                    },
+	{ OPF_SHIP_CLASS_NAME,             "ship_class_name"                },
+	{ OPF_CUSTOM_HUD_GAUGE,            "custom_hud_gauge"               },
+	{ OPF_HUGE_WEAPON,                 "huge_weapon"                    },
+	{ OPF_SHIP_NOT_PLAYER,             "ship_not_player"                },
+	{ OPF_JUMP_NODE_NAME,              "jump_node_name"                 },
+	{ OPF_VARIABLE_NAME,               "variable_name"                  },
+	{ OPF_AMBIGUOUS,                   "ambiguous"                      },
+	{ OPF_AWACS_SUBSYSTEM,             "awacs_subsystem"                },
+	{ OPF_CARGO,                       "cargo"                          },
+	{ OPF_AI_CLASS,                    "ai_class"                       },
+	{ OPF_SUPPORT_SHIP_CLASS,          "support_ship_class"             },
+	{ OPF_ARRIVAL_LOCATION,            "arrival_location"               },
+	{ OPF_ARRIVAL_ANCHOR_ALL,          "arrival_anchor"                 },
+	{ OPF_DEPARTURE_LOCATION,          "departure_location"             },
+	{ OPF_SHIP_WITH_BAY,               "ship_with_bay"                  },
+	{ OPF_SOUNDTRACK_NAME,             "soundtrack_name"                },
+	{ OPF_INTEL_NAME,                  "intel_name"                     },
+	{ OPF_STRING,                      "string"                         },
+	{ OPF_ROTATING_SUBSYSTEM,          "rotating_subsystem"             },
+	{ OPF_NAV_POINT,                   "nav_point"                      },
+	{ OPF_SSM_CLASS,                   "ssm_class"                      },
+	{ OPF_FLEXIBLE_ARGUMENT,           "flexible_argument"              },
+	{ OPF_ANYTHING,                    "anything"                       },
+	{ OPF_SKYBOX_MODEL_NAME,           "skybox_model_name"              },
+	{ OPF_SHIP_OR_NONE,                "ship_or_none"                   },
+	{ OPF_BACKGROUND_BITMAP,           "background_bitmap"              },
+	{ OPF_SUN_BITMAP,                  "sun_bitmap"                     },
+	{ OPF_NEBULA_STORM_TYPE,           "nebula_storm_type"              },
+	{ OPF_NEBULA_POOF,                 "nebula_poof"                    },
+	{ OPF_TURRET_TARGET_ORDER,         "turret_target_order"            },
+	{ OPF_SUBSYSTEM_OR_NONE,           "subsystem_or_none"              },
+	{ OPF_PERSONA,                     "persona"                        },
+	{ OPF_SUBSYS_OR_GENERIC,           "subsystem_or_generic"           },
+	{ OPF_ORDER_RECIPIENT,             "order_recipient"                },
+	{ OPF_SUBSYSTEM_TYPE,              "subsystem_type"                 },
+	{ OPF_POST_EFFECT,                 "post_effect"                    },
+	{ OPF_TARGET_PRIORITIES,           "target_priorities"              },
+	{ OPF_ARMOR_TYPE,                  "armor_type"                     },
+	{ OPF_FONT,                        "font"                           },
+	{ OPF_HUD_ELEMENT,                 "hud_element"                    },
+	{ OPF_SOUND_ENVIRONMENT,           "sound_environment"              },
+	{ OPF_SOUND_ENVIRONMENT_OPTION,    "sound_environment_option"       },
+	{ OPF_EXPLOSION_OPTION,            "explosion_option"               },
+	{ OPF_AUDIO_VOLUME_OPTION,         "audio_volume_option"            },
+	{ OPF_WEAPON_BANK_NUMBER,          "weapon_bank_number"             },
+	{ OPF_MESSAGE_OR_STRING,           "message_or_string"              },
+	{ OPF_BUILTIN_HUD_GAUGE,           "builtin_hud_gauge"              },
+	{ OPF_DAMAGE_TYPE,                 "damage_type"                    },
+	{ OPF_SHIP_EFFECT,                 "ship_effect"                    },
+	{ OPF_ANIMATION_TYPE,              "animation_type"                 },
+	{ OPF_MISSION_MOOD,                "mission_mood"                   },
+	{ OPF_SHIP_FLAG,                   "ship_flag"                      },
+	{ OPF_TEAM_COLOR,                  "team_color"                     },
+	{ OPF_NEBULA_PATTERN,              "nebula_pattern"                 },
+	{ OPF_SKYBOX_FLAGS,                "skybox_flags"                   },
+	{ OPF_GAME_SND,                    "game_sound"                     },
+	{ OPF_FIREBALL,                    "fireball"                       },
+	{ OPF_SPECIES,                     "species"                        },
+	{ OPF_LANGUAGE,                    "language"                       },
+	{ OPF_FUNCTIONAL_WHEN_EVAL_TYPE,   "functional_when_eval_type"      },
+	{ OPF_CONTAINER_NAME,              "container_name"                 },
+	{ OPF_LIST_CONTAINER_NAME,         "list_container_name"            },
+	{ OPF_MAP_CONTAINER_NAME,          "map_container_name"             },
+	{ OPF_ANIMATION_NAME,              "animation_name"                 },
+	{ OPF_CONTAINER_VALUE,             "container_value"                },
+	{ OPF_DATA_OR_STR_CONTAINER,       "data_or_string_container"       },
+	{ OPF_TRANSLATING_SUBSYSTEM,       "translating_subsystem"          },
+	{ OPF_ANY_HUD_GAUGE,               "any_hud_gauge"                  },
+	{ OPF_WING_FLAG,                   "wing_flag"                      },
+	{ OPF_ASTEROID_TYPES,              "asteroid_type"                  },
+	{ OPF_DEBRIS_TYPES,                "debris_type"                    },
+	{ OPF_WING_FORMATION,              "wing_formation"                 },
+	{ OPF_MOTION_DEBRIS,               "motion_debris"                  },
+	{ OPF_TURRET_TYPE,                 "turret_type"                    },
+	{ OPF_BOLT_TYPE,                   "bolt_type"                      },
+	{ OPF_TRAITOR_OVERRIDE,            "traitor_override"               },
+	{ OPF_LUA_GENERAL_ORDER,           "lua_general_order"              },
+	{ OPF_CHILD_LUA_ENUM,              "child_lua_enum"                 },
+	{ OPF_MISSION_CUSTOM_STRING,       "mission_custom_string"          },
+	{ OPF_MESSAGE_TYPE,                "message_type"                   },
+	{ OPF_PROP,                        "prop"                           },
+	{ OPF_SHIP_PROP,                   "ship_or_prop"                   },
+	{ OPF_PROP_CLASS_NAME,             "prop_class_name"                },
+};
+
 static const char *opf_to_string(int opf)
 {
-	switch (opf) {
-		case OPF_NONE:                         return "none";
-		case OPF_NULL:                         return "null";
-		case OPF_BOOL:                         return "boolean";
-		case OPF_NUMBER:                       return "number";
-		case OPF_SHIP:                         return "ship";
-		case OPF_WING:                         return "wing";
-		case OPF_SUBSYSTEM:                    return "subsystem";
-		case OPF_POINT:                        return "point";
-		case OPF_IFF:                          return "iff";
-		case OPF_AI_GOAL:                      return "ai_goal";
-		case OPF_DOCKER_POINT:                 return "docker_point";
-		case OPF_DOCKEE_POINT:                 return "dockee_point";
-		case OPF_MESSAGE:                      return "message";
-		case OPF_WHO_FROM:                     return "who_from";
-		case OPF_PRIORITY:                     return "priority";
-		case OPF_WAYPOINT_PATH:                return "waypoint_path";
-		case OPF_POSITIVE:                     return "positive_number";
-		case OPF_MISSION_NAME:                 return "mission_name";
-		case OPF_SHIP_POINT:                   return "ship_or_waypoint";
-		case OPF_GOAL_NAME:                    return "goal_name";
-		case OPF_SHIP_WING:                    return "ship_or_wing";
-		case OPF_SHIP_WING_WHOLETEAM:          return "ship_or_wing_or_team";
-		case OPF_SHIP_WING_SHIPONTEAM_POINT:   return "ship_or_wing_or_team_or_waypoint";
-		case OPF_SHIP_WING_POINT:              return "ship_or_wing_or_waypoint";
-		case OPF_SHIP_WING_POINT_OR_NONE:      return "ship_or_wing_or_waypoint_or_none";
-		case OPF_SHIP_TYPE:                    return "ship_type";
-		case OPF_KEYPRESS:                     return "keypress";
-		case OPF_EVENT_NAME:                   return "event_name";
-		case OPF_AI_ORDER:                     return "ai_order";
-		case OPF_SKILL_LEVEL:                  return "skill_level";
-		case OPF_MEDAL_NAME:                   return "medal_name";
-		case OPF_WEAPON_NAME:                  return "weapon_name";
-		case OPF_SHIP_CLASS_NAME:              return "ship_class_name";
-		case OPF_CUSTOM_HUD_GAUGE:             return "custom_hud_gauge";
-		case OPF_HUGE_WEAPON:                  return "huge_weapon";
-		case OPF_SHIP_NOT_PLAYER:              return "ship_not_player";
-		case OPF_JUMP_NODE_NAME:               return "jump_node_name";
-		case OPF_VARIABLE_NAME:                return "variable_name";
-		case OPF_AMBIGUOUS:                    return "ambiguous";
-		case OPF_AWACS_SUBSYSTEM:              return "awacs_subsystem";
-		case OPF_CARGO:                        return "cargo";
-		case OPF_AI_CLASS:                     return "ai_class";
-		case OPF_SUPPORT_SHIP_CLASS:           return "support_ship_class";
-		case OPF_ARRIVAL_LOCATION:             return "arrival_location";
-		case OPF_ARRIVAL_ANCHOR_ALL:           return "arrival_anchor";
-		case OPF_DEPARTURE_LOCATION:           return "departure_location";
-		case OPF_SHIP_WITH_BAY:                return "ship_with_bay";
-		case OPF_SOUNDTRACK_NAME:              return "soundtrack_name";
-		case OPF_INTEL_NAME:                   return "intel_name";
-		case OPF_STRING:                       return "string";
-		case OPF_ROTATING_SUBSYSTEM:           return "rotating_subsystem";
-		case OPF_NAV_POINT:                    return "nav_point";
-		case OPF_SSM_CLASS:                    return "ssm_class";
-		case OPF_FLEXIBLE_ARGUMENT:            return "flexible_argument";
-		case OPF_ANYTHING:                     return "anything";
-		case OPF_SKYBOX_MODEL_NAME:            return "skybox_model_name";
-		case OPF_SHIP_OR_NONE:                 return "ship_or_none";
-		case OPF_BACKGROUND_BITMAP:            return "background_bitmap";
-		case OPF_SUN_BITMAP:                   return "sun_bitmap";
-		case OPF_NEBULA_STORM_TYPE:            return "nebula_storm_type";
-		case OPF_NEBULA_POOF:                  return "nebula_poof";
-		case OPF_TURRET_TARGET_ORDER:          return "turret_target_order";
-		case OPF_SUBSYSTEM_OR_NONE:            return "subsystem_or_none";
-		case OPF_PERSONA:                      return "persona";
-		case OPF_SUBSYS_OR_GENERIC:            return "subsystem_or_generic";
-		case OPF_ORDER_RECIPIENT:              return "order_recipient";
-		case OPF_SUBSYSTEM_TYPE:               return "subsystem_type";
-		case OPF_POST_EFFECT:                  return "post_effect";
-		case OPF_TARGET_PRIORITIES:            return "target_priorities";
-		case OPF_ARMOR_TYPE:                   return "armor_type";
-		case OPF_FONT:                         return "font";
-		case OPF_HUD_ELEMENT:                  return "hud_element";
-		case OPF_SOUND_ENVIRONMENT:            return "sound_environment";
-		case OPF_SOUND_ENVIRONMENT_OPTION:     return "sound_environment_option";
-		case OPF_EXPLOSION_OPTION:             return "explosion_option";
-		case OPF_AUDIO_VOLUME_OPTION:          return "audio_volume_option";
-		case OPF_WEAPON_BANK_NUMBER:           return "weapon_bank_number";
-		case OPF_MESSAGE_OR_STRING:            return "message_or_string";
-		case OPF_BUILTIN_HUD_GAUGE:            return "builtin_hud_gauge";
-		case OPF_DAMAGE_TYPE:                  return "damage_type";
-		case OPF_SHIP_EFFECT:                  return "ship_effect";
-		case OPF_ANIMATION_TYPE:               return "animation_type";
-		case OPF_MISSION_MOOD:                 return "mission_mood";
-		case OPF_SHIP_FLAG:                    return "ship_flag";
-		case OPF_TEAM_COLOR:                   return "team_color";
-		case OPF_NEBULA_PATTERN:               return "nebula_pattern";
-		case OPF_SKYBOX_FLAGS:                 return "skybox_flags";
-		case OPF_GAME_SND:                     return "game_sound";
-		case OPF_FIREBALL:                     return "fireball";
-		case OPF_SPECIES:                      return "species";
-		case OPF_LANGUAGE:                     return "language";
-		case OPF_FUNCTIONAL_WHEN_EVAL_TYPE:    return "functional_when_eval_type";
-		case OPF_CONTAINER_NAME:               return "container_name";
-		case OPF_LIST_CONTAINER_NAME:          return "list_container_name";
-		case OPF_MAP_CONTAINER_NAME:           return "map_container_name";
-		case OPF_ANIMATION_NAME:               return "animation_name";
-		case OPF_CONTAINER_VALUE:              return "container_value";
-		case OPF_DATA_OR_STR_CONTAINER:        return "data_or_string_container";
-		case OPF_TRANSLATING_SUBSYSTEM:        return "translating_subsystem";
-		case OPF_ANY_HUD_GAUGE:                return "any_hud_gauge";
-		case OPF_WING_FLAG:                    return "wing_flag";
-		case OPF_ASTEROID_TYPES:               return "asteroid_type";
-		case OPF_DEBRIS_TYPES:                 return "debris_type";
-		case OPF_WING_FORMATION:               return "wing_formation";
-		case OPF_MOTION_DEBRIS:                return "motion_debris";
-		case OPF_TURRET_TYPE:                  return "turret_type";
-		case OPF_BOLT_TYPE:                    return "bolt_type";
-		case OPF_TRAITOR_OVERRIDE:             return "traitor_override";
-		case OPF_LUA_GENERAL_ORDER:            return "lua_general_order";
-		case OPF_CHILD_LUA_ENUM:               return "child_lua_enum";
-		case OPF_MISSION_CUSTOM_STRING:        return "mission_custom_string";
-		case OPF_MESSAGE_TYPE:                 return "message_type";
-		case OPF_PROP:                         return "prop";
-		case OPF_SHIP_PROP:                    return "ship_or_prop";
-		case OPF_PROP_CLASS_NAME:              return "prop_class_name";
-		default: return "unknown";
-	}
+	for (const auto &p : s_opf_names)
+		if (p.first == opf)
+			return p.second;
+	return "unknown";
 }
 
 // Reverse mapping: MCP argument type name → OPF_* constant.
@@ -165,49 +169,9 @@ static const char *opf_to_string(int opf)
 static int opf_from_string(const char *name)
 {
 	if (!name) return -1;
-
-	// Walk all OPF values by converting each to string and comparing.
-	// This intentionally mirrors opf_to_string so they stay in sync.
-	static const int opf_values[] = {
-		OPF_NONE, OPF_NULL, OPF_BOOL, OPF_NUMBER, OPF_SHIP, OPF_WING,
-		OPF_SUBSYSTEM, OPF_POINT, OPF_IFF, OPF_AI_GOAL, OPF_DOCKER_POINT,
-		OPF_DOCKEE_POINT, OPF_MESSAGE, OPF_WHO_FROM, OPF_PRIORITY,
-		OPF_WAYPOINT_PATH, OPF_POSITIVE, OPF_MISSION_NAME, OPF_SHIP_POINT,
-		OPF_GOAL_NAME, OPF_SHIP_WING, OPF_SHIP_WING_WHOLETEAM,
-		OPF_SHIP_WING_SHIPONTEAM_POINT, OPF_SHIP_WING_POINT,
-		OPF_SHIP_WING_POINT_OR_NONE, OPF_SHIP_TYPE, OPF_KEYPRESS,
-		OPF_EVENT_NAME, OPF_AI_ORDER, OPF_SKILL_LEVEL, OPF_MEDAL_NAME,
-		OPF_WEAPON_NAME, OPF_SHIP_CLASS_NAME, OPF_CUSTOM_HUD_GAUGE,
-		OPF_HUGE_WEAPON, OPF_SHIP_NOT_PLAYER, OPF_JUMP_NODE_NAME,
-		OPF_VARIABLE_NAME, OPF_AMBIGUOUS, OPF_AWACS_SUBSYSTEM, OPF_CARGO,
-		OPF_AI_CLASS, OPF_SUPPORT_SHIP_CLASS, OPF_ARRIVAL_LOCATION,
-		OPF_ARRIVAL_ANCHOR_ALL, OPF_DEPARTURE_LOCATION, OPF_SHIP_WITH_BAY,
-		OPF_SOUNDTRACK_NAME, OPF_INTEL_NAME, OPF_STRING, OPF_ROTATING_SUBSYSTEM,
-		OPF_NAV_POINT, OPF_SSM_CLASS, OPF_FLEXIBLE_ARGUMENT, OPF_ANYTHING,
-		OPF_SKYBOX_MODEL_NAME, OPF_SHIP_OR_NONE, OPF_BACKGROUND_BITMAP,
-		OPF_SUN_BITMAP, OPF_NEBULA_STORM_TYPE, OPF_NEBULA_POOF,
-		OPF_TURRET_TARGET_ORDER, OPF_SUBSYSTEM_OR_NONE, OPF_PERSONA,
-		OPF_SUBSYS_OR_GENERIC, OPF_ORDER_RECIPIENT, OPF_SUBSYSTEM_TYPE,
-		OPF_POST_EFFECT, OPF_TARGET_PRIORITIES, OPF_ARMOR_TYPE, OPF_FONT,
-		OPF_HUD_ELEMENT, OPF_SOUND_ENVIRONMENT, OPF_SOUND_ENVIRONMENT_OPTION,
-		OPF_EXPLOSION_OPTION, OPF_AUDIO_VOLUME_OPTION, OPF_WEAPON_BANK_NUMBER,
-		OPF_MESSAGE_OR_STRING, OPF_BUILTIN_HUD_GAUGE, OPF_DAMAGE_TYPE,
-		OPF_SHIP_EFFECT, OPF_ANIMATION_TYPE, OPF_MISSION_MOOD, OPF_SHIP_FLAG,
-		OPF_TEAM_COLOR, OPF_NEBULA_PATTERN, OPF_SKYBOX_FLAGS, OPF_GAME_SND,
-		OPF_FIREBALL, OPF_SPECIES, OPF_LANGUAGE, OPF_FUNCTIONAL_WHEN_EVAL_TYPE,
-		OPF_CONTAINER_NAME, OPF_LIST_CONTAINER_NAME, OPF_MAP_CONTAINER_NAME,
-		OPF_ANIMATION_NAME, OPF_CONTAINER_VALUE, OPF_DATA_OR_STR_CONTAINER,
-		OPF_TRANSLATING_SUBSYSTEM, OPF_ANY_HUD_GAUGE, OPF_WING_FLAG,
-		OPF_ASTEROID_TYPES, OPF_DEBRIS_TYPES, OPF_WING_FORMATION,
-		OPF_MOTION_DEBRIS, OPF_TURRET_TYPE, OPF_BOLT_TYPE, OPF_TRAITOR_OVERRIDE,
-		OPF_LUA_GENERAL_ORDER, OPF_CHILD_LUA_ENUM, OPF_MISSION_CUSTOM_STRING,
-		OPF_MESSAGE_TYPE, OPF_PROP, OPF_SHIP_PROP, OPF_PROP_CLASS_NAME,
-	};
-
-	for (int opf : opf_values) {
-		if (strcmp(opf_to_string(opf), name) == 0)
-			return opf;
-	}
+	for (const auto &p : s_opf_names)
+		if (strcmp(p.second, name) == 0)
+			return p.first;
 	return -1;
 }
 
