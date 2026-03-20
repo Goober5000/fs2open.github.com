@@ -206,11 +206,9 @@ static json_t *mcp_wait_for_result(McpToolRequest *req)
 	}
 	// else: handler still running and will clean up when it finishes
 
-	char timeout_msg[256];
-	snprintf(timeout_msg, sizeof(timeout_msg),
+	return make_tool_result(true,
 		"Operation timed out (%us). A modal dialog may be blocking the FRED2 UI. "
 		"Use get_ui_status to check.", timeout_ms / 1000);
-	return make_tool_result(timeout_msg, true);
 }
 
 // Marshal a tool call to the main MFC thread with a configurable timeout.
@@ -303,9 +301,7 @@ static json_t *handle_tools_call(json_t *params)
 	}
 
 	if (strcmp(tool_name, "get_timeout") == 0) {
-		char buf[64];
-		snprintf(buf, sizeof(buf), "timeout_seconds: %u", mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000);
-		return make_tool_result(buf);
+		return make_tool_result(false, "timeout_seconds: %u", mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000);
 	}
 
 	if (strcmp(tool_name, "set_timeout") == 0) {
@@ -319,9 +315,7 @@ static json_t *handle_tools_call(json_t *params)
 
 		mcp_tool_timeout_ms.store((DWORD)(seconds * 1000), std::memory_order_relaxed);
 
-		char buf[64];
-		snprintf(buf, sizeof(buf), "timeout_seconds: %d", seconds);
-		return make_tool_result(buf);
+		return make_tool_result(false, "timeout_seconds: %d", seconds);
 	}
 
 	// All tools below require FRED2 to be fully initialized
@@ -521,11 +515,11 @@ void mcp_server_start()
 	if (mcp_ctx != nullptr)
 		return;
 
-	char listen_addr[32];
-	snprintf(listen_addr, sizeof(listen_addr), "127.0.0.1:%d", Mcp_server_port);
+	SCP_string listen_addr;
+	sprintf(listen_addr, "127.0.0.1:%d", Mcp_server_port);
 
 	const char *options[] = {
-		"listening_ports", listen_addr,
+		"listening_ports", listen_addr.c_str(),
 		"num_threads", "2",
 		nullptr
 	};
