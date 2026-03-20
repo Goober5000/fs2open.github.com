@@ -26,6 +26,7 @@
 
 #include "mcpserver.h"
 #include "mcp_mission_tools.h"
+#include "mcp_sexp_forest.h"
 #include "mod_table/mod_table.h"
 #include "management.h"
 #include "ship/ship.h"
@@ -739,6 +740,7 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		Undo_count = 0;
+		mcp_sexp_forest_mark_dirty();
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
 			"Mission loaded successfully: %s", Mission_filename);
@@ -777,6 +779,32 @@ static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 	}
 }
 
+// ---------------------------------------------------------------------------
+// Editor window enumeration
+// Shared between GET_UI_STATUS and SEXP-forest dirty tracking.
+// ---------------------------------------------------------------------------
+
+struct McpPersistentEditor { CWnd *wnd; const char *name; };
+struct McpOnDemandEditor   { CWnd **ptr; const char *name; };
+
+static const McpPersistentEditor s_persistent_editors[] = {
+	{ &Ship_editor_dialog,     "Ship Editor"      },
+	{ &Wing_editor_dialog,     "Wing Editor"      },
+	{ &Prop_editor_dialog,     "Props Editor"     },
+	{ &Waypoint_editor_dialog, "Waypoint Editor"  },
+	{ &Jumpnode_editor_dialog, "Jump Node Editor" },
+	{ &Music_player_dialog,    "Music Player"     },
+};
+
+static const McpOnDemandEditor s_ondemand_editors[] = {
+	{ (CWnd **)&Briefing_dialog,     "Briefing Editor"    },
+	{ (CWnd **)&Bg_bitmap_dialog,    "Background Editor"  },
+	{ (CWnd **)&Event_editor_dlg,    "Event Editor"       },
+	{ (CWnd **)&Goal_editor_dlg,     "Goals Editor"       },
+	{ (CWnd **)&Message_editor_dlg,  "Message Editor"     },
+	{ (CWnd **)&Cutscene_editor_dlg, "Cutscene Editor"    },
+};
+
 LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 {
 	auto *req = reinterpret_cast<McpToolRequest*>(lParam);
@@ -794,6 +822,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		create_new_mission();
 		FREDDoc_ptr->SetTitle("Untitled");
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
+		mcp_sexp_forest_mark_dirty();
 		req->success = true;
 		strncpy(req->result_message, "New empty mission created", sizeof(req->result_message) - 1);
 		break;
@@ -841,6 +870,12 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 					"Model was not loaded for %s", req->filepath);
 			}
 		}
+		break;
+
+	case McpToolId::REBUILD_SEXP_FOREST:
+		mcp_sexp_forest_rebuild();
+		req->success = true;
+		strncpy(req->result_message, "SEXP forest rebuilt", sizeof(req->result_message) - 1);
 		break;
 
 	case McpToolId::GET_SERVER_INFO:
@@ -920,35 +955,14 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			if (!modal_active) {
 				buf += "open_editors:";
 
-				// Persistent (always-exist) modeless dialogs
-				struct { CWnd *wnd; const char *name; } persistent[] = {
-					{ &Ship_editor_dialog, "Ship Editor" },
-					{ &Wing_editor_dialog, "Wing Editor" },
-					{ &Prop_editor_dialog, "Props Editor" },
-					{ &Waypoint_editor_dialog, "Waypoint Editor" },
-					{ &Jumpnode_editor_dialog, "Jump Node Editor" },
-					{ &Music_player_dialog, "Music Player" },
-				};
-
 				bool any_open = false;
-				for (auto &d : persistent) {
+				for (auto &d : s_persistent_editors) {
 					if (d.wnd->IsWindowVisible()) {
 						sprintf_concat(buf, " %s,", d.name);
 						any_open = true;
 					}
 				}
-
-				// On-demand (pointer-based) modeless dialogs
-				struct { CWnd **ptr; const char *name; } on_demand[] = {
-					{ (CWnd **)&Briefing_dialog, "Briefing Editor" },
-					{ (CWnd **)&Bg_bitmap_dialog, "Background Editor" },
-					{ (CWnd **)&Event_editor_dlg, "Event Editor" },
-					{ (CWnd **)&Goal_editor_dlg, "Goals Editor" },
-					{ (CWnd **)&Message_editor_dlg, "Message Editor" },
-					{ (CWnd **)&Cutscene_editor_dlg, "Cutscene Editor" },
-				};
-
-				for (auto &d : on_demand) {
+				for (auto &d : s_ondemand_editors) {
 					if (*d.ptr != nullptr && (*d.ptr)->IsWindowVisible()) {
 						sprintf_concat(buf, " %s,", d.name);
 						any_open = true;

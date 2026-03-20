@@ -13,6 +13,7 @@
 #include "FRED.h"
 #include "FREDDoc.h"
 #include "FREDView.h"
+#include "mcp_sexp_forest.h"
 #include "globalincs/linklist.h"
 #include "parse/sexp.h"
 #include "MissionCutscenesDlg.h"
@@ -288,6 +289,7 @@ void CMissionCutscenesDlg::OnButtonOk()
 	UpdateData(TRUE);
 	if (query_modified())
 		set_modified();
+	mcp_sexp_forest_mark_dirty();
 
 	for (auto& cutscene : The_mission.cutscenes) {
 		free_sexp2(cutscene.formula);
