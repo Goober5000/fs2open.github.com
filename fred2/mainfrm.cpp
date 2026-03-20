@@ -965,7 +965,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			}
 
 			req->success = true;
-			strncpy(req->result_message, buf, sizeof(req->result_message) - 1);
+			strncpy(req->result_message, buf.c_str(), sizeof(req->result_message) - 1);
 			req->result_message[sizeof(req->result_message) - 1] = '\0';
 		}
 		break;
