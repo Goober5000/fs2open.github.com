@@ -13,6 +13,7 @@
 #include "FRED.h"
 #include "FREDDoc.h"
 #include "FREDView.h"
+#include "mcp_sexp_forest.h"
 #include "globalincs/linklist.h"
 #include "parse/sexp.h"
 #include "MissionGoalsDlg.h"
@@ -358,6 +359,7 @@ void CMissionGoalsDlg::OnButtonOk()
 	UpdateData(TRUE);
 	if (query_modified())
 		set_modified();
+	mcp_sexp_forest_mark_dirty();
 
 	for (auto &goal: Mission_goals) {
 		free_sexp2(goal.formula);
