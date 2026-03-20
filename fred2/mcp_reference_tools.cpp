@@ -1631,12 +1631,13 @@ static const opf_type_info Opf_type_info[] = {
 	{ nullptr, nullptr, nullptr, nullptr }
 };
 
-static const opf_type_info *find_opf_type_info(const char *name)
+// Linear search in a sentinel-terminated (t->name == nullptr) type-info table.
+template<typename T>
+static const T *find_type_info(const T *table, const char *name)
 {
-	for (const opf_type_info *t = Opf_type_info; t->name; t++) {
+	for (const T *t = table; t->name; t++)
 		if (stricmp(name, t->name) == 0)
 			return t;
-	}
 	return nullptr;
 }
 
@@ -1656,7 +1657,7 @@ static json_t *handle_get_sexp_argument_type(json_t *arguments)
 		return make_json_tool_result(arr);
 	}
 
-	const opf_type_info *info = find_opf_type_info(name);
+	const opf_type_info *info = find_type_info(Opf_type_info, name);
 	if (!info)
 		return make_tool_result("Unknown argument type. Call get_sexp_argument_type without arguments to list all types.", true);
 
@@ -1711,15 +1712,6 @@ static const opr_type_info Opr_type_info[] = {
 	{ nullptr, nullptr, nullptr }
 };
 
-static const opr_type_info *find_opr_type_info(const char *name)
-{
-	for (const opr_type_info *t = Opr_type_info; t->name; t++) {
-		if (stricmp(name, t->name) == 0)
-			return t;
-	}
-	return nullptr;
-}
-
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
 	const char *name = get_optional_string(arguments, "name");
@@ -1737,7 +1729,7 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 	}
 
 	// Look up the type
-	const opr_type_info *info = find_opr_type_info(name);
+	const opr_type_info *info = find_type_info(Opr_type_info, name);
 	if (!info)
 		return make_tool_result("Unknown return type. Call get_sexp_return_type without arguments to list all types.", true);
 
@@ -2061,10 +2053,7 @@ static json_t *handle_list_persona_types()
 	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
 		json_array_append_new(arr, json_string(Persona_type_names[i]));
 
-	json_t *data = json_object();
-	json_object_set_new(data, "persona_types", arr);
-	json_object_set_new(data, "count", json_integer(MAX_PERSONA_TYPES));
-	return make_json_tool_result(data);
+	return make_list_result("persona_types", arr);
 }
 
 static json_t *handle_list_personas()
@@ -2096,10 +2085,7 @@ static json_t *handle_list_personas()
 		json_array_append_new(arr, entry);
 	}
 
-	json_t *data = json_object();
-	json_object_set_new(data, "personas", arr);
-	json_object_set_new(data, "count", json_integer((int)Personas.size()));
-	return make_json_tool_result(data);
+	return make_list_result("personas", arr);
 }
 
 static json_t *handle_list_talking_heads()
@@ -2137,10 +2123,7 @@ static json_t *handle_list_talking_heads()
 	for (const auto &h : heads)
 		json_array_append_new(arr, json_string(h.c_str()));
 
-	json_t *data = json_object();
-	json_object_set_new(data, "talking_heads", arr);
-	json_object_set_new(data, "count", json_integer((int)heads.size()));
-	return make_json_tool_result(data);
+	return make_list_result("talking_heads", arr);
 }
 
 // ---------------------------------------------------------------------------

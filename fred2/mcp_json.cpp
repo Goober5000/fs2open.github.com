@@ -28,6 +28,14 @@ json_t *make_json_tool_result(json_t *data)
 	return result;
 }
 
+json_t *make_list_result(const char *array_key, json_t *arr)
+{
+	json_t *data = json_object();
+	json_object_set_new(data, array_key, arr);
+	json_object_set_new(data, "count", json_integer((int)json_array_size(arr)));
+	return make_json_tool_result(data);
+}
+
 void set_optional_string(json_t *obj, const char *key, const char *value)
 {
 	if (value && value[0] != '\0')
