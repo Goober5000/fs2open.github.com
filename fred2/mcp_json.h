@@ -72,4 +72,7 @@ json_t *build_vec3_json(const vec3d &v);
 // Sets req->success=false and formats "EntityType not found: name" into result_message.
 void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name);
 
+// Builds an MCP error result with "EntityType not found: name" text (for reference tools).
+json_t *make_not_found_error(const char *entity_type, const char *name);
+
 #endif // _MCP_JSON_H

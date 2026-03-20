@@ -464,6 +464,16 @@ void mcp_register_reference_tools(json_t *tools)
 // Tool handlers
 // ---------------------------------------------------------------------------
 
+// Build a JSON string array from a list of Ship_types indices.
+static json_t *build_ship_type_name_array(const SCP_vector<int> &indices)
+{
+	json_t *arr = json_array();
+	for (int idx : indices)
+		if (idx >= 0 && idx < (int)Ship_types.size())
+			json_array_append_new(arr, json_string(Ship_types[idx].name));
+	return arr;
+}
+
 static json_t *handle_list_ship_types()
 {
 	json_t *arr = json_array();
@@ -473,13 +483,7 @@ static json_t *handle_list_ship_types()
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(st.name));
 
-		// Resolve actively-pursues to names
-		json_t *pursues = json_array();
-		for (int idx : st.ai_actively_pursues) {
-			if (idx >= 0 && idx < (int)Ship_types.size())
-				json_array_append_new(pursues, json_string(Ship_types[idx].name));
-		}
-		json_object_set_new(item, "actively_pursues", pursues);
+		json_object_set_new(item, "actively_pursues", build_ship_type_name_array(st.ai_actively_pursues));
 
 		json_array_append_new(arr, item);
 	}
@@ -495,7 +499,7 @@ static json_t *handle_get_ship_type(json_t *arguments)
 
 	int idx = ship_type_name_lookup(name);
 	if (idx < 0)
-		return make_tool_result("Ship type not found", true);
+		return make_not_found_error("Ship type", name);
 
 	const auto &st = Ship_types[idx];
 	json_t *obj = json_object();
@@ -513,21 +517,8 @@ static json_t *handle_get_ship_type(json_t *arguments)
 	json_object_set_new(flags, "ai_protected_on_cripple", json_boolean(st.flags[Ship::Type_Info_Flags::AI_protected_on_cripple]));
 	json_object_set_new(obj, "flags", flags);
 
-	// AI actively pursues
-	json_t *pursues = json_array();
-	for (int pidx : st.ai_actively_pursues) {
-		if (pidx >= 0 && pidx < (int)Ship_types.size())
-			json_array_append_new(pursues, json_string(Ship_types[pidx].name));
-	}
-	json_object_set_new(obj, "ai_actively_pursues", pursues);
-
-	// AI cripple ignores
-	json_t *ignores = json_array();
-	for (int cidx : st.ai_cripple_ignores) {
-		if (cidx >= 0 && cidx < (int)Ship_types.size())
-			json_array_append_new(ignores, json_string(Ship_types[cidx].name));
-	}
-	json_object_set_new(obj, "ai_cripple_ignores", ignores);
+	json_object_set_new(obj, "ai_actively_pursues", build_ship_type_name_array(st.ai_actively_pursues));
+	json_object_set_new(obj, "ai_cripple_ignores", build_ship_type_name_array(st.ai_cripple_ignores));
 
 	return make_json_tool_result(obj);
 }
@@ -542,14 +533,14 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 	if (filter_species) {
 		filter_species_idx = species_info_lookup(filter_species);
 		if (filter_species_idx < 0)
-			return make_tool_result("Species not found", true);
+			return make_not_found_error("Species", filter_species);
 	}
 
 	int filter_type_idx = -1;
 	if (filter_type) {
 		filter_type_idx = ship_type_name_lookup(filter_type);
 		if (filter_type_idx < 0)
-			return make_tool_result("Ship type not found", true);
+			return make_not_found_error("Ship type", filter_type);
 	}
 
 	json_t *arr = json_array();
@@ -631,7 +622,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 
 	int idx = ship_info_lookup(name);
 	if (idx < 0)
-		return make_tool_result("Ship class not found", true);
+		return make_not_found_error("Ship class", name);
 
 	const auto &sip = Ship_info[idx];
 	json_t *obj = json_object();
@@ -665,8 +656,8 @@ static json_t *handle_get_ship_class(json_t *arguments)
 
 	// Physics
 	json_object_set_new(obj, "max_velocity", build_vec3_json(sip.max_vel));
-	json_object_set_new(obj, "max_afterburner_velocity", json_real(sip.afterburner_max_vel.xyz.z));
-	json_object_set_new(obj, "max_rear_velocity", json_real(sip.max_rear_vel));
+	json_object_set_new(obj, "max_afterburner_speed", json_real(sip.afterburner_max_vel.xyz.z));
+	json_object_set_new(obj, "max_rear_speed", json_real(sip.max_rear_vel));
 
 	// Durability
 	json_object_set_new(obj, "max_hull_strength", json_real(sip.max_hull_strength));
@@ -775,7 +766,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 
 	int idx = weapon_info_lookup(name);
 	if (idx < 0)
-		return make_tool_result("Weapon class not found", true);
+		return make_not_found_error("Weapon class", name);
 
 	const auto &wip = Weapon_info[idx];
 	json_t *obj = json_object();
@@ -912,7 +903,7 @@ static json_t *handle_get_iff(json_t *arguments)
 
 	int idx = iff_lookup(name);
 	if (idx < 0)
-		return make_tool_result("IFF not found", true);
+		return make_not_found_error("IFF", name);
 
 	const auto &iff = Iff_info[idx];
 	json_t *obj = json_object();
@@ -970,7 +961,7 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 
 	int idx = intel_info_lookup(name);
 	if (idx < 0)
-		return make_tool_result("Intel entry not found", true);
+		return make_not_found_error("Intel entry", name);
 
 	const auto &entry = Intel_info[idx];
 	json_t *obj = json_object();
@@ -1152,6 +1143,138 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 	return make_json_tool_result(arr);
 }
 
+// Populate "argument_types" (and "variadic_argument_types" for variadic ops) on obj.
+// For variadic operators (max_args == INT_MAX), detects the repeating cycle and splits
+// the fixed prefix from the cycle.  For non-variadic operators, lists all argument types.
+static void build_argument_types_json(json_t *obj, int op_index, int min_args, int max_args)
+{
+	bool is_variadic = (max_args == INT_MAX);
+
+	if (is_variadic) {
+		// For variadic operators, separate the fixed prefix from the
+		// repeating cycle.  We query enough positions to reliably detect
+		// the cycle pattern, then verify it repeats into an extended range.
+		//
+		// We need at least 8 positions even when min_args is small (e.g. 0)
+		// so that we have enough data to detect multi-element cycles.
+		int query_count = std::max(min_args * 2, 8);
+
+		// Collect types for positions 0..query_count-1
+		SCP_vector<int> types;
+		for (int a = 0; a < query_count; a++)
+			types.push_back(query_operator_argument_type(op_index, a));
+
+		// Query 2 * query_count additional positions to verify the cycle,
+		// ensuring even the largest candidate cycle gets a second-period check.
+		int extended_count = 2 * query_count;
+		SCP_vector<int> extended_types;
+		for (int a = 0; a < extended_count; a++)
+			extended_types.push_back(query_operator_argument_type(op_index, query_count + a));
+
+		// Find the cycle length.  The cycle is the smallest L (1..query_count)
+		// where the pattern at the tail of types[] repeats into
+		// extended_types[].  Specifically, the last L entries of types[]
+		// must equal the first L entries of extended_types[], AND for any
+		// additional repetitions within types[] the cycle must hold.
+		int cycle_len = 0;
+		for (int L = 1; L <= query_count; L++) {
+			// The cycle covers positions [query_count - L .. query_count - 1].
+			// Verify it repeats at [query_count .. query_count + L - 1].
+			bool match = true;
+			for (int i = 0; i < L; i++) {
+				if (types[query_count - L + i] != extended_types[i]) {
+					match = false;
+					break;
+				}
+			}
+			if (!match)
+				continue;
+
+			// Verify the cycle is self-consistent within types[] —
+			// i.e., for the cycle region, type[a] == type[a - L]
+			int prefix_len = query_count - L;
+			for (int a = prefix_len + L; a < query_count; a++) {
+				if (types[a] != types[a - L]) {
+					match = false;
+					break;
+				}
+			}
+			if (!match)
+				continue;
+
+			// Verify a second period in extended_types to guard
+			// against a coincidental single-period boundary match
+			for (int i = 0; i < L; i++) {
+				if (extended_types[i] != extended_types[L + i]) {
+					match = false;
+					break;
+				}
+			}
+			if (!match)
+				continue;
+
+			cycle_len = L;
+			break;
+		}
+
+		bool cycle_found = (cycle_len > 0);
+
+		if (cycle_found) {
+			int prefix_len = query_count - cycle_len;
+
+			// The cycle may begin earlier than query_count - cycle_len.
+			// Walk backwards in full-cycle steps while the prefix tail
+			// matches the cycle.
+			while (prefix_len >= cycle_len) {
+				bool matches = true;
+				for (int i = 0; i < cycle_len; i++) {
+					if (types[prefix_len - cycle_len + i] != types[prefix_len + i]) {
+						matches = false;
+						break;
+					}
+				}
+				if (!matches)
+					break;
+				prefix_len -= cycle_len;
+			}
+
+			// Fine-tune: the prefix may end partway through a cycle
+			// period.  Trim one position at a time if it matches.
+			while (prefix_len > 0 && types[prefix_len - 1] == types[prefix_len - 1 + cycle_len]) {
+				prefix_len--;
+			}
+
+			// Fixed prefix (argument_types)
+			json_t *arg_types = json_array();
+			for (int a = 0; a < prefix_len; a++)
+				json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
+			json_object_set_new(obj, "argument_types", arg_types);
+
+			// Repeating group (variadic_argument_types) — emit exactly one cycle
+			json_t *var_types = json_array();
+			for (int a = prefix_len; a < prefix_len + cycle_len; a++)
+				json_array_append_new(var_types, json_string(opf_to_string(types[a])));
+			json_object_set_new(obj, "variadic_argument_types", var_types);
+		} else {
+			// No cycle detected — emit only the min_args types as argument_types
+			json_t *arg_types = json_array();
+			for (int a = 0; a < min_args; a++)
+				json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
+			json_object_set_new(obj, "argument_types", arg_types);
+		}
+	} else {
+		// Non-variadic: just list all argument types
+		json_t *arg_types = json_array();
+		for (int a = 0; a < max_args; a++) {
+			int atype = query_operator_argument_type(op_index, a);
+			if (atype == OPF_NONE)
+				break;
+			json_array_append_new(arg_types, json_string(opf_to_string(atype)));
+		}
+		json_object_set_new(obj, "argument_types", arg_types);
+	}
+}
+
 static json_t *handle_get_sexp_operator(json_t *arguments)
 {
 	json_t *err = nullptr;
@@ -1161,7 +1284,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	// Find operator by name
 	int op_index = find_item_with_string(Operators, &sexp_oper::text, name);
 	if (op_index < 0)
-		return make_tool_result("SEXP operator not found", true);
+		return make_not_found_error("SEXP operator", name);
 
 	const auto &op = Operators[op_index];
 	json_t *obj = json_object();
@@ -1195,133 +1318,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 		json_object_set_new(obj, "help", json_string(Sexp_help[help_idx].help.c_str()));
 
 	// Argument types
-	{
-		bool is_variadic = (op.max == INT_MAX);
-
-		if (is_variadic) {
-			// For variadic operators, separate the fixed prefix from the
-			// repeating cycle.  We query enough positions to reliably detect
-			// the cycle pattern, then verify it repeats into an extended range.
-			//
-			// We need at least 8 positions even when min_args is small (e.g. 0)
-			// so that we have enough data to detect multi-element cycles.
-			int query_count = std::max(op.min * 2, 8);
-
-			// Collect types for positions 0..query_count-1
-			SCP_vector<int> types;
-			for (int a = 0; a < query_count; a++)
-				types.push_back(query_operator_argument_type(op_index, a));
-
-			// Query 2 * query_count additional positions to verify the cycle,
-			// ensuring even the largest candidate cycle gets a second-period check.
-			int extended_count = 2 * query_count;
-			SCP_vector<int> extended_types;
-			for (int a = 0; a < extended_count; a++)
-				extended_types.push_back(query_operator_argument_type(op_index, query_count + a));
-
-			// Find the cycle length.  The cycle is the smallest L (1..query_count)
-			// where the pattern at the tail of types[] repeats into
-			// extended_types[].  Specifically, the last L entries of types[]
-			// must equal the first L entries of extended_types[], AND for any
-			// additional repetitions within types[] the cycle must hold.
-			int cycle_len = 0;
-			for (int L = 1; L <= query_count; L++) {
-				// The cycle covers positions [query_count - L .. query_count - 1].
-				// Verify it repeats at [query_count .. query_count + L - 1].
-				bool match = true;
-				for (int i = 0; i < L; i++) {
-					if (types[query_count - L + i] != extended_types[i]) {
-						match = false;
-						break;
-					}
-				}
-				if (!match)
-					continue;
-
-				// Verify the cycle is self-consistent within types[] —
-				// i.e., for the cycle region, type[a] == type[a - L]
-				int prefix_len = query_count - L;
-				for (int a = prefix_len + L; a < query_count; a++) {
-					if (types[a] != types[a - L]) {
-						match = false;
-						break;
-					}
-				}
-				if (!match)
-					continue;
-
-				// Verify a second period in extended_types to guard
-				// against a coincidental single-period boundary match
-				for (int i = 0; i < L; i++) {
-					if (extended_types[i] != extended_types[L + i]) {
-						match = false;
-						break;
-					}
-				}
-				if (!match)
-					continue;
-
-				cycle_len = L;
-				break;
-			}
-
-			bool cycle_found = (cycle_len > 0);
-
-			if (cycle_found) {
-				int prefix_len = query_count - cycle_len;
-
-				// The cycle may begin earlier than query_count - cycle_len.
-				// Walk backwards in full-cycle steps while the prefix tail
-				// matches the cycle.
-				while (prefix_len >= cycle_len) {
-					bool matches = true;
-					for (int i = 0; i < cycle_len; i++) {
-						if (types[prefix_len - cycle_len + i] != types[prefix_len + i]) {
-							matches = false;
-							break;
-						}
-					}
-					if (!matches)
-						break;
-					prefix_len -= cycle_len;
-				}
-
-				// Fine-tune: the prefix may end partway through a cycle
-				// period.  Trim one position at a time if it matches.
-				while (prefix_len > 0 && types[prefix_len - 1] == types[prefix_len - 1 + cycle_len]) {
-					prefix_len--;
-				}
-
-				// Fixed prefix (argument_types)
-				json_t *arg_types = json_array();
-				for (int a = 0; a < prefix_len; a++)
-					json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
-				json_object_set_new(obj, "argument_types", arg_types);
-
-				// Repeating group (variadic_argument_types) — emit exactly one cycle
-				json_t *var_types = json_array();
-				for (int a = prefix_len; a < prefix_len + cycle_len; a++)
-					json_array_append_new(var_types, json_string(opf_to_string(types[a])));
-				json_object_set_new(obj, "variadic_argument_types", var_types);
-			} else {
-				// No cycle detected — emit only the min_args types as argument_types
-				json_t *arg_types = json_array();
-				for (int a = 0; a < op.min; a++)
-					json_array_append_new(arg_types, json_string(opf_to_string(types[a])));
-				json_object_set_new(obj, "argument_types", arg_types);
-			}
-		} else {
-			// Non-variadic: just list all argument types
-			json_t *arg_types = json_array();
-			for (int a = 0; a < op.max; a++) {
-				int atype = query_operator_argument_type(op_index, a);
-				if (atype == OPF_NONE)
-					break;
-				json_array_append_new(arg_types, json_string(opf_to_string(atype)));
-			}
-			json_object_set_new(obj, "argument_types", arg_types);
-		}
-	}
+	build_argument_types_json(obj, op_index, op.min, op.max);
 
 	return make_json_tool_result(obj);
 }
@@ -1798,7 +1795,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 	int sip_idx = ship_info_lookup(name);
 	if (sip_idx < 0)
-		return make_tool_result("Ship class not found", true);
+		return make_not_found_error("Ship class", name);
 
 	// Check cache (use canonical name from Ship_info for consistent keys)
 	const char *canonical_name = Ship_info[sip_idx].name;
