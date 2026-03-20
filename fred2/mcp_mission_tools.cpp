@@ -62,12 +62,12 @@ static void mark_modified(const char *fmt, ...)
 {
 	set_modified();
 	if (FREDDoc_ptr) {
-		char desc[128];
+		SCP_string desc;
 		va_list args;
 		va_start(args, fmt);
-		vsnprintf(desc, sizeof(desc), fmt, args);
+		vsprintf(desc, fmt, args);
 		va_end(args);
-		FREDDoc_ptr->autosave(desc);
+		FREDDoc_ptr->autosave(desc.c_str());
 	}
 }
 

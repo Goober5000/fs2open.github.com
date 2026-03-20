@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "mcp_json.h"
 #include "mcpserver.h"
+#include "parse/parselo.h"
 
 #include <jansson.h>
 #include "globalincs/pstypes.h"
@@ -17,6 +18,18 @@ json_t *make_tool_result(const char *text, bool is_error)
 	if (is_error)
 		json_object_set_new(result, "isError", json_true());
 	return result;
+}
+
+json_t *make_tool_result(bool is_error, const char *format, ...)
+{
+	SCP_string buf;
+
+	va_list args;
+	va_start(args, format);
+	vsprintf(buf, format, args);
+	va_end(args);
+
+	return make_tool_result(buf.c_str(), is_error);
 }
 
 json_t *make_json_tool_result(json_t *data)
@@ -88,9 +101,7 @@ static void set_missing_param_error(McpToolRequest *req, const char *param_name)
 
 static json_t *make_missing_param_error(const char *param_name)
 {
-	char buf[64];
-	snprintf(buf, sizeof(buf), "Missing required parameter: %s", param_name);
-	return make_tool_result(buf, true);
+	return make_tool_result(true, "Missing required parameter: %s", param_name);
 }
 
 bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn)
@@ -251,7 +262,5 @@ void set_not_found_error(McpToolRequest *req, const char *entity_type, const cha
 
 json_t *make_not_found_error(const char *entity_type, const char *name)
 {
-	char buf[256];
-	snprintf(buf, sizeof(buf), "%s not found: %s", entity_type, name);
-	return make_tool_result(buf, true);
+	return make_tool_result(true, "%s not found: %s", entity_type, name);
 }
