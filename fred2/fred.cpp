@@ -123,7 +123,8 @@ waypoint_path_dlg    Waypoint_editor_dialog;
 jumpnode_dlg         Jumpnode_editor_dialog;
 music_player_dlg	 Music_player_dialog;
 bg_bitmap_dlg*       Bg_bitmap_dialog = NULL;
-briefing_editor_dlg* Briefing_dialog = NULL;
+briefing_editor_dlg*   Briefing_dialog   = NULL;
+debriefing_editor_dlg* Debriefing_dialog = NULL;
 
 window_data Main_wnd_data;
 window_data Ship_wnd_data;
@@ -137,6 +138,7 @@ window_data Player_wnd_data;
 window_data Events_wnd_data;
 window_data Bg_wnd_data;
 window_data Briefing_wnd_data;
+window_data Debriefing_wnd_data;
 window_data Reinforcement_wnd_data;
 window_data Waypoint_wnd_data;
 window_data Jumpnode_wnd_data;
