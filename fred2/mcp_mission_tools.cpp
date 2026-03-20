@@ -115,10 +115,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	for (int i = start; i < end; i++)
 		json_array_append_new(arr, build_message_json(Messages[i]));
 
-	json_t *data = json_object();
-	json_object_set_new(data, "messages", arr);
-	json_object_set_new(data, "count", json_integer(end - start));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_list_result("messages", arr);
 	req->success = true;
 }
 

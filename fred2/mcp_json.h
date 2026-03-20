@@ -13,6 +13,10 @@ json_t *make_tool_result(const char *text, bool is_error = false);
 // Takes ownership of `data` (decrefs it after serializing).
 json_t *make_json_tool_result(json_t *data);
 
+// Build an MCP tool-result wrapping `arr` in {"<array_key>": arr, "count": N}.
+// Takes ownership of `arr`.
+json_t *make_list_result(const char *array_key, json_t *arr);
+
 // Set a string field only if the source is non-null and non-empty.
 void set_optional_string(json_t *obj, const char *key, const char *value);
 
