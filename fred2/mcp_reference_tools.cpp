@@ -2,6 +2,8 @@
 #include "mcp_reference_tools.h"
 #include "mcpserver.h"
 #include "mcp_json.h"
+#include "mcp_sexp_forest.h"
+#include "sexp_tree.h"
 
 #include <jansson.h>
 #include <climits>
@@ -156,6 +158,57 @@ static const char *opf_to_string(int opf)
 		case OPF_PROP_CLASS_NAME:              return "prop_class_name";
 		default: return "unknown";
 	}
+}
+
+// Reverse mapping: MCP argument type name → OPF_* constant.
+// Returns -1 if the name is not recognized.
+static int opf_from_string(const char *name)
+{
+	if (!name) return -1;
+
+	// Walk all OPF values by converting each to string and comparing.
+	// This intentionally mirrors opf_to_string so they stay in sync.
+	static const int opf_values[] = {
+		OPF_NONE, OPF_NULL, OPF_BOOL, OPF_NUMBER, OPF_SHIP, OPF_WING,
+		OPF_SUBSYSTEM, OPF_POINT, OPF_IFF, OPF_AI_GOAL, OPF_DOCKER_POINT,
+		OPF_DOCKEE_POINT, OPF_MESSAGE, OPF_WHO_FROM, OPF_PRIORITY,
+		OPF_WAYPOINT_PATH, OPF_POSITIVE, OPF_MISSION_NAME, OPF_SHIP_POINT,
+		OPF_GOAL_NAME, OPF_SHIP_WING, OPF_SHIP_WING_WHOLETEAM,
+		OPF_SHIP_WING_SHIPONTEAM_POINT, OPF_SHIP_WING_POINT,
+		OPF_SHIP_WING_POINT_OR_NONE, OPF_SHIP_TYPE, OPF_KEYPRESS,
+		OPF_EVENT_NAME, OPF_AI_ORDER, OPF_SKILL_LEVEL, OPF_MEDAL_NAME,
+		OPF_WEAPON_NAME, OPF_SHIP_CLASS_NAME, OPF_CUSTOM_HUD_GAUGE,
+		OPF_HUGE_WEAPON, OPF_SHIP_NOT_PLAYER, OPF_JUMP_NODE_NAME,
+		OPF_VARIABLE_NAME, OPF_AMBIGUOUS, OPF_AWACS_SUBSYSTEM, OPF_CARGO,
+		OPF_AI_CLASS, OPF_SUPPORT_SHIP_CLASS, OPF_ARRIVAL_LOCATION,
+		OPF_ARRIVAL_ANCHOR_ALL, OPF_DEPARTURE_LOCATION, OPF_SHIP_WITH_BAY,
+		OPF_SOUNDTRACK_NAME, OPF_INTEL_NAME, OPF_STRING, OPF_ROTATING_SUBSYSTEM,
+		OPF_NAV_POINT, OPF_SSM_CLASS, OPF_FLEXIBLE_ARGUMENT, OPF_ANYTHING,
+		OPF_SKYBOX_MODEL_NAME, OPF_SHIP_OR_NONE, OPF_BACKGROUND_BITMAP,
+		OPF_SUN_BITMAP, OPF_NEBULA_STORM_TYPE, OPF_NEBULA_POOF,
+		OPF_TURRET_TARGET_ORDER, OPF_SUBSYSTEM_OR_NONE, OPF_PERSONA,
+		OPF_SUBSYS_OR_GENERIC, OPF_ORDER_RECIPIENT, OPF_SUBSYSTEM_TYPE,
+		OPF_POST_EFFECT, OPF_TARGET_PRIORITIES, OPF_ARMOR_TYPE, OPF_FONT,
+		OPF_HUD_ELEMENT, OPF_SOUND_ENVIRONMENT, OPF_SOUND_ENVIRONMENT_OPTION,
+		OPF_EXPLOSION_OPTION, OPF_AUDIO_VOLUME_OPTION, OPF_WEAPON_BANK_NUMBER,
+		OPF_MESSAGE_OR_STRING, OPF_BUILTIN_HUD_GAUGE, OPF_DAMAGE_TYPE,
+		OPF_SHIP_EFFECT, OPF_ANIMATION_TYPE, OPF_MISSION_MOOD, OPF_SHIP_FLAG,
+		OPF_TEAM_COLOR, OPF_NEBULA_PATTERN, OPF_SKYBOX_FLAGS, OPF_GAME_SND,
+		OPF_FIREBALL, OPF_SPECIES, OPF_LANGUAGE, OPF_FUNCTIONAL_WHEN_EVAL_TYPE,
+		OPF_CONTAINER_NAME, OPF_LIST_CONTAINER_NAME, OPF_MAP_CONTAINER_NAME,
+		OPF_ANIMATION_NAME, OPF_CONTAINER_VALUE, OPF_DATA_OR_STR_CONTAINER,
+		OPF_TRANSLATING_SUBSYSTEM, OPF_ANY_HUD_GAUGE, OPF_WING_FLAG,
+		OPF_ASTEROID_TYPES, OPF_DEBRIS_TYPES, OPF_WING_FORMATION,
+		OPF_MOTION_DEBRIS, OPF_TURRET_TYPE, OPF_BOLT_TYPE, OPF_TRAITOR_OVERRIDE,
+		OPF_LUA_GENERAL_ORDER, OPF_CHILD_LUA_ENUM, OPF_MISSION_CUSTOM_STRING,
+		OPF_MESSAGE_TYPE, OPF_PROP, OPF_SHIP_PROP, OPF_PROP_CLASS_NAME,
+	};
+
+	for (int opf : opf_values) {
+		if (strcmp(opf_to_string(opf), name) == 0)
+			return opf;
+	}
+	return -1;
 }
 
 static const char *opr_to_string(int opr)
@@ -383,6 +436,32 @@ void mcp_register_reference_tools(json_t *tools)
 			"Get details about a SEXP return type, including what argument types it is compatible with. "
 			"Call without arguments to list all known return types.",
 			props);
+	}
+
+	// list_sexp_argument_values
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Argument type name as returned by get_sexp_operator or get_sexp_argument_type "
+			"(e.g. \"iff\", \"ship_flag\", \"skill_level\")");
+		json_object_set_new(props, "node",
+			json_pack("{s:s, s:s}", "type", "integer",
+				"description", "Sexp_nodes[] index for context-filtered results "
+				"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results."));
+		json_object_set_new(props, "arg_index",
+			json_pack("{s:s, s:s}", "type", "integer",
+				"description", "Argument position within the operator at 'node' (0-based). "
+				"Used together with 'node' for context filtering."));
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "list_sexp_argument_values",
+			"List the valid values for a SEXP argument type. "
+			"Without the optional 'node' parameter, returns all possible values. "
+			"With 'node', returns context-filtered values (e.g. only subsystems belonging "
+			"to the ship specified in an earlier argument of the same SEXP operator). "
+			"Some types depend on the current mission (e.g. 'ship' returns ships in the "
+			"loaded mission).",
+			props, req);
 	}
 
 	// get_ship_class_model_details
@@ -2115,6 +2194,46 @@ static json_t *handle_list_talking_heads()
 // Dispatch
 // ---------------------------------------------------------------------------
 
+static json_t *handle_list_sexp_argument_values(json_t *arguments)
+{
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err);
+	if (!name)
+		return err;
+
+	int opf = opf_from_string(name);
+	if (opf < 0)
+		return make_tool_result(
+			"Unknown argument type. Call get_sexp_argument_type without arguments to list all types.", true);
+
+	// Optional: node index for context-filtered results
+	int parent_node = -1;
+	int arg_index = -1;
+	get_optional_integer(arguments, "node", &parent_node);
+	get_optional_integer(arguments, "arg_index", &arg_index);
+
+	// If context was requested and the forest is dirty, rebuild it first.
+	if (parent_node >= 0 && mcp_sexp_forest_is_dirty()) {
+		json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
+		json_decref(rebuild_result);
+	}
+
+	// Get the value list from the forest (or with no context if parent_node < 0)
+	sexp_list_item *list = mcp_sexp_forest_get_listing(opf, parent_node, arg_index);
+
+	json_t *values = json_array();
+	for (sexp_list_item *item = list; item != nullptr; item = item->next)
+		json_array_append_new(values, json_string(item->text.c_str()));
+
+	if (list)
+		list->destroy();
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(name));
+	json_object_set_new(obj, "values", values);
+	return make_json_tool_result(obj);
+}
+
 json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 {
 	if (!tool_name)
@@ -2156,6 +2275,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_argument_type(arguments);
 	if (strcmp(tool_name, "get_sexp_return_type") == 0)
 		return handle_get_sexp_return_type(arguments);
+	if (strcmp(tool_name, "list_sexp_argument_values") == 0)
+		return handle_list_sexp_argument_values(arguments);
 	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
 		return handle_get_ship_class_model_details(arguments);
 	if (strcmp(tool_name, "subsystem_names_compare") == 0)
@@ -2182,4 +2303,6 @@ void mcp_reference_tools_cleanup()
 	for (auto &pair : model_details_cache)
 		json_decref(pair.second);
 	model_details_cache.clear();
+
+	mcp_sexp_forest_cleanup();
 }
