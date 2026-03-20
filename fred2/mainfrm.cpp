@@ -861,6 +861,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				json_object_set_new(info, "mod_title", json_string(Mod_title.c_str()));
 			if (!Mod_version.empty())
 				json_object_set_new(info, "mod_version", json_string(Mod_version.c_str()));
+			json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
 
 			// Build tool result
 			json_t *text_item = json_object();
