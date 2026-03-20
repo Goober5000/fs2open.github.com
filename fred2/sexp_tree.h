@@ -122,7 +122,7 @@ public:
 class sexp_tree : public CTreeCtrl
 {
 public:
-	sexp_tree();
+	sexp_tree(bool headless = false);
 
 	int find_text(const char *text, int *find);
 	int query_restricted_opf_range(int opf);
@@ -328,6 +328,7 @@ public:
 
 	bool is_node_eligible_for_special_argument(int parent_node) const;
 
+	bool m_headless;
 	int m_mode;
 	int item_index;
 	int select_sexp_node;  // used to select an sexp item on dialog box open.

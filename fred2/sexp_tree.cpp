@@ -89,11 +89,12 @@ static int Add_count, Replace_count;
 static int Modify_variable;
 
 // constructor
-sexp_tree::sexp_tree()
+sexp_tree::sexp_tree(bool headless)
 	: m_operator_box(help)
 {
 	select_sexp_node = -1;
 	root_item = -1;
+	m_headless = headless;
 	m_mode = 0;
 	m_dragging = FALSE;
 	m_p_image_list = NULL;
@@ -115,7 +116,9 @@ void sexp_tree::clear_tree(const char *op)
 	tree_nodes.clear();
 
 	if (op) {
-		DeleteAllItems();
+		if (!m_headless)
+			DeleteAllItems();
+
 		if (strlen(op)) {
 			set_node(allocate_node(-1), (SEXPT_OPERATOR | SEXPT_VALID), op);
 			build_tree();
@@ -518,7 +521,9 @@ void sexp_tree::build_tree()
 	if (!flag)
 		select_sexp_node = -1;
 
-	DeleteAllItems();
+	if (!m_headless)
+		DeleteAllItems();
+
 	add_sub_tree(0, TVI_ROOT);
 }
 
