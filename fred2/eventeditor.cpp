@@ -13,6 +13,7 @@
 #include "FRED.h"
 #include "FREDDoc.h"
 #include "EventEditor.h"
+#include "mcp_sexp_forest.h"
 #include "FREDView.h"
 #include "Management.h"
 #include "Sexp_tree.h"
@@ -532,6 +533,7 @@ void event_editor::OnButtonOk()
 	save();
 	if (query_modified())
 		set_modified();
+	mcp_sexp_forest_mark_dirty();
 
 	for (auto &event: Mission_events) {
 		free_sexp2(event.formula);
