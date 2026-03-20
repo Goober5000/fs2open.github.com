@@ -293,11 +293,7 @@ static json_t *handle_tools_call(json_t *params)
 		return nullptr;  // caller will send error
 
 	if (strcmp(tool_name, "get_server_info") == 0) {
-		SCP_string server_info = "FRED2 MCP Server is running. ";
-		if (!mcp_fred_ready.load())
-			server_info += "FRED2 is initializing. ";
-		server_info += "Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state.";
-		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, server_info.c_str());
+		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, "");
 	}
 
 	if (strcmp(tool_name, "get_timeout") == 0) {
