@@ -850,9 +850,9 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 			// Mission context (if loaded)
 			if (Mission_filename[0] != '\0') {
-				char full_name[256];
-				snprintf(full_name, sizeof(full_name), "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-				json_object_set_new(info, "mission_filename", json_string(full_name));
+				SCP_string full_name;
+				sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
+				json_object_set_new(info, "mission_filename", json_string(full_name.c_str()));
 				json_object_set_new(info, "mission_title", json_string(The_mission.name));
 			}
 
@@ -885,9 +885,9 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 			// Full filename with extension
 			if (Mission_filename[0] != '\0') {
-				char full_name[256];
-				snprintf(full_name, sizeof(full_name), "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-				json_object_set_new(info, "filename", json_string(full_name));
+				SCP_string full_name;
+				sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
+				json_object_set_new(info, "filename", json_string(full_name.c_str()));
 			} else {
 				json_object_set_new(info, "filename", json_string(""));
 			}
@@ -935,16 +935,14 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	case McpToolId::GET_UI_STATUS:
 		{
-			char buf[512];
-			int pos = 0;
+			SCP_string buf;
 
 			// Check if a modal dialog is blocking the main window
 			bool modal_active = !IsWindowEnabled();
-			pos += snprintf(buf + pos, sizeof(buf) - pos, "modal_dialog_active: %s\n",
-				modal_active ? "true" : "false");
+			sprintf_concat(buf, "modal_dialog_active: %s\n", modal_active ? "true" : "false");
 
 			if (!modal_active) {
-				pos += snprintf(buf + pos, sizeof(buf) - pos, "open_editors:");
+				buf += "open_editors:";
 
 				// Persistent (always-exist) modeless dialogs
 				struct { CWnd *wnd; const char *name; } persistent[] = {
@@ -959,7 +957,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				bool any_open = false;
 				for (auto &d : persistent) {
 					if (d.wnd->IsWindowVisible()) {
-						pos += snprintf(buf + pos, sizeof(buf) - pos, " %s,", d.name);
+						sprintf_concat(buf, " %s,", d.name);
 						any_open = true;
 					}
 				}
@@ -976,17 +974,17 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 				for (auto &d : on_demand) {
 					if (*d.ptr != nullptr && (*d.ptr)->IsWindowVisible()) {
-						pos += snprintf(buf + pos, sizeof(buf) - pos, " %s,", d.name);
+						sprintf_concat(buf, " %s,", d.name);
 						any_open = true;
 					}
 				}
 
 				if (!any_open) {
-					pos += snprintf(buf + pos, sizeof(buf) - pos, " none");
+					sprintf_concat(buf, " none");
 				} else {
 					// Remove trailing comma
-					if (pos > 0 && buf[pos - 1] == ',')
-						buf[pos - 1] = '\0';
+					if (!buf.empty() && buf.back() == ',')
+						buf.pop_back();
 				}
 			}
 
