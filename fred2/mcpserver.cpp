@@ -98,7 +98,7 @@ static json_t *handle_tools_list(json_t * /*params*/)
 
 	// Tool: get_server_info
 	register_tool(tools, "get_server_info",
-		"Returns information about the running FRED2 instance, including the currently loaded mission and active mod if applicable",
+		"Returns information about the running FRED2 instance, including whether Unicode is supported, and the currently loaded mission and active mod if applicable",
 		nullptr);
 
 	// Tool: load_mission
