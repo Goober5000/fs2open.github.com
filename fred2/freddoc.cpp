@@ -133,7 +133,7 @@ bool CFREDDoc::autoload() {
 	return r;
 }
 
-int CFREDDoc::autosave(char *desc) {
+int CFREDDoc::autosave(const char *desc) {
 	int i;
 	Fred_mission_save save;
 	if (Mission_save_format == FSO_FORMAT_RETAIL) {

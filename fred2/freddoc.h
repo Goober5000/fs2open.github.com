@@ -58,7 +58,7 @@ public:
 	 * @returns  0 If autosave is disabled, or
 	 * @returns -1 If could not save to the stack
 	 */
-	int autosave(char *desc);
+	int autosave(const char *desc);
 
 	//{{AFX_VIRTUAL(CFREDDoc)
 	/**
