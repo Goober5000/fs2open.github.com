@@ -924,7 +924,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				struct { CWnd *wnd; const char *name; } persistent[] = {
 					{ &Ship_editor_dialog, "Ship Editor" },
 					{ &Wing_editor_dialog, "Wing Editor" },
-					{ &Prop_editor_dialog, "Properties Editor" },
+					{ &Prop_editor_dialog, "Props Editor" },
 					{ &Waypoint_editor_dialog, "Waypoint Editor" },
 					{ &Jumpnode_editor_dialog, "Jump Node Editor" },
 					{ &Music_player_dialog, "Music Player" },
