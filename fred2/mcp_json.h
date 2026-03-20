@@ -65,4 +65,11 @@ bool get_optional_double(json_t *arguments, const char *param_name, double *out)
 bool get_optional_float(json_t *arguments, const char *param_name, float *out);
 bool get_optional_bool(json_t *arguments, const char *param_name, bool *out);
 
+// Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
+struct vec3d;
+json_t *build_vec3_json(const vec3d &v);
+
+// Sets req->success=false and formats "EntityType not found: name" into result_message.
+void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name);
+
 #endif // _MCP_JSON_H
