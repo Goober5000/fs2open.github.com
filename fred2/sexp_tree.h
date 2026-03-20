@@ -180,6 +180,7 @@ public:
 	void reset_handles();
 	int save_tree(int node = -1);
 	void load_tree(int index, const char *deflt = "true");
+	int load_branch(int index, int parent);
 	void add_operator(const char *op, HTREEITEM h = TVI_ROOT);
 	int add_data(const char *data, int type);
 	int add_variable_data(const char *data, int type);
@@ -370,7 +371,6 @@ protected:
 
 	void update_item(HTREEITEM handle);
 
-	int load_branch(int index, int parent);
 	int save_branch(int cur, int at_root = 0);
 	void free_node2(int node);
 

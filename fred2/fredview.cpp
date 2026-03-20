@@ -15,6 +15,7 @@
 #include "FREDDoc.h"
 #include "FREDView.h"
 #include "mcpserver.h"
+#include "mcp_sexp_forest.h"
 #include "FredRender.h"
 #include "cfile/cfile.h"
 #include "Grid.h"
@@ -4214,11 +4215,12 @@ void CFREDView::OnEditorsBriefing()
 	Briefing_dialog->ShowWindow(SW_RESTORE);
 }
 
-void CFREDView::OnEditorsDebriefing() 
+void CFREDView::OnEditorsDebriefing()
 {
 	debriefing_editor_dlg dlg;
 
 	dlg.DoModal();
+	mcp_sexp_forest_mark_dirty();
 }
 
 void CFREDView::OnSaveCamera() 
