@@ -8056,8 +8056,9 @@ sexp_list_item* sexp_tree::check_for_dynamic_sexp_enum(int opf)
 // given a node's parent, check if node is eligible for being used with the special argument
 bool sexp_tree::is_node_eligible_for_special_argument(int parent_node) const
 {
-	Assertion(parent_node != -1,
-		"Attempt to access invalid parent node for special arg eligibility check. Please report!");
+	// if there's no parent, it's certainly not eligible
+	if (parent_node < 0)
+		return false;
 
 	const int w_arg = find_ancestral_argument_number(OP_WHEN_ARGUMENT, parent_node);
 	const int e_arg = find_ancestral_argument_number(OP_EVERY_TIME_ARGUMENT, parent_node);
