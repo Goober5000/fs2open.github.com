@@ -798,6 +798,7 @@ static const McpPersistentEditor s_persistent_editors[] = {
 
 static const McpOnDemandEditor s_ondemand_editors[] = {
 	{ (CWnd **)&Briefing_dialog,     "Briefing Editor"    },
+	{ (CWnd **)&Debriefing_dialog,   "Debriefing Editor"  },
 	{ (CWnd **)&Bg_bitmap_dialog,    "Background Editor"  },
 	{ (CWnd **)&Event_editor_dlg,    "Event Editor"       },
 	{ (CWnd **)&Goal_editor_dlg,     "Goals Editor"       },

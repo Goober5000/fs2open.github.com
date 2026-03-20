@@ -4217,10 +4217,14 @@ void CFREDView::OnEditorsBriefing()
 
 void CFREDView::OnEditorsDebriefing()
 {
-	debriefing_editor_dlg dlg;
+	if (!Debriefing_dialog) {
+		Debriefing_dialog = new debriefing_editor_dlg;
+		Debriefing_dialog->create();
+	}
 
-	dlg.DoModal();
-	mcp_sexp_forest_mark_dirty();
+	Debriefing_dialog->SetWindowPos(&wndTop, 0, 0, 0, 0,
+		SWP_SHOWWINDOW | SWP_NOMOVE | SWP_NOSIZE);
+	Debriefing_dialog->ShowWindow(SW_RESTORE);
 }
 
 void CFREDView::OnSaveCamera() 
