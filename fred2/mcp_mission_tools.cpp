@@ -75,6 +75,28 @@ static void mark_modified(const char *fmt, ...)
 // Message tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
 
+// include_details adds team, talking_head, and voice_file fields.
+static json_t *build_message_json(const MMessage &msg, bool include_details = false)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(msg.name));
+	json_object_set_new(obj, "message", json_string(msg.message));
+
+	const char *persona = persona_name_from_index(msg.persona_index);
+	if (persona)
+		json_object_set_new(obj, "persona", json_string(persona));
+
+	if (include_details) {
+		json_object_set_new(obj, "team", json_integer(msg.multi_team));
+		if (msg.avi_info.name)
+			json_object_set_new(obj, "talking_head", json_string(msg.avi_info.name));
+		if (msg.wave_info.name)
+			json_object_set_new(obj, "voice_file", json_string(msg.wave_info.name));
+	}
+
+	return obj;
+}
+
 static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
 	// Determine range based on "source" parameter
@@ -92,17 +114,8 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	}
 
 	json_t *arr = json_array();
-	for (int i = start; i < end; i++) {
-		json_t *entry = json_object();
-		json_object_set_new(entry, "name", json_string(Messages[i].name));
-		json_object_set_new(entry, "message", json_string(Messages[i].message));
-
-		const char *persona = persona_name_from_index(Messages[i].persona_index);
-		if (persona)
-			json_object_set_new(entry, "persona", json_string(persona));
-
-		json_array_append_new(arr, entry);
-	}
+	for (int i = start; i < end; i++)
+		json_array_append_new(arr, build_message_json(Messages[i]));
 
 	json_t *data = json_object();
 	json_object_set_new(data, "messages", arr);
@@ -119,8 +132,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 	// Find the message
 	int idx = find_item_with_string(Messages, &MMessage::name, name);
 	if (idx < 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		set_not_found_error(req, "Message", name);
 		return;
 	}
 
@@ -129,22 +141,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 		if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 	}
 
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(Messages[idx].name));
-	json_object_set_new(data, "message", json_string(Messages[idx].message));
-
-	const char *persona = persona_name_from_index(Messages[idx].persona_index);
-	if (persona)
-		json_object_set_new(data, "persona", json_string(persona));
-
-	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
-
-	if (Messages[idx].avi_info.name)
-		json_object_set_new(data, "talking_head", json_string(Messages[idx].avi_info.name));
-	if (Messages[idx].wave_info.name)
-		json_object_set_new(data, "voice_file", json_string(Messages[idx].wave_info.name));
-
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
 	req->success = true;
 }
 
@@ -255,8 +252,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		set_not_found_error(req, "Message", name);
 		return;
 	}
 
@@ -351,19 +347,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Return the updated message
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(Messages[idx].name));
-	json_object_set_new(data, "message", json_string(Messages[idx].message));
-	const char *persona = persona_name_from_index(Messages[idx].persona_index);
-	if (persona)
-		json_object_set_new(data, "persona", json_string(persona));
-	json_object_set_new(data, "team", json_integer(Messages[idx].multi_team));
-	if (Messages[idx].avi_info.name)
-		json_object_set_new(data, "talking_head", json_string(Messages[idx].avi_info.name));
-	if (Messages[idx].wave_info.name)
-		json_object_set_new(data, "voice_file", json_string(Messages[idx].wave_info.name));
-
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
 	req->success = true;
 }
 
@@ -380,8 +364,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "Message not found: %s", name);
+		set_not_found_error(req, "Message", name);
 		return;
 	}
 
