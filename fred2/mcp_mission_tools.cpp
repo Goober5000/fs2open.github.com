@@ -88,10 +88,8 @@ static json_t *build_message_json(const MMessage &msg, bool include_details = fa
 
 	if (include_details) {
 		json_object_set_new(obj, "team", json_integer(msg.multi_team));
-		if (msg.avi_info.name)
-			json_object_set_new(obj, "talking_head", json_string(msg.avi_info.name));
-		if (msg.wave_info.name)
-			json_object_set_new(obj, "voice_file", json_string(msg.wave_info.name));
+		set_optional_string(obj, "talking_head", msg.avi_info.name);
+		set_optional_string(obj, "voice_file", msg.wave_info.name);
 	}
 
 	return obj;
