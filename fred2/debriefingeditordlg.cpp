@@ -12,6 +12,7 @@
 #include "stdafx.h"
 #include "FRED.h"
 #include "DebriefingEditorDlg.h"
+#include "mcp_sexp_forest.h"
 #include "FREDDoc.h"
 #include "management.h"
 #include "mission/missionbriefcommon.h"
@@ -468,6 +469,7 @@ void debriefing_editor_dlg::OnClose()
 	delete ptr;
 
 	FREDDoc_ptr->autosave("debriefing editor");
+	mcp_sexp_forest_mark_dirty();
 }
 
 void debriefing_editor_dlg::OnOK()
