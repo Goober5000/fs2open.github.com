@@ -13,6 +13,7 @@
 #include "FRED.h"
 #include "BriefingEditorDlg.h"
 #include "FREDDoc.h"
+#include "mcp_sexp_forest.h"
 #include "mission/missionbriefcommon.h"
 #include "mission/missionparse.h"
 #include "FredRender.h"
@@ -380,6 +381,7 @@ void briefing_editor_dlg::update_data(int update)
 
 		MODIFY(ptr->flags, i);
 		ptr->formula = m_tree.save_tree();
+		mcp_sexp_forest_mark_dirty();
 		switch (m_lines.GetCheck()) {
 			case 1:
 				// add lines between every pair of 2 marked icons if there isn't one already.
