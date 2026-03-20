@@ -4,10 +4,15 @@
 #include <functional>
 #include <jansson.h>
 
+#include "globalincs/vmallocator.h"	// for SCP_string
+
 struct McpToolRequest;  // full definition in mcpserver.h
 
 // Build an MCP tool result with a text content item.
 json_t *make_tool_result(const char *text, bool is_error = false);
+
+// Build an MCP tool result with a text content item, formatted with arguments.
+json_t *make_tool_result(bool is_error, const char *format, ...);
 
 // Build an MCP tool-result whose text content is pretty-printed JSON.
 // Takes ownership of `data` (decrefs it after serializing).
@@ -72,6 +77,28 @@ bool get_optional_bool(json_t *arguments, const char *param_name, bool *out);
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 struct vec3d;
 json_t *build_vec3_json(const vec3d &v);
+
+// Build a JSON string array from a list of indices, using a C-string-compatible field.
+template<typename VECTOR1_T, typename VECTOR2_T, typename ITEM_T, typename FIELD_T>
+json_t *build_array_with_field(const VECTOR1_T& index_vector, const VECTOR2_T& item_vector, FIELD_T ITEM_T::* field)
+{
+	json_t *arr = json_array();
+	for (int idx: index_vector)
+		if (idx >= 0 && idx < static_cast<int>(item_vector.size()))
+			json_array_append_new(arr, json_string(item_vector[idx].*field));
+	return arr;
+}
+
+// Build a JSON string array from a list of indices, using a SCP_string field.
+template<typename VECTOR1_T, typename VECTOR2_T, typename ITEM_T>
+json_t *build_array_with_field(const VECTOR1_T& index_vector, const VECTOR2_T& item_vector, SCP_string ITEM_T::* field)
+{
+	json_t *arr = json_array();
+	for (int idx: index_vector)
+		if (idx >= 0 && idx < static_cast<int>(item_vector.size()))
+			json_array_append_new(arr, json_string((item_vector[idx].*field).c_str()));
+	return arr;
+}
 
 // Sets req->success=false and formats "EntityType not found: name" into result_message.
 void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name);
