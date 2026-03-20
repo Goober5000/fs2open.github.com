@@ -847,6 +847,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		{
 			json_t *info = json_object();
 			json_object_set_new(info, "status", json_string("running"));
+			json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state."));
 
 			// Mission context (if loaded)
 			if (Mission_filename[0] != '\0') {
@@ -857,25 +858,11 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			}
 
 			// Mod context (if available)
-			if (!Mod_title.empty())
-				json_object_set_new(info, "mod_title", json_string(Mod_title.c_str()));
-			if (!Mod_version.empty())
-				json_object_set_new(info, "mod_version", json_string(Mod_version.c_str()));
+			set_optional_string(info, "mod_title", Mod_title.c_str());
+			set_optional_string(info, "mod_version", Mod_version.c_str());
 			json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
 
-			// Build tool result
-			json_t *text_item = json_object();
-			json_object_set_new(text_item, "type", json_string("text"));
-			char *info_str = json_dumps(info, JSON_INDENT(2));
-			json_object_set_new(text_item, "text", json_string(info_str));
-			free(info_str);
-			json_decref(info);
-
-			json_t *content = json_array();
-			json_array_append_new(content, text_item);
-
-			req->result_json = json_object();
-			json_object_set_new(req->result_json, "content", content);
+			req->result_json = make_json_tool_result(info);
 			req->success = true;
 		}
 		break;
@@ -917,19 +904,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				json_object_set_new(info, "game_type", json_string(type_str));
 			}
 
-			// Build tool result
-			json_t *text_item = json_object();
-			json_object_set_new(text_item, "type", json_string("text"));
-			char *info_str = json_dumps(info, JSON_INDENT(2));
-			json_object_set_new(text_item, "text", json_string(info_str));
-			free(info_str);
-			json_decref(info);
-
-			json_t *content = json_array();
-			json_array_append_new(content, text_item);
-
-			req->result_json = json_object();
-			json_object_set_new(req->result_json, "content", content);
+			req->result_json = make_json_tool_result(info);
 			req->success = true;
 		}
 		break;
