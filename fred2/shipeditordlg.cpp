@@ -13,6 +13,7 @@
 #include "FRED.h"
 #include "FREDDoc.h"
 #include "FREDView.h"
+#include "mcp_sexp_forest.h"
 #include "MainFrm.h"
 #include "render/3d.h"
 #include "physics/physics.h"
@@ -1402,6 +1403,8 @@ int CShipEditorDlg::update_ship(int ship)
 
 			Ships[ship].departure_cue = m_departure_tree.save_tree();
 		}
+
+		mcp_sexp_forest_mark_dirty();
 
 		m_arrival_dist.save(&Ships[ship].arrival_distance);
 		m_arrival_delay.save(&Ships[ship].arrival_delay);

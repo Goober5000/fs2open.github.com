@@ -13,6 +13,7 @@
 #include "MainFrm.h"
 #include "FRED.h"
 #include "FREDDoc.h"
+#include "mcp_sexp_forest.h"
 #include "Management.h"
 #include "wing.h"
 #include "globalincs/linklist.h"
@@ -962,6 +963,8 @@ void wing_editor::update_data_safe()
 	if (Wings[cur_wing].departure_cue >= 0)
 		free_sexp2(Wings[cur_wing].departure_cue);
 	Wings[cur_wing].departure_cue = m_departure_tree.save_tree();
+
+	mcp_sexp_forest_mark_dirty();
 
 	// copy squad stuff
 	if(stricmp(m_wing_squad_filename, Wings[cur_wing].wing_squad_filename))

@@ -164,6 +164,8 @@ set(FRED2_SOURCES
 	mcp_reference_tools.h
 	mcp_mission_tools.cpp
 	mcp_mission_tools.h
+	mcp_sexp_forest.cpp
+	mcp_sexp_forest.h
 	fred.rc
 	version.rc2
 )
