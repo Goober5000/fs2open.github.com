@@ -240,3 +240,10 @@ void set_not_found_error(McpToolRequest *req, const char *entity_type, const cha
 	req->success = false;
 	snprintf(req->result_message, sizeof(req->result_message), "%s not found: %s", entity_type, name);
 }
+
+json_t *make_not_found_error(const char *entity_type, const char *name)
+{
+	char buf[256];
+	snprintf(buf, sizeof(buf), "%s not found: %s", entity_type, name);
+	return make_tool_result(buf, true);
+}
