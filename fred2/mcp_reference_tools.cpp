@@ -664,13 +664,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	}
 
 	// Physics
-	{
-		json_t *vel = json_object();
-		json_object_set_new(vel, "x", json_real(sip.max_vel.xyz.x));
-		json_object_set_new(vel, "y", json_real(sip.max_vel.xyz.y));
-		json_object_set_new(vel, "z", json_real(sip.max_vel.xyz.z));
-		json_object_set_new(obj, "max_velocity", vel);
-	}
+	json_object_set_new(obj, "max_velocity", build_vec3_json(sip.max_vel));
 	json_object_set_new(obj, "max_afterburner_velocity", json_real(sip.afterburner_max_vel.xyz.z));
 	json_object_set_new(obj, "max_rear_velocity", json_real(sip.max_rear_vel));
 
@@ -1840,19 +1834,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	json_object_set_new(obj, "name", json_string(sip.name));
 
 	// Bounding box dimensions
-	{
-		json_t *mins = json_object();
-		json_object_set_new(mins, "x", json_real(pm->mins.xyz.x));
-		json_object_set_new(mins, "y", json_real(pm->mins.xyz.y));
-		json_object_set_new(mins, "z", json_real(pm->mins.xyz.z));
-		json_object_set_new(obj, "mins", mins);
-
-		json_t *maxs = json_object();
-		json_object_set_new(maxs, "x", json_real(pm->maxs.xyz.x));
-		json_object_set_new(maxs, "y", json_real(pm->maxs.xyz.y));
-		json_object_set_new(maxs, "z", json_real(pm->maxs.xyz.z));
-		json_object_set_new(obj, "maxs", maxs);
-	}
+	json_object_set_new(obj, "mins", build_vec3_json(pm->mins));
+	json_object_set_new(obj, "maxs", build_vec3_json(pm->maxs));
 
 	// Docking bays
 	{
@@ -1878,17 +1861,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_t *positions = json_array();
 			json_t *normals = json_array();
 			for (int s = 0; s < bay.num_slots; s++) {
-				json_t *pos = json_object();
-				json_object_set_new(pos, "x", json_real(bay.pnt[s].xyz.x));
-				json_object_set_new(pos, "y", json_real(bay.pnt[s].xyz.y));
-				json_object_set_new(pos, "z", json_real(bay.pnt[s].xyz.z));
-				json_array_append_new(positions, pos);
-
-				json_t *nrm = json_object();
-				json_object_set_new(nrm, "x", json_real(bay.norm[s].xyz.x));
-				json_object_set_new(nrm, "y", json_real(bay.norm[s].xyz.y));
-				json_object_set_new(nrm, "z", json_real(bay.norm[s].xyz.z));
-				json_array_append_new(normals, nrm);
+				json_array_append_new(positions, build_vec3_json(bay.pnt[s]));
+				json_array_append_new(normals, build_vec3_json(bay.norm[s]));
 			}
 			json_object_set_new(dock_obj, "positions", positions);
 			json_object_set_new(dock_obj, "normals", normals);
@@ -1925,11 +1899,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				const auto &vert = path.verts[v];
 				json_t *vert_obj = json_object();
 
-				json_t *pos = json_object();
-				json_object_set_new(pos, "x", json_real(vert.pos.xyz.x));
-				json_object_set_new(pos, "y", json_real(vert.pos.xyz.y));
-				json_object_set_new(pos, "z", json_real(vert.pos.xyz.z));
-				json_object_set_new(vert_obj, "pos", pos);
+				json_object_set_new(vert_obj, "pos", build_vec3_json(vert.pos));
 
 				json_object_set_new(vert_obj, "radius", json_real(vert.radius));
 
@@ -2152,19 +2122,13 @@ static json_t *handle_list_talking_heads()
 
 	// Hardcoded heads (unless disabled by mod table)
 	if (!Disable_hc_message_ani) {
-		maybe_add("Head-TP2");
-		maybe_add("Head-VC2");
-		maybe_add("Head-TP4");
-		maybe_add("Head-TP5");
-		maybe_add("Head-TP6");
-		maybe_add("Head-TP7");
-		maybe_add("Head-TP8");
-		maybe_add("Head-VP2");
-		maybe_add("Head-CM2");
-		maybe_add("Head-CM3");
-		maybe_add("Head-CM4");
-		maybe_add("Head-CM5");
-		maybe_add("Head-BSH");
+		static const char *hardcoded_heads[] = {
+			"Head-TP2", "Head-VC2", "Head-TP4", "Head-TP5", "Head-TP6",
+			"Head-TP7", "Head-TP8", "Head-VP2", "Head-CM2", "Head-CM3",
+			"Head-CM4", "Head-CM5", "Head-BSH"
+		};
+		for (const char *h : hardcoded_heads)
+			maybe_add(h);
 	}
 
 	// Custom heads from mod table
