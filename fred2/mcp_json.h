@@ -7,6 +7,8 @@
 #include "globalincs/vmallocator.h"	// for SCP_string
 
 struct McpToolRequest;  // full definition in mcpserver.h
+struct vec3d;           // full definition in pstypes.h
+struct matrix;          // full definition in pstypes.h
 
 // Build an MCP tool result with a text content item.
 json_t *make_tool_result(const char *text, bool is_error = false);
@@ -30,6 +32,8 @@ void add_string_prop(json_t *props, const char *name, const char *description);
 void add_integer_prop(json_t *props, const char *name, const char *description);
 void add_number_prop(json_t *props, const char *name, const char *description);
 void add_bool_prop(json_t *props, const char *name, const char *description);
+void add_vec3d_prop(json_t *props, const char *name, const char *description);
+void add_matrix_prop(json_t *props, const char *name, const char *description);
 
 // Register an MCP tool schema in the tools array.
 void register_tool(json_t *tools, const char *name, const char *description,
@@ -49,6 +53,8 @@ bool require_integer_param(json_t *input, const char *param_name, McpToolRequest
 bool require_double_param(json_t *input, const char *param_name, McpToolRequest *req, double *out);
 bool require_float_param(json_t *input, const char *param_name, McpToolRequest *req, float *out);
 bool require_bool_param(json_t *input, const char *param_name, McpToolRequest *req, bool *out);
+bool require_vec3d_param(json_t *input, const char *param_name, McpToolRequest *req, vec3d *out);
+bool require_matrix_param(json_t *input, const char *param_name, McpToolRequest *req, matrix *out);
 
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
@@ -62,6 +68,8 @@ bool get_required_integer(json_t *arguments, const char *param_name, json_t **er
 bool get_required_double(json_t *arguments, const char *param_name, json_t **error_out, double *out);
 bool get_required_float(json_t *arguments, const char *param_name, json_t **error_out, float *out);
 bool get_required_bool(json_t *arguments, const char *param_name, json_t **error_out, bool *out);
+bool get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out, vec3d *out);
+bool get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out, matrix *out);
 
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or empty.
@@ -73,10 +81,16 @@ bool get_optional_integer(json_t *arguments, const char *param_name, int *out);
 bool get_optional_double(json_t *arguments, const char *param_name, double *out);
 bool get_optional_float(json_t *arguments, const char *param_name, float *out);
 bool get_optional_bool(json_t *arguments, const char *param_name, bool *out);
+bool get_optional_vec3d(json_t *arguments, const char *param_name, vec3d *out);
+bool get_optional_matrix(json_t *arguments, const char *param_name, matrix *out);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 struct vec3d;
-json_t *build_vec3_json(const vec3d &v);
+json_t *build_vec3d_json(const vec3d &v);
+
+// Builds a JSON {"rvec":..., "uvec":..., "fvec":...} object from a matrix.
+struct matrix;
+json_t* build_matrix_json(const matrix& m);
 
 // Build a JSON string array from a list of indices, using a C-string-compatible field.
 template<typename VECTOR1_T, typename VECTOR2_T, typename ITEM_T, typename FIELD_T>

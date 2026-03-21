@@ -245,13 +245,129 @@ bool get_optional_bool(json_t *arguments, const char *param_name, bool *out)
 	return false;
 }
 
-json_t *build_vec3_json(const vec3d &v)
+static json_t *make_vec3d_schema()
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("object"));
+	json_t *sub = json_object();
+	for (const char *axis : {"x", "y", "z"}) {
+		json_t *np = json_object();
+		json_object_set_new(np, "type", json_string("number"));
+		json_object_set_new(sub, axis, np);
+	}
+	json_object_set_new(p, "properties", sub);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("x"));
+	json_array_append_new(req, json_string("y"));
+	json_array_append_new(req, json_string("z"));
+	json_object_set_new(p, "required", req);
+	return p;
+}
+
+static bool parse_vec3d_json(json_t *obj, vec3d *out)
+{
+	if (!obj || !json_is_object(obj))
+		return false;
+	json_t *x = json_object_get(obj, "x");
+	json_t *y = json_object_get(obj, "y");
+	json_t *z = json_object_get(obj, "z");
+	if (!x || !json_is_number(x) || !y || !json_is_number(y) || !z || !json_is_number(z))
+		return false;
+	out->xyz.x = (float)json_number_value(x);
+	out->xyz.y = (float)json_number_value(y);
+	out->xyz.z = (float)json_number_value(z);
+	return true;
+}
+
+json_t *build_vec3d_json(const vec3d &v)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "x", json_real(v.xyz.x));
 	json_object_set_new(obj, "y", json_real(v.xyz.y));
 	json_object_set_new(obj, "z", json_real(v.xyz.z));
 	return obj;
+}
+
+json_t* build_matrix_json(const matrix& m)
+{
+	json_t* obj = json_object();
+	json_object_set_new(obj, "rvec", build_vec3d_json(m.vec.rvec));
+	json_object_set_new(obj, "uvec", build_vec3d_json(m.vec.uvec));
+	json_object_set_new(obj, "fvec", build_vec3d_json(m.vec.fvec));
+	return obj;
+}
+
+void add_vec3d_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = make_vec3d_schema();
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
+void add_matrix_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("object"));
+	json_object_set_new(p, "description", json_string(description));
+	json_t *sub = json_object();
+	json_object_set_new(sub, "rvec", make_vec3d_schema());
+	json_object_set_new(sub, "uvec", make_vec3d_schema());
+	json_object_set_new(sub, "fvec", make_vec3d_schema());
+	json_object_set_new(p, "properties", sub);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("rvec"));
+	json_array_append_new(req, json_string("uvec"));
+	json_array_append_new(req, json_string("fvec"));
+	json_object_set_new(p, "required", req);
+	json_object_set_new(props, name, p);
+}
+
+bool get_optional_vec3d(json_t *arguments, const char *param_name, vec3d *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	return parse_vec3d_json(val, out);
+}
+
+bool get_optional_matrix(json_t *arguments, const char *param_name, matrix *out)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (!val || !json_is_object(val))
+		return false;
+	return parse_vec3d_json(json_object_get(val, "rvec"), &out->vec.rvec)
+		&& parse_vec3d_json(json_object_get(val, "uvec"), &out->vec.uvec)
+		&& parse_vec3d_json(json_object_get(val, "fvec"), &out->vec.fvec);
+}
+
+bool get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out, vec3d *out)
+{
+	if (get_optional_vec3d(arguments, param_name, out))
+		return true;
+	*error_out = make_missing_param_error(param_name);
+	return false;
+}
+
+bool get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out, matrix *out)
+{
+	if (get_optional_matrix(arguments, param_name, out))
+		return true;
+	*error_out = make_missing_param_error(param_name);
+	return false;
+}
+
+bool require_vec3d_param(json_t *input, const char *param_name, McpToolRequest *req, vec3d *out)
+{
+	if (get_optional_vec3d(input, param_name, out))
+		return true;
+	set_missing_param_error(req, param_name);
+	return false;
+}
+
+bool require_matrix_param(json_t *input, const char *param_name, McpToolRequest *req, matrix *out)
+{
+	if (get_optional_matrix(input, param_name, out))
+		return true;
+	set_missing_param_error(req, param_name);
+	return false;
 }
 
 void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name)
