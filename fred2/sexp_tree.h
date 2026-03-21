@@ -175,6 +175,7 @@ public:
 	void free_node(int node, int cascade = 0);
 	int allocate_node(int parent, int after = -1);
 	int allocate_node();
+	int allocate_node_at(int sexp_index, int parent);  // headless only: allocates at tree_nodes[sexp_index]
 	int find_free_node();
 	void clear_tree(const char *op = NULL);
 	void reset_handles();
