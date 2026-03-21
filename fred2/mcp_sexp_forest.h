@@ -1,6 +1,8 @@
 #ifndef _MCP_SEXP_FOREST_H
 #define _MCP_SEXP_FOREST_H
 
+#include "globalincs/pstypes.h"
+
 // ---------------------------------------------------------------------------
 // Cached headless sexp_tree representing every live SEXP tree in the mission.
 //
@@ -10,8 +12,13 @@
 // may rebuild it.
 // ---------------------------------------------------------------------------
 
-// Mark the forest as needing a rebuild.  Safe to call from any thread.
+// Mark the entire forest as needing a full rebuild.  Safe to call from any thread.
 void mcp_sexp_forest_mark_dirty();
+
+// Mark specific root nodes dirty (partial rebuild).
+// roots must be valid Sexp_nodes[] root indices saved after the most recent save_tree() call.
+// Safe to call from any thread.
+void mcp_sexp_forest_mark_dirty(SCP_vector<int> roots);
 
 // Rebuild the forest from the current Sexp_nodes[] array.
 // MUST be called on the main thread only.
