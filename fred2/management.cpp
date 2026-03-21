@@ -16,6 +16,7 @@
 #include "FREDDoc.h"
 #include "FREDView.h"
 #include "FredRender.h"
+#include "mcp_sexp_forest.h"
 #include "ai/aigoals.h"
 #include "ship/ship.h"
 #include "globalincs/linklist.h"
@@ -871,6 +872,7 @@ void clear_mission(bool fast_reload)
 
 	// clean up everything we need to before we reset back to defaults.
 	clean_up_selections();
+	mcp_sexp_forest_mark_dirty();
 	if (Briefing_dialog){
 		Briefing_dialog->reset_editor();
 	}
