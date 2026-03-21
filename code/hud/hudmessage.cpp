@@ -369,7 +369,7 @@ void HudGaugeMessages::scrollMessages()
 			new_active_msg.target_y = new_active_msg.y;
 		}
 
-		active_messages.push_back(new_active_msg);
+		active_messages.push_back(std::move(new_active_msg));
 	}
 
 	Scroll_in_progress = false;
@@ -585,7 +585,7 @@ void hud_sourced_print(int source, const SCP_string &msg)
 	new_msg.source = source;
 	new_msg.x = 0;
 
-	HUD_msg_buffer.push_back(new_msg);
+	HUD_msg_buffer.push_back(std::move(new_msg));
 
 	// Invoke the scripting hook
 	if (OnHudMessageReceivedHook->isActive()) {
@@ -610,7 +610,7 @@ void hud_sourced_print(int source, const char *msg)
 	new_msg.source = source;
 	new_msg.x = 0;
 
-	HUD_msg_buffer.push_back(new_msg);
+	HUD_msg_buffer.push_back(std::move(new_msg));
 
 	// Invoke the scripting hook
 	if (OnHudMessageReceivedHook->isActive()) {
@@ -666,7 +666,7 @@ void hud_add_msg_to_scrollback(const char *text, int source, int t)
 	line_node newLine = {t, The_mission.HUD_timer_padding, source, 0, 1, w, ""};
 	newLine.text = text;
 
-	Msg_scrollback_vec.push_back(newLine);
+	Msg_scrollback_vec.push_back(std::move(newLine));
 }
 
 // how many lines to skip
@@ -886,7 +886,7 @@ void hud_initialize_scrollback_lines()
 				}
 			} else {
 				node_msg.y = height / 3;
-				Msg_scrollback_lines.push_back(node_msg);
+				Msg_scrollback_lines.push_back(std::move(node_msg));
 			}
 		}
 	}
