@@ -686,7 +686,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	}
 
 	// Physics
-	json_object_set_new(obj, "max_velocity", build_vec3_json(sip.max_vel));
+	json_object_set_new(obj, "max_velocity", build_vec3d_json(sip.max_vel));
 	json_object_set_new(obj, "max_afterburner_speed", json_real(sip.afterburner_max_vel.xyz.z));
 	json_object_set_new(obj, "max_rear_speed", json_real(sip.max_rear_vel));
 
@@ -1854,8 +1854,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	json_object_set_new(obj, "name", json_string(sip.name));
 
 	// Bounding box dimensions
-	json_object_set_new(obj, "mins", build_vec3_json(pm->mins));
-	json_object_set_new(obj, "maxs", build_vec3_json(pm->maxs));
+	json_object_set_new(obj, "mins", build_vec3d_json(pm->mins));
+	json_object_set_new(obj, "maxs", build_vec3d_json(pm->maxs));
 
 	// Docking bays
 	{
@@ -1881,8 +1881,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_t *positions = json_array();
 			json_t *normals = json_array();
 			for (int s = 0; s < bay.num_slots; s++) {
-				json_array_append_new(positions, build_vec3_json(bay.pnt[s]));
-				json_array_append_new(normals, build_vec3_json(bay.norm[s]));
+				json_array_append_new(positions, build_vec3d_json(bay.pnt[s]));
+				json_array_append_new(normals, build_vec3d_json(bay.norm[s]));
 			}
 			json_object_set_new(dock_obj, "positions", positions);
 			json_object_set_new(dock_obj, "normals", normals);
@@ -1919,7 +1919,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				const auto &vert = path.verts[v];
 				json_t *vert_obj = json_object();
 
-				json_object_set_new(vert_obj, "pos", build_vec3_json(vert.pos));
+				json_object_set_new(vert_obj, "pos", build_vec3d_json(vert.pos));
 
 				json_object_set_new(vert_obj, "radius", json_real(vert.radius));
 
