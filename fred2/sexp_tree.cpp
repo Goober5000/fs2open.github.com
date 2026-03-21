@@ -197,7 +197,7 @@ int sexp_tree::load_branch(int index, int parent)
 			load_branch(Sexp_nodes[index].first, parent);  // do the sublist and continue
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_OPERATOR) {
-			cur = allocate_node(parent);
+			cur = m_headless ? allocate_node_at(index, parent) : allocate_node(parent);
 			if ((index == select_sexp_node) && !flag) {  // translate sexp node to our node
 				select_sexp_node = cur;
 				flag = 1;
@@ -208,7 +208,7 @@ int sexp_tree::load_branch(int index, int parent)
 			return cur;  // 'rest' was just used, so nothing left to use.
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_NUMBER) {
-			cur = allocate_node(parent);
+			cur = m_headless ? allocate_node_at(index, parent) : allocate_node(parent);
 			if (Sexp_nodes[index].type & SEXP_FLAG_VARIABLE) {
 				get_combined_variable_name(combined_var_name, Sexp_nodes[index].text);
 				set_node(cur, (SEXPT_VARIABLE | SEXPT_NUMBER | additional_flags), combined_var_name);
@@ -217,7 +217,7 @@ int sexp_tree::load_branch(int index, int parent)
 			}
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_STRING) {
-			cur = allocate_node(parent);
+			cur = m_headless ? allocate_node_at(index, parent) : allocate_node(parent);
 			if (Sexp_nodes[index].type & SEXP_FLAG_VARIABLE) {
 				get_combined_variable_name(combined_var_name, Sexp_nodes[index].text);
 				set_node(cur, (SEXPT_VARIABLE | SEXPT_STRING | additional_flags), combined_var_name);
@@ -232,11 +232,11 @@ int sexp_tree::load_branch(int index, int parent)
 			Assertion(get_sexp_container(Sexp_nodes[index].text) != nullptr,
 				"Attempt to load unknown container data %s into SEXP tree. Please report!",
 				Sexp_nodes[index].text);
-			cur = allocate_node(parent);
+			cur = m_headless ? allocate_node_at(index, parent) : allocate_node(parent);
 			set_node(cur, (SEXPT_CONTAINER_NAME | SEXPT_STRING | additional_flags), Sexp_nodes[index].text);
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_CONTAINER_DATA) {
-			cur = allocate_node(parent);
+			cur = m_headless ? allocate_node_at(index, parent) : allocate_node(parent);
 			Assertion(get_sexp_container(Sexp_nodes[index].text) != nullptr,
 				"Attempt to load unknown container data %s into SEXP tree. Please report!",
 				Sexp_nodes[index].text);
@@ -362,6 +362,8 @@ int sexp_tree::save_branch(int cur, int at_root)
 // find the next free tree node and return its index.
 int sexp_tree::find_free_node()
 {
+	Assert(!m_headless);  // headless forest addresses tree_nodes by Sexp_nodes index directly
+
 	int i;
 
 	for (i = 0; i < (int)tree_nodes.size(); i++)
@@ -436,6 +438,38 @@ int sexp_tree::allocate_node(int parent, int after)
 
 	tree_nodes[index].parent = parent;
 	return index;
+}
+
+// headless-only: allocate (or overwrite) the tree node at tree_nodes[sexp_index].
+// Because tree_nodes and Sexp_nodes share a 1:1 index mapping in headless mode,
+// the caller passes the Sexp_nodes[] index being processed and we write directly there.
+int sexp_tree::allocate_node_at(int sexp_index, int parent)
+{
+	Assert(m_headless);
+
+	if (sexp_index >= (int)tree_nodes.size())
+		tree_nodes.resize(sexp_index + 1);
+
+	tree_nodes[sexp_index].type   = SEXPT_UNINIT;
+	tree_nodes[sexp_index].parent = parent;
+	tree_nodes[sexp_index].child  = -1;
+	tree_nodes[sexp_index].next   = -1;
+	tree_nodes[sexp_index].flags  = 0;
+	strcpy_s(tree_nodes[sexp_index].text, "<uninitialized tree node>");
+	tree_nodes[sexp_index].handle = NULL;
+
+	if (parent != -1) {
+		int i = tree_nodes[parent].child;
+		if (i == -1) {
+			tree_nodes[parent].child = sexp_index;
+		} else {
+			while (tree_nodes[i].next != -1)
+				i = tree_nodes[i].next;
+			tree_nodes[i].next = sexp_index;
+		}
+	}
+
+	return sexp_index;
 }
 
 // free a node and all its children.  Also clears pointers to it, if any.

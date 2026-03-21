@@ -533,8 +533,6 @@ void event_editor::OnButtonOk()
 	save();
 	if (query_modified())
 		set_modified();
-	mcp_sexp_forest_mark_dirty();
-
 	for (auto &event: Mission_events) {
 		free_sexp2(event.formula);
 		event.result = 0;  // use this as a processed flag
@@ -562,11 +560,14 @@ void event_editor::OnButtonOk()
 	}
 
 	// copy all dialog events to the mission
+	SCP_vector<int> dirty_formulas;
 	Mission_events.clear();
 	for (const auto &dialog_event: m_events) {
 		Mission_events.push_back(dialog_event);
 		Mission_events.back().formula = m_event_tree.save_tree(dialog_event.formula);
+		dirty_formulas.push_back(Mission_events.back().formula);
 	}
+	mcp_sexp_forest_mark_dirty(dirty_formulas);
 
 	// now update all sexp references
 	for (const auto &name_pair: names)

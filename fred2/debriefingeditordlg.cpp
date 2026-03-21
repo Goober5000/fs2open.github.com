@@ -216,6 +216,7 @@ void debriefing_editor_dlg::update_data(int update)
 			free_sexp2(ptr->formula);
 
 		ptr->formula = m_tree.save_tree();
+		mcp_sexp_forest_mark_dirty({ ptr->formula });
 
 		SCP_string new_text, new_rec_text;
 		deconvert_multiline_string(new_text, m_text);
