@@ -37,7 +37,7 @@
   {
     "topic": "subsystems",
     "title": "Ship Subsystems",
-    "text": "Subsystems are targetable components of a ship, each with their own hitpoints. Common subsystem types include:\n\n- **Engines**: Disabling stops the ship from moving\n- **Weapons**: Disabling prevents the ship from firing\n- **Sensors/Communication**: Affects targeting and messaging\n- **Navigation**: Affects autopilot and warp capability\n- **Turrets**: Individual gun emplacements on larger ships\n- **Fighter bays**: Launch and recovery bays for carried craft\n\nSubsystems can be individually targeted, damaged, disabled, and repaired. Many SEXPs reference subsystems by name."
+    "text": "Subsystems are targetable components of a ship, each with their own hitpoints. Common subsystem types include:\n\n- **Engines**: Disabling stops the ship from moving\n- **Weapons**: Disabling prevents the ship from firing\n- **Sensors/Communication**: Affects targeting and messaging\n- **Navigation**: Affects autopilot and warp capability\n- **Turrets**: Individual gun emplacements on larger ships\n- **Hangar bays**: Sometimes referred to as fighter bays, these are launch and recovery bays for carried craft\n\nSubsystems can be individually targeted, damaged, disabled, and repaired. Many SEXPs reference subsystems by name."
   },
   {
     "topic": "weapon_banks",
@@ -52,7 +52,7 @@
   {
     "topic": "coordinate_system",
     "title": "Coordinate System and 3D Conventions",
-    "text": "FreeSpace uses a **left-handed coordinate system**:\n\n- **+X** is right\n- **+Y** is up\n- **+Z** is forward\n\nA ship's nose points along the +Z axis.\n\n**Units**: All distances are in **meters**.\n\n**Orientations** are represented as 3x3 rotation matrices consisting of three vectors in this order:\n- **rvec** (right vector)\n- **uvec** (up vector)\n- **fvec** (forward vector)\n\nAn identity orientation (facing forward, no rotation) is: rvec=(1,0,0) uvec=(0,1,0) fvec=(0,0,1).\n\n**Euler angles**: heading (h) = rotation around the Y axis, bank (b) = rotation around the Z axis, pitch (p) = rotation around the X axis. Rotations are applied in the order heading, bank, pitch (i.e. Y, Z, X). Strictly speaking these are Tait-Bryan angles, not classic Euler angles.\n\n**Model bounding boxes**: The `mins` and `maxs` fields from `get_ship_model_details` define the bounding box of the ship model in the model's local coordinate frame. For example, `maxs.z - mins.z` gives the overall length of the ship."
+    "text": "FreeSpace uses a **left-handed coordinate system**:\n\n- **+X** is right\n- **+Y** is up\n- **+Z** is forward\n\nA ship's nose points along the +Z axis.\n\n**Units**: All distances are in **meters**.\n\n**Orientations** are represented as 3x3 rotation matrices consisting of three vectors in this order:\n- **rvec** (right vector)\n- **uvec** (up vector)\n- **fvec** (forward vector)\n\nAn identity orientation (facing forward, no rotation) is: rvec=(1,0,0) uvec=(0,1,0) fvec=(0,0,1).\n\n**Euler angles**: heading (h) = rotation around the Y axis, bank (b) = rotation around the Z axis, pitch (p) = rotation around the X axis. Rotations are applied in the order heading, bank, pitch (i.e. Y, Z, X). Strictly speaking these are Tait-Bryan angles, not classic Euler angles.\n\n**Model bounding boxes**: The `minimums` and `maximums` fields from `get_ship_class_model_details` define the bounding box of the ship model in the model's local coordinate frame. For example, `maximums.z - minimums.z` gives the overall length of the ship."
   },
   {
     "topic": "subsystem_names",
