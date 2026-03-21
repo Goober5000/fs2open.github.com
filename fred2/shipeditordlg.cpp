@@ -1390,11 +1390,14 @@ int CShipEditorDlg::update_ship(int ship)
 		if (m_departure_location != -1)
 			MODIFY(Ships[ship].departure_location, static_cast<DepartureLocation>(m_departure_location));
 
+		SCP_vector<int> dirty_cues;
+
 		if (!multi_edit || m_update_arrival) {  // should we update the arrival cue?
 			if (Ships[ship].arrival_cue >= 0)
 				free_sexp2(Ships[ship].arrival_cue);
 
 			Ships[ship].arrival_cue = m_arrival_tree.save_tree();
+			dirty_cues.push_back(Ships[ship].arrival_cue);
 		}
 
 		if (!multi_edit || m_update_departure) {
@@ -1402,9 +1405,10 @@ int CShipEditorDlg::update_ship(int ship)
 				free_sexp2(Ships[ship].departure_cue);
 
 			Ships[ship].departure_cue = m_departure_tree.save_tree();
+			dirty_cues.push_back(Ships[ship].departure_cue);
 		}
 
-		mcp_sexp_forest_mark_dirty();
+		mcp_sexp_forest_mark_dirty(dirty_cues);
 
 		m_arrival_dist.save(&Ships[ship].arrival_distance);
 		m_arrival_delay.save(&Ships[ship].arrival_delay);

@@ -964,7 +964,7 @@ void wing_editor::update_data_safe()
 		free_sexp2(Wings[cur_wing].departure_cue);
 	Wings[cur_wing].departure_cue = m_departure_tree.save_tree();
 
-	mcp_sexp_forest_mark_dirty();
+	mcp_sexp_forest_mark_dirty({ Wings[cur_wing].arrival_cue, Wings[cur_wing].departure_cue });
 
 	// copy squad stuff
 	if(stricmp(m_wing_squad_filename, Wings[cur_wing].wing_squad_filename))

@@ -385,7 +385,7 @@ void briefing_editor_dlg::update_data(int update)
 
 		MODIFY(ptr->flags, i);
 		ptr->formula = m_tree.save_tree();
-		mcp_sexp_forest_mark_dirty();
+		mcp_sexp_forest_mark_dirty({ ptr->formula });
 		switch (m_lines.GetCheck()) {
 			case 1:
 				// add lines between every pair of 2 marked icons if there isn't one already.
