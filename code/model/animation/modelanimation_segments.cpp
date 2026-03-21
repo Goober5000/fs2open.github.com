@@ -1396,7 +1396,7 @@ namespace animation {
 	};
 	
 	void ModelAnimationSegmentIK::recalculate(ModelAnimationSubmodelBuffer& base, ModelAnimationSubmodelBuffer& currentAnimDelta, polymodel_instance* pmi) {
-		auto ik = std::unique_ptr<ik_solver>(new ik_solver_fabrik());
+		auto ik = std::make_unique<ik_solver_fabrik>();
 
 		polymodel* pm = model_get(pmi->model_num);
 		bsp_info* lastSubmodel = nullptr;
