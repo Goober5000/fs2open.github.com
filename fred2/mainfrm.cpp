@@ -740,7 +740,6 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		Undo_count = 0;
-		mcp_sexp_forest_mark_dirty();
 		req->success = true;
 		snprintf(req->result_message, sizeof(req->result_message),
 			"Mission loaded successfully: %s", Mission_filename);
@@ -823,7 +822,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		create_new_mission();
 		FREDDoc_ptr->SetTitle("Untitled");
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
-		mcp_sexp_forest_mark_dirty();
 		req->success = true;
 		strncpy(req->result_message, "New empty mission created", sizeof(req->result_message) - 1);
 		break;

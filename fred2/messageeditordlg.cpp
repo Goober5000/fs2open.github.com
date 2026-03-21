@@ -16,6 +16,7 @@
 #include "Management.h"
 #include "Sexp_tree.h"
 #include "EventEditor.h"
+#include "mcp_sexp_forest.h"
 #include "mission/missionmessage.h"
 
 #ifdef _DEBUG
@@ -437,6 +438,7 @@ int CMessageEditorDlg::update(int num)
 			node = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, fnode, node);
 			node = alloc_sexp("when", SEXP_ATOM, SEXP_ATOM_OPERATOR, -1, node);
 			Mission_events[m_event_num].formula = node;
+		mcp_sexp_forest_mark_dirty({ Mission_events[m_event_num].formula });
 		}
 	}
 
