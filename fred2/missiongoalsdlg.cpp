@@ -339,8 +339,6 @@ void CMissionGoalsDlg::OnButtonOk()
 	UpdateData(TRUE);
 	if (query_modified())
 		set_modified();
-	mcp_sexp_forest_mark_dirty();
-
 	for (auto &goal: Mission_goals) {
 		free_sexp2(goal.formula);
 		goal.satisfied = 0;  // use this as a processed flag
@@ -368,6 +366,7 @@ void CMissionGoalsDlg::OnButtonOk()
 	}
 
 	// copy all dialog goals to the mission
+	SCP_vector<int> dirty_formulas;
 	Mission_goals.clear();
 	for (const auto &dialog_goal: m_goals) {
 		Mission_goals.push_back(dialog_goal);
@@ -375,7 +374,9 @@ void CMissionGoalsDlg::OnButtonOk()
 		if ( The_mission.game_type & MISSION_TYPE_MULTI_TEAMS ) {
 			Assert( dialog_goal.team != -1 );
 		}
+		dirty_formulas.push_back(Mission_goals.back().formula);
 	}
+	mcp_sexp_forest_mark_dirty(dirty_formulas);
 
 	// now update all sexp references
 	for (const auto &name_pair: names)

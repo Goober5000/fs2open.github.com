@@ -289,18 +289,19 @@ void CMissionCutscenesDlg::OnButtonOk()
 	UpdateData(TRUE);
 	if (query_modified())
 		set_modified();
-	mcp_sexp_forest_mark_dirty();
-
 	for (auto& cutscene : The_mission.cutscenes) {
 		free_sexp2(cutscene.formula);
 	}
 
 	// copy all dialog cutscenes to the mission
+	SCP_vector<int> dirty_formulas;
 	The_mission.cutscenes.clear();
 	for (const auto& dialog_cutscene : m_cutscenes) {
 		The_mission.cutscenes.push_back(dialog_cutscene);
 		The_mission.cutscenes.back().formula = m_cutscenes_tree.save_tree(dialog_cutscene.formula);
+		dirty_formulas.push_back(The_mission.cutscenes.back().formula);
 	}
+	mcp_sexp_forest_mark_dirty(dirty_formulas);
 
 	theApp.record_window_data(&Mission_cutscenes_wnd_data, this);
 	CDialog::OnOK();
