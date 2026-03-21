@@ -437,7 +437,8 @@ void mcp_register_reference_tools(json_t *tools)
 		register_tool(tools, "get_ship_class_model_details",
 			"Get 3D model details for a ship class, including subsystems, bounding box "
 			"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
-			"fighter bay arrival/departure). Note: if the model is not already loaded, "
+			"fighter bay arrival/departure). All coordinate information is in the model's "
+			"local reference frame. Note: if the model has not been previously loaded, "
 			"this tool may take several seconds to respond while the model is loaded "
 			"into memory.",
 			props, req);
@@ -1535,7 +1536,7 @@ static const opf_type_info Opf_type_info[] = {
 	{ "order_recipient", "A ship, wing, or the special value \"All Fighters\"", ac_order_recipient, nullptr },
 	{ "ship_or_none",    "A ship name or <none>", ac_ship_none, "Use the literal string \"<none>\" to indicate no ship." },
 	{ "ship_not_player", "Any ship in the mission except the player ship", ac_ship, nullptr },
-	{ "ship_with_bay",   "A ship that has a fighter bay subsystem", ac_ship, nullptr },
+	{ "ship_with_bay",   "A ship that has a hangar bay subsystem", ac_ship, nullptr },
 	{ "ship_or_prop",    "A ship name or prop name", ac_ship_prop, nullptr },
 
 	// Subsystem variants
@@ -1803,7 +1804,7 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 	if (pm->ship_bay) {
 		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
 			if (pm->ship_bay->path_indexes[b] == path_index)
-				return "ship_bay";
+				return "hangar_bay";
 		}
 	}
 
@@ -1854,8 +1855,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	json_object_set_new(obj, "name", json_string(sip.name));
 
 	// Bounding box dimensions
-	json_object_set_new(obj, "mins", build_vec3d_json(pm->mins));
-	json_object_set_new(obj, "maxs", build_vec3d_json(pm->maxs));
+	json_object_set_new(obj, "minimums", build_vec3d_json(pm->mins));
+	json_object_set_new(obj, "maximums", build_vec3d_json(pm->maxs));
 
 	// Docking bays
 	{
@@ -1865,7 +1866,6 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_t *dock_obj = json_object();
 
 			json_object_set_new(dock_obj, "name", json_string(bay.name));
-			json_object_set_new(dock_obj, "num_slots", json_integer(bay.num_slots));
 
 			// Type flags as array of strings
 			json_t *type_arr = json_array();
@@ -1875,7 +1875,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				json_array_append_new(type_arr, json_string("rearm"));
 			if (bay.type_flags & DOCK_TYPE_GENERIC)
 				json_array_append_new(type_arr, json_string("generic"));
-			json_object_set_new(dock_obj, "type_flags", type_arr);
+			json_object_set_new(dock_obj, "dock_types", type_arr);
 
 			// Slot positions and normals
 			json_t *positions = json_array();
@@ -1894,7 +1894,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				if (spline_idx >= 0 && spline_idx < pm->n_paths)
 					json_array_append_new(spline_names, json_string(pm->paths[spline_idx].name));
 			}
-			json_object_set_new(dock_obj, "spline_path_names", spline_names);
+			json_object_set_new(dock_obj, "path_names", spline_names);
 
 			json_array_append_new(docks, dock_obj);
 		}
@@ -1910,7 +1910,6 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 			json_object_set_new(path_obj, "name", json_string(path.name));
 			set_optional_string(path_obj, "parent_name", path.parent_name);
-			json_object_set_new(path_obj, "num_vertices", json_integer(path.nverts));
 			json_object_set_new(path_obj, "usage", json_string(determine_path_usage(p, pm)));
 
 			// Vertices
@@ -1919,7 +1918,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				const auto &vert = path.verts[v];
 				json_t *vert_obj = json_object();
 
-				json_object_set_new(vert_obj, "pos", build_vec3d_json(vert.pos));
+				json_object_set_new(vert_obj, "position", build_vec3d_json(vert.pos));
 
 				json_object_set_new(vert_obj, "radius", json_real(vert.radius));
 
@@ -1935,7 +1934,6 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	// Ship bay (fighter bay arrival/departure paths)
 	if (pm->ship_bay && pm->ship_bay->num_paths > 0) {
 		json_t *bay_obj = json_object();
-		json_object_set_new(bay_obj, "num_paths", json_integer(pm->ship_bay->num_paths));
 
 		json_t *bay_paths = json_array();
 		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
@@ -1951,7 +1949,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_array_append_new(bay_paths, bp);
 		}
 		json_object_set_new(bay_obj, "paths", bay_paths);
-		json_object_set_new(obj, "ship_bay", bay_obj);
+		json_object_set_new(obj, "hangar_bay", bay_obj);
 	}
 
 	// Subsystems (model is loaded at this point, so types are reliable)
