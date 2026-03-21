@@ -1965,6 +1965,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			if (ss.type != SUBSYSTEM_NONE)
 				json_object_set_new(ss_obj, "subsystem_type", json_string(subsystem_type_str(ss.type)));
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
+			json_object_set_new(ss_obj, "position", build_vec3d_json(ss.pnt));
+			json_object_set_new(ss_obj, "radius", json_real(ss.radius));
 
 			// Turret-specific info
 			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
