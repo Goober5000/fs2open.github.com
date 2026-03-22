@@ -55,6 +55,26 @@ static const char *persona_name_from_index(int persona_index)
 }
 
 // ---------------------------------------------------------------------------
+// Team helpers
+// ---------------------------------------------------------------------------
+
+static const char *team_name_from_index(int multi_team)
+{
+	switch (multi_team) {
+		case 0:  return "Team 1";
+		case 1:  return "Team 2";
+		default: return "none";
+	}
+}
+
+static int team_index_from_name(const char *name)
+{
+	if (!stricmp(name, "Team 1")) return 0;
+	if (!stricmp(name, "Team 2")) return 1;
+	return -1;	// invalid or default
+}
+
+// ---------------------------------------------------------------------------
 // Autosave helper
 // ---------------------------------------------------------------------------
 
@@ -87,7 +107,7 @@ static json_t *build_message_json(const MMessage &msg, bool include_details = fa
 		json_object_set_new(obj, "persona", json_string(persona));
 
 	if (include_details) {
-		json_object_set_new(obj, "team", json_integer(msg.multi_team));
+		json_object_set_new(obj, "team", json_string(team_name_from_index(msg.multi_team)));
 		set_optional_string(obj, "talking_head", msg.avi_info.name, true);
 		set_optional_string(obj, "voice_file", msg.wave_info.name, true);
 	}
@@ -156,7 +176,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	auto persona_str  = get_optional_string(input, "persona", false);
 	auto talking_head = get_optional_string(input, "talking_head", false);
 	auto voice_file   = get_optional_string(input, "voice_file", false);
-	auto team         = get_optional_integer(input, "team");
+	auto team_str     = get_optional_string(input, "team", true);
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Check for duplicate name
@@ -172,6 +192,14 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	if (persona_str && persona_str[0]) {
 		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
 		if (persona_index < 0) return;
+	}
+
+	// Validate team
+	int multi_team = -1;
+	if (team_str) {
+		if (!check_string_enum(team_str, {"none", "Team 1", "Team 2"}, "team", req))
+			return;
+		multi_team = team_index_from_name(team_str);
 	}
 
 	// Validate and resolve insert index
@@ -195,7 +223,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	strcpy_s(msg.name, name);
 	strcpy_s(msg.message, message);
 	msg.persona_index = persona_index;
-	msg.multi_team = team.has_value() ? *team : -1;
+	msg.multi_team = multi_team;
 	msg.mood = DEFAULT_MOOD;
 	msg.note.clear();
 	msg.excluded_moods.clear();
@@ -253,7 +281,14 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 	auto new_head = get_optional_string(input, "talking_head", false);
 	auto new_voice = get_optional_string(input, "voice_file", false);
-	auto new_team = get_optional_integer(input, "team");
+
+	auto new_team_str = get_optional_string(input, "team", true);
+	std::optional<int> new_team = std::nullopt;
+	if (new_team_str) {
+		if (!check_string_enum(new_team_str, {"none", "Team 1", "Team 2"}, "team", req))
+			return;
+		new_team = team_index_from_name(new_team_str);
+	}
 
 	auto new_name = get_optional_string(input, "new_name", false);
 	if (new_name) {
@@ -615,9 +650,9 @@ void mcp_register_mission_tools(json_t *tools)
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation");
 		add_string_prop(props, "voice_file", "Filename for the voice audio");
-		add_integer_enum_prop(props, "team",
-			"Multiplayer team filter (-1 for all teams, 0 or 1 for a specific team)",
-			{-1, 0, 1});
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment (\"none\" for all teams)",
+			{"none", "Team 1", "Team 2"});
 		add_integer_prop(props, "index",
 			"Position to insert the message among mission messages (0 = first). "
 			"If omitted, appends to the end.");
@@ -640,9 +675,9 @@ void mcp_register_mission_tools(json_t *tools)
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
 		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
-		add_integer_enum_prop(props, "team",
-			"Multiplayer team filter (-1 for all teams, 0 or 1 for a specific team)",
-			{-1, 0, 1});
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment (\"none\" for all teams)",
+			{"none", "Team 1", "Team 2"});
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_message",
