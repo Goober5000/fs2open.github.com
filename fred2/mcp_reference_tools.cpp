@@ -258,7 +258,9 @@ void mcp_register_reference_tools(json_t *tools)
 	// list_weapon_classes
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "subtype", "Filter by subtype: \"primary\", \"secondary\", or \"beam\"");
+		add_string_enum_prop(props, "subtype",
+			"Filter by subtype: \"primary\", \"secondary\", or \"beam\"",
+			{"primary", "secondary", "beam"});
 		register_tool(tools, "list_weapon_classes",
 			"List all weapon classes with summary info. Optionally filter by subtype.",
 			props);
@@ -711,16 +713,17 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
 	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
+	json_t *err = nullptr;
 	const char *st = get_optional_string(arguments, "subtype", true);
 	if (st) {
+		if (!check_string_enum(st, {"primary", "secondary", "beam"}, "subtype", &err))
+			return err;
 		if (stricmp(st, "primary") == 0)
 			filter = FILTER_PRIMARY;
 		else if (stricmp(st, "secondary") == 0)
 			filter = FILTER_SECONDARY;
-		else if (stricmp(st, "beam") == 0)
-			filter = FILTER_BEAM;
 		else
-			return make_tool_result("Invalid subtype. Use \"primary\", \"secondary\", or \"beam\".", true);
+			filter = FILTER_BEAM;
 	}
 
 	json_t *arr = json_array();
