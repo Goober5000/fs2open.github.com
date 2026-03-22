@@ -644,10 +644,16 @@ static json_t *handle_get_ship_class(json_t *arguments)
 		json_object_set_new(obj, "tech_lore", tech);
 	}
 
-	// Physics
-	json_object_set_new(obj, "max_velocity", build_vec3d_json(sip.max_vel));
-	json_object_set_new(obj, "max_afterburner_speed", json_real(sip.afterburner_max_vel.xyz.z));
-	json_object_set_new(obj, "max_rear_speed", json_real(sip.max_rear_vel));
+	// Speeds
+	{
+		json_t *speeds = json_object();
+		json_object_set_new(speeds, "lateral", json_real(sip.max_vel.xyz.x));
+		json_object_set_new(speeds, "vertical", json_real(sip.max_vel.xyz.y));
+		json_object_set_new(speeds, "forward", json_real(sip.max_vel.xyz.z));
+		json_object_set_new(speeds, "backward", json_real(sip.max_rear_vel));
+		json_object_set_new(speeds, "afterburner", json_real(sip.afterburner_max_vel.xyz.z));
+		json_object_set_new(obj, "max_speeds", speeds);
+	}
 
 	// Durability
 	json_object_set_new(obj, "max_hull_strength", json_real(sip.max_hull_strength));
@@ -902,14 +908,14 @@ static json_t *handle_get_iff(json_t *arguments)
 	// Identity
 	json_object_set_new(obj, "name", json_string(iff.iff_name));
 
-	// Color (RGB array from the non-bright variant)
+	// Color (RGB from the non-bright variant)
 	{
 		color *c = iff_get_color(iff.color_index, 0);
-		json_t *color_arr = json_array();
-		json_array_append_new(color_arr, json_integer(c->red));
-		json_array_append_new(color_arr, json_integer(c->green));
-		json_array_append_new(color_arr, json_integer(c->blue));
-		json_object_set_new(obj, "color", color_arr);
+		json_t *color_obj = json_object();
+		json_object_set_new(color_obj, "red", json_integer(c->red));
+		json_object_set_new(color_obj, "green", json_integer(c->green));
+		json_object_set_new(color_obj, "blue", json_integer(c->blue));
+		json_object_set_new(obj, "color", color_obj);
 	}
 
 	// Attacks
