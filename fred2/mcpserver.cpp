@@ -74,7 +74,7 @@ static json_t *make_error_response(json_t *id, int code, const char *message)
 // MCP method handlers
 // ---------------------------------------------------------------------------
 
-static json_t *handle_initialize(json_t * /*params*/)
+static json_t *handle_initialize(json_t * /*params*/, int &error_code, SCP_string &error_msg)
 {
 	json_t *result = json_object();
 	json_object_set_new(result, "protocolVersion", json_string(MCP_PROTOCOL_VERSION));
@@ -91,7 +91,7 @@ static json_t *handle_initialize(json_t * /*params*/)
 	return result;
 }
 
-static json_t *handle_tools_list(json_t * /*params*/)
+static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_string &error_msg)
 {
 	json_t *result = json_object();
 	json_t *tools = json_array();
@@ -285,12 +285,15 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 	return mcp_wait_for_result(req);
 }
 
-static json_t *handle_tools_call(json_t *params)
+static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &error_msg)
 {
 	const char *tool_name = get_optional_string(params, "name");
 
-	if (!tool_name)
-		return nullptr;  // caller will send error
+	if (!tool_name) {
+		error_code = -32602;
+		error_msg = "tool_name must be specified";
+		return nullptr;
+	}
 
 	if (strcmp(tool_name, "get_server_info") == 0) {
 		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, "");
@@ -455,19 +458,29 @@ static void handle_mcp_post(struct mg_connection *conn)
 	// Dispatch method
 	json_t *result = nullptr;
 	json_t *resp = nullptr;
+	int error_code = 0;
+	SCP_string error_msg;
 
 	if (strcmp(method, "initialize") == 0) {
-		result = handle_initialize(params);
+		result = handle_initialize(params, error_code, error_msg);
 	} else if (strcmp(method, "tools/list") == 0) {
-		result = handle_tools_list(params);
+		result = handle_tools_list(params, error_code, error_msg);
 	} else if (strcmp(method, "tools/call") == 0) {
-		result = handle_tools_call(params);
+		result = handle_tools_call(params, error_code, error_msg);
+	} else {
+		error_code = -32601;
+		error_msg = "Method not found";
 	}
 
-	if (result) {
+	if (result && (error_code == 0) && (error_msg.empty())) {
 		resp = make_response(id, result);
 	} else {
-		resp = make_error_response(id, -32601, "Method not found");
+		if (error_msg.empty()) {
+			error_msg = "Unknown error";
+		} else if (error_code == 0) {
+			error_code = -32000;	// server error
+		}
+		resp = make_error_response(id, error_code, error_msg.c_str());
 	}
 
 	send_json_response(conn, resp);
