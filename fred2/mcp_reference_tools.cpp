@@ -683,7 +683,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 		set_optional_string(tech, "ship_length", sip.ship_length.get());
 		set_optional_string(tech, "gun_mounts", sip.gun_mounts.get());
 		set_optional_string(tech, "missile_banks", sip.missile_banks.get());
-		json_object_set_new(tech, "tech_lore", tech);
+		json_object_set_new(obj, "tech_lore", tech);
 	}
 
 	// Physics
@@ -1370,8 +1370,9 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 		CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
 		if (fp) {
 			int len = cfilelength(fp);
-			content.resize(len);
-			cfread(content.data(), len + 1, 1, fp);
+			content.resize(len + 1);
+			cfread(content.data(), len, 1, fp);
+			content += '\0';
 			cfclose(fp);
 		}
 	} else if (try_defaults) {
@@ -2035,10 +2036,11 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
-	const char *name1 = get_optional_string(arguments, "name1");
-	const char *name2 = get_optional_string(arguments, "name2");
-	if (!name1 || !name2)
-		return make_tool_result("Missing required parameters: name1 and name2", true);
+	json_t *err = nullptr;
+	const char *name1 = get_required_string(arguments, "name1", &err);
+	if (!name1) return err;
+	const char *name2 = get_required_string(arguments, "name2", &err);
+	if (!name2) return err;
 
 	int cmp = subsystem_stricmp(name1, name2);
 
@@ -2053,10 +2055,11 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 
 static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
-	const char *name1 = get_optional_string(arguments, "name1");
-	const char *name2 = get_optional_string(arguments, "name2");
-	if (!name1 || !name2)
-		return make_tool_result("Missing required parameters: name1 and name2", true);
+	json_t *err = nullptr;
+	const char *name1 = get_required_string(arguments, "name1", &err);
+	if (!name1) return err;
+	const char *name2 = get_required_string(arguments, "name2", &err);
+	if (!name2) return err;
 
 	bool equal = subsystem_stricmp(name1, name2) == 0;
 
@@ -2081,7 +2084,7 @@ static json_t *handle_list_persona_types()
 	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
 		json_array_append_new(arr, json_string(Persona_type_names[i]));
 
-	return make_list_result("persona_types", arr);
+	return make_json_tool_result(arr);
 }
 
 static json_t *handle_list_personas()
@@ -2113,7 +2116,7 @@ static json_t *handle_list_personas()
 		json_array_append_new(arr, entry);
 	}
 
-	return make_list_result("personas", arr);
+	return make_json_tool_result(arr);
 }
 
 static json_t *handle_list_talking_heads()
@@ -2151,7 +2154,7 @@ static json_t *handle_list_talking_heads()
 	for (const auto &h : heads)
 		json_array_append_new(arr, json_string(h.c_str()));
 
-	return make_list_result("talking_heads", arr);
+	return make_json_tool_result(arr);
 }
 
 // ---------------------------------------------------------------------------
