@@ -89,6 +89,16 @@ void register_tool(json_t *tools, const char *name, const char *description,
 	json_array_append_new(tools, tool);
 }
 
+void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
+	const char *param_name, const char *param_desc)
+{
+	json_t *props = json_object();
+	add_string_prop(props, param_name, param_desc);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string(param_name));
+	register_tool(tools, tool_name, description, props, req);
+}
+
 static void set_missing_param_error(McpToolRequest *req, const char *param_name)
 {
 	req->success = false;

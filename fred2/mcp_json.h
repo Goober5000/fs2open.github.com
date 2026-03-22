@@ -36,6 +36,10 @@ void add_matrix_prop(json_t *props, const char *name, const char *description);
 void register_tool(json_t *tools, const char *name, const char *description,
 	json_t *properties, json_t *required_arr = nullptr);
 
+// Shorthand: register a tool whose only parameter is a single required string.
+void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
+	const char *param_name, const char *param_desc);
+
 // Calls check_fn(); if it returns a conflict message, sets req->success=false and
 // copies the message into req->result_message, then returns true. Caller should return.
 bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn);
