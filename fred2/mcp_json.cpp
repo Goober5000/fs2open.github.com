@@ -46,9 +46,9 @@ json_t *make_json_tool_result(json_t *data)
 	return result;
 }
 
-void set_optional_string(json_t *obj, const char *key, const char *value)
+void set_optional_string(json_t *obj, const char *key, const char *value, bool omit_if_empty)
 {
-	if (value && value[0] != '\0')
+	if (value && (value[0] || !omit_if_empty))
 		json_object_set_new(obj, key, json_string(value));
 }
 
@@ -191,11 +191,17 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 	return result;
 }
 
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req)
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool allow_empty)
 {
-	const char *value = get_optional_string(input, param_name);
-	if (!value || !value[0]) {
+	const char *value = get_optional_string(input, param_name, false);
+	if (!value) {
 		set_missing_param_error(req, param_name);
+		return nullptr;
+	}
+	if (!value[0] && !allow_empty) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Required parameter must not be empty: %s", param_name);
 		return nullptr;
 	}
 	return value;
@@ -237,11 +243,15 @@ std::optional<bool> get_required_bool(json_t *input, const char *param_name, Mcp
 	return std::nullopt;
 }
 
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out)
+const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool allow_empty)
 {
-	const char *str = get_optional_string(arguments, param_name);
-	if (!str || str[0] == '\0') {
+	const char *str = get_optional_string(arguments, param_name, false);
+	if (!str) {
 		*error_out = make_missing_param_error(param_name);
+		return nullptr;
+	}
+	if (!str[0] && !allow_empty) {
+		*error_out = make_tool_result(true, "Required parameter must not be empty: %s", param_name);
 		return nullptr;
 	}
 	return str;
@@ -283,10 +293,16 @@ std::optional<bool> get_required_bool(json_t *arguments, const char *param_name,
 	return std::nullopt;
 }
 
-const char *get_optional_string(json_t *arguments, const char *param_name)
+const char *get_optional_string(json_t *arguments, const char *param_name, bool null_if_empty)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	return (val && json_is_string(val)) ? json_string_value(val) : nullptr;
+	if (val && json_is_string(val)) {
+		auto str = json_string_value(val);
+		if (str[0] || !null_if_empty) {
+			return str;
+		}
+	}
+	return nullptr;
 }
 
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name)
@@ -457,10 +473,10 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name)
 {
 	req->success = false;
-	snprintf(req->result_message, sizeof(req->result_message), "%s not found: %s", entity_type, name);
+	snprintf(req->result_message, sizeof(req->result_message), "%s not found: '%s'", entity_type, name);
 }
 
 json_t *make_not_found_error(const char *entity_type, const char *name)
 {
-	return make_tool_result(true, "%s not found: %s", entity_type, name);
+	return make_tool_result(true, "%s not found: '%s'", entity_type, name);
 }
