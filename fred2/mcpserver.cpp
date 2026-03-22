@@ -281,7 +281,7 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
 	if (!req->completion_event) {
 		delete req;
-	    return make_tool_result("Failed to create completion event", true);
+		return make_tool_result("Failed to create completion event", true);
 	}
 	req->refcount.store(2, std::memory_order_relaxed);
 
