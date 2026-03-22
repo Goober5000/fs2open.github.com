@@ -894,8 +894,8 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			}
 
 			// Mod context (if available)
-			set_optional_string(info, "mod_title", Mod_title.c_str());
-			set_optional_string(info, "mod_version", Mod_version.c_str());
+			set_optional_string(info, "mod_title", Mod_title.c_str(), true);
+			set_optional_string(info, "mod_version", Mod_version.c_str(), true);
 			json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
 
 			req->result_json = make_json_tool_result(info);

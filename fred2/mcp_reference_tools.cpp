@@ -372,14 +372,12 @@ void mcp_register_reference_tools(json_t *tools)
 		add_string_prop(props, "name",
 			"Argument type name as returned by get_sexp_operator or get_sexp_argument_type "
 			"(e.g. \"iff\", \"ship_flag\", \"skill_level\")");
-		json_object_set_new(props, "node",
-			json_pack("{s:s, s:s}", "type", "integer",
-				"description", "Sexp_nodes[] index for context-filtered results "
-				"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results."));
-		json_object_set_new(props, "arg_index",
-			json_pack("{s:s, s:s}", "type", "integer",
-				"description", "Argument position within the operator at 'node' (0-based). "
-				"Used together with 'node' for context filtering."));
+		add_integer_prop(props, "node",
+			"Sexp_nodes[] index for context-filtered results "
+			"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results.");
+		add_integer_prop(props, "arg_index",
+			"Argument position within the operator at 'node' (0-based). "
+			"Used together with 'node' for context filtering.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "list_sexp_argument_values",
@@ -484,7 +482,7 @@ static json_t *handle_list_ship_types()
 static json_t *handle_get_ship_type(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int idx = ship_type_name_lookup(name);
@@ -516,8 +514,8 @@ static json_t *handle_get_ship_type(json_t *arguments)
 static json_t *handle_list_ship_classes(json_t *arguments)
 {
 	// Optional filters
-	const char *filter_species = get_optional_string(arguments, "species");
-	const char *filter_type    = get_optional_string(arguments, "ship_type");
+	const char *filter_species = get_optional_string(arguments, "species", true);
+	const char *filter_type    = get_optional_string(arguments, "ship_type", true);
 
 	int filter_species_idx = -1;
 	if (filter_species) {
@@ -607,7 +605,7 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 static json_t *handle_get_ship_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int idx = ship_info_lookup(name);
@@ -633,14 +631,14 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	// Tech room strings
 	{
 		json_t* tech = json_object();
-		set_optional_string(tech, "role", sip.type_str.get());
-		set_optional_string(tech, "manufacturer", sip.manufacturer_str.get());
-		set_optional_string(tech, "description", sip.tech_desc.get());
-		set_optional_string(tech, "armor", sip.armor_str.get());
-		set_optional_string(tech, "maneuverability", sip.maneuverability_str.get());
-		set_optional_string(tech, "ship_length", sip.ship_length.get());
-		set_optional_string(tech, "gun_mounts", sip.gun_mounts.get());
-		set_optional_string(tech, "missile_banks", sip.missile_banks.get());
+		set_optional_string(tech, "role", sip.type_str.get(), true);
+		set_optional_string(tech, "manufacturer", sip.manufacturer_str.get(), true);
+		set_optional_string(tech, "description", sip.tech_desc.get(), true);
+		set_optional_string(tech, "armor", sip.armor_str.get(), true);
+		set_optional_string(tech, "maneuverability", sip.maneuverability_str.get(), true);
+		set_optional_string(tech, "ship_length", sip.ship_length.get(), true);
+		set_optional_string(tech, "gun_mounts", sip.gun_mounts.get(), true);
+		set_optional_string(tech, "missile_banks", sip.missile_banks.get(), true);
 		json_object_set_new(obj, "tech_lore", tech);
 	}
 
@@ -713,7 +711,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
 	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
-	const char *st = get_optional_string(arguments, "subtype");
+	const char *st = get_optional_string(arguments, "subtype", true);
 	if (st) {
 		if (stricmp(st, "primary") == 0)
 			filter = FILTER_PRIMARY;
@@ -751,7 +749,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 static json_t *handle_get_weapon_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int idx = weapon_info_lookup(name);
@@ -770,13 +768,13 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	// Loadout and Tech screen strings
 	{
 		json_t* loadout = json_object();
-		set_optional_string(loadout, "title", wip.title);
-		set_optional_string(loadout, "description", wip.desc.get());
+		set_optional_string(loadout, "title", wip.title, true);
+		set_optional_string(loadout, "description", wip.desc.get(), true);
 		json_object_set_new(obj, "loadout_ui", loadout);
 
 		json_t* tech = json_object();
-		set_optional_string(tech, "title", wip.tech_title);
-		set_optional_string(tech, "description", wip.tech_desc.get());
+		set_optional_string(tech, "title", wip.tech_title, true);
+		set_optional_string(tech, "description", wip.tech_desc.get(), true);
 		json_object_set_new(obj, "tech_lore", tech);
 	}
 
@@ -863,8 +861,8 @@ static json_t *handle_list_species()
 			json_object_set_new(item, "default_iff", json_string(Iff_info[sp.default_iff].iff_name));
 
 		json_object_set_new(item, "awacs_multiplier", json_real(sp.awacs_multiplier));
-		set_optional_string(item, "countermeasure", sp.cmeasure_name);
-		set_optional_string(item, "support_ship_class", sp.support_ship_name);
+		set_optional_string(item, "countermeasure", sp.cmeasure_name, true);
+		set_optional_string(item, "support_ship_class", sp.support_ship_name, true);
 
 		json_array_append_new(arr, item);
 	}
@@ -888,7 +886,7 @@ static json_t *handle_list_iffs()
 static json_t *handle_get_iff(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int idx = iff_lookup(name);
@@ -946,7 +944,7 @@ static json_t *handle_list_intel_entries()
 static json_t *handle_get_intel_entry(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int idx = intel_info_lookup(name);
@@ -1054,9 +1052,9 @@ static json_t *handle_list_sexp_categories()
 
 static json_t *handle_list_sexp_operators(json_t *arguments)
 {
-	const char *filter_category    = get_optional_string(arguments, "category");
-	const char *filter_subcategory = get_optional_string(arguments, "subcategory");
-	const char *filter_search      = get_optional_string(arguments, "search");
+	const char *filter_category    = get_optional_string(arguments, "category", true);
+	const char *filter_subcategory = get_optional_string(arguments, "subcategory", true);
+	const char *filter_search      = get_optional_string(arguments, "search", true);
 
 	// Subcategory requires category (names can appear in multiple categories)
 	if (filter_subcategory && !filter_category)
@@ -1268,7 +1266,7 @@ static void build_argument_types_json(json_t *obj, int op_index, int min_args, i
 static json_t *handle_get_sexp_operator(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	// Find operator by name
@@ -1375,7 +1373,7 @@ static json_t *load_reference_notes()
 
 static json_t *handle_get_reference_notes(json_t *arguments)
 {
-	const char *topic = get_optional_string(arguments, "topic");
+	const char *topic = get_optional_string(arguments, "topic", true);
 
 	json_t *notes = load_reference_notes();
 	if (!notes)
@@ -1633,7 +1631,7 @@ static const T *find_type_info(const T *table, const char *name)
 
 static json_t *handle_get_sexp_argument_type(json_t *arguments)
 {
-	const char *name = get_optional_string(arguments, "name");
+	const char *name = get_optional_string(arguments, "name", true);
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -1704,7 +1702,7 @@ static const opr_type_info Opr_type_info[] = {
 
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
-	const char *name = get_optional_string(arguments, "name");
+	const char *name = get_optional_string(arguments, "name", true);
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -1772,7 +1770,7 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);
@@ -1867,7 +1865,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_t *path_obj = json_object();
 
 			json_object_set_new(path_obj, "name", json_string(path.name));
-			set_optional_string(path_obj, "parent_name", path.parent_name);
+			set_optional_string(path_obj, "parent_name", path.parent_name, true);
 			json_object_set_new(path_obj, "usage", json_string(determine_path_usage(p, pm)));
 
 			// Vertices
@@ -1994,9 +1992,9 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err);
+	const char *name1 = get_required_string(arguments, "name1", &err, true);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err);
+	const char *name2 = get_required_string(arguments, "name2", &err, true);
 	if (!name2) return err;
 
 	int cmp = subsystem_stricmp(name1, name2);
@@ -2013,9 +2011,9 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err);
+	const char *name1 = get_required_string(arguments, "name1", &err, true);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err);
+	const char *name2 = get_required_string(arguments, "name2", &err, true);
 	if (!name2) return err;
 
 	bool equal = subsystem_stricmp(name1, name2) == 0;
@@ -2121,7 +2119,7 @@ static json_t *handle_list_talking_heads()
 static json_t *handle_list_sexp_argument_values(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name)
 		return err;
 
