@@ -482,7 +482,7 @@ static json_t *handle_list_ship_types()
 static json_t *handle_get_ship_type(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int idx = ship_type_name_lookup(name);
@@ -605,7 +605,7 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 static json_t *handle_get_ship_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int idx = ship_info_lookup(name);
@@ -749,7 +749,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 static json_t *handle_get_weapon_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int idx = weapon_info_lookup(name);
@@ -886,7 +886,7 @@ static json_t *handle_list_iffs()
 static json_t *handle_get_iff(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int idx = iff_lookup(name);
@@ -944,7 +944,7 @@ static json_t *handle_list_intel_entries()
 static json_t *handle_get_intel_entry(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int idx = intel_info_lookup(name);
@@ -1266,7 +1266,7 @@ static void build_argument_types_json(json_t *obj, int op_index, int min_args, i
 static json_t *handle_get_sexp_operator(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	// Find operator by name
@@ -1770,7 +1770,7 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	const char *name = get_required_string(arguments, "name", &err, false);
 	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);
@@ -1992,9 +1992,9 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err, true);
+	const char *name1 = get_required_string(arguments, "name1", &err, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err, true);
+	const char *name2 = get_required_string(arguments, "name2", &err, false);
 	if (!name2) return err;
 
 	int cmp = subsystem_stricmp(name1, name2);
@@ -2011,9 +2011,9 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err, true);
+	const char *name1 = get_required_string(arguments, "name1", &err, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err, true);
+	const char *name2 = get_required_string(arguments, "name2", &err, false);
 	if (!name2) return err;
 
 	bool equal = subsystem_stricmp(name1, name2) == 0;
@@ -2119,7 +2119,7 @@ static json_t *handle_list_talking_heads()
 static json_t *handle_list_sexp_argument_values(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	const char *name = get_required_string(arguments, "name", &err, true);
 	if (!name)
 		return err;
 
