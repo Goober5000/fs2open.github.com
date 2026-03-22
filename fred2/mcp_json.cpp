@@ -158,27 +158,27 @@ bool check_int_range(int input, int min, int max, const char *param_name, json_t
 	return true;
 }
 
-bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req)
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req)
 {
-	if (lookup_fn(input) < 0) {
+	int result = lookup_fn(input);
+	if (result < 0) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
 			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
 			param_name, input);
-		return false;
 	}
-	return true;
+	return result;
 }
 
-bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out)
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out)
 {
-	if (lookup_fn(input) < 0) {
+	int result = lookup_fn(input);
+	if (result < 0) {
 		*error_out = make_tool_result(true,
 			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
 			param_name, input);
-		return false;
 	}
-	return true;
+	return result;
 }
 
 const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req)
