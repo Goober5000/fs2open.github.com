@@ -180,7 +180,7 @@ static SCP_string format_string_enum_error(const char *input, std::initializer_l
 		msg += v;
 		msg += "\",";
 	}
-	msg.back() = '.';  // replace trailing comma
+	msg.pop_back();  // remove trailing comma
 	return msg;
 }
 
