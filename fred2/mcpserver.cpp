@@ -300,7 +300,13 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 	}
 
 	if (strcmp(tool_name, "get_timeout") == 0) {
-		return make_tool_result(false, "timeout_seconds: %u", mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000);
+		DWORD seconds = mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000;
+		json_t *result = make_tool_result(false, "timeout (seconds): %u", seconds);
+
+		json_t *sc = json_object();
+		json_object_set_new(sc, "seconds", json_integer(seconds));
+		json_object_set_new(result, "structuredContent", sc);
+		return result;
 	}
 
 	if (strcmp(tool_name, "set_timeout") == 0) {
@@ -313,8 +319,12 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 			return make_tool_result("Timeout must be between 1 and 300 seconds", true);
 
 		mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
+		json_t *result = make_tool_result(false, "timeout (seconds): %d", *seconds);
 
-		return make_tool_result(false, "timeout_seconds: %d", *seconds);
+		json_t *sc = json_object();
+		json_object_set_new(sc, "seconds", json_integer(*seconds));
+		json_object_set_new(result, "structuredContent", sc);
+		return result;
 	}
 
 	// All tools below require FRED2 to be fully initialized
