@@ -234,15 +234,9 @@ void mcp_register_reference_tools(json_t *tools)
 		json_object());
 
 	// get_ship_type
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship type (e.g. \"fighter\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_ship_type",
-			"Get detailed information about a ship type, including AI behavior flags.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_ship_type",
+		"Get detailed information about a ship type, including AI behavior flags.",
+		"name", "Name of the ship type (e.g. \"fighter\")");
 
 	// list_ship_classes
 	{
@@ -255,17 +249,11 @@ void mcp_register_reference_tools(json_t *tools)
 	}
 
 	// get_ship_class
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship class (e.g. \"GTF Ulysses\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_ship_class",
-			"Get detailed stats for a specific ship class, including hull, shields, "
-			"speed, weapons, and per-bank weapon restrictions. See also get_ship_class_model_details "
-			"for ship class information that depends on the 3D model.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_ship_class",
+		"Get detailed stats for a specific ship class, including hull, shields, "
+		"speed, weapons, and per-bank weapon restrictions. See also get_ship_class_model_details "
+		"for ship class information that depends on the 3D model.",
+		"name", "Name of the ship class (e.g. \"GTF Ulysses\")");
 
 	// list_weapon_classes
 	{
@@ -277,15 +265,9 @@ void mcp_register_reference_tools(json_t *tools)
 	}
 
 	// get_weapon_class
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the weapon (e.g. \"Subach HL-7\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_weapon_class",
-			"Get detailed stats for a specific weapon, including damage and damage-per-second (dps) against hulls, shields, and subsystems.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_weapon_class",
+		"Get detailed stats for a specific weapon, including damage and damage-per-second (dps) against hulls, shields, and subsystems.",
+		"name", "Name of the weapon (e.g. \"Subach HL-7\")");
 
 	// list_species
 	register_tool(tools, "list_species",
@@ -298,15 +280,9 @@ void mcp_register_reference_tools(json_t *tools)
 		json_object());
 
 	// get_iff
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the IFF (e.g. \"Friendly\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_iff",
-			"Get details for a specific IFF, including color, attack relationships, and flags.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_iff",
+		"Get details for a specific IFF, including color, attack relationships, and flags.",
+		"name", "Name of the IFF (e.g. \"Friendly\")");
 
 	// list_intel_entries
 	register_tool(tools, "list_intel_entries",
@@ -314,15 +290,9 @@ void mcp_register_reference_tools(json_t *tools)
 		json_object());
 
 	// get_intel_entry
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the intel entry");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_intel_entry",
-			"Get the full text of an intel/tech database entry, including its description and custom data.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_intel_entry",
+		"Get the full text of an intel/tech database entry, including its description and custom data.",
+		"name", "Name of the intel entry");
 
 	// list_sexp_categories
 	register_tool(tools, "list_sexp_categories",
@@ -346,19 +316,13 @@ void mcp_register_reference_tools(json_t *tools)
 	}
 
 	// get_sexp_operator
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the SEXP operator (e.g. \"is-destroyed\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_sexp_operator",
-			"Get full details of a SEXP operator, including help text, argument types, "
-			"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
-			"max_args is -1 for variadic operators; for these, argument_types contains "
-			"only the fixed argument group and variadic_argument_types contains the "
-			"repeating argument group.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_sexp_operator",
+		"Get full details of a SEXP operator, including help text, argument types, "
+		"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
+		"max_args is -1 for variadic operators; for these, argument_types contains "
+		"only the fixed argument group and variadic_argument_types contains the "
+		"repeating argument group.",
+		"name", "Name of the SEXP operator (e.g. \"is-destroyed-delay\")");
 
 	// get_mod_info
 	register_tool(tools, "get_mod_info",
@@ -429,20 +393,14 @@ void mcp_register_reference_tools(json_t *tools)
 	}
 
 	// get_ship_class_model_details
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship class (e.g. \"GTD Orion\")");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_ship_class_model_details",
-			"Get 3D model details for a ship class, including subsystems, bounding box "
-			"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
-			"fighter bay arrival/departure). All coordinate information is in the model's "
-			"local reference frame. Note: if the model has not been previously loaded, "
-			"this tool may take several seconds to respond while the model is loaded "
-			"into memory.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_ship_class_model_details",
+		"Get 3D model details for a ship class, including subsystems, bounding box "
+		"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
+		"fighter bay arrival/departure). All coordinate information is in the model's "
+		"local reference frame. Note: if the model has not been previously loaded, "
+		"this tool may take several seconds to respond while the model is loaded "
+		"into memory.",
+		"name", "Name of the ship class (e.g. \"GTD Orion\")");
 
 	// subsystem_names_compare
 	{
@@ -1022,7 +980,7 @@ static const char *mcp_category_name(int category_id)
 static const char *get_category_description(int category_id)
 {
 	switch (category_id) {
-		case OP_CATEGORY_OBJECTIVE:    return "Conditions for mission goals (is-destroyed, is-departed, etc.)";
+		case OP_CATEGORY_OBJECTIVE:    return "Conditions for mission goals (is-destroyed-delay, is-departed-delay, etc.)";
 		case OP_CATEGORY_TIME:         return "Time-related checks and delays";
 		case OP_CATEGORY_LOGICAL:      return "Boolean logic (and, or, not, etc.)";
 		case OP_CATEGORY_ARITHMETIC:   return "Math operations (+, -, *, /, etc.)";
