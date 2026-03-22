@@ -72,6 +72,32 @@ void add_number_prop(json_t *props, const char *name, const char *description)
 void add_bool_prop(json_t *props, const char *name, const char *description)
 	{ add_typed_prop(props, name, description, "boolean"); }
 
+void add_string_enum_prop(json_t *props, const char *name, const char *description,
+	std::initializer_list<const char *> values)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("string"));
+	json_object_set_new(p, "description", json_string(description));
+	json_t *arr = json_array();
+	for (const char *v : values)
+		json_array_append_new(arr, json_string(v));
+	json_object_set_new(p, "enum", arr);
+	json_object_set_new(props, name, p);
+}
+
+void add_integer_enum_prop(json_t *props, const char *name, const char *description,
+	std::initializer_list<int> values)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("integer"));
+	json_object_set_new(p, "description", json_string(description));
+	json_t *arr = json_array();
+	for (int v : values)
+		json_array_append_new(arr, json_integer(v));
+	json_object_set_new(p, "enum", arr);
+	json_object_set_new(props, name, p);
+}
+
 void register_tool(json_t *tools, const char *name, const char *description,
 	json_t *properties, json_t *required_arr)
 {
@@ -143,6 +169,41 @@ bool check_string_length(const char *input, size_t max_len, const char *param_na
 		return false;
 	}
 	return true;
+}
+
+static SCP_string format_string_enum_error(const char *input, std::initializer_list<const char *> values, const char *param_name)
+{
+	SCP_string msg;
+	sprintf(msg, "Parameter '%s' has invalid value '%s'. Must be one of:", param_name, input);
+	for (const char *v : values) {
+		msg += " \"";
+		msg += v;
+		msg += "\",";
+	}
+	msg.back() = '.';  // replace trailing comma
+	return msg;
+}
+
+bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, McpToolRequest *req)
+{
+	for (const char *v : values)
+		if (stricmp(input, v) == 0)
+			return true;
+	req->success = false;
+	SCP_string msg = format_string_enum_error(input, values, param_name);
+	strncpy(req->result_message, msg.c_str(), sizeof(req->result_message) - 1);
+	req->result_message[sizeof(req->result_message) - 1] = '\0';
+	return false;
+}
+
+bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, json_t **error_out)
+{
+	for (const char *v : values)
+		if (stricmp(input, v) == 0)
+			return true;
+	SCP_string msg = format_string_enum_error(input, values, param_name);
+	*error_out = make_tool_result(msg.c_str(), true);
+	return false;
 }
 
 bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req)
