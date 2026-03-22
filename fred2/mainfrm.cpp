@@ -823,7 +823,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		FREDDoc_ptr->SetTitle("Untitled");
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		req->success = true;
-		strncpy(req->result_message, "New empty mission created", sizeof(req->result_message) - 1);
+		snprintf(req->result_message, sizeof(req->result_message), "New empty mission created");
 		break;
 
 	case McpToolId::LOAD_SHIP_MODEL:
@@ -874,7 +874,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 	case McpToolId::REBUILD_SEXP_FOREST:
 		mcp_sexp_forest_rebuild();
 		req->success = true;
-		strncpy(req->result_message, "SEXP forest rebuilt", sizeof(req->result_message) - 1);
+		snprintf(req->result_message, sizeof(req->result_message), "SEXP forest rebuilt");
 		break;
 
 	case McpToolId::GET_SERVER_INFO:
