@@ -112,7 +112,28 @@ bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check
 	return true;
 }
 
-const char *require_string_param(json_t *input, const char *param_name, McpToolRequest *req)
+bool string_too_long(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
+{
+	if (strlen(input) > max_len) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Parameter %s is too long (max " SIZE_T_ARG " characters)", param_name, max_len);
+		return true;
+	}
+	return false;
+}
+
+bool string_too_long(const char *input, size_t max_len, const char *param_name, json_t **error_out)
+{
+	if (strlen(input) > max_len) {
+		*error_out = make_tool_result(true,
+			"Parameter %s is too long (max " SIZE_T_ARG " characters)", param_name, max_len);
+		return true;
+	}
+	return false;
+}
+
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req)
 {
 	const char *value = get_optional_string(input, param_name);
 	if (!value || !value[0]) {
@@ -122,36 +143,40 @@ const char *require_string_param(json_t *input, const char *param_name, McpToolR
 	return value;
 }
 
-bool require_integer_param(json_t *input, const char *param_name, McpToolRequest *req, int *out)
+std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_integer(input, param_name, out))
-		return true;
+	auto item = get_optional_integer(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool require_double_param(json_t *input, const char *param_name, McpToolRequest *req, double *out)
+std::optional<double> get_required_double(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_double(input, param_name, out))
-		return true;
+	auto item = get_optional_double(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool require_float_param(json_t *input, const char *param_name, McpToolRequest *req, float *out)
+std::optional<float> get_required_float(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_float(input, param_name, out))
-		return true;
+	auto item = get_optional_float(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool require_bool_param(json_t *input, const char *param_name, McpToolRequest *req, bool *out)
+std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_bool(input, param_name, out))
-		return true;
+	auto item = get_optional_bool(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
 const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out)
@@ -164,36 +189,40 @@ const char *get_required_string(json_t *arguments, const char *param_name, json_
 	return str;
 }
 
-bool get_required_integer(json_t *arguments, const char *param_name, json_t **error_out, int *out)
+std::optional<int> get_required_integer(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_integer(arguments, param_name, out))
-		return true;
+	auto item = get_optional_integer(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool get_required_double(json_t *arguments, const char *param_name, json_t **error_out, double *out)
+std::optional<double> get_required_double(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_double(arguments, param_name, out))
-		return true;
+	auto item = get_optional_double(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool get_required_float(json_t *arguments, const char *param_name, json_t **error_out, float *out)
+std::optional<float> get_required_float(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_float(arguments, param_name, out))
-		return true;
+	auto item = get_optional_float(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool get_required_bool(json_t *arguments, const char *param_name, json_t **error_out, bool *out)
+std::optional<bool> get_required_bool(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_bool(arguments, param_name, out))
-		return true;
+	auto item = get_optional_bool(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
 const char *get_optional_string(json_t *arguments, const char *param_name)
@@ -202,44 +231,40 @@ const char *get_optional_string(json_t *arguments, const char *param_name)
 	return (val && json_is_string(val)) ? json_string_value(val) : nullptr;
 }
 
-bool get_optional_integer(json_t *arguments, const char *param_name, int *out)
+std::optional<int> get_optional_integer(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_integer(val)) {
-		*out = (int)json_integer_value(val);
-		return true;
+		return (int)json_integer_value(val);
 	}
-	return false;
+	return std::nullopt;
 }
 
-bool get_optional_double(json_t *arguments, const char *param_name, double *out)
+std::optional<double> get_optional_double(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
-		*out = json_number_value(val);
-		return true;
+		return json_number_value(val);
 	}
-	return false;
+	return std::nullopt;
 }
 
-bool get_optional_float(json_t *arguments, const char *param_name, float *out)
+std::optional<float> get_optional_float(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
-		*out = (float)json_number_value(val);
-		return true;
+		return (float)json_number_value(val);
 	}
-	return false;
+	return std::nullopt;
 }
 
-bool get_optional_bool(json_t *arguments, const char *param_name, bool *out)
+std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_boolean(val)) {
-		*out = json_is_true(val);
-		return true;
+		return json_is_true(val);
 	}
-	return false;
+	return std::nullopt;
 }
 
 static json_t *make_vec3d_schema()
@@ -261,19 +286,16 @@ static json_t *make_vec3d_schema()
 	return p;
 }
 
-static bool parse_vec3d_json(json_t *obj, vec3d *out)
+static std::optional<vec3d> parse_vec3d_json(json_t *obj)
 {
 	if (!obj || !json_is_object(obj))
-		return false;
+		return std::nullopt;
 	json_t *x = json_object_get(obj, "x");
 	json_t *y = json_object_get(obj, "y");
 	json_t *z = json_object_get(obj, "z");
 	if (!x || !json_is_number(x) || !y || !json_is_number(y) || !z || !json_is_number(z))
-		return false;
-	out->xyz.x = (float)json_number_value(x);
-	out->xyz.y = (float)json_number_value(y);
-	out->xyz.z = (float)json_number_value(z);
-	return true;
+		return std::nullopt;
+	return vec3d{ (float)json_number_value(x), (float)json_number_value(y), (float)json_number_value(z) };
 }
 
 json_t *build_vec3d_json(const vec3d &v)
@@ -319,52 +341,59 @@ void add_matrix_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
-bool get_optional_vec3d(json_t *arguments, const char *param_name, vec3d *out)
+std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	return parse_vec3d_json(val, out);
+	return parse_vec3d_json(val);
 }
 
-bool get_optional_matrix(json_t *arguments, const char *param_name, matrix *out)
+std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (!val || !json_is_object(val))
-		return false;
-	return parse_vec3d_json(json_object_get(val, "rvec"), &out->vec.rvec)
-		&& parse_vec3d_json(json_object_get(val, "uvec"), &out->vec.uvec)
-		&& parse_vec3d_json(json_object_get(val, "fvec"), &out->vec.fvec);
+		return std::nullopt;
+	auto rvec = parse_vec3d_json(json_object_get(val, "rvec"));
+	auto uvec = parse_vec3d_json(json_object_get(val, "uvec"));
+	auto fvec = parse_vec3d_json(json_object_get(val, "fvec"));
+	if (!rvec.has_value() || !uvec.has_value() || !fvec.has_value())
+		return std::nullopt;
+	return matrix{ *rvec, *uvec, *fvec };
 }
 
-bool get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out, vec3d *out)
+std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_vec3d(arguments, param_name, out))
-		return true;
+	auto item = get_optional_vec3d(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out, matrix *out)
+std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out)
 {
-	if (get_optional_matrix(arguments, param_name, out))
-		return true;
+	auto item = get_optional_matrix(arguments, param_name);
+	if (item.has_value())
+		return *item;
 	*error_out = make_missing_param_error(param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool require_vec3d_param(json_t *input, const char *param_name, McpToolRequest *req, vec3d *out)
+std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_vec3d(input, param_name, out))
-		return true;
+	auto item = get_optional_vec3d(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
-bool require_matrix_param(json_t *input, const char *param_name, McpToolRequest *req, matrix *out)
+std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req)
 {
-	if (get_optional_matrix(input, param_name, out))
-		return true;
+	auto item = get_optional_matrix(input, param_name);
+	if (item.has_value())
+		return *item;
 	set_missing_param_error(req, param_name);
-	return false;
+	return std::nullopt;
 }
 
 void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name)
