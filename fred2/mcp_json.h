@@ -77,8 +77,8 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 }
 
 // Extracts a required string parameter from input JSON. Returns nullptr and sets
-// req->success=false with an error message if the parameter is missing or empty.
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool allow_empty);
+// req->success=false with an error message if the parameter is missing, or empty and disallowed.
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty);
 
 // Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
 // req->success=false with an error message if the parameter is missing or the wrong type.
@@ -91,8 +91,8 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
-// if the parameter is missing or empty.
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool allow_empty);
+// if the parameter is missing, or empty and disallowed.
+const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool disallow_empty);
 
 // Extracts required integer, double, float, or bool parameters from arguments JSON (for reference
 // tools that return json_t* directly). Returns false and sets *error_out to an error result

@@ -327,7 +327,7 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		// Extract filepath from arguments
 		json_t *arguments = json_object_get(params, "arguments");
 		json_t *err = nullptr;
-		const char *filepath = get_required_string(arguments, "filepath", &err, false);
+		const char *filepath = get_required_string(arguments, "filepath", &err, true);
 		if (!filepath) return err;
 
 		McpToolId tool;
