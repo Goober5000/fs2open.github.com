@@ -115,7 +115,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	for (int i = start; i < end; i++)
 		json_array_append_new(arr, build_message_json(Messages[i]));
 
-	req->result_json = make_list_result("messages", arr);
+	req->result_json = make_json_tool_result(arr);
 	req->success = true;
 }
 
@@ -216,11 +216,21 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	array_insert_slot(Messages, Num_messages, target_index);
 
 	MMessage &msg = Messages[target_index];
-	memset(&msg, 0, sizeof(MMessage));
+	// we can't use memset here, so explicitly assign all fields
 	strcpy_s(msg.name, name);
 	strcpy_s(msg.message, message);
 	msg.persona_index = persona_index;
 	msg.multi_team = team;
+	msg.mood = DEFAULT_MOOD;
+	msg.note.clear();
+	msg.excluded_moods.clear();
+
+	message_filter_clear(msg.sender_filter);
+	message_filter_clear(msg.subject_filter);
+	message_filter_clear(msg.outer_filter);
+	msg.outer_filter_radius = -1;
+	msg.boost_level = 0;
+
 	msg.avi_info.name = talking_head ? strdup(talking_head) : nullptr;
 	msg.wave_info.name = voice_file ? strdup(voice_file) : nullptr;
 
@@ -251,10 +261,15 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	const char *new_msg = get_optional_string(input, "message");
+	const char *persona_str = get_optional_string(input, "persona");
+	const char *new_head = get_optional_string(input, "talking_head");
+	const char *new_voice = get_optional_string(input, "voice_file");
+	const char *new_name = get_optional_string(input, "new_name");
+
 	bool changed = false;
 
 	// Update message text
-	const char *new_msg = get_optional_string(input, "message");
 	if (new_msg) {
 		if (strlen(new_msg) >= MESSAGE_LENGTH) {
 			req->success = false;
@@ -269,7 +284,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update persona
-	const char *persona_str = get_optional_string(input, "persona");
 	if (persona_str) {
 		int persona_index = message_persona_name_lookup(persona_str);
 		if (persona_index < 0) {
@@ -285,7 +299,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update talking head
-	const char *new_head = get_optional_string(input, "talking_head");
 	if (new_head) {
 		if (Messages[idx].avi_info.name)
 			free(Messages[idx].avi_info.name);
@@ -294,7 +307,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update voice file
-	const char *new_voice = get_optional_string(input, "voice_file");
 	if (new_voice) {
 		if (Messages[idx].wave_info.name)
 			free(Messages[idx].wave_info.name);
@@ -312,7 +324,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update name (must be last — invalidates `name` pointer and updates SEXP refs)
-	const char *new_name = get_optional_string(input, "new_name");
 	if (new_name) {
 		if (strlen(new_name) >= NAME_LENGTH) {
 			req->success = false;
@@ -366,7 +377,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Check for SEXP references unless force is set
 	if (!force) {
 		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::SHIP, Messages[idx].name, node);
+		auto ref = query_referenced_in_sexp(sexp_ref_type::MESSAGE, Messages[idx].name, node);
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
