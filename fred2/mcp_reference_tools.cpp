@@ -2173,12 +2173,8 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 			"Unknown argument type. Call get_sexp_argument_type without arguments to list all types.", true);
 
 	// Optional: node index for context-filtered results
-	auto parent_node = get_optional_integer(arguments, "node");
-	if (!parent_node.has_value())
-		parent_node = -1;
-	auto arg_index = get_optional_integer(arguments, "arg_index");
-	if (!arg_index.has_value())
-		arg_index = -1;
+	int parent_node = get_optional_integer(arguments, "node").value_or(-1);
+	int arg_index = get_optional_integer(arguments, "arg_index").value_or(-1);
 
 	// If context was requested and the forest is dirty, rebuild it first.
 	if (parent_node >= 0 && mcp_sexp_forest_is_dirty()) {
@@ -2187,7 +2183,7 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 	}
 
 	// Get the value list from the forest (or with no context if parent_node < 0)
-	sexp_list_item *list = mcp_sexp_forest_get_listing(opf, *parent_node, *arg_index);
+	sexp_list_item *list = mcp_sexp_forest_get_listing(opf, parent_node, arg_index);
 
 	json_t *values = json_array();
 	for (sexp_list_item *item = list; item != nullptr; item = item->next)

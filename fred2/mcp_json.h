@@ -45,15 +45,16 @@ bool check_string_length(const char *input, size_t max_len, const char *param_na
 bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out);
 bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req);
 bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out);
-bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
-bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out);
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out);
 
 template<typename T>
 bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validate_fn, McpToolRequest *req)
 {
 	SCP_string failure_msg;
 	if (!validate_fn(input, failure_msg)) {
-		*error_out = make_tool_result(failure_msg.c_str(), true);
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), failure_msg.c_str());
 		return false;
 	}
 	return true;
@@ -64,8 +65,7 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 {
 	SCP_string failure_msg;
 	if (!validate_fn(input, failure_msg)) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), failure_msg.c_str());
+		*error_out = make_tool_result(failure_msg.c_str(), true);
 		return false;
 	}
 	return true;
