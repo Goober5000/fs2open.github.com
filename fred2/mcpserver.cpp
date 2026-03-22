@@ -315,8 +315,8 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		auto seconds = get_required_integer(arguments, "seconds", &err);
 		if (!seconds.has_value())
 			return err;
-		if (*seconds < 1 || *seconds > 300)
-			return make_tool_result("Timeout must be between 1 and 300 seconds", true);
+		if (!check_int_range(*seconds, 1, 300, "seconds", &err))
+			return err;
 
 		mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
 		json_t *result = make_tool_result(false, "timeout (seconds): %d", *seconds);
