@@ -100,6 +100,9 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	// Determine range based on "source" parameter
 	const char *source = get_optional_string(input, "source", true);
 
+	if (source && !check_string_enum(source, {"mission", "builtin"}, "source", req))
+		return;
+
 	int start, end;
 	if (source && !stricmp(source, "builtin")) {
 		start = 0;
@@ -586,9 +589,10 @@ void mcp_register_mission_tools(json_t *tools)
 	// list_messages
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "source",
+		add_string_enum_prop(props, "source",
 			"Which messages to list: \"mission\" (default) for mission-specific messages, "
-			"or \"builtin\" for built-in engine messages from messages.tbl");
+			"or \"builtin\" for built-in engine messages from messages.tbl",
+			{"mission", "builtin"});
 		register_tool(tools, "list_messages",
 			"List messages. By default lists mission-specific messages. "
 			"Use source=\"builtin\" to list built-in engine messages instead. "
@@ -611,7 +615,9 @@ void mcp_register_mission_tools(json_t *tools)
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation");
 		add_string_prop(props, "voice_file", "Filename for the voice audio");
-		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
+		add_integer_enum_prop(props, "team",
+			"Multiplayer team filter (-1 for all teams, 0 or 1 for a specific team)",
+			{-1, 0, 1});
 		add_integer_prop(props, "index",
 			"Position to insert the message among mission messages (0 = first). "
 			"If omitted, appends to the end.");
@@ -634,7 +640,9 @@ void mcp_register_mission_tools(json_t *tools)
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
 		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
-		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
+		add_integer_enum_prop(props, "team",
+			"Multiplayer team filter (-1 for all teams, 0 or 1 for a specific team)",
+			{-1, 0, 1});
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_message",
