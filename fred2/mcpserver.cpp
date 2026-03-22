@@ -102,22 +102,14 @@ static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_strin
 		nullptr);
 
 	// Tool: load_mission
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "filepath", "Absolute path to the mission file (.fs2 extension)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("filepath"));
-		register_tool(tools, "load_mission", "Load a mission file into FRED2", props, req);
-	}
+	register_tool_with_required_string(tools, "load_mission",
+		"Load a mission file into FRED2",
+		"filepath", "Absolute path to the mission file (.fs2 extension)");
 
 	// Tool: save_mission
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "filepath", "Absolute path to save the mission file to");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("filepath"));
-		register_tool(tools, "save_mission", "Save the current mission in standard (.fs2) format", props, req);
-	}
+	register_tool_with_required_string(tools, "save_mission",
+		"Save the current mission in standard (.fs2) format",
+		"filepath", "Absolute path to save the mission file to");
 
 	// Tool: new_mission
 	register_tool(tools, "new_mission",
