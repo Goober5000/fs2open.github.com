@@ -121,7 +121,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
-	const char *name = require_string_param(input, "name", req);
+	const char *name = get_required_string(input, "name", req);
 	if (!name) return;
 
 	// Find the message
@@ -144,36 +144,17 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	const char *name = nullptr;
-	const char *message = nullptr;
-	const char *persona_str = nullptr;
-	const char *talking_head = nullptr;
-	const char *voice_file = nullptr;
-	int team = -1;
-	int insert_index = -1;  // -1 means append to end
+	auto name    = get_required_string(input, "name", req);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
 
-	name    = require_string_param(input, "name", req);
-	if (!name) return;
-	message = require_string_param(input, "message", req);
-	if (!message) return;
+	auto message = get_required_string(input, "message", req);
+	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", req)) return;
 
-	persona_str  = get_optional_string(input, "persona");
-	talking_head = get_optional_string(input, "talking_head");
-	voice_file   = get_optional_string(input, "voice_file");
-	get_optional_integer(input, "team", &team);
-	get_optional_integer(input, "index", &insert_index);
-	if (strlen(name) >= NAME_LENGTH) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Name too long (max %d characters)", NAME_LENGTH - 1);
-		return;
-	}
-	if (strlen(message) >= MESSAGE_LENGTH) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Message too long (max %d characters)", MESSAGE_LENGTH - 1);
-		return;
-	}
+	auto persona_str  = get_optional_string(input, "persona");
+	auto talking_head = get_optional_string(input, "talking_head");
+	auto voice_file   = get_optional_string(input, "voice_file");
+	auto team         = get_optional_integer(input, "team");
+	auto insert_index = get_optional_integer(input, "index");
 
 	// Check for duplicate name
 	if (find_item_with_string(Messages, &MMessage::name, name) >= 0) {
@@ -197,19 +178,15 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 	// Validate and resolve insert index
 	int target_index;
-	if (insert_index < 0) {
+	if (!insert_index.has_value()) {
 		// Default: append to end
 		target_index = Num_messages;
 	} else {
 		// Caller specifies a mission-relative index (0 = first mission message)
-		target_index = Num_builtin_messages + insert_index;
-		if (target_index < Num_builtin_messages || target_index > Num_messages) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Invalid index %d: must be 0 to %d (number of mission messages)",
-				insert_index, Num_messages - Num_builtin_messages);
+		// Note: the upper bound is allowed, and means append
+		if (!check_int_range(*insert_index, 0, Num_messages - Num_builtin_messages, "index", req))
 			return;
-		}
+		target_index = Num_builtin_messages + *insert_index;
 	}
 
 	// Insert a slot at the target position
@@ -220,7 +197,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	strcpy_s(msg.name, name);
 	strcpy_s(msg.message, message);
 	msg.persona_index = persona_index;
-	msg.multi_team = team;
+	msg.multi_team = team.has_value() ? *team : -1;
 	msg.mood = DEFAULT_MOOD;
 	msg.note.clear();
 	msg.excluded_moods.clear();
@@ -251,7 +228,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	const char *name = require_string_param(input, "name", req);
+	auto name = get_required_string(input, "name", req);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
@@ -261,22 +238,42 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	const char *new_msg = get_optional_string(input, "message");
-	const char *persona_str = get_optional_string(input, "persona");
-	const char *new_head = get_optional_string(input, "talking_head");
-	const char *new_voice = get_optional_string(input, "voice_file");
-	const char *new_name = get_optional_string(input, "new_name");
+	auto new_msg = get_optional_string(input, "message");
+	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", req)) return;
+
+	auto persona_str = get_optional_string(input, "persona");
+	std::optional<int> persona_index = std::nullopt;
+	if (persona_str) {
+		persona_index = message_persona_name_lookup(persona_str);
+		if (*persona_index < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Unknown persona: %s", persona_str);
+			return;
+		}
+	}
+
+	auto new_head = get_optional_string(input, "talking_head");
+	auto new_voice = get_optional_string(input, "voice_file");
+	auto new_team = get_optional_integer(input, "team");
+
+	auto new_name = get_optional_string(input, "new_name");
+	if (new_name) {
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+
+		// Check for duplicate if the name is actually different
+		if ((stricmp(Messages[idx].name, new_name) != 0) && (find_item_with_string(Messages, &MMessage::name, new_name) >= 0)) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"A message with name '%s' already exists", new_name);
+			return;
+		}
+	}
 
 	bool changed = false;
 
 	// Update message text
 	if (new_msg) {
-		if (strlen(new_msg) >= MESSAGE_LENGTH) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Message too long (max %d characters)", MESSAGE_LENGTH - 1);
-			return;
-		}
 		if (strcmp(Messages[idx].message, new_msg) != 0) {
 			strcpy_s(Messages[idx].message, new_msg);
 			changed = true;
@@ -285,15 +282,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 	// Update persona
 	if (persona_str) {
-		int persona_index = message_persona_name_lookup(persona_str);
-		if (persona_index < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Unknown persona: %s", persona_str);
-			return;
-		}
-		if (Messages[idx].persona_index != persona_index) {
-			Messages[idx].persona_index = persona_index;
+		if (Messages[idx].persona_index != *persona_index) {
+			Messages[idx].persona_index = *persona_index;
 			changed = true;
 		}
 	}
@@ -315,37 +305,20 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update team
-	int new_team;
-	if (get_optional_integer(input, "team", &new_team)) {
-		if (Messages[idx].multi_team != new_team) {
-			Messages[idx].multi_team = new_team;
+	if (new_team.has_value()) {
+		if (Messages[idx].multi_team != *new_team) {
+			Messages[idx].multi_team = *new_team;
 			changed = true;
 		}
 	}
 
 	// Update name (must be last — invalidates `name` pointer and updates SEXP refs)
-	if (new_name) {
-		if (strlen(new_name) >= NAME_LENGTH) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"New name too long (max %d characters)", NAME_LENGTH - 1);
-			return;
-		}
-		if (stricmp(Messages[idx].name, new_name) != 0) {
-			// Check for duplicate
-			if (find_item_with_string(Messages, &MMessage::name, new_name) >= 0) {
-				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
-					"A message with name '%s' already exists", new_name);
-				return;
-			}
-
-			// Update SEXP references before changing the name
-			update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE);
-			update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE_OR_STRING);
-			strcpy_s(Messages[idx].name, new_name);
-			changed = true;
-		}
+	if (new_name && (stricmp(Messages[idx].name, new_name) != 0)) {
+		// Update SEXP references before changing the name
+		update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE);
+		update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE_OR_STRING);
+		strcpy_s(Messages[idx].name, new_name);
+		changed = true;
 	}
 
 	if (changed) {
@@ -361,10 +334,9 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	bool force = false;
-	get_optional_bool(input, "force", &force);
+	auto force = get_optional_bool(input, "force");
 
-	const char *name = require_string_param(input, "name", req);
+	auto name = get_required_string(input, "name", req);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
@@ -375,7 +347,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Check for SEXP references unless force is set
-	if (!force) {
+	if (!force.has_value() || !*force) {
 		int node;
 		auto ref = query_referenced_in_sexp(sexp_ref_type::MESSAGE, Messages[idx].name, node);
 		if (ref.second != sexp_src::NONE) {
@@ -468,40 +440,27 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 {
 	if (set_conflict_error(req, cfg.check_conflict)) return;
 
-	int from_index = -1;
-	int to_index = -1;
-	get_optional_integer(input, "from_index", &from_index);
-	get_optional_integer(input, "to_index", &to_index);
-
-	if (from_index < 0 || from_index >= cfg.count) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid from_index %d: must be 0 to %d", from_index, cfg.count - 1);
-		return;
-	}
-	if (to_index < 0 || to_index >= cfg.count) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid to_index %d: must be 0 to %d", to_index, cfg.count - 1);
-		return;
-	}
+	auto from_index = get_required_integer(input, "from_index", req);
+	if (!from_index.has_value() || !check_int_range(*from_index, 0, cfg.count - 1, "from_index", req)) return;
+	auto to_index = get_required_integer(input, "to_index", req);
+	if (!to_index.has_value() || !check_int_range(*to_index, 0, cfg.count - 1, "to_index", req)) return;
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(cfg.get_name(from_index)));
-		json_object_set_new(data, "index", json_integer(from_index));
+		json_object_set_new(data, "name", json_string(cfg.get_name(*from_index)));
+		json_object_set_new(data, "index", json_integer(*from_index));
 		req->result_json = make_json_tool_result(data);
 		req->success = true;
 		return;
 	}
 
-	cfg.do_move(from_index, to_index);
+	cfg.do_move(*from_index, *to_index);
 
-	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(to_index), from_index, to_index);
+	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(*to_index), *from_index, *to_index);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(cfg.get_name(to_index)));
-	json_object_set_new(data, "index", json_integer(to_index));
+	json_object_set_new(data, "name", json_string(cfg.get_name(*to_index)));
+	json_object_set_new(data, "index", json_integer(*to_index));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -510,37 +469,24 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 {
 	if (set_conflict_error(req, cfg.check_conflict)) return;
 
-	int index_a = -1;
-	int index_b = -1;
-	get_optional_integer(input, "index_a", &index_a);
-	get_optional_integer(input, "index_b", &index_b);
-
-	if (index_a < 0 || index_a >= cfg.count) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_a %d: must be 0 to %d", index_a, cfg.count - 1);
-		return;
-	}
-	if (index_b < 0 || index_b >= cfg.count) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid index_b %d: must be 0 to %d", index_b, cfg.count - 1);
-		return;
-	}
+	auto index_a = get_required_integer(input, "index_a", req);
+	if (!index_a.has_value() || !check_int_range(*index_a, 0, cfg.count - 1, "index_a", req)) return;
+	auto index_b = get_required_integer(input, "index_b", req);
+	if (!index_b.has_value() || !check_int_range(*index_b, 0, cfg.count - 1, "index_b", req)) return;
 
 	if (index_a != index_b) {
-		cfg.do_swap(index_a, index_b);
+		cfg.do_swap(*index_a, *index_b);
 
-		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, cfg.get_name(index_a), cfg.get_name(index_b));
+		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, cfg.get_name(*index_a), cfg.get_name(*index_b));
 	}
 
 	json_t *data = json_object();
 	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(cfg.get_name(index_a)));
-	json_object_set_new(a_obj, "index", json_integer(index_a));
+	json_object_set_new(a_obj, "name", json_string(cfg.get_name(*index_a)));
+	json_object_set_new(a_obj, "index", json_integer(*index_a));
 	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(cfg.get_name(index_b)));
-	json_object_set_new(b_obj, "index", json_integer(index_b));
+	json_object_set_new(b_obj, "name", json_string(cfg.get_name(*index_b)));
+	json_object_set_new(b_obj, "index", json_integer(*index_b));
 	json_object_set_new(data, "a", a_obj);
 	json_object_set_new(data, "b", b_obj);
 	req->result_json = make_json_tool_result(data);
