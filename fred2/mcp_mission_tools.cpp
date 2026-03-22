@@ -167,13 +167,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Look up persona by name
 	int persona_index = -1;
 	if (persona_str) {
-		persona_index = message_persona_name_lookup(persona_str);
-		if (persona_index < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Unknown persona: %s", persona_str);
-			return;
-		}
+		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
+		if (persona_index < 0) return;
 	}
 
 	// Validate and resolve insert index
@@ -244,13 +239,9 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	auto persona_str = get_optional_string(input, "persona");
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
-		persona_index = message_persona_name_lookup(persona_str);
-		if (*persona_index < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Unknown persona: %s", persona_str);
-			return;
-		}
+		int idx = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
+		if (idx < 0) return;
+		persona_index = idx;
 	}
 
 	auto new_head = get_optional_string(input, "talking_head");
