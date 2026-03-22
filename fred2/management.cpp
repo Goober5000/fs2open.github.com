@@ -2048,6 +2048,10 @@ int reference_handler(const char *name, sexp_ref_type type, int obj)
 			sprintf(type_name, "Waypoint path \"%s\"", name);
 			break;
 
+		case sexp_ref_type::MESSAGE:
+			sprintf(type_name, "Message \"%s\"", name);
+			break;
+
 		default:
 			Error(LOCATION, "Type unknown for object \"%s\".  Let Hoffos know now!", name);
 	}

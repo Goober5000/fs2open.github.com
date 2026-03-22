@@ -35,18 +35,15 @@ json_t *make_tool_result(bool is_error, const char *format, ...)
 json_t *make_json_tool_result(json_t *data)
 {
 	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
-	json_t *result = make_tool_result(text);
+	json_t *result;
+	if (text) {
+		result = make_tool_result(text);
+	} else {
+		result = make_tool_result("json_dumps failed to return text!", true);
+	}
 	free(text);
 	json_decref(data);
 	return result;
-}
-
-json_t *make_list_result(const char *array_key, json_t *arr)
-{
-	json_t *data = json_object();
-	json_object_set_new(data, array_key, arr);
-	json_object_set_new(data, "count", json_integer((int)json_array_size(arr)));
-	return make_json_tool_result(data);
 }
 
 void set_optional_string(json_t *obj, const char *key, const char *value)
