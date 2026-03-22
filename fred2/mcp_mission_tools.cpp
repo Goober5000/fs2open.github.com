@@ -121,7 +121,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
-	const char *name = get_required_string(input, "name", req, true);
+	const char *name = get_required_string(input, "name", req, false);
 	if (!name) return;
 
 	// Find the message
@@ -144,10 +144,10 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	auto name    = get_required_string(input, "name", req, false);
+	auto name    = get_required_string(input, "name", req, true);
 	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
 
-	auto message = get_required_string(input, "message", req, true);
+	auto message = get_required_string(input, "message", req, false);
 	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", req)) return;
 
 	auto persona_str  = get_optional_string(input, "persona", false);
@@ -223,7 +223,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	auto name = get_required_string(input, "name", req, false);
+	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
@@ -337,7 +337,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 
 	auto force = get_optional_bool(input, "force");
 
-	auto name = get_required_string(input, "name", req, false);
+	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
