@@ -54,7 +54,8 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 	SCP_string failure_msg;
 	if (!validate_fn(input, failure_msg)) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), failure_msg.c_str());
+		strncpy(req->result_message, failure_msg.c_str(), sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
 		return false;
 	}
 	return true;
