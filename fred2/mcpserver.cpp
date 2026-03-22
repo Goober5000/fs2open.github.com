@@ -287,7 +287,7 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 
 static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &error_msg)
 {
-	const char *tool_name = get_optional_string(params, "name");
+	const char *tool_name = get_optional_string(params, "name", true);
 
 	if (!tool_name) {
 		error_code = -32602;
@@ -327,7 +327,7 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		// Extract filepath from arguments
 		json_t *arguments = json_object_get(params, "arguments");
 		json_t *err = nullptr;
-		const char *filepath = get_required_string(arguments, "filepath", &err);
+		const char *filepath = get_required_string(arguments, "filepath", &err, false);
 		if (!filepath) return err;
 
 		McpToolId tool;

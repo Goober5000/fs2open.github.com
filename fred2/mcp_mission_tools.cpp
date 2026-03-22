@@ -88,8 +88,8 @@ static json_t *build_message_json(const MMessage &msg, bool include_details = fa
 
 	if (include_details) {
 		json_object_set_new(obj, "team", json_integer(msg.multi_team));
-		set_optional_string(obj, "talking_head", msg.avi_info.name);
-		set_optional_string(obj, "voice_file", msg.wave_info.name);
+		set_optional_string(obj, "talking_head", msg.avi_info.name, true);
+		set_optional_string(obj, "voice_file", msg.wave_info.name, true);
 	}
 
 	return obj;
@@ -98,7 +98,7 @@ static json_t *build_message_json(const MMessage &msg, bool include_details = fa
 static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
 	// Determine range based on "source" parameter
-	const char *source = get_optional_string(input, "source");
+	const char *source = get_optional_string(input, "source", true);
 
 	int start, end;
 	if (source && !stricmp(source, "builtin")) {
@@ -121,7 +121,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
-	const char *name = get_required_string(input, "name", req);
+	const char *name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
 	// Find the message
@@ -144,15 +144,15 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	auto name    = get_required_string(input, "name", req);
+	auto name    = get_required_string(input, "name", req, false);
 	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
 
-	auto message = get_required_string(input, "message", req);
+	auto message = get_required_string(input, "message", req, true);
 	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", req)) return;
 
-	auto persona_str  = get_optional_string(input, "persona");
-	auto talking_head = get_optional_string(input, "talking_head");
-	auto voice_file   = get_optional_string(input, "voice_file");
+	auto persona_str  = get_optional_string(input, "persona", false);
+	auto talking_head = get_optional_string(input, "talking_head", false);
+	auto voice_file   = get_optional_string(input, "voice_file", false);
 	auto team         = get_optional_integer(input, "team");
 	auto insert_index = get_optional_integer(input, "index");
 
@@ -166,7 +166,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 	// Look up persona by name
 	int persona_index = -1;
-	if (persona_str) {
+	if (persona_str && persona_str[0]) {
 		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
 		if (persona_index < 0) return;
 	}
@@ -203,8 +203,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	msg.outer_filter_radius = -1;
 	msg.boost_level = 0;
 
-	msg.avi_info.name = talking_head ? strdup(talking_head) : nullptr;
-	msg.wave_info.name = voice_file ? strdup(voice_file) : nullptr;
+	msg.avi_info.name = (talking_head && talking_head[0]) ? strdup(talking_head) : nullptr;
+	msg.wave_info.name = (voice_file && voice_file[0]) ? strdup(voice_file) : nullptr;
 
 	mark_modified("MCP: create message %s", name);
 
@@ -223,7 +223,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 {
 	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
 
-	auto name = get_required_string(input, "name", req);
+	auto name = get_required_string(input, "name", req, false);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
@@ -233,24 +233,34 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg = get_optional_string(input, "message");
+	auto new_msg = get_optional_string(input, "message", false);
 	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", req)) return;
 
-	auto persona_str = get_optional_string(input, "persona");
+	auto persona_str = get_optional_string(input, "persona", false);
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
-		int idx = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
-		if (idx < 0) return;
-		persona_index = idx;
+		if (persona_str[0]) {
+			int persona_idx = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
+			if (persona_idx < 0) return;
+			persona_index = persona_idx;
+		} else {
+			persona_index = -1;
+		}
 	}
 
-	auto new_head = get_optional_string(input, "talking_head");
-	auto new_voice = get_optional_string(input, "voice_file");
+	auto new_head = get_optional_string(input, "talking_head", false);
+	auto new_voice = get_optional_string(input, "voice_file", false);
 	auto new_team = get_optional_integer(input, "team");
 
-	auto new_name = get_optional_string(input, "new_name");
+	auto new_name = get_optional_string(input, "new_name", false);
 	if (new_name) {
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!new_name[0]) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"A message name cannot be blank!");
+			return;
+		}
 
 		// Check for duplicate if the name is actually different
 		if ((stricmp(Messages[idx].name, new_name) != 0) && (find_item_with_string(Messages, &MMessage::name, new_name) >= 0)) {
@@ -272,7 +282,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Update persona
-	if (persona_str) {
+	if (persona_index.has_value()) {
 		if (Messages[idx].persona_index != *persona_index) {
 			Messages[idx].persona_index = *persona_index;
 			changed = true;
@@ -283,7 +293,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	if (new_head) {
 		if (Messages[idx].avi_info.name)
 			free(Messages[idx].avi_info.name);
-		Messages[idx].avi_info.name = (new_head[0] != '\0') ? strdup(new_head) : nullptr;
+		Messages[idx].avi_info.name = new_head[0] ? strdup(new_head) : nullptr;
 		changed = true;
 	}
 
@@ -291,7 +301,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	if (new_voice) {
 		if (Messages[idx].wave_info.name)
 			free(Messages[idx].wave_info.name);
-		Messages[idx].wave_info.name = (new_voice[0] != '\0') ? strdup(new_voice) : nullptr;
+		Messages[idx].wave_info.name = new_voice[0] ? strdup(new_voice) : nullptr;
 		changed = true;
 	}
 
@@ -327,7 +337,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 
 	auto force = get_optional_bool(input, "force");
 
-	auto name = get_required_string(input, "name", req);
+	auto name = get_required_string(input, "name", req, false);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
@@ -621,7 +631,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "new_name", "New name for the message (updates SEXP references)");
 		add_string_prop(props, "message", "New message text");
 		add_string_prop(props, "persona",
-			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
+			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
 		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
 		add_integer_prop(props, "team", "Multiplayer team filter (-1 for all teams)");
