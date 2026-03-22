@@ -28,6 +28,19 @@
 
 
 // ---------------------------------------------------------------------------
+// Thread safety note
+// ---------------------------------------------------------------------------
+// Reference tool handlers run on Mongoose worker threads and read global game
+// data arrays (Ship_info, Weapon_info, Species_info, Iff_info, Operators,
+// Intel_info, Ship_types, Personas, etc.) without synchronization.  This is
+// safe because these arrays are populated during game data parsing at startup
+// and are never modified during a FRED session.
+//
+// The model_details_cache below is the exception: model loading can happen
+// on-demand from this file, so the cache is protected by a mutex.
+// ---------------------------------------------------------------------------
+
+// ---------------------------------------------------------------------------
 // Model details cache
 // ---------------------------------------------------------------------------
 

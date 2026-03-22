@@ -38,10 +38,10 @@ json_t *make_json_tool_result(json_t *data)
 	json_t *result;
 	if (text) {
 		result = make_tool_result(text);
+		free(text);
 	} else {
 		result = make_tool_result("json_dumps failed to return text!", true);
 	}
-	free(text);
 	json_decref(data);
 	return result;
 }
