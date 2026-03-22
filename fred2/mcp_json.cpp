@@ -191,14 +191,14 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 	return result;
 }
 
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool allow_empty)
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty)
 {
 	const char *value = get_optional_string(input, param_name, false);
 	if (!value) {
 		set_missing_param_error(req, param_name);
 		return nullptr;
 	}
-	if (!value[0] && !allow_empty) {
+	if (!value[0] && disallow_empty) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
 			"Required parameter must not be empty: %s", param_name);
@@ -243,14 +243,14 @@ std::optional<bool> get_required_bool(json_t *input, const char *param_name, Mcp
 	return std::nullopt;
 }
 
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool allow_empty)
+const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool disallow_empty)
 {
 	const char *str = get_optional_string(arguments, param_name, false);
 	if (!str) {
 		*error_out = make_missing_param_error(param_name);
 		return nullptr;
 	}
-	if (!str[0] && !allow_empty) {
+	if (!str[0] && disallow_empty) {
 		*error_out = make_tool_result(true, "Required parameter must not be empty: %s", param_name);
 		return nullptr;
 	}
