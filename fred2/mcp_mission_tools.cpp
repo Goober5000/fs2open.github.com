@@ -587,16 +587,10 @@ void mcp_register_mission_tools(json_t *tools)
 	}
 
 	// get_message
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the message to retrieve");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "get_message",
-			"Get full details of a message by name, including text, persona, "
-			"talking head animation, voice file, and team assignment.",
-			props, req);
-	}
+	register_tool_with_required_string(tools, "get_message",
+		"Get full details of a message by name, including text, persona, "
+		"talking head animation, voice file, and team assignment.",
+		"name", "Name of the message to retrieve");
 
 	// create_message
 	{
