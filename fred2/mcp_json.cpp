@@ -112,25 +112,73 @@ bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check
 	return true;
 }
 
-bool string_too_long(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
+bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
 {
-	if (strlen(input) > max_len) {
+	size_t len = strlen(input);
+	if (len > max_len) {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter %s is too long (max " SIZE_T_ARG " characters)", param_name, max_len);
-		return true;
+			"Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
+		return false;
 	}
-	return false;
+	return true;
 }
 
-bool string_too_long(const char *input, size_t max_len, const char *param_name, json_t **error_out)
+bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out)
 {
-	if (strlen(input) > max_len) {
+	size_t len = strlen(input);
+	if (len > max_len) {
 		*error_out = make_tool_result(true,
-			"Parameter %s is too long (max " SIZE_T_ARG " characters)", param_name, max_len);
-		return true;
+			"Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
+		return false;
 	}
-	return false;
+	return true;
+}
+
+bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req)
+{
+	if (input < min || input > max) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Parameter '%s' is out of range (value=%d; min=%d; max=%d)",
+			param_name, input, min, max);
+		return false;
+	}
+	return true;
+}
+
+bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out)
+{
+	if (input < min || input > max) {
+		*error_out = make_tool_result(true,
+			"Parameter '%s' is out of range (value=%d; min=%d; max=%d)",
+			param_name, input, min, max);
+		return false;
+	}
+	return true;
+}
+
+bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req)
+{
+	if (lookup_fn(input) < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+			param_name, input);
+		return false;
+	}
+	return true;
+}
+
+bool check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out)
+{
+	if (lookup_fn(input) < 0) {
+		*error_out = make_tool_result(true,
+			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+			param_name, input);
+		return false;
+	}
+	return true;
 }
 
 const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req)
