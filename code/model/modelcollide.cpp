@@ -1098,7 +1098,7 @@ NoHit:
 			vm_vec_add2(&instance_offset, &csmi->canonical_offset);
 
 			blown_off = csmi->blown_off;
-			collision_checked = csmi->collision_checked;
+			collision_checked = Mc->collision_checked_override ? Mc->collision_checked_override[i] : csmi->collision_checked;
 		}
 
 		// Don't check it or its children if it is destroyed

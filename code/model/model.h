@@ -1282,6 +1282,12 @@ typedef struct mc_info {
 	float   radius = 0;                 // If MC_CHECK_THICK is set, checks a sphere moving with the radius.
 	int     lod = 0;                    // Which detail level of the submodel to check instead
 
+	// Optional per-submodel collision_checked override array (indexed by submodel number).
+	// When non-null, model_collide uses this instead of pmi->submodel[].collision_checked,
+	// allowing callers to control which submodels are skipped without writing to shared state.
+	// This is essential for thread-safe ship-ship collision detection.
+	const char *collision_checked_override = nullptr;
+
 	// Return values
 	int     num_hits = 0;               // How many collisions were found
 	float   hit_dist = 0.0f;            // The distance from p0 to hitpoint
