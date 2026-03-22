@@ -2,6 +2,7 @@
 #define _MCP_JSON_H
 
 #include <functional>
+#include <optional>
 #include <jansson.h>
 
 #include "globalincs/vmallocator.h"	// for SCP_string
@@ -39,18 +40,21 @@ void register_tool(json_t *tools, const char *name, const char *description,
 // copies the message into req->result_message, then returns true. Caller should return.
 bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn);
 
+bool string_too_long(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
+bool string_too_long(const char *input, size_t max_len, const char *param_name, json_t **error_out);
+
 // Extracts a required string parameter from input JSON. Returns nullptr and sets
 // req->success=false with an error message if the parameter is missing or empty.
-const char *require_string_param(json_t *input, const char *param_name, McpToolRequest *req);
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req);
 
 // Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
 // req->success=false with an error message if the parameter is missing or the wrong type.
-bool require_integer_param(json_t *input, const char *param_name, McpToolRequest *req, int *out);
-bool require_double_param(json_t *input, const char *param_name, McpToolRequest *req, double *out);
-bool require_float_param(json_t *input, const char *param_name, McpToolRequest *req, float *out);
-bool require_bool_param(json_t *input, const char *param_name, McpToolRequest *req, bool *out);
-bool require_vec3d_param(json_t *input, const char *param_name, McpToolRequest *req, vec3d *out);
-bool require_matrix_param(json_t *input, const char *param_name, McpToolRequest *req, matrix *out);
+std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<double> get_required_double(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<float> get_required_float(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req);
 
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
@@ -60,25 +64,25 @@ const char *get_required_string(json_t *arguments, const char *param_name, json_
 // Extracts required integer, double, float, or bool parameters from arguments JSON (for reference
 // tools that return json_t* directly). Returns false and sets *error_out to an error result
 // if the parameter is missing or the wrong type.
-bool get_required_integer(json_t *arguments, const char *param_name, json_t **error_out, int *out);
-bool get_required_double(json_t *arguments, const char *param_name, json_t **error_out, double *out);
-bool get_required_float(json_t *arguments, const char *param_name, json_t **error_out, float *out);
-bool get_required_bool(json_t *arguments, const char *param_name, json_t **error_out, bool *out);
-bool get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out, vec3d *out);
-bool get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out, matrix *out);
+std::optional<int> get_required_integer(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<double> get_required_double(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<float> get_required_float(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<bool> get_required_bool(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out);
 
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or empty.
 const char *get_optional_string(json_t *arguments, const char *param_name);
 
 // Extracts optional integer, double, float, or bool parameters from arguments JSON (for reference
-// tools that return json_t* directly). Returns true and sets *out if present, false if absent.
-bool get_optional_integer(json_t *arguments, const char *param_name, int *out);
-bool get_optional_double(json_t *arguments, const char *param_name, double *out);
-bool get_optional_float(json_t *arguments, const char *param_name, float *out);
-bool get_optional_bool(json_t *arguments, const char *param_name, bool *out);
-bool get_optional_vec3d(json_t *arguments, const char *param_name, vec3d *out);
-bool get_optional_matrix(json_t *arguments, const char *param_name, matrix *out);
+// tools that return json_t* directly).
+std::optional<int> get_optional_integer(json_t *arguments, const char *param_name);
+std::optional<double> get_optional_double(json_t *arguments, const char *param_name);
+std::optional<float> get_optional_float(json_t *arguments, const char *param_name);
+std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name);
+std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name);
+std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 struct vec3d;
