@@ -21,8 +21,8 @@ json_t *make_tool_result(bool is_error, const char *format, ...);
 // Takes ownership of `data` (decrefs it after serializing).
 json_t *make_json_tool_result(json_t *data);
 
-// Set a string field only if the source is non-null and non-empty.
-void set_optional_string(json_t *obj, const char *key, const char *value);
+// Set a string field only if the source is non-null and, optionally, non-empty.
+void set_optional_string(json_t *obj, const char *key, const char *value, bool omit_if_empty);
 
 // Schema property helpers for tool registration.
 void add_string_prop(json_t *props, const char *name, const char *description);
@@ -78,7 +78,7 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 
 // Extracts a required string parameter from input JSON. Returns nullptr and sets
 // req->success=false with an error message if the parameter is missing or empty.
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req);
+const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool allow_empty);
 
 // Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
 // req->success=false with an error message if the parameter is missing or the wrong type.
@@ -92,7 +92,7 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
 // if the parameter is missing or empty.
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out);
+const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool allow_empty);
 
 // Extracts required integer, double, float, or bool parameters from arguments JSON (for reference
 // tools that return json_t* directly). Returns false and sets *error_out to an error result
@@ -105,8 +105,8 @@ std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_nam
 std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out);
 
 // Extracts an optional string parameter from arguments JSON (for reference tools that
-// return json_t* directly). Returns nullptr if the parameter is missing or empty.
-const char *get_optional_string(json_t *arguments, const char *param_name);
+// return json_t* directly). Returns nullptr if the parameter is missing or omitted.
+const char *get_optional_string(json_t *arguments, const char *param_name, bool null_if_empty);
 
 // Extracts optional integer, double, float, or bool parameters from arguments JSON (for reference
 // tools that return json_t* directly).
