@@ -59,6 +59,7 @@ extern SCP_vector<message_extra> Message_waves;
 #define MAX_SEARCH_MESSAGE_DEPTH 5 // maximum search number of event nodes with message text
 
 extern SCP_vector<SCP_string> Builtin_moods;
+constexpr int DEFAULT_MOOD = 0;
 extern int Current_mission_mood;
 extern float Command_announces_enemy_arrival_chance;
 extern bool Always_loop_head_anis;
@@ -166,6 +167,7 @@ typedef struct MessageFilter {
 	int                    type_bitfield;
 	int                    team_bitfield;
 } MessageFilter;
+extern void message_filter_clear(MessageFilter& filter);
 
 typedef struct MissionMessage {
 	char    name[NAME_LENGTH];					// used to identify this message
