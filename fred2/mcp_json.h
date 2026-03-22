@@ -2,6 +2,7 @@
 #define _MCP_JSON_H
 
 #include <functional>
+#include <initializer_list>
 #include <optional>
 #include <jansson.h>
 
@@ -29,6 +30,10 @@ void add_string_prop(json_t *props, const char *name, const char *description);
 void add_integer_prop(json_t *props, const char *name, const char *description);
 void add_number_prop(json_t *props, const char *name, const char *description);
 void add_bool_prop(json_t *props, const char *name, const char *description);
+void add_string_enum_prop(json_t *props, const char *name, const char *description,
+	std::initializer_list<const char *> values);
+void add_integer_enum_prop(json_t *props, const char *name, const char *description,
+	std::initializer_list<int> values);
 void add_vec3d_prop(json_t *props, const char *name, const char *description);
 void add_matrix_prop(json_t *props, const char *name, const char *description);
 
@@ -47,6 +52,8 @@ bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check
 // Various validation functions
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
 bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out);
+bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, McpToolRequest *req);
+bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, json_t **error_out);
 bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req);
 bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out);
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
