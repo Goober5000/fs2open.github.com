@@ -229,6 +229,10 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 	req->result_message[0] = '\0';
 	req->result_json = nullptr;
 	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (!req->completion_event) {
+		delete req;
+		return make_tool_result("Failed to create completion event", true);
+	}
 	req->refcount.store(2, std::memory_order_relaxed);
 
 	// Normalize path separators for the FreeSpace engine
@@ -275,6 +279,10 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 	req->result_message[0] = '\0';
 	req->result_json = nullptr;
 	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
+	if (!req->completion_event) {
+		delete req;
+	    return make_tool_result("Failed to create completion event", true);
+	}
 	req->refcount.store(2, std::memory_order_relaxed);
 
 	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
@@ -306,15 +314,15 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 	if (strcmp(tool_name, "set_timeout") == 0) {
 		json_t *arguments = json_object_get(params, "arguments");
 		json_t *err = nullptr;
-		int seconds;
-		if (!get_required_integer(arguments, "seconds", &err, &seconds))
+		auto seconds = get_required_integer(arguments, "seconds", &err);
+		if (!seconds.has_value())
 			return err;
-		if (seconds < 1 || seconds > 300)
+		if (*seconds < 1 || *seconds > 300)
 			return make_tool_result("Timeout must be between 1 and 300 seconds", true);
 
-		mcp_tool_timeout_ms.store((DWORD)(seconds * 1000), std::memory_order_relaxed);
+		mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
 
-		return make_tool_result(false, "timeout_seconds: %d", seconds);
+		return make_tool_result(false, "timeout_seconds: %d", *seconds);
 	}
 
 	// All tools below require FRED2 to be fully initialized

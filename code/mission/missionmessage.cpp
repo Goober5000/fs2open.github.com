@@ -46,7 +46,6 @@ bool Always_loop_head_anis = false;
 bool Use_newer_head_ani_suffix = false;
 float Command_announces_enemy_arrival_chance = 0.25;
 
-#define DEFAULT_MOOD 0
 SCP_vector<SCP_string> Builtin_moods;
 int Current_mission_mood;
 
