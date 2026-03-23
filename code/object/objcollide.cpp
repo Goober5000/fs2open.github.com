@@ -762,6 +762,7 @@ void spin_up_mp_collision() {
 void spin_down_mp_collision() {
 	threading::spin_down_threaded_task();
 	collision_processing_done.store(true);
+	threading::spin_down_wait_complete();
 }
 
 void queue_mp_collision(uint ctype, const obj_pair& colliding) {
