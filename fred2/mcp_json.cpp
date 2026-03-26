@@ -137,13 +137,13 @@ static json_t *make_missing_param_error(const char *param_name)
 	return make_tool_result(true, "Missing required parameter: %s", param_name);
 }
 
-bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn)
+bool check_for_error(McpToolRequest *req, std::function<const char *()> error_msg_fn)
 {
-	const char *conflict = check_fn();
-	if (!conflict)
+	const char *msg = error_msg_fn();
+	if (!msg)
 		return false;
 	req->success = false;
-	strncpy(req->result_message, conflict, sizeof(req->result_message) - 1);
+	strncpy(req->result_message, msg, sizeof(req->result_message) - 1);
 	req->result_message[sizeof(req->result_message) - 1] = '\0';
 	return true;
 }
