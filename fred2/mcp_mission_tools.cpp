@@ -129,7 +129,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 		end = Num_builtin_messages;
 	} else {
 		// Default: mission messages — check for conflicting dialogs
-		if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
+		if (check_for_error(req, check_dialog_conflict_for_messages)) return;
 		start = Num_builtin_messages;
 		end = Num_messages;
 	}
@@ -156,7 +156,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 	// Check for conflicting dialogs if this is a mission-specific message
 	if (idx >= Num_builtin_messages) {
-		if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
+		if (check_for_error(req, check_dialog_conflict_for_messages)) return;
 	}
 
 	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
@@ -165,7 +165,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 static void handle_create_message(json_t *input, McpToolRequest *req)
 {
-	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
+	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
 
 	auto name    = get_required_string(input, "name", req, true);
 	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
@@ -252,7 +252,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 static void handle_update_message(json_t *input, McpToolRequest *req)
 {
-	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
+	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
 
 	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
@@ -371,7 +371,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
-	if (set_conflict_error(req, check_dialog_conflict_for_messages)) return;
+	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
 
 	auto force = get_optional_bool(input, "force");
 
@@ -477,7 +477,7 @@ struct MoveSwapConfig {
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (set_conflict_error(req, cfg.check_conflict)) return;
+	if (check_for_error(req, cfg.check_conflict)) return;
 
 	auto from_index = get_required_integer(input, "from_index", req);
 	if (!from_index.has_value() || !check_int_range(*from_index, 0, cfg.count - 1, "from_index", req)) return;
@@ -506,7 +506,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (set_conflict_error(req, cfg.check_conflict)) return;
+	if (check_for_error(req, cfg.check_conflict)) return;
 
 	auto index_a = get_required_integer(input, "index_a", req);
 	if (!index_a.has_value() || !check_int_range(*index_a, 0, cfg.count - 1, "index_a", req)) return;

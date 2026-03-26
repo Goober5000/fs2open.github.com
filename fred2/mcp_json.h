@@ -45,9 +45,9 @@ void register_tool(json_t *tools, const char *name, const char *description,
 void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
 	const char *param_name, const char *param_desc);
 
-// Calls check_fn(); if it returns a conflict message, sets req->success=false and
+// Calls error_msg_fn(); if it returns a message, sets req->success=false and
 // copies the message into req->result_message, then returns true. Caller should return.
-bool set_conflict_error(McpToolRequest *req, std::function<const char *()> check_fn);
+bool check_for_error(McpToolRequest *req, std::function<const char *()> error_msg_fn);
 
 // Various validation functions
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
