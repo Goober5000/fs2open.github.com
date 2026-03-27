@@ -18,29 +18,33 @@
 #include "fred.h"
 #include "messageeditordlg.h"
 #include "eventeditor.h"
+#include "mainfrm.h"
 
 // ---------------------------------------------------------------------------
 // Dialog conflict guards
 // ---------------------------------------------------------------------------
 
-// Returns nullptr if no conflicting dialog is open, or an error message if one is.
-static const char *check_dialog_conflict_for_messages()
+static bool validate_single_dialog(const char *items_to_modify, const char *dialog_key, SCP_string &error_msg)
 {
-	if (Message_editor_dlg && Message_editor_dlg->IsWindowVisible())
-		return "Cannot modify messages while the Message Editor is open. "
-			"Close it first, or use get_ui_status to check which editors are open.";
-	if (Event_editor_dlg && Event_editor_dlg->IsWindowVisible())
-		return "Cannot modify messages while the Event Editor is open. "
-			"Close it first, or use get_ui_status to check which editors are open.";
-	return nullptr;
+	for (size_t i = 0; i < g_editor_info_count; ++i) {
+		auto &info = g_editor_info[i];
+		if (!stricmp(dialog_key, info.editor_key)) {
+			auto wnd = info.getCWndPtr();
+			if (wnd && wnd->IsWindowVisible()) {
+				sprintf(error_msg, "Cannot modify %s while the %s is open. "
+					"Close it first, or use get_ui_status to check which editors are open.", items_to_modify, info.editor_name);
+				return false;
+			}
+			return true;
+		}
+	}
+	Assertion(false, "dialog key %s not found!", dialog_key);
 }
 
-static const char *check_dialog_conflict_for_events()
+static bool validate_dialog_for_messages(SCP_string &error_msg)
 {
-	if (Event_editor_dlg && Event_editor_dlg->IsWindowVisible())
-		return "Cannot modify events while the Event Editor is open. "
-			"Close it first, or use get_ui_status to check which editors are open.";
-	return nullptr;
+	return validate_single_dialog("messages", "message", error_msg)
+		&& validate_single_dialog("messages", "event", error_msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +133,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 		end = Num_builtin_messages;
 	} else {
 		// Default: mission messages — check for conflicting dialogs
-		if (check_for_error(req, check_dialog_conflict_for_messages)) return;
+		if (!validate(validate_dialog_for_messages, req)) return;
 		start = Num_builtin_messages;
 		end = Num_messages;
 	}
@@ -156,7 +160,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 	// Check for conflicting dialogs if this is a mission-specific message
 	if (idx >= Num_builtin_messages) {
-		if (check_for_error(req, check_dialog_conflict_for_messages)) return;
+		if (!validate(validate_dialog_for_messages, req)) return;
 	}
 
 	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
@@ -165,7 +169,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 static void handle_create_message(json_t *input, McpToolRequest *req)
 {
-	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
+	if (!validate(validate_dialog_for_messages, req)) return;
 
 	auto name    = get_required_string(input, "name", req, true);
 	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
@@ -252,7 +256,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 static void handle_update_message(json_t *input, McpToolRequest *req)
 {
-	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
+	if (!validate(validate_dialog_for_messages, req)) return;
 
 	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
@@ -371,7 +375,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
-	if (check_for_error(req, check_dialog_conflict_for_messages)) return;
+	if (!validate(validate_dialog_for_messages, req)) return;
 
 	auto force = get_optional_bool(input, "force");
 
@@ -469,7 +473,7 @@ static void update_annotation_paths_for_swap(int a, int b)
 struct MoveSwapConfig {
 	const char *entity_name;
 	int count;
-	std::function<const char *()> check_conflict;
+	std::function<bool(SCP_string&)> validate_dialog;
 	std::function<const char *(int)> get_name;
 	std::function<void(int, int)> do_move;
 	std::function<void(int, int)> do_swap;
@@ -477,7 +481,7 @@ struct MoveSwapConfig {
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (check_for_error(req, cfg.check_conflict)) return;
+	if (!validate(cfg.validate_dialog, req)) return;
 
 	auto from_index = get_required_integer(input, "from_index", req);
 	if (!from_index.has_value() || !check_int_range(*from_index, 0, cfg.count - 1, "from_index", req)) return;
@@ -506,7 +510,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (check_for_error(req, cfg.check_conflict)) return;
+	if (!validate(cfg.validate_dialog, req)) return;
 
 	auto index_a = get_required_integer(input, "index_a", req);
 	if (!index_a.has_value() || !check_int_range(*index_a, 0, cfg.count - 1, "index_a", req)) return;
@@ -541,7 +545,7 @@ static MoveSwapConfig make_message_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "message";
 	cfg.count = Num_messages - Num_builtin_messages;
-	cfg.check_conflict = check_dialog_conflict_for_messages;
+	cfg.validate_dialog = validate_dialog_for_messages;
 	cfg.get_name = [](int i) -> const char * {
 		return Messages[Num_builtin_messages + i].name;
 	};
@@ -559,7 +563,7 @@ static MoveSwapConfig make_event_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "event";
 	cfg.count = (int)Mission_events.size();
-	cfg.check_conflict = check_dialog_conflict_for_events;
+	cfg.validate_dialog = [](SCP_string& msg)->bool { return validate_single_dialog("events", "event", msg); };
 	cfg.get_name = [](int i) -> const char * {
 		return Mission_events[i].name.c_str();
 	};

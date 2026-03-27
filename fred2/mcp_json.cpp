@@ -137,17 +137,6 @@ static json_t *make_missing_param_error(const char *param_name)
 	return make_tool_result(true, "Missing required parameter: %s", param_name);
 }
 
-bool check_for_error(McpToolRequest *req, std::function<const char *()> error_msg_fn)
-{
-	const char *msg = error_msg_fn();
-	if (!msg)
-		return false;
-	req->success = false;
-	strncpy(req->result_message, msg, sizeof(req->result_message) - 1);
-	req->result_message[sizeof(req->result_message) - 1] = '\0';
-	return true;
-}
-
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
 {
 	size_t len = strlen(input);
@@ -250,6 +239,30 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 			param_name, input);
 	}
 	return result;
+}
+
+bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req)
+{
+	auto failure_msg = error_msg_fn();
+	if (failure_msg) {
+		req->success = false;
+		strncpy(req->result_message, failure_msg, sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return false;
+	}
+	return true;
+}
+
+bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req)
+{
+	SCP_string failure_msg;
+	if (!validate_fn(failure_msg)) {
+		req->success = false;
+		strncpy(req->result_message, failure_msg.c_str(), sizeof(req->result_message) - 1);
+		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		return false;
+	}
+	return true;
 }
 
 const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty)

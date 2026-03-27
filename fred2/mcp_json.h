@@ -45,10 +45,6 @@ void register_tool(json_t *tools, const char *name, const char *description,
 void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
 	const char *param_name, const char *param_desc);
 
-// Calls error_msg_fn(); if it returns a message, sets req->success=false and
-// copies the message into req->result_message, then returns true. Caller should return.
-bool check_for_error(McpToolRequest *req, std::function<const char *()> error_msg_fn);
-
 // Various validation functions
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
 bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out);
@@ -58,6 +54,9 @@ bool check_int_range(int input, int min, int max, const char *param_name, McpToo
 bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out);
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out);
+
+bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req);
+bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req);
 
 template<typename T>
 bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validate_fn, McpToolRequest *req)
