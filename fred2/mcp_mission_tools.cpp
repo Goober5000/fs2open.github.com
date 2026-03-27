@@ -447,7 +447,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
 		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NOT_APPLICABLE, Messages[idx].name, node);
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Messages[idx].name, node);
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
@@ -900,7 +900,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
 		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NOT_APPLICABLE, Mission_events[idx].name.c_str(), node);
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Mission_events[idx].name.c_str(), node);
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
