@@ -155,10 +155,12 @@ static void mark_modified(const char *fmt, ...)
 // ---------------------------------------------------------------------------
 
 // include_details adds team, talking_head, and voice_file fields.
-static json_t *build_message_json(const MMessage &msg, bool include_details = false)
+static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, bool include_details = false)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(msg.name));
+	if (msg_absolute_index >= Num_builtin_messages)
+		json_object_set_new(obj, "index", json_integer(msg_absolute_index - Num_builtin_messages));
 	json_object_set_new(obj, "message", json_string(msg.message));
 
 	const char *persona = persona_name_from_index(msg.persona_index);
@@ -195,7 +197,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 	json_t *arr = json_array();
 	for (int i = start; i < end; i++)
-		json_array_append_new(arr, build_message_json(Messages[i]));
+		json_array_append_new(arr, build_message_json(Messages[i], i));
 
 	req->result_json = make_json_tool_result(arr);
 	req->success = true;
@@ -218,7 +220,7 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 		if (!validate(validate_dialog_for_messages, req)) return;
 	}
 
-	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
+	req->result_json = make_json_tool_result(build_message_json(Messages[idx], idx, true));
 	req->success = true;
 }
 
@@ -301,10 +303,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Return the created message
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "message", json_string(message));
 	json_object_set_new(data, "index", json_integer(target_index - Num_builtin_messages));
-	if (persona_str)
-		json_object_set_new(data, "persona", json_string(persona_str));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -424,7 +423,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	// Return the updated message
-	req->result_json = make_json_tool_result(build_message_json(Messages[idx], true));
+	req->result_json = make_json_tool_result(build_message_json(Messages[idx], idx, true));
 	req->success = true;
 }
 
@@ -558,10 +557,11 @@ static bool validate_dialog_for_events(SCP_string &error_msg)
 	return validate_single_dialog("events", "event", error_msg);
 }
 
-static json_t *build_event_json(const mission_event &evt, bool include_details = false)
+static json_t *build_event_json(const mission_event &evt, int evt_index, bool include_details = false)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
+	json_object_set_new(obj, "index", json_integer(evt_index));
 	json_object_set_new(obj, "root_node", json_integer(evt.formula));
 
 	bool is_chained = (evt.chain_delay >= 0);
@@ -596,7 +596,7 @@ static void handle_list_events(json_t * /*input*/, McpToolRequest *req)
 
 	json_t *arr = json_array();
 	for (int i = 0; i < (int)Mission_events.size(); i++)
-		json_array_append_new(arr, build_event_json(Mission_events[i]));
+		json_array_append_new(arr, build_event_json(Mission_events[i], i));
 
 	req->result_json = make_json_tool_result(arr);
 	req->success = true;
@@ -615,7 +615,7 @@ static void handle_get_event(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	req->result_json = make_json_tool_result(build_event_json(Mission_events[idx], true));
+	req->result_json = make_json_tool_result(build_event_json(Mission_events[idx], idx, true));
 	req->success = true;
 }
 
@@ -732,6 +732,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: create event %s", name);
 
+	// Return the created event
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
 	json_object_set_new(data, "index", json_integer(target_index));
@@ -878,7 +879,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	if (changed)
 		mark_modified("MCP: update event %s", evt.name.c_str());
 
-	req->result_json = make_json_tool_result(build_event_json(evt, true));
+	req->result_json = make_json_tool_result(build_event_json(evt, idx, true));
 	req->success = true;
 }
 
