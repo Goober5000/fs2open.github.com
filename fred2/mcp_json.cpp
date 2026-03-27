@@ -72,29 +72,30 @@ void add_number_prop(json_t *props, const char *name, const char *description)
 void add_bool_prop(json_t *props, const char *name, const char *description)
 	{ add_typed_prop(props, name, description, "boolean"); }
 
-void add_string_enum_prop(json_t *props, const char *name, const char *description,
-	std::initializer_list<const char *> values)
+void add_string_enum_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values)
 {
 	json_t *p = json_object();
 	json_object_set_new(p, "type", json_string("string"));
 	json_object_set_new(p, "description", json_string(description));
 	json_t *arr = json_array();
-	for (const char *v : values)
+	for (const char *v : allowed_values)
 		json_array_append_new(arr, json_string(v));
 	json_object_set_new(p, "enum", arr);
 	json_object_set_new(props, name, p);
 }
 
-void add_integer_enum_prop(json_t *props, const char *name, const char *description,
-	std::initializer_list<int> values)
+void add_string_array_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values)
 {
 	json_t *p = json_object();
-	json_object_set_new(p, "type", json_string("integer"));
+	json_object_set_new(p, "type", json_string("array"));
 	json_object_set_new(p, "description", json_string(description));
+	json_t *items = json_object();
+	json_object_set_new(items, "type", json_string("string"));
 	json_t *arr = json_array();
-	for (int v : values)
-		json_array_append_new(arr, json_integer(v));
-	json_object_set_new(p, "enum", arr);
+	for (const char *v : allowed_values)
+		json_array_append_new(arr, json_string(v));
+	json_object_set_new(items, "enum", arr);
+	json_object_set_new(p, "items", items);
 	json_object_set_new(props, name, p);
 }
 
@@ -160,7 +161,7 @@ bool check_string_length(const char *input, size_t max_len, const char *param_na
 	return true;
 }
 
-static SCP_string format_string_enum_error(const char *input, std::initializer_list<const char *> values, const char *param_name)
+static SCP_string format_string_enum_error(const char *input, const SCP_vector<const char *> &values, const char *param_name)
 {
 	SCP_string msg;
 	sprintf(msg, "Parameter '%s' has invalid value '%s'. Must be one of:", param_name, input);
@@ -173,7 +174,7 @@ static SCP_string format_string_enum_error(const char *input, std::initializer_l
 	return msg;
 }
 
-bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, McpToolRequest *req)
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpToolRequest *req)
 {
 	for (const char *v : values)
 		if (stricmp(input, v) == 0)
@@ -185,7 +186,7 @@ bool check_string_enum(const char *input, std::initializer_list<const char *> va
 	return false;
 }
 
-bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, json_t **error_out)
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, json_t **error_out)
 {
 	for (const char *v : values)
 		if (stricmp(input, v) == 0)
@@ -233,6 +234,43 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out)
 {
 	int result = lookup_fn(input);
+	if (result < 0) {
+		*error_out = make_tool_result(true,
+			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+			param_name, input);
+	}
+	return result;
+}
+
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpToolRequest *req)
+{
+	int count = sz2i(lookup_vec.size());
+	int result = -1;
+	for (int i = 0; i < count; i++) {
+		if (!stricmp(input, lookup_vec[i])) {
+			result = i;
+			break;
+		}
+	}
+	if (result < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+			param_name, input);
+	}
+	return result;
+}
+
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, json_t **error_out)
+{
+	int count = sz2i(lookup_vec.size());
+	int result = -1;
+	for (int i = 0; i < count; i++) {
+		if (!stricmp(input, lookup_vec[i])) {
+			result = i;
+			break;
+		}
+	}
 	if (result < 0) {
 		*error_out = make_tool_result(true,
 			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
@@ -411,6 +449,22 @@ std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name)
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_boolean(val)) {
 		return json_is_true(val);
+	}
+	return std::nullopt;
+}
+
+std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (val && json_is_array(val)) {
+		SCP_vector<SCP_string> result;
+		size_t index;
+		json_t *item;
+		json_array_foreach(val, index, item) {
+			if (json_is_string(item))
+				result.push_back(json_string_value(item));
+		}
+		return result;
 	}
 	return std::nullopt;
 }
