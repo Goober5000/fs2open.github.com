@@ -2009,6 +2009,10 @@ int reference_handler(const char *name, sexp_ref_type type, int obj)
 	int r, node;
 
 	switch (type) {
+		case sexp_ref_type::NOT_APPLICABLE:
+			sprintf(type_name, "[not an object or object group: %s]", name);
+			break;
+
 		case sexp_ref_type::SHIP:
 			sprintf(type_name, "Ship \"%s\"", name);
 			break;
@@ -2027,10 +2031,6 @@ int reference_handler(const char *name, sexp_ref_type type, int obj)
 
 		case sexp_ref_type::WAYPOINT_PATH:
 			sprintf(type_name, "Waypoint path \"%s\"", name);
-			break;
-
-		case sexp_ref_type::MESSAGE:
-			sprintf(type_name, "Message \"%s\"", name);
 			break;
 
 		default:
