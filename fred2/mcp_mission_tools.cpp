@@ -62,6 +62,8 @@ static const char *persona_name_from_index(int persona_index)
 // Team helpers
 // ---------------------------------------------------------------------------
 
+static const std::initializer_list<const char *> team_enum_values = {"none", "Team 1", "Team 2"};
+
 static const char *team_name_from_index(int multi_team)
 {
 	switch (multi_team) {
@@ -201,7 +203,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Validate team
 	int multi_team = -1;
 	if (team_str) {
-		if (!check_string_enum(team_str, {"none", "Team 1", "Team 2"}, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
 			return;
 		multi_team = team_index_from_name(team_str);
 	}
@@ -289,7 +291,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	auto new_team_str = get_optional_string(input, "team", true);
 	std::optional<int> new_team = std::nullopt;
 	if (new_team_str) {
-		if (!check_string_enum(new_team_str, {"none", "Team 1", "Team 2"}, "team", req))
+		if (!check_string_enum(new_team_str, team_enum_values, "team", req))
 			return;
 		new_team = team_index_from_name(new_team_str);
 	}
@@ -656,7 +658,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "voice_file", "Filename for the voice audio");
 		add_string_enum_prop(props, "team",
 			"Multiplayer team assignment (\"none\" for all teams)",
-			{"none", "Team 1", "Team 2"});
+			team_enum_values);
 		add_integer_prop(props, "index",
 			"Position to insert the message among mission messages (0 = first). "
 			"If omitted, appends to the end.");
@@ -681,7 +683,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
 		add_string_enum_prop(props, "team",
 			"Multiplayer team assignment (\"none\" for all teams)",
-			{"none", "Team 1", "Team 2"});
+			team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_message",
