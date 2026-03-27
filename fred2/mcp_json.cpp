@@ -471,11 +471,10 @@ void add_vec3d_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
-void add_matrix_prop(json_t *props, const char *name, const char *description)
+static json_t *make_matrix_schema()
 {
 	json_t *p = json_object();
 	json_object_set_new(p, "type", json_string("object"));
-	json_object_set_new(p, "description", json_string(description));
 	json_t *sub = json_object();
 	json_object_set_new(sub, "rvec", make_vec3d_schema());
 	json_object_set_new(sub, "uvec", make_vec3d_schema());
@@ -486,6 +485,13 @@ void add_matrix_prop(json_t *props, const char *name, const char *description)
 	json_array_append_new(req, json_string("uvec"));
 	json_array_append_new(req, json_string("fvec"));
 	json_object_set_new(p, "required", req);
+	return p;
+}
+
+void add_matrix_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = make_matrix_schema();
+	json_object_set_new(p, "description", json_string(description));
 	json_object_set_new(props, name, p);
 }
 
