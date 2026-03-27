@@ -99,6 +99,30 @@ CPoint Global_point2;
 CStatic m_ship_label;
 CStatic m_prop_label;
 
+CWnd* McpEditorInfo::getCWndPtr() const
+{
+	return persistent ? std::get<CWnd*>(handle) : *std::get<CWnd**>(handle);
+}
+
+const McpEditorInfo g_editor_info[] =
+{
+	{ &Ship_editor_dialog,     "ship",       "Ship Editor",       true  },
+	{ &Wing_editor_dialog,     "wing",       "Wing Editor",       true  },
+	{ &Prop_editor_dialog,     "prop",       "Props Editor",      true  },
+	{ &Waypoint_editor_dialog, "waypoint",   "Waypoint Editor",   true  },
+	{ &Jumpnode_editor_dialog, "jump node",  "Jump Node Editor",  true  },
+	{ &Music_player_dialog,    nullptr,      "Music Player",      true  },
+
+	{ (CWnd**)&Briefing_dialog,         "briefing",   "Briefing Editor",   false },
+	{ (CWnd**)&Debriefing_dialog,       "debriefing", "Debriefing Editor", false },
+	{ (CWnd**)&Bg_bitmap_dialog,        "background", "Background Editor", false },
+	{ (CWnd**)&Event_editor_dlg,        "event",      "Event Editor",      false },
+	{ (CWnd**)&Goal_editor_dlg,         "goal",       "Goals Editor",      false },
+	{ (CWnd**)&Message_editor_dlg,      "message",    "Message Editor",    false },
+	{ (CWnd**)&Cutscene_editor_dlg,     "cutscene",   "Cutscene Editor",   false },
+};
+const size_t g_editor_info_count = sizeof(g_editor_info) / sizeof(McpEditorInfo);
+
 /**
  * @brief Launches the default browser to open the given URL
  */
@@ -778,33 +802,6 @@ static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 	}
 }
 
-// ---------------------------------------------------------------------------
-// Editor window enumeration
-// Shared between GET_UI_STATUS and SEXP-forest dirty tracking.
-// ---------------------------------------------------------------------------
-
-struct McpPersistentEditor { CWnd *wnd; const char *name; };
-struct McpOnDemandEditor   { CWnd **ptr; const char *name; };
-
-static const McpPersistentEditor s_persistent_editors[] = {
-	{ &Ship_editor_dialog,     "Ship Editor"      },
-	{ &Wing_editor_dialog,     "Wing Editor"      },
-	{ &Prop_editor_dialog,     "Props Editor"     },
-	{ &Waypoint_editor_dialog, "Waypoint Editor"  },
-	{ &Jumpnode_editor_dialog, "Jump Node Editor" },
-	{ &Music_player_dialog,    "Music Player"     },
-};
-
-static const McpOnDemandEditor s_ondemand_editors[] = {
-	{ (CWnd **)&Briefing_dialog,     "Briefing Editor"    },
-	{ (CWnd **)&Debriefing_dialog,   "Debriefing Editor"  },
-	{ (CWnd **)&Bg_bitmap_dialog,    "Background Editor"  },
-	{ (CWnd **)&Event_editor_dlg,    "Event Editor"       },
-	{ (CWnd **)&Goal_editor_dlg,     "Goals Editor"       },
-	{ (CWnd **)&Message_editor_dlg,  "Message Editor"     },
-	{ (CWnd **)&Cutscene_editor_dlg, "Cutscene Editor"    },
-};
-
 LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 {
 	auto *req = reinterpret_cast<McpToolRequest*>(lParam);
@@ -957,15 +954,10 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 				buf += "open_editors:";
 
 				bool any_open = false;
-				for (auto &d : s_persistent_editors) {
-					if (d.wnd->IsWindowVisible()) {
-						sprintf_concat(buf, " %s,", d.name);
-						any_open = true;
-					}
-				}
-				for (auto &d : s_ondemand_editors) {
-					if (*d.ptr != nullptr && (*d.ptr)->IsWindowVisible()) {
-						sprintf_concat(buf, " %s,", d.name);
+				for (auto &info : g_editor_info) {
+					auto wnd = info.getCWndPtr();
+					if (wnd && wnd->IsWindowVisible()) {
+						sprintf_concat(buf, " %s,", info.editor_name);
 						any_open = true;
 					}
 				}
