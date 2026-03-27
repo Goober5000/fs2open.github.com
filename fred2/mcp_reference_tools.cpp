@@ -482,6 +482,12 @@ void mcp_register_reference_tools(json_t *tools)
 		"last-modified timestamp. Combine the directory and filename to get the "
 		"absolute path for load_mission.",
 		json_object());
+
+	// get_root_path
+	register_tool(tools, "get_root_path",
+		"Returns the absolute path to the game data root directory. "
+		"All relative file paths (missions, tables, models, etc.) resolve under this directory.",
+		json_object());
 }
 
 // ---------------------------------------------------------------------------
@@ -2179,6 +2185,19 @@ static json_t *handle_list_missions()
 	return make_json_tool_result(obj);
 }
 
+static json_t *handle_get_root_path()
+{
+	SCP_string root;
+	cf_create_default_path_string(root, CF_TYPE_ROOT);
+
+	json_t *result = make_tool_result(false, "root_path: %s", root.c_str());
+
+	json_t *sc = json_object();
+	json_object_set_new(sc, "root_path", json_string(root.c_str()));
+	json_object_set_new(result, "structuredContent", sc);
+	return result;
+}
+
 // ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
@@ -2278,6 +2297,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_talking_heads();
 	if (strcmp(tool_name, "list_missions") == 0)
 		return handle_list_missions();
+	if (strcmp(tool_name, "get_root_path") == 0)
+		return handle_get_root_path();
 
 	return nullptr;  // not one of our tools
 }
