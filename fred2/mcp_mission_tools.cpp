@@ -3,8 +3,10 @@
 #include "mcpserver.h"
 #include "mcp_json.h"
 #include "mcp_array_utils.h"
+#include "mcp_sexp_forest.h"
 
 #include <jansson.h>
+#include <algorithm>
 #include <cstdarg>
 #include <cstring>
 #include <functional>
@@ -38,7 +40,8 @@ static bool validate_single_dialog(const char *items_to_modify, const char *dial
 			return true;
 		}
 	}
-	Assertion(false, "dialog key %s not found!", dialog_key);
+	Assertion(false, "dialog key '%s' not found!", dialog_key);
+	return false;
 }
 
 static bool validate_dialog_for_messages(SCP_string &error_msg)
@@ -59,10 +62,16 @@ static const char *persona_name_from_index(int persona_index)
 }
 
 // ---------------------------------------------------------------------------
-// Team helpers
+// Enum helpers
 // ---------------------------------------------------------------------------
 
-static const std::initializer_list<const char *> team_enum_values = {"none", "Team 1", "Team 2"};
+static const SCP_vector<const char *> team_enum_values = { "none", "Team 1", "Team 2" };
+static const SCP_vector<const char *> message_enum_values = { "mission", "builtin" };
+static const SCP_vector<const char *> event_unit_enum_values = { "milliseconds", "seconds" };
+
+// ---------------------------------------------------------------------------
+// Team helpers
+// ---------------------------------------------------------------------------
 
 static const char *team_name_from_index(int multi_team)
 {
@@ -78,6 +87,70 @@ static int team_index_from_name(const char *name)
 	if (!stricmp(name, "Team 1")) return 0;
 	if (!stricmp(name, "Team 2")) return 1;
 	return -1;	// invalid or default
+}
+
+// ---------------------------------------------------------------------------
+// Flag helpers
+// ---------------------------------------------------------------------------
+
+struct flag_entry { const char *name; int bit; };
+
+static SCP_vector<const char *> flags_to_list(const flag_entry entries[], size_t count)
+{
+	SCP_vector<const char *> vec;
+	for (size_t i = 0; i < count; i++)
+		vec.push_back(entries[i].name);
+	return vec;
+}
+
+static json_t *flags_to_json_array(int bitmask, const flag_entry entries[], size_t count)
+{
+	json_t *arr = json_array();
+	for (size_t i = 0; i < count; i++)
+		if (bitmask & entries[i].bit)
+			json_array_append_new(arr, json_string(entries[i].name));
+	return arr;
+}
+
+static const flag_entry mef_flag_entries[] = {
+	{"using_trigger_count", MEF_USING_TRIGGER_COUNT},
+	{"use_msecs",           MEF_USE_MSECS},
+};
+static const size_t mef_flag_count = sizeof(mef_flag_entries) / sizeof(mef_flag_entries[0]);
+static const SCP_vector<const char *> mef_flag_names = flags_to_list(mef_flag_entries, mef_flag_count);
+
+static const flag_entry mlf_flag_entries[] = {
+	{"sexp_true",           MLF_SEXP_TRUE},
+	{"sexp_false",          MLF_SEXP_FALSE},
+	{"sexp_known_false",    MLF_SEXP_KNOWN_FALSE},
+	{"first_repeat_only",   MLF_FIRST_REPEAT_ONLY},
+	{"last_repeat_only",    MLF_LAST_REPEAT_ONLY},
+	{"first_trigger_only",  MLF_FIRST_TRIGGER_ONLY},
+	{"last_trigger_only",   MLF_LAST_TRIGGER_ONLY},
+	{"state_change",        MLF_STATE_CHANGE},
+};
+static const size_t mlf_flag_count = sizeof(mlf_flag_entries) / sizeof(mlf_flag_entries[0]);
+static const SCP_vector<const char *> mlf_flag_names = flags_to_list(mlf_flag_entries, mlf_flag_count);
+
+static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_entry entries[], size_t count,
+	const char *param_name, int &out_flags, McpToolRequest *req)
+{
+	auto lookup_fn = [&](const char *str)->int
+	{
+		for (size_t i = 0; i < count; i++)
+			if (!stricmp(entries[i].name, str))
+				return sz2i(i);
+		return -1;
+	};
+
+	out_flags = 0;
+	for (const auto &s : strings) {
+		int i = check_lookup(s.c_str(), lookup_fn, param_name, req);
+		if (i < 0)
+			return false;
+		out_flags |= entries[i].bit;
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -126,7 +199,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	// Determine range based on "source" parameter
 	const char *source = get_optional_string(input, "source", true);
 
-	if (source && !check_string_enum(source, {"mission", "builtin"}, "source", req))
+	if (source && !check_string_enum(source, message_enum_values, "source", req))
 		return;
 
 	int start, end;
@@ -394,7 +467,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
 		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::MESSAGE, Messages[idx].name, node);
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NOT_APPLICABLE, Messages[idx].name, node);
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
@@ -464,6 +537,467 @@ static void update_annotation_paths_for_swap(int a, int b)
 		else if (event_idx == b)
 			event_idx = a;
 	}
+}
+
+// After inserting an event at `index`, shift all annotation paths >= index up by 1.
+static void update_annotation_paths_for_insert(int index)
+{
+	for (auto &ea : Event_annotations) {
+		if (ea.path.empty())
+			continue;
+		if (ea.path.front() >= index)
+			ea.path.front()++;
+	}
+}
+
+// Before deleting an event at `index`, remove annotations for that event
+// and shift annotations for later events down by 1.
+static void update_annotation_paths_for_delete(int index)
+{
+	Event_annotations.erase(
+		std::remove_if(Event_annotations.begin(), Event_annotations.end(),
+			[index](const event_annotation &ea) {
+				return !ea.path.empty() && ea.path.front() == index;
+			}),
+		Event_annotations.end());
+
+	for (auto &ea : Event_annotations) {
+		if (ea.path.empty())
+			continue;
+		if (ea.path.front() > index)
+			ea.path.front()--;
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Event tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static bool validate_dialog_for_events(SCP_string &error_msg)
+{
+	return validate_single_dialog("events", "event", error_msg);
+}
+
+static json_t *build_event_json(const mission_event &evt, bool include_details = false)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
+	json_object_set_new(obj, "root_node", json_integer(evt.formula));
+
+	bool is_chained = (evt.chain_delay >= 0);
+	json_object_set_new(obj, "is_chained", json_boolean(is_chained));
+
+	if (!include_details)
+		return obj;
+
+	// Detail fields
+	json_object_set_new(obj, "repeat_count", json_integer(evt.repeat_count));
+	if (evt.flags & MEF_USING_TRIGGER_COUNT)
+		json_object_set_new(obj, "trigger_count", json_integer(evt.trigger_count));
+	json_object_set_new(obj, "interval", json_integer(evt.interval));
+
+	json_object_set_new(obj, "chain_and_interval_units",
+		json_string((evt.flags & MEF_USE_MSECS) ? "milliseconds" : "seconds"));
+
+	json_object_set_new(obj, "score", json_integer(evt.score));
+	if (is_chained)
+		json_object_set_new(obj, "chain_delay", json_integer(evt.chain_delay));
+	json_object_set_new(obj, "team", json_string(team_name_from_index(evt.team)));
+
+	set_optional_string(obj, "objective_text", evt.objective_text.c_str(), true);
+	set_optional_string(obj, "objective_key_text", evt.objective_key_text.c_str(), true);
+
+	json_object_set_new(obj, "flags",
+		flags_to_json_array(evt.flags, mef_flag_entries, mef_flag_count));
+	json_object_set_new(obj, "log_flags",
+		flags_to_json_array(evt.mission_log_flags, mlf_flag_entries, mlf_flag_count));
+
+	return obj;
+}
+
+static void handle_list_events(json_t * /*input*/, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_events, req)) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < (int)Mission_events.size(); i++)
+		json_array_append_new(arr, build_event_json(Mission_events[i]));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_event(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_events, req)) return;
+
+	auto name = get_required_string(input, "name", req, false);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Event", name);
+		return;
+	}
+
+	req->result_json = make_json_tool_result(build_event_json(Mission_events[idx], true));
+	req->success = true;
+}
+
+static void handle_create_event(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_events, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+
+	// Check for duplicate name
+	if (find_item_with_string(Mission_events, &mission_event::name, name) >= 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"An event with name '%s' already exists", name);
+		return;
+	}
+
+	auto insert_index = get_optional_integer(input, "index");
+
+	// Optional parameters
+	auto root_node     = get_optional_integer(input, "root_node");
+	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto is_chained    = get_optional_bool(input, "is_chained");
+	auto repeat_count  = get_optional_integer(input, "repeat_count");
+	auto trigger_count = get_optional_integer(input, "trigger_count");
+	auto interval      = get_optional_integer(input, "interval");
+
+	auto units = get_optional_string(input, "chain_and_interval_units", true);
+	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", req))
+		return;
+
+	auto score         = get_optional_integer(input, "score");
+	auto chain_delay   = get_optional_integer(input, "chain_delay");
+
+	// if an event is chained but a chain delay is not specified, set the delay to 0;
+	// similarly, if an event is explicitly unchained, set the delay to -1
+	// (note: chain delay overrides is_chained)
+	if (!chain_delay.has_value() && is_chained.has_value()) {
+		chain_delay = *is_chained ? 0 : -1;
+	}
+
+	// Team
+	auto team_str = get_optional_string(input, "team", true);
+	int multi_team = -1;
+	if (team_str) {
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return;
+		multi_team = team_index_from_name(team_str);
+	}
+
+	auto objective_text = get_optional_string(input, "objective_text", false);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
+
+	// Flags
+	std::optional<int> mef_flags;
+	auto flags_arr = get_optional_string_array(input, "flags");
+	if (flags_arr.has_value()) {
+		mef_flags = 0;
+		if (!flags_arr->empty()) {
+			if (!parse_flags_array(*flags_arr, mef_flag_entries, mef_flag_count, "flags", *mef_flags, req))
+				return;
+		}
+	}
+
+	std::optional<int> mlf_flags;
+	auto log_flags_arr = get_optional_string_array(input, "log_flags");
+	if (log_flags_arr.has_value()) {
+		mlf_flags = 0;
+		if (!log_flags_arr->empty()) {
+			if (!parse_flags_array(*log_flags_arr, mlf_flag_entries, mlf_flag_count, "log_flags", *mlf_flags, req))
+				return;
+		}
+	}
+
+	// Auto-set MEF_ flags if parameters provided
+	// Note: these assignments must come AFTER the optional flag checks
+	if (trigger_count.has_value()) {
+		if (mef_flags.has_value()) {
+			*mef_flags |= MEF_USING_TRIGGER_COUNT;
+		} else {
+			mef_flags = MEF_USING_TRIGGER_COUNT;
+		}
+	}
+	if (units && !stricmp(units, "milliseconds")) {
+		if (mef_flags.has_value()) {
+			*mef_flags |= MEF_USE_MSECS;
+		} else {
+			mef_flags = MEF_USE_MSECS;
+		}
+	}
+
+	// Validate insert index
+	int target_index;
+	if (!insert_index.has_value()) {
+		target_index = (int)Mission_events.size();
+	} else {
+		if (!check_int_range(*insert_index, 0, (int)Mission_events.size(), "index", req))
+			return;
+		target_index = *insert_index;
+	}
+
+	int formula_node;
+	if (root_node.has_value()) {
+		formula_node = *root_node;
+	} else {
+		// Build default SEXP formula: (when (true) (do-nothing))
+		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);
+		formula_node = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
+	}
+
+	// Construct the event
+	mission_event evt;
+	evt.name = name;
+	evt.formula = formula_node;
+	evt.repeat_count  = repeat_count.value_or(1);
+	evt.trigger_count = trigger_count.value_or(1);
+	evt.interval      = interval.value_or(1);
+	evt.score         = score.value_or(0);
+	evt.chain_delay   = chain_delay.value_or(-1);	// -1 means no chain
+	evt.team          = multi_team;
+	evt.flags         = mef_flags.value_or(0);
+	evt.mission_log_flags = mlf_flags.value_or(0);
+
+	if (objective_text && objective_text[0])
+		evt.objective_text = objective_text;
+	if (objective_key_text && objective_key_text[0])
+		evt.objective_key_text = objective_key_text;
+
+	// Insert
+	update_annotation_paths_for_insert(target_index);
+	Mission_events.insert(Mission_events.begin() + target_index, evt);
+	mcp_sexp_forest_mark_dirty({formula_node});
+
+	mark_modified("MCP: create event %s", name);
+
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(name));
+	json_object_set_new(data, "index", json_integer(target_index));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_update_event(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_events, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Event", name);
+		return;
+	}
+
+	mission_event &evt = Mission_events[idx];
+
+	// Validate new_name
+	auto new_name      = get_optional_string(input, "new_name", false);
+	if (new_name) {
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!new_name[0]) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"An event name cannot be blank!");
+			return;
+		}
+		if (stricmp(evt.name.c_str(), new_name) != 0 &&
+			find_item_with_string(Mission_events, &mission_event::name, new_name) >= 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"An event with name '%s' already exists", new_name);
+			return;
+		}
+	}
+
+	// Extract optional fields
+	auto root_node     = get_optional_integer(input, "root_node");
+	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto is_chained    = get_optional_bool(input, "is_chained");
+	auto repeat_count  = get_optional_integer(input, "repeat_count");
+	auto trigger_count = get_optional_integer(input, "trigger_count");
+	auto interval      = get_optional_integer(input, "interval");
+
+	auto units = get_optional_string(input, "chain_and_interval_units", true);
+	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", req))
+		return;
+
+	auto score         = get_optional_integer(input, "score");
+	auto chain_delay   = get_optional_integer(input, "chain_delay");
+
+	if (!chain_delay.has_value() && is_chained.has_value()) {
+		chain_delay = *is_chained ? 0 : -1;
+	}
+
+	// Team
+	auto team_str = get_optional_string(input, "team", true);
+	std::optional<int> new_team = std::nullopt;
+	if (team_str) {
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return;
+		new_team = team_index_from_name(team_str);
+	}
+
+	auto objective_text     = get_optional_string(input, "objective_text", false);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
+
+	// Flags
+	std::optional<int> new_mef_flags;
+	auto flags_arr = get_optional_string_array(input, "flags");
+	if (flags_arr.has_value()) {
+		new_mef_flags = 0;
+		if (!flags_arr->empty()) {
+			if (!parse_flags_array(*flags_arr, mef_flag_entries, mef_flag_count, "flags", *new_mef_flags, req))
+				return;
+		}
+	}
+
+	std::optional<int> new_mlf_flags;
+	auto log_flags_arr = get_optional_string_array(input, "log_flags");
+	if (log_flags_arr.has_value()) {
+		new_mlf_flags = 0;
+		if (!log_flags_arr->empty()) {
+			if (!parse_flags_array(*log_flags_arr, mlf_flag_entries, mlf_flag_count, "log_flags", *new_mlf_flags, req))
+				return;
+		}
+	}
+
+	// Auto-set MEF_ flags if parameters provided
+	// Note: these assignments must come AFTER the optional flag checks
+	if (trigger_count.has_value()) {
+		if (!new_mef_flags.has_value()) {
+			*new_mef_flags = evt.flags;
+		}
+		*new_mef_flags |= MEF_USING_TRIGGER_COUNT;
+	}
+	if (units) {
+		if (!new_mef_flags.has_value()) {
+			*new_mef_flags = evt.flags;
+		}
+		if (!stricmp(units, "milliseconds"))
+			*new_mef_flags |= MEF_USE_MSECS;
+		else
+			*new_mef_flags &= ~MEF_USE_MSECS;
+	}
+
+	bool changed = false;
+
+	if (root_node.has_value() && evt.formula != *root_node) {
+		if (evt.formula >= 0)
+			free_sexp2(evt.formula);
+		evt.formula = *root_node;
+		changed = true;
+		mcp_sexp_forest_mark_dirty({ *root_node });
+	}
+	if (repeat_count.has_value() && evt.repeat_count != *repeat_count) {
+		evt.repeat_count = *repeat_count;
+		changed = true;
+	}
+	if (trigger_count.has_value() && evt.trigger_count != *trigger_count) {
+		evt.trigger_count = *trigger_count;
+		changed = true;
+	}
+	if (interval.has_value() && evt.interval != *interval) {
+		evt.interval = *interval;
+		changed = true;
+	}
+	if (score.has_value() && evt.score != *score) {
+		evt.score = *score;
+		changed = true;
+	}
+	if (chain_delay.has_value() && evt.chain_delay != *chain_delay) {
+		evt.chain_delay = *chain_delay;
+		changed = true;
+	}
+	if (new_team.has_value() && evt.team != *new_team) {
+		evt.team = *new_team;
+		changed = true;
+	}
+	if (new_mef_flags.has_value() && evt.flags != *new_mef_flags) {
+		evt.flags = *new_mef_flags;
+		changed = true;
+	}
+	if (new_mlf_flags.has_value() && evt.mission_log_flags != *new_mlf_flags) {
+		evt.mission_log_flags = *new_mlf_flags;
+		changed = true;
+	}
+	if (objective_text && evt.objective_text != objective_text) {
+		evt.objective_text = objective_text;
+		changed = true;
+	}
+	if (objective_key_text && evt.objective_key_text != objective_key_text) {
+		evt.objective_key_text = objective_key_text;
+		changed = true;
+	}
+
+	// Rename last — updates SEXP references
+	if (new_name && stricmp(evt.name.c_str(), new_name) != 0) {
+		update_sexp_references(evt.name.c_str(), new_name, OPF_EVENT_NAME);
+		evt.name = new_name;
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update event %s", evt.name.c_str());
+
+	req->result_json = make_json_tool_result(build_event_json(evt, true));
+	req->success = true;
+}
+
+static void handle_delete_event(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_events, req)) return;
+
+	auto force = get_optional_bool(input, "force");
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Event", name);
+		return;
+	}
+
+	// Check for SEXP references unless force is set
+	if (!force.has_value() || !*force) {
+		int node;
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NOT_APPLICABLE, Mission_events[idx].name.c_str(), node);
+		if (ref.second != sexp_src::NONE) {
+			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Event '%s' is referenced in %s. Use force=true to delete anyway "
+				"(references will be invalidated).", name, desc.c_str());
+			return;
+		}
+	}
+
+	// Invalidate SEXP references
+	SCP_string buf = SCP_string("<") + Mission_events[idx].name + ">";
+	update_sexp_references(Mission_events[idx].name.c_str(), buf.c_str(), OPF_EVENT_NAME);
+
+	// Free the SEXP formula
+	if (Mission_events[idx].formula >= 0)
+		free_sexp2(Mission_events[idx].formula);
+
+	// Update annotations and remove from vector
+	update_annotation_paths_for_delete(idx);
+	Mission_events.erase(Mission_events.begin() + idx);
+
+	mark_modified("MCP: delete event %s", name);
+
+	snprintf(req->result_message, sizeof(req->result_message), "Deleted event: %s", name);
+	req->success = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -565,7 +1099,7 @@ static MoveSwapConfig make_event_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "event";
 	cfg.count = (int)Mission_events.size();
-	cfg.validate_dialog = [](SCP_string& msg)->bool { return validate_single_dialog("events", "event", msg); };
+	cfg.validate_dialog = validate_dialog_for_events;
 	cfg.get_name = [](int i) -> const char * {
 		return Mission_events[i].name.c_str();
 	};
@@ -616,6 +1150,11 @@ static const char *mission_tool_names[] = {
 	"delete_message",
 	"move_message",
 	"swap_messages",
+	"list_events",
+	"get_event",
+	"create_event",
+	"update_event",
+	"delete_event",
 	"move_event",
 	"swap_events",
 	nullptr
@@ -633,7 +1172,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_enum_prop(props, "source",
 			"Which messages to list: \"mission\" (default) for mission-specific messages, "
 			"or \"builtin\" for built-in engine messages from messages.tbl",
-			{"mission", "builtin"});
+			message_enum_values);
 		register_tool(tools, "list_messages",
 			"List messages. By default lists mission-specific messages. "
 			"Use source=\"builtin\" to list built-in engine messages instead. "
@@ -740,6 +1279,107 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// list_events
+	register_tool(tools, "list_events",
+		"List all mission events. Returns each event's name and root node, "
+		"and whether it is chained.",
+		json_object());
+
+	// get_event
+	register_tool_with_required_string(tools, "get_event",
+		"Get full details of a mission event by name, including repeat/trigger counts, "
+		"interval, score, chain delay, team, objective text, flags, and log flags.",
+		"name", "Name of the event to retrieve");
+
+	// create_event
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Unique name for the event");
+		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this event");
+		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
+			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
+		add_integer_prop(props, "repeat_count",
+			"Number of times to test this event (1 = once, -1 = infinite)");
+		add_integer_prop(props, "trigger_count",
+			"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
+		add_integer_prop(props, "interval",
+			"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
+		add_string_enum_prop(props, "chain_and_interval_units",
+			"Units for 'interval' and 'chain_delay' (defaults to seconds)",
+			event_unit_enum_values);
+		add_integer_prop(props, "score", "Score awarded when event is satisfied");
+		add_integer_prop(props, "chain_delay",
+			"Delay before evaluating this chained event (-1 = not chained)");
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment (\"none\" for all teams)",
+			team_enum_values);
+		add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
+		add_string_prop(props, "objective_key_text", "Localization key for the objective text");
+		add_string_array_prop(props, "flags", "Event flags", mef_flag_names);
+		add_string_array_prop(props, "log_flags", "Mission log flags", mlf_flag_names);
+		add_integer_prop(props, "index",
+			"Position to insert the event (0 = first). If omitted, appends to the end.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "create_event",
+			"Create a new mission event with a default (when (true) (do-nothing)) formula. "
+			"Use the SEXP editor to modify the formula after creation.",
+			props, req);
+	}
+
+	// update_event
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the existing event to update");
+		add_string_prop(props, "new_name", "New name for the event (updates SEXP references)");
+		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this event");
+		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
+			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
+		add_integer_prop(props, "repeat_count",
+			"Number of times to test this event (1 = once, -1 = infinite)");
+		add_integer_prop(props, "trigger_count",
+			"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
+		add_integer_prop(props, "interval",
+			"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
+		add_string_enum_prop(props, "chain_and_interval_units",
+			"Units for 'interval' and 'chain_delay' (defaults to seconds)",
+			event_unit_enum_values);
+		add_integer_prop(props, "score", "Score awarded when event is satisfied");
+		add_integer_prop(props, "chain_delay",
+			"Delay before evaluating this chained event (-1 = not chained)");
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment (\"none\" for all teams)",
+			team_enum_values);
+		add_string_prop(props, "objective_text",
+			"Directive text displayed in the HUD (empty string to clear)");
+		add_string_prop(props, "objective_key_text",
+			"Localization key for the objective text (empty string to clear)");
+		add_string_array_prop(props, "flags", "Event flags (replaces all flags)", mef_flag_names);
+		add_string_array_prop(props, "log_flags", "Mission log flags (replaces all log flags)", mlf_flag_names);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_event",
+			"Update properties of an existing mission event. Only specified fields are "
+			"changed; omitted fields are left unchanged. Renaming automatically updates "
+			"all SEXP references to the event.",
+			props, req);
+	}
+
+	// delete_event
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the event to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if the event is referenced in SEXPs (references "
+			"will be invalidated). Default: false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "delete_event",
+			"Delete a mission event. Frees its SEXP formula and updates annotation paths. "
+			"SEXP references to the deleted event are invalidated (wrapped in angle brackets).",
+			props, req);
+	}
+
 	// move_event
 	{
 		json_t *props = json_object();
@@ -806,6 +1446,16 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_message(input_json, req);
 	} else if (strcmp(tool_name, "swap_messages") == 0) {
 		handle_swap_messages(input_json, req);
+	} else if (strcmp(tool_name, "list_events") == 0) {
+		handle_list_events(input_json, req);
+	} else if (strcmp(tool_name, "get_event") == 0) {
+		handle_get_event(input_json, req);
+	} else if (strcmp(tool_name, "create_event") == 0) {
+		handle_create_event(input_json, req);
+	} else if (strcmp(tool_name, "update_event") == 0) {
+		handle_update_event(input_json, req);
+	} else if (strcmp(tool_name, "delete_event") == 0) {
+		handle_delete_event(input_json, req);
 	} else if (strcmp(tool_name, "move_event") == 0) {
 		handle_move_event(input_json, req);
 	} else if (strcmp(tool_name, "swap_events") == 0) {
