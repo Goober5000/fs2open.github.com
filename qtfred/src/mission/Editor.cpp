@@ -1257,7 +1257,7 @@ int Editor::reference_handler(const char* name, sexp_ref_type type, int obj) {
 	int r, node;
 
 	switch (type) {
-	case sexp_ref_type::NOT_APPLICABLE:
+	case sexp_ref_type::NON_OBJECT:
 		sprintf(type_name, "[not an object or object group: %s]", name);
 		break;
 
