@@ -235,6 +235,8 @@ static const char *subsystem_type_str(int type)
 	}
 }
 
+static const SCP_vector<const char*> subtype_enum_values = { "primary", "secondary", "beam" };
+
 // ---------------------------------------------------------------------------
 // Tool schema registration
 // ---------------------------------------------------------------------------
@@ -274,7 +276,7 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *props = json_object();
 		add_string_enum_prop(props, "subtype",
 			"Filter by subtype: \"primary\", \"secondary\", or \"beam\"",
-			{"primary", "secondary", "beam"});
+			subtype_enum_values);
 		register_tool(tools, "list_weapon_classes",
 			"List all weapon classes with summary info. Optionally filter by subtype.",
 			props);
@@ -750,7 +752,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	json_t *err = nullptr;
 	const char *st = get_optional_string(arguments, "subtype", true);
 	if (st) {
-		if (!check_string_enum(st, {"primary", "secondary", "beam"}, "subtype", &err))
+		if (!check_string_enum(st, subtype_enum_values, "subtype", &err))
 			return err;
 		if (stricmp(st, "primary") == 0)
 			filter = FILTER_PRIMARY;

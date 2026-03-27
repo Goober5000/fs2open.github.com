@@ -30,10 +30,8 @@ void add_string_prop(json_t *props, const char *name, const char *description);
 void add_integer_prop(json_t *props, const char *name, const char *description);
 void add_number_prop(json_t *props, const char *name, const char *description);
 void add_bool_prop(json_t *props, const char *name, const char *description);
-void add_string_enum_prop(json_t *props, const char *name, const char *description,
-	std::initializer_list<const char *> values);
-void add_integer_enum_prop(json_t *props, const char *name, const char *description,
-	std::initializer_list<int> values);
+void add_string_enum_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
+void add_string_array_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
 void add_vec3d_prop(json_t *props, const char *name, const char *description);
 void add_matrix_prop(json_t *props, const char *name, const char *description);
 
@@ -48,12 +46,14 @@ void register_tool_with_required_string(json_t *tools, const char *tool_name, co
 // Various validation functions
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
 bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out);
-bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, McpToolRequest *req);
-bool check_string_enum(const char *input, std::initializer_list<const char *> values, const char *param_name, json_t **error_out);
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpToolRequest *req);
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, json_t **error_out);
 bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req);
 bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out);
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out);
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpToolRequest *req);
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, json_t **error_out);
 
 bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req);
 bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req);
@@ -122,6 +122,9 @@ std::optional<float> get_optional_float(json_t *arguments, const char *param_nam
 std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name);
 std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name);
 std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name);
+
+// Extracts an optional JSON array of strings.
+std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 struct vec3d;
