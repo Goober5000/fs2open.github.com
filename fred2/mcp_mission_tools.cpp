@@ -112,26 +112,6 @@ static json_t *flags_to_json_array(int bitmask, const flag_entry entries[], size
 	return arr;
 }
 
-static const flag_entry mef_flag_entries[] = {
-	{"using_trigger_count", MEF_USING_TRIGGER_COUNT},
-	{"use_msecs",           MEF_USE_MSECS},
-};
-static const size_t mef_flag_count = sizeof(mef_flag_entries) / sizeof(mef_flag_entries[0]);
-static const SCP_vector<const char *> mef_flag_names = flags_to_list(mef_flag_entries, mef_flag_count);
-
-static const flag_entry mlf_flag_entries[] = {
-	{"sexp_true",           MLF_SEXP_TRUE},
-	{"sexp_false",          MLF_SEXP_FALSE},
-	{"sexp_known_false",    MLF_SEXP_KNOWN_FALSE},
-	{"first_repeat_only",   MLF_FIRST_REPEAT_ONLY},
-	{"last_repeat_only",    MLF_LAST_REPEAT_ONLY},
-	{"first_trigger_only",  MLF_FIRST_TRIGGER_ONLY},
-	{"last_trigger_only",   MLF_LAST_TRIGGER_ONLY},
-	{"state_change",        MLF_STATE_CHANGE},
-};
-static const size_t mlf_flag_count = sizeof(mlf_flag_entries) / sizeof(mlf_flag_entries[0]);
-static const SCP_vector<const char *> mlf_flag_names = flags_to_list(mlf_flag_entries, mlf_flag_count);
-
 static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_entry entries[], size_t count,
 	const char *param_name, int &out_flags, McpToolRequest *req)
 {
@@ -607,11 +587,6 @@ static json_t *build_event_json(const mission_event &evt, bool include_details =
 	set_optional_string(obj, "objective_text", evt.objective_text.c_str(), true);
 	set_optional_string(obj, "objective_key_text", evt.objective_key_text.c_str(), true);
 
-	json_object_set_new(obj, "flags",
-		flags_to_json_array(evt.flags, mef_flag_entries, mef_flag_count));
-	json_object_set_new(obj, "log_flags",
-		flags_to_json_array(evt.mission_log_flags, mlf_flag_entries, mlf_flag_count));
-
 	return obj;
 }
 
@@ -695,29 +670,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto objective_text = get_optional_string(input, "objective_text", false);
 	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
 
-	// Flags
-	std::optional<int> mef_flags;
-	auto flags_arr = get_optional_string_array(input, "flags");
-	if (flags_arr.has_value()) {
-		mef_flags = 0;
-		if (!flags_arr->empty()) {
-			if (!parse_flags_array(*flags_arr, mef_flag_entries, mef_flag_count, "flags", *mef_flags, req))
-				return;
-		}
-	}
-
-	std::optional<int> mlf_flags;
-	auto log_flags_arr = get_optional_string_array(input, "log_flags");
-	if (log_flags_arr.has_value()) {
-		mlf_flags = 0;
-		if (!log_flags_arr->empty()) {
-			if (!parse_flags_array(*log_flags_arr, mlf_flag_entries, mlf_flag_count, "log_flags", *mlf_flags, req))
-				return;
-		}
-	}
-
 	// Auto-set MEF_ flags if parameters provided
-	// Note: these assignments must come AFTER the optional flag checks
+	std::optional<int> mef_flags;
 	if (trigger_count.has_value()) {
 		if (mef_flags.has_value()) {
 			*mef_flags |= MEF_USING_TRIGGER_COUNT;
@@ -764,7 +718,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	evt.chain_delay   = chain_delay.value_or(-1);	// -1 means no chain
 	evt.team          = multi_team;
 	evt.flags         = mef_flags.value_or(0);
-	evt.mission_log_flags = mlf_flags.value_or(0);
+	evt.mission_log_flags = 0;
 
 	if (objective_text && objective_text[0])
 		evt.objective_text = objective_text;
@@ -850,38 +804,17 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto objective_text     = get_optional_string(input, "objective_text", false);
 	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
 
-	// Flags
-	std::optional<int> new_mef_flags;
-	auto flags_arr = get_optional_string_array(input, "flags");
-	if (flags_arr.has_value()) {
-		new_mef_flags = 0;
-		if (!flags_arr->empty()) {
-			if (!parse_flags_array(*flags_arr, mef_flag_entries, mef_flag_count, "flags", *new_mef_flags, req))
-				return;
-		}
-	}
-
-	std::optional<int> new_mlf_flags;
-	auto log_flags_arr = get_optional_string_array(input, "log_flags");
-	if (log_flags_arr.has_value()) {
-		new_mlf_flags = 0;
-		if (!log_flags_arr->empty()) {
-			if (!parse_flags_array(*log_flags_arr, mlf_flag_entries, mlf_flag_count, "log_flags", *new_mlf_flags, req))
-				return;
-		}
-	}
-
 	// Auto-set MEF_ flags if parameters provided
-	// Note: these assignments must come AFTER the optional flag checks
+	std::optional<int> new_mef_flags;
 	if (trigger_count.has_value()) {
 		if (!new_mef_flags.has_value()) {
-			*new_mef_flags = evt.flags;
+			new_mef_flags = evt.flags;
 		}
 		*new_mef_flags |= MEF_USING_TRIGGER_COUNT;
 	}
 	if (units) {
 		if (!new_mef_flags.has_value()) {
-			*new_mef_flags = evt.flags;
+			new_mef_flags = evt.flags;
 		}
 		if (!stricmp(units, "milliseconds"))
 			*new_mef_flags |= MEF_USE_MSECS;
@@ -924,10 +857,6 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 	if (new_mef_flags.has_value() && evt.flags != *new_mef_flags) {
 		evt.flags = *new_mef_flags;
-		changed = true;
-	}
-	if (new_mlf_flags.has_value() && evt.mission_log_flags != *new_mlf_flags) {
-		evt.mission_log_flags = *new_mlf_flags;
 		changed = true;
 	}
 	if (objective_text && evt.objective_text != objective_text) {
@@ -1315,8 +1244,6 @@ void mcp_register_mission_tools(json_t *tools)
 			team_enum_values);
 		add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
 		add_string_prop(props, "objective_key_text", "Localization key for the objective text");
-		add_string_array_prop(props, "flags", "Event flags", mef_flag_names);
-		add_string_array_prop(props, "log_flags", "Mission log flags", mlf_flag_names);
 		add_integer_prop(props, "index",
 			"Position to insert the event (0 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
@@ -1354,8 +1281,6 @@ void mcp_register_mission_tools(json_t *tools)
 			"Directive text displayed in the HUD (empty string to clear)");
 		add_string_prop(props, "objective_key_text",
 			"Localization key for the objective text (empty string to clear)");
-		add_string_array_prop(props, "flags", "Event flags (replaces all flags)", mef_flag_names);
-		add_string_array_prop(props, "log_flags", "Mission log flags (replaces all log flags)", mlf_flag_names);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_event",
