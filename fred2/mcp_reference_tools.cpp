@@ -24,6 +24,7 @@
 #include "mission/missionmessage.h"
 #include "mod_table/mod_table.h"
 #include "cfile/cfile.h"
+#include "cfile/cfilesystem.h"
 #include "def_files/def_files.h"
 
 
@@ -200,7 +201,7 @@ static const char *opr_to_string(int opr)
 		case OPR_STRING:             return "string";
 		case OPR_AMBIGUOUS:          return "ambiguous";
 		case OPR_FLEXIBLE_ARGUMENT:  return "flexible_argument";
-		default: return "unknown";
+		default:                     return "unknown";
 	}
 }
 
@@ -473,6 +474,14 @@ void mcp_register_reference_tools(json_t *tools)
 			"assigned from this list, but on rare occasions can be unique.",
 			json_object());
 	}
+
+	// list_missions
+	register_tool(tools, "list_missions",
+		"List all mission files (.fs2) available in the data/missions directory. "
+		"Returns the directory path and an array of missions with filename and "
+		"last-modified timestamp. Combine the directory and filename to get the "
+		"absolute path for load_mission.",
+		json_object());
 }
 
 // ---------------------------------------------------------------------------
@@ -487,7 +496,7 @@ static json_t *handle_list_ship_types()
 		const auto &st = Ship_types[i];
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(st.name));
-		json_object_set_new(item, "actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
+		json_object_set_new(item, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
 		json_array_append_new(arr, item);
 	}
 
@@ -1833,8 +1842,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	json_object_set_new(obj, "name", json_string(sip.name));
 
 	// Bounding box dimensions
-	json_object_set_new(obj, "minimums", build_vec3d_json(pm->mins));
-	json_object_set_new(obj, "maximums", build_vec3d_json(pm->maxs));
+	json_object_set_new(obj, "bounding_box_min", build_vec3d_json(pm->mins));
+	json_object_set_new(obj, "bounding_box_max", build_vec3d_json(pm->maxs));
 
 	// Docking bays
 	{
@@ -2084,7 +2093,7 @@ static json_t *handle_list_personas()
 
 		// Decode species_bitfield into species name array
 		json_t *species_arr = json_array();
-		for (int j = 0; j < (int)Species_info.size(); j++) {
+		for (int j = 0; j < (int)Species_info.size() && j < 32; j++) {
 			if (p.species_bitfield & (1 << j))
 				json_array_append_new(species_arr, json_string(Species_info[j].species_name));
 		}
@@ -2132,6 +2141,42 @@ static json_t *handle_list_talking_heads()
 		json_array_append_new(arr, json_string(h.c_str()));
 
 	return make_json_tool_result(arr);
+}
+
+// ---------------------------------------------------------------------------
+// Mission file listing
+// ---------------------------------------------------------------------------
+
+static json_t *handle_list_missions()
+{
+	SCP_vector<SCP_string> names;
+	SCP_vector<file_list_info> info;
+	cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
+
+	// Build the directory path (without a filename)
+	SCP_string directory;
+	cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
+
+	json_t *arr = json_array();
+	for (size_t i = 0; i < names.size(); i++) {
+		json_t *entry = json_object();
+		json_object_set_new(entry, "filename", json_string((names[i] + ".fs2").c_str()));
+
+		// Format write_time as ISO 8601
+		char timebuf[32];
+		auto tm_ptr = localtime(&info[i].write_time);
+		if (tm_ptr) {
+			strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", tm_ptr);
+			json_object_set_new(entry, "modified", json_string(timebuf));
+		}
+
+		json_array_append_new(arr, entry);
+	}
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "directory", json_string(directory.c_str()));
+	json_object_set_new(obj, "missions", arr);
+	return make_json_tool_result(obj);
 }
 
 // ---------------------------------------------------------------------------
@@ -2231,6 +2276,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_personas();
 	if (strcmp(tool_name, "list_talking_heads") == 0)
 		return handle_list_talking_heads();
+	if (strcmp(tool_name, "list_missions") == 0)
+		return handle_list_missions();
 
 	return nullptr;  // not one of our tools
 }
