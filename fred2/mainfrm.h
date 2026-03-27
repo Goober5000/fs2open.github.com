@@ -9,7 +9,7 @@
  *
  */
 
-
+#include <variant>
 
 #define	WM_MENU_POPUP_TEST	(WM_USER+9)
 
@@ -244,5 +244,23 @@ extern size_t prop_type_combo_box_size;
 
 extern CStatic m_ship_label;
 extern CStatic m_prop_label;
+
+// ---------------------------------------------------------------------------
+// Editor window enumeration
+// Shared between GET_UI_STATUS and SEXP-forest dirty tracking.
+// ---------------------------------------------------------------------------
+
+struct McpEditorInfo
+{
+	std::variant<CWnd*, CWnd**> handle;
+	const char *editor_key;
+	const char *editor_name;
+	bool persistent;
+
+	CWnd* getCWndPtr() const;
+};
+
+extern const McpEditorInfo g_editor_info[];
+extern const size_t g_editor_info_count;
 
 #endif // _MAINFRM_H
