@@ -1071,7 +1071,7 @@ const char *CTEXT(int n);
 
 enum class sexp_ref_type
 {
-	NOT_APPLICABLE = 0,
+	NON_OBJECT = 0,
 	SHIP = 1,
 	WING,
 	PLAYER,
