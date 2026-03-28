@@ -39,6 +39,7 @@
 #include "missiongoalsdlg.h"
 #include "missioncutscenesdlg.h"
 #include "cmdbrief.h"
+#include "FictionViewerDlg.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -124,6 +125,7 @@ const McpEditorInfo g_editor_info[] =
 	{ (CWnd**)&Message_editor_dlg,  "message",          "Message Editor",          false },
 	{ (CWnd**)&Cutscene_editor_dlg, "cutscene",         "Cutscene Editor",         false },
 	{ (CWnd**)&Cmd_brief_dlg,       "command briefing", "Command Briefing Editor", false },
+	{ (CWnd**)&Fiction_viewer_dlg,  "fiction viewer",   "Fiction Viewer Editor",   false },
 };
 const size_t g_editor_info_count = sizeof(g_editor_info) / sizeof(McpEditorInfo);
 

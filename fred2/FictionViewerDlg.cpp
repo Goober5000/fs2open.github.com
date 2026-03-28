@@ -12,6 +12,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+FictionViewerDlg* Fiction_viewer_dlg = nullptr;
+
 /////////////////////////////////////////////////////////////////////////////
 // FictionViewerDlg dialog
 
@@ -50,6 +52,8 @@ END_MESSAGE_MAP()
 
 BOOL FictionViewerDlg::OnInitDialog()
 {
+	Fiction_viewer_dlg = this;
+
 	CComboBox *box;
 
 	box = (CComboBox *) GetDlgItem(IDC_FICTION_MUSIC);
@@ -149,6 +153,12 @@ void FictionViewerDlg::OnClose()
 	}
 
 	CDialog::OnClose();
+}
+
+BOOL FictionViewerDlg::DestroyWindow()
+{
+	Fiction_viewer_dlg = nullptr;
+	return CDialog::DestroyWindow();
 }
 
 int FictionViewerDlg::query_modified()
