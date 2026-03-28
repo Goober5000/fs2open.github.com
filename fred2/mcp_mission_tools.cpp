@@ -1109,7 +1109,7 @@ static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 		if (team_index < 0) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
-				"Invalid team: %s", team_str);
+				"Invalid team for command brief: %s", team_str);
 			return nullptr;
 		}
 	}
@@ -1318,6 +1318,387 @@ static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Goal tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static bool validate_dialog_for_goals(SCP_string &error_msg)
+{
+	return validate_single_dialog("goals", "goal", error_msg);
+}
+
+static const SCP_vector<const char *> goal_type_enum_values = { "Primary", "Secondary", "Bonus" };
+
+static const char *goal_type_name(int type)
+{
+	switch (type & GOAL_TYPE_MASK) {
+		case PRIMARY_GOAL:   return "Primary";
+		case SECONDARY_GOAL: return "Secondary";
+		case BONUS_GOAL:     return "Bonus";
+		default:             return "Unknown";
+	}
+}
+
+static int goal_type_from_name(const char *name)
+{
+	if (!stricmp(name, "Primary"))   return PRIMARY_GOAL;
+	if (!stricmp(name, "Secondary")) return SECONDARY_GOAL;
+	if (!stricmp(name, "Bonus"))     return BONUS_GOAL;
+	return -1;
+}
+
+static json_t *build_goal_json(const mission_goal &goal, int index, bool include_details = false)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(goal.name.c_str()));
+	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
+	json_object_set_new(obj, "root_node", json_integer(goal.formula));
+
+	if (!include_details)
+		return obj;
+
+	json_object_set_new(obj, "is_valid", json_boolean(!(goal.type & INVALID_GOAL)));
+	json_object_set_new(obj, "message", json_string(goal.message.c_str()));
+	json_object_set_new(obj, "score", json_integer(goal.score));
+	json_object_set_new(obj, "team", json_string(team_name_from_index(goal.team)));
+	json_object_set_new(obj, "no_music", json_boolean(goal.flags & MGF_NO_MUSIC));
+
+	return obj;
+}
+
+static void handle_list_goals(json_t * /*input*/, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_goals, req)) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < (int)Mission_goals.size(); i++)
+		json_array_append_new(arr, build_goal_json(Mission_goals[i], i));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_goal(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_goals, req)) return;
+
+	auto name = get_required_string(input, "name", req, false);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Goal", name);
+		return;
+	}
+
+	req->result_json = make_json_tool_result(build_goal_json(Mission_goals[idx], idx, true));
+	req->success = true;
+}
+
+static void handle_create_goal(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_goals, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+
+	// Check for duplicate name
+	if (find_item_with_string(Mission_goals, &mission_goal::name, name) >= 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"A goal with name '%s' already exists", name);
+		return;
+	}
+
+	auto insert_index = get_optional_integer(input, "index");
+
+	// Optional parameters
+	auto type_str   = get_optional_string(input, "goal_type", true);
+	auto root_node  = get_optional_integer(input, "root_node");
+	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto message    = get_optional_string(input, "message", false);
+	auto score      = get_optional_integer(input, "score");
+	auto team_str   = get_optional_string(input, "team", true);
+	auto invalid    = get_optional_bool(input, "invalid");
+	auto no_music   = get_optional_bool(input, "no_music");
+
+	// Resolve type
+	int goal_type = PRIMARY_GOAL;
+	if (type_str) {
+		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", req))
+			return;
+		goal_type = goal_type_from_name(type_str);
+	}
+
+	// Resolve team
+	int team = 0;
+	if (team_str) {
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return;
+		team = team_index_from_name(team_str);
+		if (team < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Invalid team for goal: %s", team_str);
+			return;
+		}
+	}
+
+	// Validate insert index
+	int target_index;
+	if (!insert_index.has_value()) {
+		target_index = (int)Mission_goals.size();
+	} else {
+		if (!check_int_range(*insert_index, 0, (int)Mission_goals.size(), "index", req))
+			return;
+		target_index = *insert_index;
+	}
+
+	int formula_node;
+	if (root_node.has_value()) {
+		formula_node = *root_node;
+	} else {
+		// Build default SEXP formula: (true) — matching FRED2 editor pattern
+		formula_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+	}
+
+	// Construct the goal
+	mission_goal goal;
+	goal.name = name;
+	goal.type = goal_type;
+	goal.formula = formula_node;
+	goal.score = score.value_or(0);
+	goal.team = team;
+	goal.flags = 0;
+
+	if (message && message[0])
+		goal.message = message;
+
+	if (invalid.has_value() && *invalid)
+		goal.type |= INVALID_GOAL;
+
+	if (no_music.has_value() && *no_music)
+		goal.flags |= MGF_NO_MUSIC;
+
+	// Insert
+	Mission_goals.insert(Mission_goals.begin() + target_index, goal);
+	mcp_sexp_forest_mark_dirty({formula_node});
+
+	mark_modified("MCP: create goal %s", name);
+
+	json_t *data = json_object();
+	json_object_set_new(data, "name", json_string(name));
+	json_object_set_new(data, "index", json_integer(target_index));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_update_goal(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_goals, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Goal", name);
+		return;
+	}
+
+	mission_goal &goal = Mission_goals[idx];
+
+	// Validate new_name
+	auto new_name = get_optional_string(input, "new_name", false);
+	if (new_name) {
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!new_name[0]) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"A goal name cannot be blank!");
+			return;
+		}
+		if (stricmp(goal.name.c_str(), new_name) != 0 &&
+			find_item_with_string(Mission_goals, &mission_goal::name, new_name) >= 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"A goal with name '%s' already exists", new_name);
+			return;
+		}
+	}
+
+	// Extract optional fields
+	auto type_str   = get_optional_string(input, "goal_type", true);
+	auto root_node  = get_optional_integer(input, "root_node");
+	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto message    = get_optional_string(input, "message", false);
+	auto score      = get_optional_integer(input, "score");
+	auto team_str   = get_optional_string(input, "team", true);
+	auto invalid    = get_optional_bool(input, "invalid");
+	auto no_music   = get_optional_bool(input, "no_music");
+
+	// Validate type
+	int new_type = -1;
+	if (type_str) {
+		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", req))
+			return;
+		new_type = goal_type_from_name(type_str);
+	}
+
+	// Validate team
+	std::optional<int> new_team = std::nullopt;
+	if (team_str) {
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return;
+		new_team = team_index_from_name(team_str);
+		if (new_team < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Invalid team for goal: %s", team_str);
+			return;
+		}
+	}
+
+	bool changed = false;
+
+	if (new_type >= 0) {
+		// Preserve INVALID_GOAL bit, replace type bits
+		int updated = (goal.type & INVALID_GOAL) | new_type;
+		if (goal.type != updated) {
+			goal.type = updated;
+			changed = true;
+		}
+	}
+	if (root_node.has_value() && goal.formula != *root_node) {
+		if (goal.formula >= 0)
+			free_sexp2(goal.formula);
+		goal.formula = *root_node;
+		changed = true;
+		mcp_sexp_forest_mark_dirty({ *root_node });
+	}
+	if (message) {
+		goal.message = message;
+		changed = true;
+	}
+	if (score.has_value() && goal.score != *score) {
+		goal.score = *score;
+		changed = true;
+	}
+	if (new_team.has_value() && goal.team != *new_team) {
+		goal.team = *new_team;
+		changed = true;
+	}
+	if (invalid.has_value()) {
+		bool currently_invalid = (goal.type & INVALID_GOAL) != 0;
+		if (*invalid != currently_invalid) {
+			if (*invalid)
+				goal.type |= INVALID_GOAL;
+			else
+				goal.type &= ~INVALID_GOAL;
+			changed = true;
+		}
+	}
+	if (no_music.has_value()) {
+		bool currently_no_music = (goal.flags & MGF_NO_MUSIC) != 0;
+		if (*no_music != currently_no_music) {
+			if (*no_music)
+				goal.flags |= MGF_NO_MUSIC;
+			else
+				goal.flags &= ~MGF_NO_MUSIC;
+			changed = true;
+		}
+	}
+
+	// Rename last — updates SEXP references
+	if (new_name && stricmp(goal.name.c_str(), new_name) != 0) {
+		update_sexp_references(goal.name.c_str(), new_name, OPF_GOAL_NAME);
+		goal.name = new_name;
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update goal %s", goal.name.c_str());
+
+	req->result_json = make_json_tool_result(build_goal_json(goal, idx, true));
+	req->success = true;
+}
+
+static void handle_delete_goal(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_goals, req)) return;
+
+	auto force = get_optional_bool(input, "force");
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	if (idx < 0) {
+		set_not_found_error(req, "Goal", name);
+		return;
+	}
+
+	// Check for SEXP references unless force is set
+	if (!force.has_value() || !*force) {
+		int node;
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Mission_goals[idx].name.c_str(), node);
+		if (ref.second != sexp_src::NONE) {
+			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Goal '%s' is referenced in %s. Use force=true to delete anyway "
+				"(references will be invalidated).", name, desc.c_str());
+			return;
+		}
+	}
+
+	// Invalidate SEXP references
+	SCP_string buf = SCP_string("<") + Mission_goals[idx].name + ">";
+	update_sexp_references(Mission_goals[idx].name.c_str(), buf.c_str(), OPF_GOAL_NAME);
+
+	// Free the SEXP formula
+	if (Mission_goals[idx].formula >= 0)
+		free_sexp2(Mission_goals[idx].formula);
+
+	Mission_goals.erase(Mission_goals.begin() + idx);
+
+	mark_modified("MCP: delete goal %s", name);
+
+	snprintf(req->result_message, sizeof(req->result_message), "Deleted goal: %s", name);
+	req->success = true;
+}
+
+static MoveSwapConfig make_goal_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "goal";
+	cfg.count = (int)Mission_goals.size();
+	cfg.validate_dialog = validate_dialog_for_goals;
+	cfg.get_name = [](int i) -> const char * {
+		return Mission_goals[i].name.c_str();
+	};
+	cfg.do_move = [](int from, int to) {
+		array_move_element(Mission_goals, from, to);
+	};
+	cfg.do_swap = [](int a, int b) {
+		std::swap(Mission_goals[a], Mission_goals[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_goal(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_goal_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_goals(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_goal_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -1343,6 +1724,13 @@ static const char *mission_tool_names[] = {
 	"delete_cmd_brief_stage",
 	"move_cmd_brief_stage",
 	"swap_cmd_brief_stages",
+	"list_goals",
+	"get_goal",
+	"create_goal",
+	"update_goal",
+	"delete_goal",
+	"move_goal",
+	"swap_goals",
 	nullptr
 };
 
@@ -1400,7 +1788,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Name of the existing message to update");
-		add_string_prop(props, "new_name", "New name for the message (updates SEXP references)");
+		add_string_prop(props, "new_name", "New name for the message");
 		add_string_prop(props, "message", "New message text");
 		add_string_prop(props, "persona",
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
@@ -1506,8 +1894,8 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "create_event",
-			"Create a new mission event with a default (when (true) (do-nothing)) formula. "
-			"Use the SEXP editor to modify the formula after creation.",
+			"Create a new mission event. Mission events cause actions to occur during a mission, "
+			"subject to their conditions.",
 			props, req);
 	}
 
@@ -1515,7 +1903,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Name of the existing event to update");
-		add_string_prop(props, "new_name", "New name for the event (updates SEXP references)");
+		add_string_prop(props, "new_name", "New name for the event");
 		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this event");
 		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
 			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
@@ -1705,6 +2093,126 @@ void mcp_register_mission_tools(json_t *tools)
 			"Indices are 0-based.",
 			props, req);
 	}
+
+	// -----------------------------------------------------------------------
+	// Goal tools
+	// -----------------------------------------------------------------------
+
+	// list_goals
+	register_tool(tools, "list_goals",
+		"List all mission goals. Returns each goal's name, index, type "
+		"(Primary/Secondary/Bonus), and SEXP root node.",
+		json_object());
+
+	// get_goal
+	register_tool_with_required_string(tools, "get_goal",
+		"Get full details of a mission goal by name, including type, message, "
+		"score, team, validity, no_music flag, and SEXP root node.",
+		"name", "Name of the goal to retrieve");
+
+	// create_goal
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Unique name for the goal");
+		add_string_enum_prop(props, "goal_type",
+			"Goal type (default: \"Primary\")",
+			goal_type_enum_values);
+		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this goal");
+		add_string_prop(props, "message", "Brief description of the goal objective");
+		add_integer_prop(props, "score", "Score awarded when goal is completed");
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment (default: \"Team 1\")",
+			team_enum_values);
+		add_bool_prop(props, "invalid",
+			"If true, the goal is marked as invalid (not evaluated during a mission). "
+			"Note that goals can be validated and invalidated during a mission.");
+		add_bool_prop(props, "no_music",
+			"If true, no event music plays when goal is achieved");
+		add_integer_prop(props, "index",
+			"Position to insert the goal (0 = first). If omitted, appends to the end.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "create_goal",
+			"Create a new mission goal. Mission goals are objectives for the player to "
+			"accomplish during a mission.",
+			props, req);
+	}
+
+	// update_goal
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the existing goal to update");
+		add_string_prop(props, "new_name", "New name for the goal");
+		add_string_enum_prop(props, "goal_type",
+			"Goal type",
+			goal_type_enum_values);
+		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this goal");
+		add_string_prop(props, "message",
+			"Brief description of the goal objective");
+		add_integer_prop(props, "score", "Score awarded when goal is completed");
+		add_string_enum_prop(props, "team",
+			"Multiplayer team assignment",
+			team_enum_values);
+		add_bool_prop(props, "invalid",
+			"If true, the goal is marked as invalid (not evaluated during a mission). "
+			"Note that goals can be validated and invalidated during a mission.");
+		add_bool_prop(props, "no_music",
+			"If true, no event music plays when goal is achieved");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_goal",
+			"Update properties of an existing mission goal. Only specified fields are "
+			"changed; omitted fields are left unchanged. Renaming automatically updates "
+			"all SEXP references to the goal.",
+			props, req);
+	}
+
+	// delete_goal
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the goal to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if the goal is referenced in SEXPs (references "
+			"will be invalidated). Default: false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "delete_goal",
+			"Delete a mission goal. Frees its SEXP formula. "
+			"SEXP references to the deleted goal are invalidated (wrapped in angle brackets).",
+			props, req);
+	}
+
+	// move_goal
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the goal");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the goal to");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_goal",
+			"Move a mission goal from one position to another. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_goals
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first goal");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second goal");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_goals",
+			"Swap two mission goals at the given positions. "
+			"Indices are 0-based.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1768,6 +2276,20 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_cmd_brief_stage(input_json, req);
 	} else if (strcmp(tool_name, "swap_cmd_brief_stages") == 0) {
 		handle_swap_cmd_brief_stages(input_json, req);
+	} else if (strcmp(tool_name, "list_goals") == 0) {
+		handle_list_goals(input_json, req);
+	} else if (strcmp(tool_name, "get_goal") == 0) {
+		handle_get_goal(input_json, req);
+	} else if (strcmp(tool_name, "create_goal") == 0) {
+		handle_create_goal(input_json, req);
+	} else if (strcmp(tool_name, "update_goal") == 0) {
+		handle_update_goal(input_json, req);
+	} else if (strcmp(tool_name, "delete_goal") == 0) {
+		handle_delete_goal(input_json, req);
+	} else if (strcmp(tool_name, "move_goal") == 0) {
+		handle_move_goal(input_json, req);
+	} else if (strcmp(tool_name, "swap_goals") == 0) {
+		handle_swap_goals(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
