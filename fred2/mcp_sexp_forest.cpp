@@ -46,8 +46,12 @@ void mcp_sexp_forest_mark_dirty(SCP_vector<int> roots)
 	if (g_sexp_forest_dirty.load())
 		return;  // full rebuild already pending; partial set is redundant
 	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
-	for (int r : roots)
+	for (int r : roots) {
+		// skip special root nodes
+		if (r < 0 || r == Locked_sexp_true || r == Locked_sexp_false)
+			continue;
 		g_dirty_roots.insert(r);
+	}
 	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 

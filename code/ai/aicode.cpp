@@ -9858,7 +9858,7 @@ int find_parent_moving_submodel(polymodel *pm, int dock_index)
 // Goober5000
 void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_orient, object *objp, polymodel *pm, int submodel, int dock_index)
 {
-	Assertion(global_dock_point != nullptr && global_dock_orient != nullptr && objp != nullptr && pm != nullptr, "arguments cannot be null!");
+	Assertion(global_dock_point != nullptr && global_dock_orient != nullptr && pm != nullptr, "arguments cannot be null!");
 	Assertion(dock_index >= 0 && dock_index < pm->n_docks, "for model %s, dock_index %d must be >= 0 and < %d!", pm->filename, dock_index, pm->n_docks);
 
 	vec3d fvec, uvec;
@@ -9869,6 +9869,7 @@ void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_
 		vec3d submodel_offset;
 		vec3d local_p0, local_p1;
 
+		Assertion(objp != nullptr, "When calculating relative to a submodel, objp cannot be null!");
 		auto shipp = &Ships[objp->instance];
 		auto pmi = model_get_instance(shipp->model_instance_num);
 		Assert(pmi->model_num == pm->id);
@@ -9898,12 +9899,17 @@ void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_
 		vm_vec_normalized_dir(&local_uvec, &pm->docking_bays[dock_index].pnt[1], &pm->docking_bays[dock_index].pnt[0]);
 		local_fvec = pm->docking_bays[dock_index].norm[0];
 
-		vm_vec_unrotate(global_dock_point, &local_point, &objp->orient);
-		vm_vec_unrotate(&uvec, &local_uvec, &objp->orient);
-		vm_vec_unrotate(&fvec, &local_fvec, &objp->orient);
+		if (objp == nullptr) {
+			*global_dock_point = local_point;
+			vm_vector_2_matrix_norm(global_dock_orient, &local_fvec, &local_uvec);
+		} else {
+			vm_vec_unrotate(global_dock_point, &local_point, &objp->orient);
+			vm_vec_unrotate(&uvec, &local_uvec, &objp->orient);
+			vm_vec_unrotate(&fvec, &local_fvec, &objp->orient);
 
-		vm_vec_add2(global_dock_point, &objp->pos);
-		vm_vector_2_matrix_norm(global_dock_orient, &fvec, &uvec);
+			vm_vec_add2(global_dock_point, &objp->pos);
+			vm_vector_2_matrix_norm(global_dock_orient, &fvec, &uvec);
+		}
 	}
 }
 
