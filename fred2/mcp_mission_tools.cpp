@@ -1912,7 +1912,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	if (!text)
 		return;
 
-	// Save/restore global Mp (following the run_sexp() pattern)
+	// Save/restore global parse state
 	char *old_Mp = Mp;
 	char old_Current_filename[MAX_PATH_LEN];
 	strcpy_s(old_Current_filename, Current_filename);
@@ -1921,23 +1921,42 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	Mp = buf.data();
 	strcpy_s(Current_filename, "text_to_sexp");
 
+	// Enable error collection so error_display() doesn't show modal dialogs
+	Parse_collect_errors = true;
+	Parse_errors.clear();
+
 	int n = get_sexp_main();
 
+	Parse_collect_errors = false;
 	Mp = old_Mp;
 	strcpy_s(Current_filename, old_Current_filename);
 
-	// Check for parse failure
-	if (n == -1) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Failed to parse SEXP text: expected opening parenthesis or syntax error");
-		return;
-	}
+	// Check for collected parse errors
+	if (!Parse_errors.empty()) {
+		json_t *result = json_object();
+		json_t *errors = json_array();
+		for (const auto &e : Parse_errors) {
+			json_t *entry = json_object();
+			json_object_set_new(entry, "level", json_string(e.level == 0 ? "warning" : "error"));
+			json_object_set_new(entry, "line", json_integer(e.line));
+			json_object_set_new(entry, "message", json_string(e.message.c_str()));
+			json_array_append_new(errors, entry);
+		}
+		json_object_set_new(result, "parse_errors", errors);
+		int error_count = (int)Parse_errors.size();
+		Parse_errors.clear();
 
-	if (n == Locked_sexp_false) {
+		req->result_json = make_json_tool_result(result);
+		json_object_set_new(req->result_json, "isError", json_true());
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
-			"Failed to parse SEXP text: parse error");
+			"SEXP text had %d parse error(s); see parse_errors in result",
+			error_count);
+		return;
+	} else if (n < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Could not parse SEXP; get_sexp_main() returned %d", n);
 		return;
 	}
 
