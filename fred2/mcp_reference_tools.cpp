@@ -411,6 +411,19 @@ void mcp_register_reference_tools(json_t *tools)
 			props, req);
 	}
 
+	// sexp_to_text
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Root node index of the SEXP tree to serialize");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "sexp_to_text",
+			"Convert a SEXP node tree to its text representation. "
+			"Takes a root node index and returns the S-expression as a formatted string, "
+			"suitable for copy/paste or inspection. Read-only; does not modify any nodes.",
+			props, req);
+	}
+
 	// get_ship_class_model_details
 	register_tool_with_required_string(tools, "get_ship_class_model_details",
 		"Get 3D model details for a ship class, including subsystems, bounding box "
@@ -2411,6 +2424,34 @@ static json_t *handle_get_root_paths()
 }
 
 // ---------------------------------------------------------------------------
+// SEXP text serialization
+// ---------------------------------------------------------------------------
+
+static json_t *handle_sexp_to_text(json_t *arguments)
+{
+	json_t *err = nullptr;
+	auto node = get_required_integer(arguments, "node", &err);
+	if (!node)
+		return err;
+
+	int n = *node;
+
+	if (n < 0 || n >= Num_sexp_nodes)
+		return make_tool_result(true, "Node index %d is out of range (valid: 0 to %d)", n, Num_sexp_nodes - 1);
+
+	if (Sexp_nodes[n].type == SEXP_NOT_USED)
+		return make_tool_result(true, "Node %d is not in use", n);
+
+	SCP_string text;
+	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "text", json_string(text.c_str()));
+	return make_json_tool_result(result);
+}
+
+// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -2495,6 +2536,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_return_type(arguments);
 	if (strcmp(tool_name, "list_sexp_argument_values") == 0)
 		return handle_list_sexp_argument_values(arguments);
+	if (strcmp(tool_name, "sexp_to_text") == 0)
+		return handle_sexp_to_text(arguments);
 	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
 		return handle_get_ship_class_model_details(arguments);
 	if (strcmp(tool_name, "subsystem_names_compare") == 0)
