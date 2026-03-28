@@ -15,6 +15,7 @@
 
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
+#include "missionui/missioncmdbrief.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
@@ -934,15 +935,25 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 // Generic move/swap handlers
 // ---------------------------------------------------------------------------
 
+#define CFG_GET_NAME(cfg, index) (cfg).get_name ? (cfg).get_name(index) : (cfg).get_name_fallback(index).c_str()
+
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
-struct MoveSwapConfig {
+struct MoveSwapConfig
+{
 	const char *entity_name;
 	int count;
 	std::function<bool(SCP_string&)> validate_dialog;
 	std::function<const char *(int)> get_name;
 	std::function<void(int, int)> do_move;
 	std::function<void(int, int)> do_swap;
+
+	SCP_string get_name_fallback(int index) const
+	{
+		SCP_string name;
+		sprintf(name, "%s %d", entity_name, index);
+		return name;
+	}
 };
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
@@ -956,7 +967,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(cfg.get_name(*from_index)));
+		json_object_set_new(data, "name", json_string(CFG_GET_NAME(cfg, *from_index)));
 		json_object_set_new(data, "index", json_integer(*from_index));
 		req->result_json = make_json_tool_result(data);
 		req->success = true;
@@ -965,10 +976,10 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	cfg.do_move(*from_index, *to_index);
 
-	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(*to_index), *from_index, *to_index);
+	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, CFG_GET_NAME(cfg, *to_index), *from_index, *to_index);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(cfg.get_name(*to_index)));
+	json_object_set_new(data, "name", json_string(CFG_GET_NAME(cfg, *to_index)));
 	json_object_set_new(data, "index", json_integer(*to_index));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
@@ -986,15 +997,15 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 	if (index_a != index_b) {
 		cfg.do_swap(*index_a, *index_b);
 
-		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, cfg.get_name(*index_a), cfg.get_name(*index_b));
+		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, CFG_GET_NAME(cfg, *index_a), CFG_GET_NAME(cfg, *index_b));
 	}
 
 	json_t *data = json_object();
 	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(cfg.get_name(*index_a)));
+	json_object_set_new(a_obj, "name", json_string(CFG_GET_NAME(cfg, *index_a)));
 	json_object_set_new(a_obj, "index", json_integer(*index_a));
 	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(cfg.get_name(*index_b)));
+	json_object_set_new(b_obj, "name", json_string(CFG_GET_NAME(cfg, *index_b)));
 	json_object_set_new(b_obj, "index", json_integer(*index_b));
 	json_object_set_new(data, "a", a_obj);
 	json_object_set_new(data, "b", b_obj);
@@ -1069,6 +1080,243 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Command briefing tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static bool validate_dialog_for_cmd_brief(SCP_string &error_msg)
+{
+	return validate_single_dialog("command briefing stages", "command briefing", error_msg);
+}
+
+// Resolve optional "team" parameter to a cmd_brief pointer.
+// Returns nullptr and sets error on failure.
+static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
+{
+	auto team_str = get_optional_string(input, "team", true);
+	int team_index = 0;  // default to Team 1
+
+	if (team_str) {
+		if (!stricmp(team_str, "none")) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Command briefings require a team assignment. Use \"Team 1\" or \"Team 2\".");
+			return nullptr;
+		}
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return nullptr;
+		team_index = team_index_from_name(team_str);
+		if (team_index < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Invalid team: %s", team_str);
+			return nullptr;
+		}
+	}
+
+	return &Cmd_briefs[team_index];
+}
+
+static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
+	set_optional_string(obj, "ani_filename", stage.ani_filename, true);
+	set_optional_string(obj, "wave_filename", stage.wave_filename, true);
+	return obj;
+}
+
+static void handle_list_cmd_brief_stages(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < cb->num_stages; i++)
+		json_array_append_new(arr, build_cmd_brief_stage_json(cb->stage[i], i));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_cmd_brief_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+
+	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(cb->stage[*index], *index));
+	req->success = true;
+}
+
+static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	if (cb->num_stages >= CMD_BRIEF_STAGES_MAX) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Cannot add more than %d command briefing stages", CMD_BRIEF_STAGES_MAX);
+		return;
+	}
+
+	auto text = get_required_string(input, "text", req, false);
+	if (!text) return;
+
+	auto ani = get_optional_string(input, "ani_filename", false);
+	auto wave = get_optional_string(input, "wave_filename", false);
+	auto insert_index = get_optional_integer(input, "index");
+
+	// Validate filename lengths
+	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
+	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "wave_filename", req)) return;
+
+	// Resolve insert position
+	int target;
+	if (!insert_index.has_value()) {
+		target = cb->num_stages;
+	} else {
+		// Upper bound is num_stages (append position)
+		if (!check_int_range(*insert_index, 0, cb->num_stages, "index", req))
+			return;
+		target = *insert_index;
+	}
+
+	// Insert slot
+	if (!array_insert_slot(cb->stage, cb->num_stages, CMD_BRIEF_STAGES_MAX, target)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Cannot add more than %d command briefing stages", CMD_BRIEF_STAGES_MAX);
+		return;
+	}
+
+	// Fill new stage
+	cmd_brief_stage &s = cb->stage[target];
+	s.text = text;
+	strcpy_s(s.ani_filename, (ani && ani[0]) ? ani : "<default>");
+	strcpy_s(s.wave_filename, (wave && wave[0]) ? wave : "none");
+	s.wave = -1;
+
+	mark_modified("MCP: create cmd brief stage %d", target);
+
+	json_t *data = json_object();
+	json_object_set_new(data, "index", json_integer(target));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+
+	auto new_text = get_optional_string(input, "text", false);
+	auto new_ani  = get_optional_string(input, "ani_filename", false);
+	auto new_wave = get_optional_string(input, "wave_filename", false);
+
+	// Validate filename lengths
+	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
+	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "wave_filename", req)) return;
+
+	cmd_brief_stage &s = cb->stage[*index];
+	bool changed = false;
+
+	if (new_text) {
+		s.text = new_text;
+		changed = true;
+	}
+	if (new_ani) {
+		strcpy_s(s.ani_filename, new_ani);
+		changed = true;
+	}
+	if (new_wave) {
+		strcpy_s(s.wave_filename, new_wave);
+		changed = true;
+	}
+
+	if (changed) {
+		mark_modified("MCP: update cmd brief stage %d", *index);
+	}
+
+	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(s, *index));
+	req->success = true;
+}
+
+static void handle_delete_cmd_brief_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+
+	array_remove_slot(cb->stage, cb->num_stages, *index);
+
+	mark_modified("MCP: delete cmd brief stage %d", *index);
+
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Deleted command briefing stage %d", *index);
+	req->success = true;
+}
+
+static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "cmd brief stage";
+	cfg.count = cb->num_stages;
+	cfg.validate_dialog = validate_dialog_for_cmd_brief;
+	cfg.get_name = nullptr;	// stages don't have names; use the fallback function
+	cfg.do_move = [cb](int from, int to) {
+		array_move_element(cb->stage, from, to);
+	};
+	cfg.do_swap = [cb](int a, int b) {
+		std::swap(cb->stage[a], cb->stage[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_cmd_brief_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	auto cfg = make_cmd_brief_move_swap_config(cb);
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, req);
+	if (!cb) return;
+
+	auto cfg = make_cmd_brief_move_swap_config(cb);
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -1087,6 +1335,13 @@ static const char *mission_tool_names[] = {
 	"delete_event",
 	"move_event",
 	"swap_events",
+	"list_cmd_brief_stages",
+	"get_cmd_brief_stage",
+	"create_cmd_brief_stage",
+	"update_cmd_brief_stage",
+	"delete_cmd_brief_stage",
+	"move_cmd_brief_stage",
+	"swap_cmd_brief_stages",
 	nullptr
 };
 
@@ -1337,6 +1592,118 @@ void mcp_register_mission_tools(json_t *tools)
 			"Indices are 0-based. Updates event annotation paths.",
 			props, req);
 	}
+
+	// -----------------------------------------------------------------------
+	// Command briefing stage tools
+	// -----------------------------------------------------------------------
+
+	static const char *cmd_brief_team_desc =
+		"Which team's command briefing to operate on (\"Team 1\" or \"Team 2\"). "
+		"Defaults to \"Team 1\". \"none\" is not valid for command briefings.";
+
+	// list_cmd_brief_stages
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		register_tool(tools, "list_cmd_brief_stages",
+			"List all command briefing stages. Returns each stage's index, text, "
+			"animation filename, and wave filename.",
+			props);
+	}
+
+	// get_cmd_brief_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index", "0-based index of the stage to retrieve");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "get_cmd_brief_stage",
+			"Get full details of a command briefing stage by index.",
+			props, req);
+	}
+
+	// create_cmd_brief_stage
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "text", "The text displayed during this stage");
+		add_string_prop(props, "ani_filename",
+			"Animation filename (ani/eff/png). Defaults to \"<default>\".");
+		add_string_prop(props, "wave_filename",
+			"Voice audio filename (wav/ogg). Defaults to \"none\".");
+		add_integer_prop(props, "index",
+			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("text"));
+		register_tool(tools, "create_cmd_brief_stage",
+			"Create a new command briefing stage. Command briefings are narrated "
+			"slideshows shown before the main briefing, with text, animation, and "
+			"optional voice per stage. Maximum 10 stages.",
+			props, req);
+	}
+
+	// update_cmd_brief_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index", "0-based index of the stage to update");
+		add_string_prop(props, "text", "New text for this stage");
+		add_string_prop(props, "ani_filename", "New animation filename (ani/eff/png)");
+		add_string_prop(props, "wave_filename", "New voice audio filename (wav/ogg)");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "update_cmd_brief_stage",
+			"Update properties of an existing command briefing stage. Only specified "
+			"fields are changed; omitted fields are left unchanged.",
+			props, req);
+	}
+
+	// delete_cmd_brief_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index", "0-based index of the stage to delete");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "delete_cmd_brief_stage",
+			"Delete a command briefing stage. Remaining stages are shifted down.",
+			props, req);
+	}
+
+	// move_cmd_brief_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the stage");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the stage to");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_cmd_brief_stage",
+			"Move a command briefing stage from one position to another. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_cmd_brief_stages
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first stage");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second stage");
+		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_cmd_brief_stages",
+			"Swap two command briefing stages at the given positions. "
+			"Indices are 0-based.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1386,6 +1753,20 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_event(input_json, req);
 	} else if (strcmp(tool_name, "swap_events") == 0) {
 		handle_swap_events(input_json, req);
+	} else if (strcmp(tool_name, "list_cmd_brief_stages") == 0) {
+		handle_list_cmd_brief_stages(input_json, req);
+	} else if (strcmp(tool_name, "get_cmd_brief_stage") == 0) {
+		handle_get_cmd_brief_stage(input_json, req);
+	} else if (strcmp(tool_name, "create_cmd_brief_stage") == 0) {
+		handle_create_cmd_brief_stage(input_json, req);
+	} else if (strcmp(tool_name, "update_cmd_brief_stage") == 0) {
+		handle_update_cmd_brief_stage(input_json, req);
+	} else if (strcmp(tool_name, "delete_cmd_brief_stage") == 0) {
+		handle_delete_cmd_brief_stage(input_json, req);
+	} else if (strcmp(tool_name, "move_cmd_brief_stage") == 0) {
+		handle_move_cmd_brief_stage(input_json, req);
+	} else if (strcmp(tool_name, "swap_cmd_brief_stages") == 0) {
+		handle_swap_cmd_brief_stages(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),

@@ -5,6 +5,7 @@
 // reused across different mission entity types (messages, events, etc.).
 
 #include <algorithm>
+#include <utility>
 #include <vector>
 
 // ---------------------------------------------------------------------------
@@ -19,7 +20,7 @@ bool array_insert_slot(T *arr, int &count, int max_size, int index)
 	if (count >= max_size)
 		return false;
 	for (int i = count; i > index; i--)
-		arr[i] = arr[i - 1];
+		arr[i] = std::move(arr[i - 1]);
 	count++;
 	return true;
 }
@@ -30,7 +31,7 @@ template <typename T>
 void array_remove_slot(T *arr, int &count, int index)
 {
 	for (int i = index; i < count - 1; i++)
-		arr[i] = arr[i + 1];
+		arr[i] = std::move(arr[i + 1]);
 	count--;
 }
 
@@ -40,15 +41,15 @@ void array_move_element(T *arr, int from, int to)
 {
 	if (from == to)
 		return;
-	T temp = arr[from];
+	T temp = std::move(arr[from]);
 	if (from < to) {
 		for (int i = from; i < to; i++)
-			arr[i] = arr[i + 1];
+			arr[i] = std::move(arr[i + 1]);
 	} else {
 		for (int i = from; i > to; i--)
-			arr[i] = arr[i - 1];
+			arr[i] = std::move(arr[i - 1]);
 	}
-	arr[to] = temp;
+	arr[to] = std::move(temp);
 }
 
 // ---------------------------------------------------------------------------
@@ -63,7 +64,7 @@ void array_insert_slot(std::vector<T> &vec, int &count, int index)
 	if (count >= (int)vec.size())
 		vec.resize(count + 1);
 	for (int i = count; i > index; i--)
-		vec[i] = vec[i - 1];
+		vec[i] = std::move(vec[i - 1]);
 	count++;
 }
 
@@ -73,7 +74,7 @@ template <typename T>
 void array_remove_slot(std::vector<T> &vec, int &count, int index)
 {
 	for (int i = index; i < count - 1; i++)
-		vec[i] = vec[i + 1];
+		vec[i] = std::move(vec[i + 1]);
 	count--;
 }
 
@@ -83,13 +84,13 @@ void array_move_element(std::vector<T> &vec, int from, int to)
 {
 	if (from == to)
 		return;
-	T temp = vec[from];
+	T temp = std::move(vec[from]);
 	if (from < to) {
 		for (int i = from; i < to; i++)
-			vec[i] = vec[i + 1];
+			vec[i] = std::move(vec[i + 1]);
 	} else {
 		for (int i = from; i > to; i--)
-			vec[i] = vec[i - 1];
+			vec[i] = std::move(vec[i - 1]);
 	}
-	vec[to] = temp;
+	vec[to] = std::move(temp);
 }

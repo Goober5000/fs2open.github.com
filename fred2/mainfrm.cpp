@@ -36,6 +36,7 @@
 #include "eventeditor.h"
 #include "missiongoalsdlg.h"
 #include "missioncutscenesdlg.h"
+#include "cmdbrief.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -106,20 +107,21 @@ CWnd* McpEditorInfo::getCWndPtr() const
 
 const McpEditorInfo g_editor_info[] =
 {
-	{ &Ship_editor_dialog,     "ship",       "Ship Editor",       true  },
-	{ &Wing_editor_dialog,     "wing",       "Wing Editor",       true  },
-	{ &Prop_editor_dialog,     "prop",       "Props Editor",      true  },
-	{ &Waypoint_editor_dialog, "waypoint",   "Waypoint Editor",   true  },
-	{ &Jumpnode_editor_dialog, "jump node",  "Jump Node Editor",  true  },
-	{ &Music_player_dialog,    nullptr,      "Music Player",      true  },
+	{ &Ship_editor_dialog,     "ship",      "Ship Editor",       true  },
+	{ &Wing_editor_dialog,     "wing",      "Wing Editor",       true  },
+	{ &Prop_editor_dialog,     "prop",      "Props Editor",      true  },
+	{ &Waypoint_editor_dialog, "waypoint",  "Waypoint Editor",   true  },
+	{ &Jumpnode_editor_dialog, "jump node", "Jump Node Editor",  true  },
+	{ &Music_player_dialog,    nullptr,     "Music Player",      true  },
 
-	{ (CWnd**)&Briefing_dialog,         "briefing",   "Briefing Editor",   false },
-	{ (CWnd**)&Debriefing_dialog,       "debriefing", "Debriefing Editor", false },
-	{ (CWnd**)&Bg_bitmap_dialog,        "background", "Background Editor", false },
-	{ (CWnd**)&Event_editor_dlg,        "event",      "Event Editor",      false },
-	{ (CWnd**)&Goal_editor_dlg,         "goal",       "Goals Editor",      false },
-	{ (CWnd**)&Message_editor_dlg,      "message",    "Message Editor",    false },
-	{ (CWnd**)&Cutscene_editor_dlg,     "cutscene",   "Cutscene Editor",   false },
+	{ (CWnd**)&Briefing_dialog,     "briefing",         "Briefing Editor",         false },
+	{ (CWnd**)&Debriefing_dialog,   "debriefing",       "Debriefing Editor",       false },
+	{ (CWnd**)&Bg_bitmap_dialog,    "background",       "Background Editor",       false },
+	{ (CWnd**)&Event_editor_dlg,    "event",            "Event Editor",            false },
+	{ (CWnd**)&Goal_editor_dlg,     "goal",             "Goals Editor",            false },
+	{ (CWnd**)&Message_editor_dlg,  "message",          "Message Editor",          false },
+	{ (CWnd**)&Cutscene_editor_dlg, "cutscene",         "Cutscene Editor",         false },
+	{ (CWnd**)&Cmd_brief_dlg,       "command briefing", "Command Briefing Editor", false },
 };
 const size_t g_editor_info_count = sizeof(g_editor_info) / sizeof(McpEditorInfo);
 
