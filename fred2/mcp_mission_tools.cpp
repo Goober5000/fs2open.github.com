@@ -105,6 +105,17 @@ static int team_index_from_name(const char *name)
 	return -1;	// invalid or default
 }
 
+static bool reject_team_none(const char *team_str, const char *entity_name, McpToolRequest *req)
+{
+	if (!stricmp(team_str, "none")) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"A team of \"none\" is not valid for a %s. Use \"Team 1\" or \"Team 2\".", entity_name);
+		return true;
+	}
+	return false;
+}
+
 // ---------------------------------------------------------------------------
 // Flag helpers
 // ---------------------------------------------------------------------------
@@ -1102,21 +1113,10 @@ static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
-		if (!stricmp(team_str, "none")) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Command briefings require a team assignment. Use \"Team 1\" or \"Team 2\".");
-			return nullptr;
-		}
 		if (!check_string_enum(team_str, team_enum_values, "team", req))
 			return nullptr;
+		if (reject_team_none(team_str, "command briefing", req)) return nullptr;
 		team_index = team_index_from_name(team_str);
-		if (team_index < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Invalid team for command brief: %s", team_str);
-			return nullptr;
-		}
 	}
 
 	return &Cmd_briefs[team_index];
@@ -1436,12 +1436,6 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 		if (!check_string_enum(team_str, team_enum_values, "team", req))
 			return;
 		team = team_index_from_name(team_str);
-		if (team < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Invalid team for goal: %s", team_str);
-			return;
-		}
 	}
 
 	// Validate insert index
@@ -1551,12 +1545,6 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 		if (!check_string_enum(team_str, team_enum_values, "team", req))
 			return;
 		new_team = team_index_from_name(team_str);
-		if (new_team < 0) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Invalid team for goal: %s", team_str);
-			return;
-		}
 	}
 
 	bool changed = false;
