@@ -14,6 +14,9 @@
 /////////////////////////////////////////////////////////////////////////////
 // cmd_brief_dlg dialog
 
+class cmd_brief_dlg;
+extern cmd_brief_dlg *Cmd_brief_dlg;
+
 class cmd_brief_dlg : public CDialog
 {
 // Construction
