@@ -590,7 +590,7 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(evt_index));
-	json_object_set_new(obj, "root_node", json_integer(evt.formula));
+	json_object_set_new(obj, "formula", json_integer(evt.formula));
 
 	bool is_chained = (evt.chain_delay >= 0);
 	json_object_set_new(obj, "is_chained", json_boolean(is_chained));
@@ -665,8 +665,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Optional parameters
-	auto root_node     = get_optional_integer(input, "root_node");
-	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto formula       = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
@@ -725,20 +725,17 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		target_index = *insert_index;
 	}
 
-	int formula_node;
-	if (root_node.has_value()) {
-		formula_node = *root_node;
-	} else {
+	if (!formula.has_value()) {
 		// Build default SEXP formula: (when (true) (do-nothing))
 		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
 		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);
-		formula_node = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
+		formula = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
 	}
 
 	// Construct the event
 	mission_event evt;
 	evt.name = name;
-	evt.formula = formula_node;
+	evt.formula = *formula;
 	evt.repeat_count  = repeat_count.value_or(1);
 	evt.trigger_count = trigger_count.value_or(1);
 	evt.interval      = interval.value_or(1);
@@ -756,7 +753,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	// Insert
 	update_annotation_paths_for_insert(target_index);
 	Mission_events.insert(Mission_events.begin() + target_index, evt);
-	mcp_sexp_forest_mark_dirty({formula_node});
+	mcp_sexp_forest_mark_dirty({ *formula });
 
 	mark_modified("MCP: create event %s", name);
 
@@ -803,8 +800,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Extract optional fields
-	auto root_node     = get_optional_integer(input, "root_node");
-	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto formula       = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
@@ -853,12 +850,12 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	bool changed = false;
 
-	if (root_node.has_value() && evt.formula != *root_node) {
+	if (formula.has_value() && evt.formula != *formula) {
 		if (evt.formula >= 0)
 			free_sexp2(evt.formula);
-		evt.formula = *root_node;
+		evt.formula = *formula;
 		changed = true;
-		mcp_sexp_forest_mark_dirty({ *root_node });
+		mcp_sexp_forest_mark_dirty({ *formula });
 	}
 	if (repeat_count.has_value() && evt.repeat_count != *repeat_count) {
 		evt.repeat_count = *repeat_count;
@@ -1358,7 +1355,7 @@ static json_t *build_goal_json(const mission_goal &goal, int index, bool include
 	json_object_set_new(obj, "name", json_string(goal.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(index));
 	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
-	json_object_set_new(obj, "root_node", json_integer(goal.formula));
+	json_object_set_new(obj, "formula", json_integer(goal.formula));
 
 	if (!include_details)
 		return obj;
@@ -1420,8 +1417,8 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 
 	// Optional parameters
 	auto type_str   = get_optional_string(input, "goal_type", true);
-	auto root_node  = get_optional_integer(input, "root_node");
-	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto formula    = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1454,19 +1451,16 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 		target_index = *insert_index;
 	}
 
-	int formula_node;
-	if (root_node.has_value()) {
-		formula_node = *root_node;
-	} else {
+	if (!formula.has_value()) {
 		// Build default SEXP formula: (true) — matching FRED2 editor pattern
-		formula_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+		formula = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
 	}
 
 	// Construct the goal
 	mission_goal goal;
 	goal.name = name;
 	goal.type = goal_type;
-	goal.formula = formula_node;
+	goal.formula = *formula;
 	goal.score = score.value_or(0);
 	goal.team = team;
 	goal.flags = 0;
@@ -1482,7 +1476,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 
 	// Insert
 	Mission_goals.insert(Mission_goals.begin() + target_index, goal);
-	mcp_sexp_forest_mark_dirty({formula_node});
+	mcp_sexp_forest_mark_dirty({ *formula });
 
 	mark_modified("MCP: create goal %s", name);
 
@@ -1529,8 +1523,8 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto type_str   = get_optional_string(input, "goal_type", true);
-	auto root_node  = get_optional_integer(input, "root_node");
-	if (root_node.has_value() && !check_int_range(*root_node, 0, Num_sexp_nodes - 1, "root_node", req)) return;
+	auto formula    = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1563,12 +1557,12 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 			changed = true;
 		}
 	}
-	if (root_node.has_value() && goal.formula != *root_node) {
+	if (formula.has_value() && goal.formula != *formula) {
 		if (goal.formula >= 0)
 			free_sexp2(goal.formula);
-		goal.formula = *root_node;
+		goal.formula = *formula;
 		changed = true;
-		mcp_sexp_forest_mark_dirty({ *root_node });
+		mcp_sexp_forest_mark_dirty({ *formula });
 	}
 	if (message && strcmp(goal.message.c_str(), message) != 0) {
 		goal.message = message;
@@ -1784,7 +1778,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	Fiction_viewer_stages.insert(Fiction_viewer_stages.begin() + target, stage);
 
 	if (stage.formula != Locked_sexp_true)
-		mcp_sexp_forest_mark_dirty({stage.formula});
+		mcp_sexp_forest_mark_dirty({ stage.formula });
 
 	mark_modified("MCP: create fiction viewer stage %d", target);
 
@@ -1849,7 +1843,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 			free_sexp2(s.formula);
 		s.formula = *new_formula;
 		changed = true;
-		mcp_sexp_forest_mark_dirty({*new_formula});
+		mcp_sexp_forest_mark_dirty({ *new_formula });
 	}
 
 	if (changed)
@@ -2076,7 +2070,7 @@ void mcp_register_mission_tools(json_t *tools)
 
 	// list_events
 	register_tool(tools, "list_events",
-		"List all mission events. Returns each event's name and root node, "
+		"List all mission events. Returns each event's name, index, SEXP formula root node, "
 		"and whether it is chained.",
 		json_object());
 
@@ -2090,7 +2084,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Unique name for the event");
-		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this event");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
 		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
 			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
 		add_integer_prop(props, "repeat_count",
@@ -2125,7 +2119,7 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Name of the existing event to update");
 		add_string_prop(props, "new_name", "New name for the event");
-		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this event");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
 		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
 			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
 		add_integer_prop(props, "repeat_count",
@@ -2322,13 +2316,13 @@ void mcp_register_mission_tools(json_t *tools)
 	// list_goals
 	register_tool(tools, "list_goals",
 		"List all mission goals. Returns each goal's name, index, type "
-		"(Primary/Secondary/Bonus), and SEXP root node.",
+		"(Primary/Secondary/Bonus), and SEXP formula root node.",
 		json_object());
 
 	// get_goal
 	register_tool_with_required_string(tools, "get_goal",
 		"Get full details of a mission goal by name, including type, message, "
-		"score, team, validity, no_music flag, and SEXP root node.",
+		"score, team, validity, no_music flag, and SEXP formula root node.",
 		"name", "Name of the goal to retrieve");
 
 	// create_goal
@@ -2338,7 +2332,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_enum_prop(props, "goal_type",
 			"Goal type (default: \"Primary\")",
 			goal_type_enum_values);
-		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this goal");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
 		add_string_prop(props, "message", "Brief description of the goal objective");
 		add_integer_prop(props, "score", "Score awarded when goal is completed");
 		add_string_enum_prop(props, "team",
@@ -2367,7 +2361,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_enum_prop(props, "goal_type",
 			"Goal type",
 			goal_type_enum_values);
-		add_integer_prop(props, "root_node", "Root node of the SEXP formula used for this goal");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
 		add_string_prop(props, "message",
 			"Brief description of the goal objective");
 		add_integer_prop(props, "score", "Score awarded when goal is completed");
@@ -2442,7 +2436,7 @@ void mcp_register_mission_tools(json_t *tools)
 	// list_fiction_viewer_stages
 	register_tool(tools, "list_fiction_viewer_stages",
 		"List all fiction viewer stages. Returns each stage's index, story filename, "
-		"font, voice, UI name, backgrounds, and SEXP formula node.",
+		"font, voice, UI name, backgrounds, and SEXP formula root node.",
 		json_object());
 
 	// get_fiction_viewer_stage
@@ -2473,9 +2467,8 @@ void mcp_register_mission_tools(json_t *tools)
 			"Background image for 640x480 resolution.");
 		add_string_prop(props, "background_1024",
 			"Background image for 1024x768 resolution.");
-		add_integer_prop(props, "formula",
-			"SEXP node index for the stage's activation formula. "
-			"Defaults to always-true (Locked_sexp_true).");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
+			"Defaults to true.");
 		add_integer_prop(props, "index",
 			"Position to insert the stage (0 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
@@ -2506,8 +2499,7 @@ void mcp_register_mission_tools(json_t *tools)
 			"New background image for 640x480 resolution. Empty string clears.");
 		add_string_prop(props, "background_1024",
 			"New background image for 1024x768 resolution. Empty string clears.");
-		add_integer_prop(props, "formula",
-			"New SEXP node index. Frees the old formula if replaced.");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "update_fiction_viewer_stage",
