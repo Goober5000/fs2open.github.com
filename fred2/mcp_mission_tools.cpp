@@ -51,6 +51,21 @@ static bool validate_dialog_for_messages(SCP_string &error_msg)
 		&& validate_single_dialog("messages", "event", error_msg);
 }
 
+static bool validate_dialog_for_events(SCP_string &error_msg)
+{
+	return validate_single_dialog("events", "event", error_msg);
+}
+
+static bool validate_dialog_for_cmd_brief(SCP_string &error_msg)
+{
+	return validate_single_dialog("command briefing stages", "command briefing", error_msg);
+}
+
+static bool validate_dialog_for_goals(SCP_string &error_msg)
+{
+	return validate_single_dialog("goals", "goal", error_msg);
+}
+
 // ---------------------------------------------------------------------------
 // Persona helpers
 // ---------------------------------------------------------------------------
@@ -553,11 +568,6 @@ static void update_annotation_paths_for_delete(int index)
 // Event tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
 
-static bool validate_dialog_for_events(SCP_string &error_msg)
-{
-	return validate_single_dialog("events", "event", error_msg);
-}
-
 static json_t *build_event_json(const mission_event &evt, int evt_index, bool include_details = false)
 {
 	json_t *obj = json_object();
@@ -998,7 +1008,7 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 	if (index_a != index_b) {
 		cfg.do_swap(*index_a, *index_b);
 
-		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, CFG_GET_NAME(cfg, *index_a), CFG_GET_NAME(cfg, *index_b));
+		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, CFG_GET_NAME(cfg, *index_b), CFG_GET_NAME(cfg, *index_a));
 	}
 
 	json_t *data = json_object();
@@ -1083,11 +1093,6 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 // ---------------------------------------------------------------------------
 // Command briefing tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
-
-static bool validate_dialog_for_cmd_brief(SCP_string &error_msg)
-{
-	return validate_single_dialog("command briefing stages", "command briefing", error_msg);
-}
 
 // Resolve optional "team" parameter to a cmd_brief pointer.
 // Returns nullptr and sets error on failure.
@@ -1238,7 +1243,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	cmd_brief_stage &s = cb->stage[*index];
 	bool changed = false;
 
-	if (new_text) {
+	if (new_text && strcmp(s.text.c_str(), new_text) != 0) {
 		s.text = new_text;
 		changed = true;
 	}
@@ -1320,11 +1325,6 @@ static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 // ---------------------------------------------------------------------------
 // Goal tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
-
-static bool validate_dialog_for_goals(SCP_string &error_msg)
-{
-	return validate_single_dialog("goals", "goal", error_msg);
-}
 
 static const SCP_vector<const char *> goal_type_enum_values = { "Primary", "Secondary", "Bonus" };
 
@@ -1576,7 +1576,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 		changed = true;
 		mcp_sexp_forest_mark_dirty({ *root_node });
 	}
-	if (message) {
+	if (message && strcmp(goal.message.c_str(), message) != 0) {
 		goal.message = message;
 		changed = true;
 	}
