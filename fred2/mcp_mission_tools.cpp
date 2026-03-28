@@ -17,6 +17,7 @@
 #include "mission/missiongoals.h"
 #include "missionui/missioncmdbrief.h"
 #include "missionui/fictionviewer.h"
+#include "parse/parselo.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
@@ -1902,6 +1903,75 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 }
 
 // ---------------------------------------------------------------------------
+// SEXP text parsing
+// ---------------------------------------------------------------------------
+
+static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
+{
+	const char *text = get_required_string(input, "text", req, true);
+	if (!text)
+		return;
+
+	// Save/restore global Mp (following the run_sexp() pattern)
+	char *old_Mp = Mp;
+	char old_Current_filename[MAX_PATH_LEN];
+	strcpy_s(old_Current_filename, Current_filename);
+
+	SCP_string buf(text);
+	Mp = buf.data();
+	strcpy_s(Current_filename, "text_to_sexp");
+
+	int n = get_sexp_main();
+
+	Mp = old_Mp;
+	strcpy_s(Current_filename, old_Current_filename);
+
+	// Check for parse failure
+	if (n == -1) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to parse SEXP text: expected opening parenthesis or syntax error");
+		return;
+	}
+
+	if (n == Locked_sexp_false) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to parse SEXP text: parse error");
+		return;
+	}
+
+	// Run syntax check
+	int bad_node = -1;
+	int syntax_result = check_sexp_syntax(n, OPR_AMBIGUOUS, 1, &bad_node);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+
+	if (syntax_result != SEXP_CHECK_NO_ERROR) {
+		json_t *warnings = json_object();
+		json_object_set_new(warnings, "error_code", json_integer(syntax_result));
+		json_object_set_new(warnings, "error_message", json_string(sexp_error_message(syntax_result)));
+		if (bad_node >= 0) {
+			json_object_set_new(warnings, "bad_node", json_integer(bad_node));
+			json_object_set_new(warnings, "bad_node_text",
+				json_string(Sexp_nodes[bad_node].text));
+		}
+		json_object_set_new(result, "syntax_error", warnings);
+	}
+
+	// Round-trip the text for verification
+	SCP_string round_tripped;
+	convert_sexp_to_string(round_tripped, n, SEXP_SAVE_MODE);
+	json_object_set_new(result, "parsed_text", json_string(round_tripped.c_str()));
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+
+	mcp_sexp_forest_mark_dirty({ n });
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -1941,6 +2011,7 @@ static const char *mission_tool_names[] = {
 	"delete_fiction_viewer_stage",
 	"move_fiction_viewer_stage",
 	"swap_fiction_viewer_stages",
+	"text_to_sexp",
 	nullptr
 };
 
@@ -2547,6 +2618,21 @@ void mcp_register_mission_tools(json_t *tools)
 			"Indices are 0-based.",
 			props, req);
 	}
+
+	// text_to_sexp
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "text",
+			"SEXP text to parse, e.g. \"( when ( true ) ( do-nothing ) )\"");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("text"));
+		register_tool(tools, "text_to_sexp",
+			"Parse SEXP text into a node tree. Returns the root node index of the "
+			"newly allocated tree. The caller is responsible for attaching the tree "
+			"to an event or goal formula, or freeing it. Also returns the round-tripped "
+			"text, any parsing errors encountered, and the first (if any) syntax error.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2638,6 +2724,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_fiction_viewer_stage(input_json, req);
 	} else if (strcmp(tool_name, "swap_fiction_viewer_stages") == 0) {
 		handle_swap_fiction_viewer_stages(input_json, req);
+	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
+		handle_text_to_sexp(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
