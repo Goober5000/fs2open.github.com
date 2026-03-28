@@ -1569,18 +1569,40 @@ void sexp_unmark_persistent(int n)
 	sexp_unmark_persistent(Sexp_nodes[n].rest);
 }
 
+// don't free invalid nodes (some of which might indicate an error state)
+static bool ok_to_free(int num)
+{
+	// never free these nodes
+	if ((num == -1) || (num == Locked_sexp_true) || (num == Locked_sexp_false))
+		return false;
+
+	if (Sexp_nodes[num].type == SEXP_NOT_USED)	// make sure it is actually used
+		return false;
+
+	if (num < 0 || num >= Num_sexp_nodes)
+	{
+		Assertion(false, "SEXP node %d is out of range!", num);
+		return false;
+	}
+
+	// this node might be used in a campaign condition
+	if (Sexp_nodes[num].type & SEXP_FLAG_PERSISTENT)
+	{
+		Assertion(false, "SEXP nodes with SEXP_FLAG_PERSISTENT shouldn't be freed!");
+		return false;
+	}
+
+	// we can free this node
+	return true;
+}
+
 /**
  * Free up the specified sexp node,  Leaves link chains untouched.
  */
 int free_one_sexp(int num)
 {
 	Assert(Fred_running);
-	Assert((num >= 0) && (num < Num_sexp_nodes));
-	Assert(Sexp_nodes[num].type != SEXP_NOT_USED);  // make sure it is actually used
-	Assert(!(Sexp_nodes[num].type & SEXP_FLAG_PERSISTENT));
-
-	// never free these nodes
-	if ((num == Locked_sexp_true) || (num == Locked_sexp_false))
+	if (!ok_to_free(num))
 		return 0;
 
 	Sexp_nodes[num].type = SEXP_NOT_USED;
@@ -1599,12 +1621,7 @@ int free_sexp(int num, int calling_node)
 {
 	int i, rest, count = 0;
 
-	Assert((num >= 0) && (num < Num_sexp_nodes));
-	Assert(Sexp_nodes[num].type != SEXP_NOT_USED);  // make sure it is actually used
-	Assert(!(Sexp_nodes[num].type & SEXP_FLAG_PERSISTENT));
-
-	// never free these nodes
-	if ((num == -1) || (num == Locked_sexp_true) || (num == Locked_sexp_false))
+	if (!ok_to_free(num))
 		return 0;
 
 	Sexp_nodes[num].type = SEXP_NOT_USED;
@@ -1642,14 +1659,8 @@ int free_sexp2(int num, int calling_node)
 {	
 	int i, rest, count = 0;
 
-	Assert((num >= 0) && (num < Num_sexp_nodes));
-	Assert(Sexp_nodes[num].type != SEXP_NOT_USED);  // make sure it is actually used
-	Assert(!(Sexp_nodes[num].type & SEXP_FLAG_PERSISTENT));
-
-	// never free these nodes
-	if ((num == -1) || (num == Locked_sexp_true) || (num == Locked_sexp_false)){
+	if (!ok_to_free(num))
 		return 0;
-	}
 
 	i = Sexp_nodes[num].rest;
 	while (i != -1) {
