@@ -107,12 +107,12 @@ CWnd* McpEditorInfo::getCWndPtr() const
 
 const McpEditorInfo g_editor_info[] =
 {
-	{ &Ship_editor_dialog,     "ship",      "Ship Editor",       true  },
-	{ &Wing_editor_dialog,     "wing",      "Wing Editor",       true  },
-	{ &Prop_editor_dialog,     "prop",      "Props Editor",      true  },
-	{ &Waypoint_editor_dialog, "waypoint",  "Waypoint Editor",   true  },
-	{ &Jumpnode_editor_dialog, "jump node", "Jump Node Editor",  true  },
-	{ &Music_player_dialog,    nullptr,     "Music Player",      true  },
+	{ &Ship_editor_dialog,     "ship",          "Ship Editor",       true  },
+	{ &Wing_editor_dialog,     "wing",          "Wing Editor",       true  },
+	{ &Prop_editor_dialog,     "prop",          "Props Editor",      true  },
+	{ &Waypoint_editor_dialog, "waypoint",      "Waypoint Editor",   true  },
+	{ &Jumpnode_editor_dialog, "jump node",     "Jump Node Editor",  true  },
+	{ &Music_player_dialog,    "music player",  "Music Player",      true  },
 
 	{ (CWnd**)&Briefing_dialog,     "briefing",         "Briefing Editor",         false },
 	{ (CWnd**)&Debriefing_dialog,   "debriefing",       "Debriefing Editor",       false },
