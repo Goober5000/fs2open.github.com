@@ -1817,6 +1817,8 @@ static const char *determine_path_usage(int path_index, const polymodel *pm)
 	return "other";
 }
 
+extern void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_orient, object *objp, polymodel *pm, int submodel, int dock_index);
+
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
@@ -1883,15 +1885,12 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				json_array_append_new(type_arr, json_string("generic"));
 			json_object_set_new(dock_obj, "dock_types", type_arr);
 
-			// Slot positions and normals
-			json_t *positions = json_array();
-			json_t *normals = json_array();
-			for (int s = 0; s < bay.num_slots; s++) {
-				json_array_append_new(positions, build_vec3d_json(bay.pnt[s]));
-				json_array_append_new(normals, build_vec3d_json(bay.norm[s]));
-			}
-			json_object_set_new(dock_obj, "positions", positions);
-			json_object_set_new(dock_obj, "normals", normals);
+			// Slot position and normal
+			vec3d local_dock_point;
+			matrix local_dock_orient;
+			find_adjusted_dockpoint_info(&local_dock_point, &local_dock_orient, nullptr, pm, -1, d);
+			json_object_set_new(dock_obj, "position", build_vec3d_json(local_dock_point));
+			json_object_set_new(dock_obj, "normal", build_vec3d_json(local_dock_orient.vec.uvec));
 
 			// Spline path names
 			json_t *spline_names = json_array();
@@ -1978,8 +1977,14 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				(ss.turret_turning_rate > 0.0f);
 
 			if (has_turret_data) {
-				if (ss.turret_num_firing_points > 0)
-					json_object_set_new(ss_obj, "turret_num_firing_points", json_integer(ss.turret_num_firing_points));
+				json_object_set_new(ss_obj, "turret_normal", build_vec3d_json(ss.turret_norm));
+
+				json_t *firing_points = json_array();
+				for (int fp = 0; fp < ss.turret_num_firing_points; fp++) {
+					json_array_append_new(firing_points, build_vec3d_json(ss.turret_firing_point[fp]));
+				}
+				json_object_set_new(ss_obj, "turret_firing_points", firing_points);
+
 				if (ss.turret_turning_rate > 0.0f)
 					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
 
