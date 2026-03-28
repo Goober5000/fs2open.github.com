@@ -1305,8 +1305,6 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 
 static void handle_move_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
-
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
 
@@ -1316,8 +1314,6 @@ static void handle_move_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
-
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
 
@@ -1776,9 +1772,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	}
 
 	Fiction_viewer_stages.insert(Fiction_viewer_stages.begin() + target, stage);
-
-	if (stage.formula != Locked_sexp_true)
-		mcp_sexp_forest_mark_dirty({ stage.formula });
+	mcp_sexp_forest_mark_dirty({ stage.formula });
 
 	mark_modified("MCP: create fiction viewer stage %d", target);
 
@@ -1807,39 +1801,44 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
 	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
 	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", req)) return;
-	if (new_ui && new_ui[0] && !check_string_enum(new_ui, fiction_ui_name_values, "ui_name", req)) return;
+	if (new_ui) {
+		if (!new_ui[0])
+			new_ui = fiction_ui_name_values[0];
+		else if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", req))
+			return;
+	}
 	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
 	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
 
 	fiction_viewer_stage &s = Fiction_viewer_stages[*index];
 	bool changed = false;
 
-	if (new_story) {
+	if (new_story && strcmp(s.story_filename, new_story) != 0) {
 		strcpy_s(s.story_filename, new_story);
 		changed = true;
 	}
-	if (new_font) {
+	if (new_font && strcmp(s.font_filename, new_font) != 0) {
 		strcpy_s(s.font_filename, new_font);
 		changed = true;
 	}
-	if (new_voice) {
+	if (new_voice && strcmp(s.voice_filename, new_voice) != 0) {
 		strcpy_s(s.voice_filename, new_voice);
 		changed = true;
 	}
-	if (new_ui) {
+	if (new_ui && strcmp(s.ui_name, new_ui) != 0) {
 		strcpy_s(s.ui_name, new_ui);
 		changed = true;
 	}
-	if (new_bg640) {
+	if (new_bg640 && strcmp(s.background[0], new_bg640) != 0) {
 		strcpy_s(s.background[0], new_bg640);
 		changed = true;
 	}
-	if (new_bg1024) {
+	if (new_bg1024 && strcmp(s.background[1], new_bg1024) != 0) {
 		strcpy_s(s.background[1], new_bg1024);
 		changed = true;
 	}
 	if (new_formula.has_value() && s.formula != *new_formula) {
-		if (s.formula >= 0 && s.formula != Locked_sexp_true)
+		if (s.formula >= 0)
 			free_sexp2(s.formula);
 		s.formula = *new_formula;
 		changed = true;
@@ -1863,7 +1862,7 @@ static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 	// Free the SEXP formula
 	int formula = Fiction_viewer_stages[*index].formula;
-	if (formula >= 0 && formula != Locked_sexp_true)
+	if (formula >= 0)
 		free_sexp2(formula);
 
 	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index);
@@ -1892,16 +1891,12 @@ static MoveSwapConfig make_fiction_move_swap_config()
 
 static void handle_move_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
-
 	auto cfg = make_fiction_move_swap_config();
 	handle_generic_move(input, req, cfg);
 }
 
 static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
-
 	auto cfg = make_fiction_move_swap_config();
 	handle_generic_swap(input, req, cfg);
 }
@@ -2252,8 +2247,8 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *props = json_object();
 		add_integer_prop(props, "index", "0-based index of the stage to update");
 		add_string_prop(props, "text", "New text for this stage");
-		add_string_prop(props, "ani_filename", "New animation filename (ani/eff/png)");
-		add_string_prop(props, "wave_filename", "New voice audio filename (wav/ogg)");
+		add_string_prop(props, "ani_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
+		add_string_prop(props, "wave_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -2464,9 +2459,9 @@ void mcp_register_mission_tools(json_t *tools)
 			"UI layout name. Defaults to empty (engine default).",
 			fiction_ui_name_values);
 		add_string_prop(props, "background_640",
-			"Background image for 640x480 resolution.");
+			"Background image for 640x480 resolution. Defaults to empty (standard background).");
 		add_string_prop(props, "background_1024",
-			"Background image for 1024x768 resolution.");
+			"Background image for 1024x768 resolution. Defaults to empty (standard background).");
 		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
 			"Defaults to true.");
 		add_integer_prop(props, "index",
