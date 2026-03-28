@@ -31,7 +31,7 @@ static bool validate_single_dialog(const char *items_to_modify, const char *dial
 {
 	for (size_t i = 0; i < g_editor_info_count; ++i) {
 		auto &info = g_editor_info[i];
-		if (!stricmp(dialog_key, info.editor_key)) {
+		if (dialog_key && info.editor_key && !stricmp(dialog_key, info.editor_key)) {
 			auto wnd = info.getCWndPtr();
 			if (wnd && wnd->IsWindowVisible()) {
 				sprintf(error_msg, "Cannot modify %s while the %s is open. "
@@ -41,7 +41,7 @@ static bool validate_single_dialog(const char *items_to_modify, const char *dial
 			return true;
 		}
 	}
-	Assertion(false, "dialog key '%s' not found!", dialog_key);
+	Assertion(false, "dialog key '%s' not found!", dialog_key ? dialog_key : "<nullptr>");
 	return false;
 }
 
@@ -935,6 +935,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 // Generic move/swap handlers
 // ---------------------------------------------------------------------------
 
+// since this may return a dangling pointer, be sure not to store it in a variable!
 #define CFG_GET_NAME(cfg, index) (cfg).get_name ? (cfg).get_name(index) : (cfg).get_name_fallback(index).c_str()
 
 // Configuration for entity-specific move/swap behavior.
