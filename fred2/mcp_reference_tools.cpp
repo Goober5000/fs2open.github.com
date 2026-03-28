@@ -1866,6 +1866,48 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	json_object_set_new(obj, "bounding_box_min", build_vec3d_json(pm->mins));
 	json_object_set_new(obj, "bounding_box_max", build_vec3d_json(pm->maxs));
 
+	// Helper: build a JSON array of firing point objects with standardized
+	// { "position": ..., "normal": ... } format.  For hull-mounted banks,
+	// each point has its own normal; for turrets, a shared normal is used.
+	auto build_firing_points = [](const vec3d *points, const vec3d *normals,
+	                              const vec3d *shared_normal, int count) -> json_t * {
+		json_t *arr = json_array();
+		for (int i = 0; i < count; i++) {
+			json_t *fp = json_object();
+			json_object_set_new(fp, "position", build_vec3d_json(points[i]));
+			json_object_set_new(fp, "normal",
+				build_vec3d_json(normals ? normals[i] : *shared_normal));
+			json_array_append_new(arr, fp);
+		}
+		return arr;
+	};
+
+	// Primary weapon banks (hull-mounted, not counting turrets)
+	{
+		json_t *banks = json_array();
+		for (int g = 0; g < pm->n_guns; g++) {
+			const auto &bank = pm->gun_banks[g];
+			json_t *bank_obj = json_object();
+			json_object_set_new(bank_obj, "firing_points",
+				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots));
+			json_array_append_new(banks, bank_obj);
+		}
+		json_object_set_new(obj, "primary_weapon_banks", banks);
+	}
+
+	// Secondary weapon banks (hull-mounted, not counting turrets)
+	{
+		json_t *banks = json_array();
+		for (int m = 0; m < pm->n_missiles; m++) {
+			const auto &bank = pm->missile_banks[m];
+			json_t *bank_obj = json_object();
+			json_object_set_new(bank_obj, "firing_points",
+				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots));
+			json_array_append_new(banks, bank_obj);
+		}
+		json_object_set_new(obj, "secondary_weapon_banks", banks);
+	}
+
 	// Docking bays
 	{
 		json_t *docks = json_array();
@@ -1977,13 +2019,9 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				(ss.turret_turning_rate > 0.0f);
 
 			if (has_turret_data) {
-				json_object_set_new(ss_obj, "turret_normal", build_vec3d_json(ss.turret_norm));
-
-				json_t *firing_points = json_array();
-				for (int fp = 0; fp < ss.turret_num_firing_points; fp++) {
-					json_array_append_new(firing_points, build_vec3d_json(ss.turret_firing_point[fp]));
-				}
-				json_object_set_new(ss_obj, "turret_firing_points", firing_points);
+				json_object_set_new(ss_obj, "turret_firing_points",
+					build_firing_points(ss.turret_firing_point, nullptr,
+						&ss.turret_norm, ss.turret_num_firing_points));
 
 				if (ss.turret_turning_rate > 0.0f)
 					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
