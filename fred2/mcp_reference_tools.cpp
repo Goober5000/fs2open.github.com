@@ -26,6 +26,8 @@
 #include "cfile/cfile.h"
 #include "cfile/cfilesystem.h"
 #include "def_files/def_files.h"
+#include "graphics/software/FontManager.h"
+#include "graphics/software/FSFont.h"
 
 
 // ---------------------------------------------------------------------------
@@ -483,6 +485,13 @@ void mcp_register_reference_tools(json_t *tools)
 		"Returns the directory path and an array of missions with filename and "
 		"last-modified timestamp. Combine the directory and filename to get the "
 		"absolute path for load_mission.",
+		json_object());
+
+	// list_fonts
+	register_tool(tools, "list_fonts",
+		"List all fonts loaded from fonts.tbl and modular font tables (*-fnt.tbm). "
+		"Returns each font's name, filename, and type (volition_font or truetype). "
+		"Font names are used in fiction viewer stages and other UI references.",
 		json_object());
 
 	// get_root_path
@@ -2152,6 +2161,38 @@ static json_t *handle_list_talking_heads()
 }
 
 // ---------------------------------------------------------------------------
+// Fonts
+// ---------------------------------------------------------------------------
+
+static json_t *handle_list_fonts()
+{
+	int n = font::FontManager::numberOfFonts();
+	json_t *arr = json_array();
+
+	for (int i = 0; i < n; i++) {
+		font::FSFont *f = font::FontManager::getFont(i);
+		if (!f)
+			continue;
+
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(f->getName().c_str()));
+		json_object_set_new(item, "filename", json_string(f->getFilename().c_str()));
+
+		const char *type_str;
+		switch (f->getType()) {
+			case font::VFNT_FONT:    type_str = "volition_font"; break;
+			case font::NVG_FONT:     type_str = "truetype";      break;
+			default:                 type_str = "unknown";       break;
+		}
+		json_object_set_new(item, "type", json_string(type_str));
+
+		json_array_append_new(arr, item);
+	}
+
+	return make_json_tool_result(arr);
+}
+
+// ---------------------------------------------------------------------------
 // Mission file listing
 // ---------------------------------------------------------------------------
 
@@ -2297,6 +2338,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_personas();
 	if (strcmp(tool_name, "list_talking_heads") == 0)
 		return handle_list_talking_heads();
+	if (strcmp(tool_name, "list_fonts") == 0)
+		return handle_list_fonts();
 	if (strcmp(tool_name, "list_missions") == 0)
 		return handle_list_missions();
 	if (strcmp(tool_name, "get_root_path") == 0)
