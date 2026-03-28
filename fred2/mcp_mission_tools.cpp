@@ -16,6 +16,7 @@
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
 #include "missionui/missioncmdbrief.h"
+#include "missionui/fictionviewer.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
 #include "fred.h"
@@ -64,6 +65,11 @@ static bool validate_dialog_for_cmd_brief(SCP_string &error_msg)
 static bool validate_dialog_for_goals(SCP_string &error_msg)
 {
 	return validate_single_dialog("goals", "goal", error_msg);
+}
+
+static bool validate_dialog_for_fiction(SCP_string &error_msg)
+{
+	return validate_single_dialog("fiction viewer stages", "fiction viewer", error_msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -1687,6 +1693,226 @@ static void handle_swap_goals(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Fiction Viewer stage tools
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> fiction_ui_name_values = { "FS2", "WCS" };
+
+static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage, int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "story_filename", json_string(stage.story_filename));
+	set_optional_string(obj, "font_filename", stage.font_filename, true);
+	set_optional_string(obj, "voice_filename", stage.voice_filename, true);
+	set_optional_string(obj, "ui_name", stage.ui_name, true);
+	set_optional_string(obj, "background_640", stage.background[0], true);
+	set_optional_string(obj, "background_1024", stage.background[1], true);
+	json_object_set_new(obj, "formula", json_integer(stage.formula));
+	return obj;
+}
+
+static void handle_list_fiction_viewer_stages(json_t * /*input*/, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++)
+		json_array_append_new(arr, build_fiction_viewer_stage_json(Fiction_viewer_stages[i], i));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_fiction_viewer_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+
+	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(Fiction_viewer_stages[*index], *index));
+	req->success = true;
+}
+
+static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto story = get_required_string(input, "story_filename", req, true);
+	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
+
+	auto font  = get_optional_string(input, "font_filename", true);
+	auto voice = get_optional_string(input, "voice_filename", true);
+	auto ui    = get_optional_string(input, "ui_name", true);
+	auto bg640 = get_optional_string(input, "background_640", true);
+	auto bg1024 = get_optional_string(input, "background_1024", true);
+	auto formula = get_optional_integer(input, "formula");
+	auto insert_index = get_optional_integer(input, "index");
+
+	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
+	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", req)) return;
+	if (ui && !check_string_enum(ui, fiction_ui_name_values, "ui_name", req)) return;
+	if (bg640 && !check_string_length(bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
+	if (bg1024 && !check_string_length(bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
+
+	int target;
+	if (!insert_index.has_value()) {
+		target = (int)Fiction_viewer_stages.size();
+	} else {
+		if (!check_int_range(*insert_index, 0, (int)Fiction_viewer_stages.size(), "index", req))
+			return;
+		target = *insert_index;
+	}
+
+	fiction_viewer_stage stage;
+	memset(&stage, 0, sizeof(fiction_viewer_stage));
+	strcpy_s(stage.story_filename, story);
+	if (font)  strcpy_s(stage.font_filename, font);
+	if (voice) strcpy_s(stage.voice_filename, voice);
+	if (ui)    strcpy_s(stage.ui_name, ui);
+	if (bg640) strcpy_s(stage.background[0], bg640);
+	if (bg1024) strcpy_s(stage.background[1], bg1024);
+
+	if (formula.has_value()) {
+		stage.formula = *formula;
+	} else {
+		stage.formula = Locked_sexp_true;
+	}
+
+	Fiction_viewer_stages.insert(Fiction_viewer_stages.begin() + target, stage);
+
+	if (stage.formula != Locked_sexp_true)
+		mcp_sexp_forest_mark_dirty({stage.formula});
+
+	mark_modified("MCP: create fiction viewer stage %d", target);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "index", json_integer(target));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+
+	auto new_story = get_optional_string(input, "story_filename", false);
+	auto new_font  = get_optional_string(input, "font_filename", false);
+	auto new_voice = get_optional_string(input, "voice_filename", false);
+	auto new_ui    = get_optional_string(input, "ui_name", false);
+	auto new_bg640 = get_optional_string(input, "background_640", false);
+	auto new_bg1024 = get_optional_string(input, "background_1024", false);
+	auto new_formula = get_optional_integer(input, "formula");
+
+	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
+	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
+	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", req)) return;
+	if (new_ui && new_ui[0] && !check_string_enum(new_ui, fiction_ui_name_values, "ui_name", req)) return;
+	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
+	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
+
+	fiction_viewer_stage &s = Fiction_viewer_stages[*index];
+	bool changed = false;
+
+	if (new_story) {
+		strcpy_s(s.story_filename, new_story);
+		changed = true;
+	}
+	if (new_font) {
+		strcpy_s(s.font_filename, new_font);
+		changed = true;
+	}
+	if (new_voice) {
+		strcpy_s(s.voice_filename, new_voice);
+		changed = true;
+	}
+	if (new_ui) {
+		strcpy_s(s.ui_name, new_ui);
+		changed = true;
+	}
+	if (new_bg640) {
+		strcpy_s(s.background[0], new_bg640);
+		changed = true;
+	}
+	if (new_bg1024) {
+		strcpy_s(s.background[1], new_bg1024);
+		changed = true;
+	}
+	if (new_formula.has_value() && s.formula != *new_formula) {
+		if (s.formula >= 0 && s.formula != Locked_sexp_true)
+			free_sexp2(s.formula);
+		s.formula = *new_formula;
+		changed = true;
+		mcp_sexp_forest_mark_dirty({*new_formula});
+	}
+
+	if (changed)
+		mark_modified("MCP: update fiction viewer stage %d", *index);
+
+	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(s, *index));
+	req->success = true;
+}
+
+static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+
+	// Free the SEXP formula
+	int formula = Fiction_viewer_stages[*index].formula;
+	if (formula >= 0 && formula != Locked_sexp_true)
+		free_sexp2(formula);
+
+	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index);
+
+	mark_modified("MCP: delete fiction viewer stage %d", *index);
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Deleted fiction viewer stage %d", *index);
+	req->success = true;
+}
+
+static MoveSwapConfig make_fiction_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "fiction viewer stage";
+	cfg.count = (int)Fiction_viewer_stages.size();
+	cfg.validate_dialog = validate_dialog_for_fiction;
+	cfg.get_name = nullptr;	// stages don't have names; use the fallback function
+	cfg.do_move = [](int from, int to) {
+		array_move_element(Fiction_viewer_stages, from, to);
+	};
+	cfg.do_swap = [](int a, int b) {
+		std::swap(Fiction_viewer_stages[a], Fiction_viewer_stages[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_fiction_viewer_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto cfg = make_fiction_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_fiction, req)) return;
+
+	auto cfg = make_fiction_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -1719,6 +1945,13 @@ static const char *mission_tool_names[] = {
 	"delete_goal",
 	"move_goal",
 	"swap_goals",
+	"list_fiction_viewer_stages",
+	"get_fiction_viewer_stage",
+	"create_fiction_viewer_stage",
+	"update_fiction_viewer_stage",
+	"delete_fiction_viewer_stage",
+	"move_fiction_viewer_stage",
+	"swap_fiction_viewer_stages",
 	nullptr
 };
 
@@ -2201,6 +2434,132 @@ void mcp_register_mission_tools(json_t *tools)
 			"Indices are 0-based.",
 			props, req);
 	}
+
+	// -----------------------------------------------------------------------
+	// Fiction Viewer tools
+	// -----------------------------------------------------------------------
+
+	// list_fiction_viewer_stages
+	register_tool(tools, "list_fiction_viewer_stages",
+		"List all fiction viewer stages. Returns each stage's index, story filename, "
+		"font, voice, UI name, backgrounds, and SEXP formula node.",
+		json_object());
+
+	// get_fiction_viewer_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to retrieve");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "get_fiction_viewer_stage",
+			"Get full details of a fiction viewer stage by index.",
+			props, req);
+	}
+
+	// create_fiction_viewer_stage
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "story_filename",
+			"Text filename for the fiction stage (e.g. \"fiction.txt\"). Max 31 characters.");
+		add_string_prop(props, "font_filename",
+			"Font name from list_fonts. Defaults to empty (uses default font).");
+		add_string_prop(props, "voice_filename",
+			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
+		add_string_enum_prop(props, "ui_name",
+			"UI layout name. Defaults to empty (engine default).",
+			fiction_ui_name_values);
+		add_string_prop(props, "background_640",
+			"Background image for 640x480 resolution.");
+		add_string_prop(props, "background_1024",
+			"Background image for 1024x768 resolution.");
+		add_integer_prop(props, "formula",
+			"SEXP node index for the stage's activation formula. "
+			"Defaults to always-true (Locked_sexp_true).");
+		add_integer_prop(props, "index",
+			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("story_filename"));
+		register_tool(tools, "create_fiction_viewer_stage",
+			"Create a new fiction viewer stage. Fiction viewer stages display story "
+			"text between missions, with optional font, voice, background, and "
+			"SEXP-controlled activation. Multiple stages can exist; only the first "
+			"whose formula evaluates to true is shown at runtime.",
+			props, req);
+	}
+
+	// update_fiction_viewer_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to update");
+		add_string_prop(props, "story_filename",
+			"New text filename for the fiction stage. Max 31 characters.");
+		add_string_prop(props, "font_filename",
+			"New font name from list_fonts. Empty string clears the font.");
+		add_string_prop(props, "voice_filename",
+			"New voice audio filename. Empty string clears the voice.");
+		add_string_enum_prop(props, "ui_name",
+			"New UI layout name. Empty string clears to engine default.",
+			fiction_ui_name_values);
+		add_string_prop(props, "background_640",
+			"New background image for 640x480 resolution. Empty string clears.");
+		add_string_prop(props, "background_1024",
+			"New background image for 1024x768 resolution. Empty string clears.");
+		add_integer_prop(props, "formula",
+			"New SEXP node index. Frees the old formula if replaced.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "update_fiction_viewer_stage",
+			"Update properties of an existing fiction viewer stage. Only specified "
+			"fields are changed; omitted fields are left unchanged.",
+			props, req);
+	}
+
+	// delete_fiction_viewer_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to delete");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "delete_fiction_viewer_stage",
+			"Delete a fiction viewer stage. Frees its SEXP formula. "
+			"Remaining stages are shifted down.",
+			props, req);
+	}
+
+	// move_fiction_viewer_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the stage");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the stage to");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_fiction_viewer_stage",
+			"Move a fiction viewer stage from one position to another. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_fiction_viewer_stages
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first stage");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second stage");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_fiction_viewer_stages",
+			"Swap two fiction viewer stages at the given positions. "
+			"Indices are 0-based.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2278,6 +2637,20 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_goal(input_json, req);
 	} else if (strcmp(tool_name, "swap_goals") == 0) {
 		handle_swap_goals(input_json, req);
+	} else if (strcmp(tool_name, "list_fiction_viewer_stages") == 0) {
+		handle_list_fiction_viewer_stages(input_json, req);
+	} else if (strcmp(tool_name, "get_fiction_viewer_stage") == 0) {
+		handle_get_fiction_viewer_stage(input_json, req);
+	} else if (strcmp(tool_name, "create_fiction_viewer_stage") == 0) {
+		handle_create_fiction_viewer_stage(input_json, req);
+	} else if (strcmp(tool_name, "update_fiction_viewer_stage") == 0) {
+		handle_update_fiction_viewer_stage(input_json, req);
+	} else if (strcmp(tool_name, "delete_fiction_viewer_stage") == 0) {
+		handle_delete_fiction_viewer_stage(input_json, req);
+	} else if (strcmp(tool_name, "move_fiction_viewer_stage") == 0) {
+		handle_move_fiction_viewer_stage(input_json, req);
+	} else if (strcmp(tool_name, "swap_fiction_viewer_stages") == 0) {
+		handle_swap_fiction_viewer_stages(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),

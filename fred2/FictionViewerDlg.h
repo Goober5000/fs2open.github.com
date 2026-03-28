@@ -18,6 +18,7 @@ public:
 	int query_modified();
 	void OnOK();
 	void OnCancel();
+	virtual BOOL DestroyWindow();
 
 // Dialog Data
 	//{{AFX_DATA(FictionViewerDlg)
@@ -49,6 +50,8 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 };
+
+extern FictionViewerDlg* Fiction_viewer_dlg;
 
 //{{AFX_INSERT_LOCATION}}
 // Microsoft Visual C++ will insert additional declarations immediately before the previous line.
