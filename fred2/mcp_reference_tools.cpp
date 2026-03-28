@@ -453,6 +453,36 @@ void mcp_register_reference_tools(json_t *tools)
 			props, req);
 	}
 
+	// coordinate_transform
+	{
+		json_t *props = json_object();
+		static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
+		add_string_enum_prop(props, "mode",
+			"Transform direction: \"local_to_world\" or \"world_to_local\"",
+			mode_values);
+		add_matrix_prop(props, "reference_frame_orientation",
+			"Reference frame orientation matrix (e.g. a ship's orientation)");
+		add_vec3d_prop(props, "reference_frame_position",
+			"Reference frame world position. Defaults to origin. Only affects position transforms.");
+		add_vec3d_prop(props, "position",
+			"A position to transform (applies rotation + translation)");
+		add_vec3d_prop(props, "normal",
+			"A direction/normal vector to transform (rotation only, no translation)");
+		add_matrix_prop(props, "orientation",
+			"An orientation matrix to compose with the reference frame orientation");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("mode"));
+		json_array_append_new(req, json_string("reference_frame_orientation"));
+		register_tool(tools, "coordinate_transform",
+			"Transform a position, direction/normal vector, and/or orientation matrix between "
+			"a local reference frame and world coordinates. Provide the reference frame via "
+			"'reference_frame_orientation' (and optionally 'reference_frame_position'), then "
+			"supply one or more of 'position', 'normal', or 'orientation' to transform. "
+			"All coordinate data uses the engine's left-handed coordinate system "
+			"(+X right, +Y up, +Z forward).",
+			props, req);
+	}
+
 	// list_persona_types
 	{
 		register_tool(tools, "list_persona_types",
@@ -2123,6 +2153,79 @@ static json_t *handle_subsystem_names_equal(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// Coordinate transformation
+// ---------------------------------------------------------------------------
+
+static json_t *handle_coordinate_transform(json_t *arguments)
+{
+	json_t *err = nullptr;
+
+	// Required: mode
+	const char *mode_str = get_required_string(arguments, "mode", &err, true);
+	if (!mode_str) return err;
+	static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
+	if (!check_string_enum(mode_str, mode_values, "mode", &err)) return err;
+	bool local_to_world = (strcmp(mode_str, "local_to_world") == 0);
+
+	// Required: reference_frame_orientation
+	auto ref_orient_opt = get_required_matrix(arguments, "reference_frame_orientation", &err);
+	if (!ref_orient_opt.has_value()) return err;
+	matrix ref_orient = *ref_orient_opt;
+
+	// Optional: reference_frame_position (defaults to origin)
+	vec3d ref_position = get_optional_vec3d(arguments, "reference_frame_position")
+		.value_or(vmd_zero_vector);
+
+	// Optional inputs (at least one required)
+	auto position = get_optional_vec3d(arguments, "position");
+	auto normal = get_optional_vec3d(arguments, "normal");
+	auto orientation = get_optional_matrix(arguments, "orientation");
+
+	if (!position && !normal && !orientation)
+		return make_tool_result(
+			"At least one of 'position', 'normal', or 'orientation' must be provided.", true);
+
+	json_t *obj = json_object();
+
+	if (position) {
+		vec3d result;
+		if (local_to_world) {
+			vm_vec_unrotate(&result, &(*position), &ref_orient);
+			vm_vec_add2(&result, &ref_position);
+		} else {
+			vm_vec_sub(&result, &(*position), &ref_position);
+			vec3d temp = result;
+			vm_vec_rotate(&result, &temp, &ref_orient);
+		}
+		json_object_set_new(obj, "position", build_vec3d_json(result));
+	}
+
+	if (normal) {
+		vec3d result;
+		if (local_to_world) {
+			vm_vec_unrotate(&result, &(*normal), &ref_orient);
+		} else {
+			vm_vec_rotate(&result, &(*normal), &ref_orient);
+		}
+		json_object_set_new(obj, "normal", build_vec3d_json(result));
+	}
+
+	if (orientation) {
+		matrix result;
+		if (local_to_world) {
+			vm_matrix_x_matrix(&result, &ref_orient, &(*orientation));
+		} else {
+			matrix ref_orient_t;
+			vm_copy_transpose(&ref_orient_t, &ref_orient);
+			vm_matrix_x_matrix(&result, &ref_orient_t, &(*orientation));
+		}
+		json_object_set_new(obj, "orientation", build_matrix_json(result));
+	}
+
+	return make_json_tool_result(obj);
+}
+
+// ---------------------------------------------------------------------------
 // Persona and talking head reference tools
 // ---------------------------------------------------------------------------
 
@@ -2398,6 +2501,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_subsystem_names_compare(arguments);
 	if (strcmp(tool_name, "subsystem_names_equal") == 0)
 		return handle_subsystem_names_equal(arguments);
+	if (strcmp(tool_name, "coordinate_transform") == 0)
+		return handle_coordinate_transform(arguments);
 	if (strcmp(tool_name, "list_persona_types") == 0)
 		return handle_list_persona_types();
 	if (strcmp(tool_name, "list_personas") == 0)
