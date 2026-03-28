@@ -50,6 +50,9 @@ int		Warning_count, Error_count;
 int		fred_parse_flag = 0;
 int		Token_found_flag;
 
+bool	Parse_collect_errors = false;
+SCP_vector<ParseError> Parse_errors;
+
 char 	*Parse_text = nullptr;
 char	*Parse_text_raw = nullptr;
 char	*Mp = NULL, *Mp_save = NULL;
@@ -280,7 +283,6 @@ int get_line_num()
 	while (p < stoploc)
 	{
 		if (*p == '\0') {
-			Warning(LOCATION, "Unexpected end-of-file while looking for line number!");
 			break;
 		}
 
@@ -340,6 +342,12 @@ void error_display(int error_level, const char *format, ...)
 	va_end(args);
 
 	nprintf((type, "%s(line %i): %s: %s\n", Current_filename, get_line_num(), type, error_text.c_str()));
+
+	// In error collection mode, store the error and return without displaying a dialog
+	if (Parse_collect_errors) {
+		Parse_errors.push_back({ error_level, get_line_num(), std::move(error_text) });
+		return;
+	}
 
 	if (error_level == 0 || Cmdline_noparseerrors)
 		Warning(LOCATION, "%s(line %i):\n%s: %s", Current_filename, get_line_num(), type, error_text.c_str());
