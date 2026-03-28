@@ -33,6 +33,15 @@ extern const char	*token_found;
 extern int fred_parse_flag;
 extern int Token_found_flag;
 
+struct ParseError {
+	int level;           // 0 = warning, 1 = error, 2 = release warning
+	int line;            // line number from get_line_num()
+	SCP_string message;
+};
+
+extern bool Parse_collect_errors;
+extern SCP_vector<ParseError> Parse_errors;
+
 
 #define	COMMENT_CHAR	(char)';'
 #define	EOLN			(char)0x0a
