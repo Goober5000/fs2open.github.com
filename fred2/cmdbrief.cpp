@@ -22,6 +22,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+cmd_brief_dlg *Cmd_brief_dlg = nullptr;
+
 /////////////////////////////////////////////////////////////////////////////
 // cmd_brief_dlg dialog
 
@@ -67,8 +69,9 @@ END_MESSAGE_MAP()
 /////////////////////////////////////////////////////////////////////////////
 // cmd_brief_dlg message handlers
 
-BOOL cmd_brief_dlg::OnInitDialog() 
+BOOL cmd_brief_dlg::OnInitDialog()
 {
+	Cmd_brief_dlg = this;
 	Cur_cmd_brief = Cmd_briefs;  // default to first cmd briefing
 	m_cur_stage = 0;
 	last_cmd_brief = NULL;
@@ -312,8 +315,9 @@ void cmd_brief_dlg::OnBrowseWave()
 		cfile_pop_dir();
 }
 
-BOOL cmd_brief_dlg::DestroyWindow() 
+BOOL cmd_brief_dlg::DestroyWindow()
 {
+	Cmd_brief_dlg = nullptr;
 	audiostream_close_file(m_wave_id, 0);
 	m_wave_id = -1;
 
