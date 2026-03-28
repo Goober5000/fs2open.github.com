@@ -25,6 +25,7 @@
 #include "mod_table/mod_table.h"
 #include "cfile/cfile.h"
 #include "cfile/cfilesystem.h"
+#include "cmdline/cmdline.h"
 #include "def_files/def_files.h"
 #include "graphics/software/FontManager.h"
 #include "graphics/software/FSFont.h"
@@ -494,10 +495,11 @@ void mcp_register_reference_tools(json_t *tools)
 		"Font names are used in fiction viewer stages and other UI references.",
 		json_object());
 
-	// get_root_path
-	register_tool(tools, "get_root_path",
-		"Returns the absolute path to the game data root directory. "
-		"All relative file paths (missions, tables, models, etc.) resolve under this directory.",
+	// get_root_paths
+	register_tool(tools, "get_root_paths",
+		"Returns an array of all root directory paths known to the game engine, "
+		"including the game root, user root, and any mod directories. Each entry "
+		"has a 'label' (e.g., 'game_root', 'user_primary_mod') and an absolute 'path'.",
 		json_object());
 }
 
@@ -2228,17 +2230,38 @@ static json_t *handle_list_missions()
 	return make_json_tool_result(obj);
 }
 
-static json_t *handle_get_root_path()
+static json_t *handle_get_root_paths()
 {
-	SCP_string root;
-	cf_create_default_path_string(root, CF_TYPE_ROOT);
+	// Build an array of all known root paths with their labels.
+	// We query cf_create_default_path_string with specific location flag
+	// combinations to discover each distinct root directory.
+	struct root_query {
+		uint32_t flags;
+		const char *label;
+	};
+	root_query queries[] = {
+		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_PRIMARY_MOD,    "user_primary_mod" },
+		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_SECONDARY_MODS, "user_secondary_mod" },
+		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_ROOT,           "user_root" },
+		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_PRIMARY_MOD,    "game_primary_mod" },
+		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_SECONDARY_MODS, "game_secondary_mod" },
+		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT,           "game_root" },
+	};
 
-	json_t *result = make_tool_result(false, "root_path: %s", root.c_str());
+	json_t *arr = json_array();
+	SCP_string buf;
 
-	json_t *sc = json_object();
-	json_object_set_new(sc, "root_path", json_string(root.c_str()));
-	json_object_set_new(result, "structuredContent", sc);
-	return result;
+	for (auto &q : queries) {
+		buf.clear();
+		if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
+			json_t *entry = json_object();
+			json_object_set_new(entry, "label", json_string(q.label));
+			json_object_set_new(entry, "path", json_string(buf.c_str()));
+			json_array_append_new(arr, entry);
+		}
+	}
+
+	return make_json_tool_result(arr);
 }
 
 // ---------------------------------------------------------------------------
@@ -2342,8 +2365,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_fonts();
 	if (strcmp(tool_name, "list_missions") == 0)
 		return handle_list_missions();
-	if (strcmp(tool_name, "get_root_path") == 0)
-		return handle_get_root_path();
+	if (strcmp(tool_name, "get_root_paths") == 0)
+		return handle_get_root_paths();
 
 	return nullptr;  // not one of our tools
 }
