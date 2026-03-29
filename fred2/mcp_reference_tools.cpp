@@ -60,6 +60,8 @@ static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
 static std::mutex scripting_api_cache_mutex;
 static json_t* scripting_api_cache = nullptr;
 
+static const SCP_vector<const char *> scripting_misc_sections = { "conditions", "options", "globalVars" };
+
 // ---------------------------------------------------------------------------
 // OPF / OPR enum-to-string helpers
 // ---------------------------------------------------------------------------
@@ -547,14 +549,82 @@ void mcp_register_reference_tools(json_t *tools)
 		"Font names are used in fiction viewer stages and other UI references.",
 		json_object());
 
-	// get_scripting_api
-	register_tool(tools, "get_scripting_api",
-		"Get the complete Lua scripting API documentation for the FreeSpace Open engine. "
-		"Returns libraries, classes, functions, properties, operators, hooks (actions), "
-		"conditions, enumerations, engine options, and global variables. "
-		"The result is a large JSON document (typically 200-500 KB). "
-		"Use get_reference_notes with topic 'scripts' for an overview of the scripting system.",
-		json_object());
+	// list_scripting_elements
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "element_type",
+			"Filter by element type. Omit to list both.",
+			{ "library", "class" });
+		add_string_prop(props, "search",
+			"Case-insensitive substring search against element names and descriptions.");
+		register_tool(tools, "list_scripting_elements",
+			"List all scripting API libraries and classes with summary info (name, shortName, "
+			"type, description, child count). Use this to discover available namespaces and "
+			"types before drilling into specifics with get_scripting_element. "
+			"Use get_reference_notes with topic 'scripts' for an overview of the scripting system.",
+			props);
+	}
+
+	// get_scripting_element
+	register_tool_with_required_string(tools, "get_scripting_element",
+		"Get full details of a scripting library or class, including all its children "
+		"(functions, properties, operators). Matches by name or shortName, case-insensitive.",
+		"name", "Name or shortName of the element (e.g. \"Mission\", \"mn\", \"ship\")");
+
+	// search_scripting_children
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "search",
+			"Case-insensitive substring search against child names.");
+		add_string_enum_prop(props, "child_type",
+			"Filter by child type.",
+			{ "function", "property", "operator" });
+		register_tool(tools, "search_scripting_children",
+			"Search for functions, properties, or operators across all scripting libraries "
+			"and classes. Returns matches with parent context. At least one parameter required.",
+			props);
+	}
+
+	// list_scripting_hooks
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Get a specific hook by exact name (case-insensitive). Returns full details "
+			"including hookVars and conditions. Omit to list all hooks as summaries.");
+		add_string_prop(props, "search",
+			"Substring search against hook names and descriptions.");
+		add_bool_prop(props, "overridable",
+			"Filter to only overridable (true) or non-overridable (false) hooks.");
+		register_tool(tools, "list_scripting_hooks",
+			"List scripting hooks (actions) that fire at engine events. Without 'name', "
+			"returns summaries. With 'name', returns full hook details including typed "
+			"hookVars and conditions.",
+			props);
+	}
+
+	// list_scripting_enums
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "search",
+			"Case-insensitive substring filter on enum names.");
+		register_tool(tools, "list_scripting_enums",
+			"List all scripting enumeration constants with their integer values.",
+			props);
+	}
+
+	// get_scripting_misc
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "section",
+			"Which section to return.",
+			scripting_misc_sections);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("section"));
+		register_tool(tools, "get_scripting_misc",
+			"Get miscellaneous scripting API sections: 'conditions' (hook condition types), "
+			"'options' (engine options), or 'globalVars' (global hook variables).",
+			props, req);
+	}
 
 	// get_root_paths
 	register_tool(tools, "get_root_paths",
@@ -2376,14 +2446,18 @@ static json_t *handle_list_fonts()
 // ---------------------------------------------------------------------------
 // Scripting API documentation
 // ---------------------------------------------------------------------------
+// The scripting API cache stores the raw json_t* tree from build_json_doc().
+// All scripting query tools share this cache, each extracting what they need.
+// The cache is built lazily on first access and never modified thereafter.
+// ---------------------------------------------------------------------------
 
-static json_t *handle_get_scripting_api()
+static json_t *get_scripting_api_doc()
 {
 	// Fast path: return cached result
 	{
 		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
 		if (scripting_api_cache)
-			return json_incref(scripting_api_cache);
+			return scripting_api_cache;  // borrowed reference
 	}
 
 	// Generate the documentation (reads only static data, safe from worker threads)
@@ -2391,20 +2465,251 @@ static json_t *handle_get_scripting_api()
 		mprintf(("MCP scripting API: documentation error: %s\n", error.c_str()));
 	});
 
-	json_t *api_json = scripting::build_json_doc(doc);
-	if (!api_json)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
-
-	json_t *result = make_json_tool_result(api_json);
+	json_t *result = scripting::build_json_doc(doc);
 
 	// Cache the result
 	{
 		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
 		if (!scripting_api_cache)
-			scripting_api_cache = json_incref(result);
+			scripting_api_cache = result;
+		else
+			json_decref(result);
 	}
 
-	return result;
+	return scripting_api_cache;
+}
+
+// stristr (from parse/parselo.h) is used for case-insensitive substring matching.
+
+static json_t *handle_list_scripting_elements(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	const char *filter_type = get_optional_string(arguments, "element_type", true);
+	const char *filter_search = get_optional_string(arguments, "search", true);
+
+	json_t *elements = json_object_get(doc, "elements");
+	json_t *arr = json_array();
+
+	size_t idx;
+	json_t *el;
+	json_array_foreach(elements, idx, el) {
+		const char *el_type = json_string_value(json_object_get(el, "type"));
+		const char *name = json_string_value(json_object_get(el, "name"));
+		const char *shortName = json_string_value(json_object_get(el, "shortName"));
+		const char *desc = json_string_value(json_object_get(el, "description"));
+
+		if (filter_type && el_type && stricmp(filter_type, el_type) != 0)
+			continue;
+
+		if (filter_search && filter_search[0]) {
+			if (!stristr(name, filter_search) && !stristr(shortName, filter_search) && !stristr(desc, filter_search))
+				continue;
+		}
+
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(name ? name : ""));
+		if (shortName && shortName[0])
+			json_object_set_new(item, "shortName", json_string(shortName));
+		json_object_set_new(item, "element_type", json_string(el_type ? el_type : ""));
+		if (desc && desc[0])
+			json_object_set_new(item, "description", json_string(desc));
+
+		json_t *superClass = json_object_get(el, "superClass");
+		if (superClass && json_is_string(superClass) && json_string_value(superClass)[0])
+			json_object_set_new(item, "superClass", json_string(json_string_value(superClass)));
+
+		json_t *children = json_object_get(el, "children");
+		json_object_set_new(item, "child_count", json_integer(children ? (json_int_t)json_array_size(children) : 0));
+
+		json_array_append_new(arr, item);
+	}
+
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_get_scripting_element(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	json_t *err = nullptr;
+	const char *name = get_required_string(arguments, "name", &err, false);
+	if (!name)
+		return err;
+
+	json_t *elements = json_object_get(doc, "elements");
+	size_t idx;
+	json_t *el;
+	json_array_foreach(elements, idx, el) {
+		const char *el_name = json_string_value(json_object_get(el, "name"));
+		const char *el_short = json_string_value(json_object_get(el, "shortName"));
+
+		if ((el_name && stricmp(name, el_name) == 0) || (el_short && el_short[0] && stricmp(name, el_short) == 0))
+			return make_json_tool_result(json_incref(el));
+	}
+
+	return make_not_found_error("Scripting element", name);
+}
+
+static json_t *handle_search_scripting_children(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	const char *filter_search = get_optional_string(arguments, "search", true);
+	const char *filter_child_type = get_optional_string(arguments, "child_type", true);
+
+	if ((!filter_search || !filter_search[0]) && (!filter_child_type || !filter_child_type[0]))
+		return make_tool_result("At least one of 'search' or 'child_type' must be specified.", true);
+
+	json_t *elements = json_object_get(doc, "elements");
+	json_t *arr = json_array();
+
+	size_t el_idx;
+	json_t *el;
+	json_array_foreach(elements, el_idx, el) {
+		const char *parent_name = json_string_value(json_object_get(el, "name"));
+		const char *parent_short = json_string_value(json_object_get(el, "shortName"));
+		const char *parent_type = json_string_value(json_object_get(el, "type"));
+
+		json_t *children = json_object_get(el, "children");
+		if (!children)
+			continue;
+
+		size_t ch_idx;
+		json_t *ch;
+		json_array_foreach(children, ch_idx, ch) {
+			const char *ch_name = json_string_value(json_object_get(ch, "name"));
+			const char *ch_type = json_string_value(json_object_get(ch, "type"));
+			const char *ch_desc = json_string_value(json_object_get(ch, "description"));
+
+			if (filter_child_type && ch_type && stricmp(filter_child_type, ch_type) != 0)
+				continue;
+
+			if (filter_search && filter_search[0]) {
+				if (!stristr(ch_name, filter_search))
+					continue;
+			}
+
+			json_t *item = json_object();
+			json_object_set_new(item, "parent_name", json_string(parent_name ? parent_name : ""));
+			if (parent_short && parent_short[0])
+				json_object_set_new(item, "parent_shortName", json_string(parent_short));
+			json_object_set_new(item, "parent_element_type", json_string(parent_type ? parent_type : ""));
+			json_object_set_new(item, "name", json_string(ch_name ? ch_name : ""));
+			json_object_set_new(item, "child_type", json_string(ch_type ? ch_type : ""));
+			if (ch_desc && ch_desc[0])
+				json_object_set_new(item, "description", json_string(ch_desc));
+
+			json_array_append_new(arr, item);
+		}
+	}
+
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_list_scripting_hooks(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	const char *filter_name = get_optional_string(arguments, "name", true);
+	const char *filter_search = get_optional_string(arguments, "search", true);
+	auto filter_overridable = get_optional_bool(arguments, "overridable");
+
+	json_t *actions = json_object_get(doc, "actions");
+
+	// Detail mode: return full hook by exact name
+	if (filter_name && filter_name[0]) {
+		size_t idx;
+		json_t *action;
+		json_array_foreach(actions, idx, action) {
+			const char *name = json_string_value(json_object_get(action, "name"));
+			if (name && stricmp(filter_name, name) == 0)
+				return make_json_tool_result(json_incref(action));
+		}
+		return make_not_found_error("Scripting hook", filter_name);
+	}
+
+	// List mode: return summaries
+	json_t *arr = json_array();
+	size_t idx;
+	json_t *action;
+	json_array_foreach(actions, idx, action) {
+		const char *name = json_string_value(json_object_get(action, "name"));
+		const char *desc = json_string_value(json_object_get(action, "description"));
+		bool overridable = json_is_true(json_object_get(action, "overridable"));
+
+		if (filter_overridable.has_value() && overridable != *filter_overridable)
+			continue;
+
+		if (filter_search && filter_search[0]) {
+			if (!stristr(name, filter_search) && !stristr(desc, filter_search))
+				continue;
+		}
+
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(name ? name : ""));
+		if (desc && desc[0])
+			json_object_set_new(item, "description", json_string(desc));
+		json_object_set_new(item, "overridable", json_boolean(overridable));
+
+		json_t *hookVars = json_object_get(action, "hookVars");
+		json_object_set_new(item, "hookVar_count", json_integer(hookVars ? (json_int_t)json_array_size(hookVars) : 0));
+
+		json_t *conditions = json_object_get(action, "conditions");
+		json_object_set_new(item, "condition_count", json_integer(conditions ? (json_int_t)json_array_size(conditions) : 0));
+
+		json_array_append_new(arr, item);
+	}
+
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_list_scripting_enums(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	const char *filter_search = get_optional_string(arguments, "search", true);
+
+	json_t *enums = json_object_get(doc, "enums");
+	json_t *result = json_object();
+
+	const char *key;
+	json_t *value;
+	json_object_foreach(enums, key, value) {
+		if (filter_search && filter_search[0] && !stristr(key, filter_search))
+			continue;
+		json_object_set_new(result, key, json_incref(value));
+	}
+
+	return make_json_tool_result(result);
+}
+
+static json_t *handle_get_scripting_misc(json_t *arguments)
+{
+	json_t *doc = get_scripting_api_doc();
+	if (!doc)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	json_t *err = nullptr;
+	const char *section = get_required_string(arguments, "section", &err, true);
+	if (!section)
+		return err;
+
+	json_t *data = json_object_get(doc, section);
+	if (!data)
+		return make_tool_result(true, "Unknown section '%s'. Valid values: conditions, options, globalVars.", section);
+
+	return make_json_tool_result(json_incref(data));
 }
 
 // ---------------------------------------------------------------------------
@@ -2605,8 +2910,18 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_talking_heads();
 	if (strcmp(tool_name, "list_fonts") == 0)
 		return handle_list_fonts();
-	if (strcmp(tool_name, "get_scripting_api") == 0)
-		return handle_get_scripting_api();
+	if (strcmp(tool_name, "list_scripting_elements") == 0)
+		return handle_list_scripting_elements(arguments);
+	if (strcmp(tool_name, "get_scripting_element") == 0)
+		return handle_get_scripting_element(arguments);
+	if (strcmp(tool_name, "search_scripting_children") == 0)
+		return handle_search_scripting_children(arguments);
+	if (strcmp(tool_name, "list_scripting_hooks") == 0)
+		return handle_list_scripting_hooks(arguments);
+	if (strcmp(tool_name, "list_scripting_enums") == 0)
+		return handle_list_scripting_enums(arguments);
+	if (strcmp(tool_name, "get_scripting_misc") == 0)
+		return handle_get_scripting_misc(arguments);
 	if (strcmp(tool_name, "list_missions") == 0)
 		return handle_list_missions();
 	if (strcmp(tool_name, "get_root_paths") == 0)
