@@ -2863,10 +2863,11 @@ static const char *get_sexp_value_type_name(int n)
 	int kind = SEXP_NODE_TYPE(n);
 	if (kind != SEXP_ATOM && kind != SEXP_LIST)
 		return nullptr;
+	bool is_variable = (Sexp_nodes[n].type & SEXP_FLAG_VARIABLE) != 0;
 	switch (Sexp_nodes[n].subtype) {
 		case SEXP_ATOM_OPERATOR:       return "operator";
-		case SEXP_ATOM_NUMBER:         return "number";
-		case SEXP_ATOM_STRING:         return "string";
+		case SEXP_ATOM_NUMBER:         return is_variable ? "numeric_variable" : "numeric_literal";
+		case SEXP_ATOM_STRING:         return is_variable ? "string_variable" : "string_literal";
 		case SEXP_ATOM_CONTAINER_NAME: return "container_name";
 		case SEXP_ATOM_CONTAINER_DATA: return "container_data";
 		default:                       return nullptr;
