@@ -29,6 +29,8 @@
 #include "def_files/def_files.h"
 #include "graphics/software/FontManager.h"
 #include "graphics/software/FSFont.h"
+#include "scripting/doc_json.h"
+#include "scripting/scripting.h"
 
 
 // ---------------------------------------------------------------------------
@@ -50,6 +52,13 @@
 
 static std::mutex model_cache_mutex;
 static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
+
+// ---------------------------------------------------------------------------
+// Scripting API cache
+// ---------------------------------------------------------------------------
+
+static std::mutex scripting_api_cache_mutex;
+static json_t* scripting_api_cache = nullptr;
 
 // ---------------------------------------------------------------------------
 // OPF / OPR enum-to-string helpers
@@ -536,6 +545,15 @@ void mcp_register_reference_tools(json_t *tools)
 		"List all fonts loaded from fonts.tbl and modular font tables (*-fnt.tbm). "
 		"Returns each font's name, filename, and type (volition_font or truetype). "
 		"Font names are used in fiction viewer stages and other UI references.",
+		json_object());
+
+	// get_scripting_api
+	register_tool(tools, "get_scripting_api",
+		"Get the complete Lua scripting API documentation for the FreeSpace Open engine. "
+		"Returns libraries, classes, functions, properties, operators, hooks (actions), "
+		"conditions, enumerations, engine options, and global variables. "
+		"The result is a large JSON document (typically 200-500 KB). "
+		"Use get_reference_notes with topic 'scripts' for an overview of the scripting system.",
 		json_object());
 
 	// get_root_paths
@@ -2356,6 +2374,40 @@ static json_t *handle_list_fonts()
 }
 
 // ---------------------------------------------------------------------------
+// Scripting API documentation
+// ---------------------------------------------------------------------------
+
+static json_t *handle_get_scripting_api()
+{
+	// Fast path: return cached result
+	{
+		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
+		if (scripting_api_cache)
+			return json_incref(scripting_api_cache);
+	}
+
+	// Generate the documentation (reads only static data, safe from worker threads)
+	const auto doc = Script_system.OutputDocumentation([](const SCP_string& error) {
+		mprintf(("MCP scripting API: documentation error: %s\n", error.c_str()));
+	});
+
+	json_t *api_json = scripting::build_json_doc(doc);
+	if (!api_json)
+		return make_tool_result("Failed to generate scripting API documentation.", true);
+
+	json_t *result = make_json_tool_result(api_json);
+
+	// Cache the result
+	{
+		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
+		if (!scripting_api_cache)
+			scripting_api_cache = json_incref(result);
+	}
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // Mission file listing
 // ---------------------------------------------------------------------------
 
@@ -2553,6 +2605,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_talking_heads();
 	if (strcmp(tool_name, "list_fonts") == 0)
 		return handle_list_fonts();
+	if (strcmp(tool_name, "get_scripting_api") == 0)
+		return handle_get_scripting_api();
 	if (strcmp(tool_name, "list_missions") == 0)
 		return handle_list_missions();
 	if (strcmp(tool_name, "get_root_paths") == 0)
@@ -2571,6 +2625,11 @@ void mcp_reference_tools_cleanup()
 	for (auto &pair : model_details_cache)
 		json_decref(pair.second);
 	model_details_cache.clear();
+
+	if (scripting_api_cache) {
+		json_decref(scripting_api_cache);
+		scripting_api_cache = nullptr;
+	}
 
 	mcp_sexp_forest_cleanup();
 }
