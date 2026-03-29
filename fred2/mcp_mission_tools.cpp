@@ -125,6 +125,11 @@ static bool validate_dialog_for_fiction(SCP_string &error_msg)
 	return validate_single_dialog("fiction viewer stages", "fiction viewer", error_msg);
 }
 
+static bool validate_dialog_for_debriefing(SCP_string &error_msg)
+{
+	return validate_single_dialog("debriefing stages", "debriefing", error_msg);
+}
+
 // ---------------------------------------------------------------------------
 // Persona helpers
 // ---------------------------------------------------------------------------
@@ -1957,6 +1962,239 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 }
 
 // ---------------------------------------------------------------------------
+// Debriefing stage tools
+// ---------------------------------------------------------------------------
+
+// Resolve optional "team" parameter to a debriefing pointer.
+// Defaults to Team 1. Rejects "none".
+static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
+{
+	auto team_str = get_optional_string(input, "team", true);
+	int team_index = 0;  // default to Team 1
+
+	if (team_str) {
+		if (!check_string_enum(team_str, team_enum_values, "team", req))
+			return nullptr;
+		if (reject_team_none(team_str, "debriefing", req)) return nullptr;
+		team_index = team_index_from_name(team_str);
+	}
+
+	return &Debriefings[team_index];
+}
+
+static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
+	set_optional_string(obj, "voice", stricmp(stage.voice, "None") ? stage.voice : "", true);
+	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
+	json_object_set_new(obj, "formula", json_integer(stage.formula));
+	return obj;
+}
+
+static void handle_list_debriefing_stages(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_debriefing, req)) return;
+
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < db->num_stages; i++)
+		json_array_append_new(arr, build_debrief_stage_json(db->stages[i], i));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_debriefing_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_debriefing, req)) return;
+
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+
+	req->result_json = make_json_tool_result(build_debrief_stage_json(db->stages[*index], *index));
+	req->success = true;
+}
+
+static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_debriefing, req)) return;
+
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	if (db->num_stages >= MAX_DEBRIEF_STAGES) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Cannot add more than %d debriefing stages", MAX_DEBRIEF_STAGES);
+		return;
+	}
+
+	auto text = get_required_string(input, "text", req, false);
+	if (!text) return;
+
+	auto voice = get_optional_string(input, "voice", false);
+	auto rec_text = get_optional_string(input, "recommendation_text", false);
+	auto formula = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
+	auto insert_index = get_optional_integer(input, "index");
+
+	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice", req)) return;
+
+	int target;
+	if (!insert_index.has_value()) {
+		target = db->num_stages;
+	} else {
+		if (!check_int_range(*insert_index, 0, db->num_stages, "index", req))
+			return;
+		target = *insert_index;
+	}
+
+	if (!array_insert_slot(db->stages, db->num_stages, MAX_DEBRIEF_STAGES, target)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Cannot add more than %d debriefing stages", MAX_DEBRIEF_STAGES);
+		return;
+	}
+
+	debrief_stage &s = db->stages[target];
+	s.text = text;
+	if (voice && voice[0])
+		strcpy_s(s.voice, voice);
+	else
+		s.voice[0] = 0;
+	s.recommendation_text = rec_text ? rec_text : "";
+
+	if (formula.has_value()) {
+		s.formula = *formula;
+	} else {
+		s.formula = Locked_sexp_true;
+	}
+
+	mcp_sexp_forest_mark_dirty({ s.formula });
+	mark_modified("MCP: create debriefing stage %d", target);
+
+	json_t *data = json_object();
+	json_object_set_new(data, "index", json_integer(target));
+	req->result_json = make_json_tool_result(data);
+	req->success = true;
+}
+
+static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_debriefing, req)) return;
+
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+
+	auto new_text = get_optional_string(input, "text", false);
+	auto new_voice = get_optional_string(input, "voice", false);
+	auto new_rec_text = get_optional_string(input, "recommendation_text", false);
+	auto new_formula = get_optional_integer(input, "formula");
+	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;
+
+	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice", req)) return;
+
+	debrief_stage &s = db->stages[*index];
+	bool changed = false;
+
+	if (new_text) {
+		s.text = new_text;
+		changed = true;
+	}
+	if (new_voice) {
+		strcpy_s(s.voice, new_voice);
+		changed = true;
+	}
+	if (new_rec_text) {
+		s.recommendation_text = new_rec_text;
+		changed = true;
+	}
+	if (new_formula.has_value()) {
+		int old_formula = s.formula;
+		if (old_formula >= 0)
+			free_sexp2(old_formula);
+		s.formula = *new_formula;
+		mcp_sexp_forest_mark_dirty({ s.formula });
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update debriefing stage %d", *index);
+
+	req->result_json = make_json_tool_result(build_debrief_stage_json(s, *index));
+	req->success = true;
+}
+
+static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_debriefing, req)) return;
+
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	auto index = get_required_integer(input, "index", req);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+
+	int formula = db->stages[*index].formula;
+	if (formula >= 0)
+		free_sexp2(formula);
+
+	array_remove_slot(db->stages, db->num_stages, *index);
+
+	mark_modified("MCP: delete debriefing stage %d", *index);
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Deleted debriefing stage %d", *index);
+	req->success = true;
+}
+
+static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "debriefing stage";
+	cfg.count = db->num_stages;
+	cfg.validate_dialog = validate_dialog_for_debriefing;
+	cfg.get_name = nullptr;
+	cfg.do_move = [db](int from, int to) {
+		array_move_element(db->stages, from, to);
+	};
+	cfg.do_swap = [db](int a, int b) {
+		std::swap(db->stages[a], db->stages[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_debriefing_stage(json_t *input, McpToolRequest *req)
+{
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	auto cfg = make_debriefing_move_swap_config(db);
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
+{
+	auto *db = get_debriefing_for_team(input, req);
+	if (!db) return;
+
+	auto cfg = make_debriefing_move_swap_config(db);
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // SEXP text parsing
 // ---------------------------------------------------------------------------
 
@@ -2183,6 +2421,13 @@ static const char *mission_tool_names[] = {
 	"delete_fiction_viewer_stage",
 	"move_fiction_viewer_stage",
 	"swap_fiction_viewer_stages",
+	"list_debriefing_stages",
+	"get_debriefing_stage",
+	"create_debriefing_stage",
+	"update_debriefing_stage",
+	"delete_debriefing_stage",
+	"move_debriefing_stage",
+	"swap_debriefing_stages",
 	"text_to_sexp",
 	"free_sexp",
 	nullptr
@@ -2482,7 +2727,7 @@ void mcp_register_mission_tools(json_t *tools)
 		register_tool(tools, "create_cmd_brief_stage",
 			"Create a new command briefing stage. Command briefings are narrated "
 			"slideshows shown before the main briefing, with text, animation, and "
-			"optional voice per stage. Maximum 10 stages.",
+			"optional voice per stage. Maximum " SCP_TOKEN_TO_STR(CMD_BRIEF_STAGES_MAX) " stages.",
 			props, req);
 	}
 
@@ -2792,6 +3037,127 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// -----------------------------------------------------------------------
+	// Debriefing stage tools
+	// -----------------------------------------------------------------------
+
+	static const char *debrief_team_desc =
+		"Which team's debriefing to operate on (\"Team 1\" or \"Team 2\"). "
+		"Defaults to \"Team 1\". \"none\" is not valid for debriefings.";
+
+	// list_debriefing_stages
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		register_tool(tools, "list_debriefing_stages",
+			"List all debriefing stages for a team. Returns each stage's index, "
+			"text, voice, recommendation text, and SEXP formula root node.",
+			props);
+	}
+
+	// get_debriefing_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to retrieve");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "get_debriefing_stage",
+			"Get full details of a debriefing stage by index.",
+			props, req);
+	}
+
+	// create_debriefing_stage
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "text", "The debriefing text displayed during this stage");
+		add_string_prop(props, "voice",
+			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
+		add_string_prop(props, "recommendation_text",
+			"Recommendation text displayed during this stage. Defaults to empty.");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
+			"Defaults to true (stage always shown).");
+		add_integer_prop(props, "index",
+			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("text"));
+		register_tool(tools, "create_debriefing_stage",
+			"Create a new debriefing stage. Debriefing stages are shown after a mission "
+			"completes; each stage has a SEXP formula controlling whether it is displayed. "
+			"Maximum " SCP_TOKEN_TO_STR(MAX_DEBRIEF_STAGES) " stages per team.",
+			props, req);
+	}
+
+	// update_debriefing_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to update");
+		add_string_prop(props, "text", "New debriefing text for this stage");
+		add_string_prop(props, "voice",
+			"New voice audio filename. Empty string clears the voice.");
+		add_string_prop(props, "recommendation_text",
+			"New recommendation text. Empty string clears the recommendation.");
+		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "update_debriefing_stage",
+			"Update properties of an existing debriefing stage. Only specified "
+			"fields are changed; omitted fields are left unchanged.",
+			props, req);
+	}
+
+	// delete_debriefing_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index",
+			"0-based index of the stage to delete");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "delete_debriefing_stage",
+			"Delete a debriefing stage. Frees its SEXP formula. "
+			"Remaining stages are shifted down.",
+			props, req);
+	}
+
+	// move_debriefing_stage
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"Current 0-based index of the stage");
+		add_integer_prop(props, "to_index",
+			"Target 0-based index to move the stage to");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_debriefing_stage",
+			"Move a debriefing stage from one position to another. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_debriefing_stages
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first stage");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second stage");
+		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_debriefing_stages",
+			"Swap two debriefing stages at the given positions. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
 	// text_to_sexp
 	{
 		json_t *props = json_object();
@@ -2910,6 +3276,20 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_fiction_viewer_stage(input_json, req);
 	} else if (strcmp(tool_name, "swap_fiction_viewer_stages") == 0) {
 		handle_swap_fiction_viewer_stages(input_json, req);
+	} else if (strcmp(tool_name, "list_debriefing_stages") == 0) {
+		handle_list_debriefing_stages(input_json, req);
+	} else if (strcmp(tool_name, "get_debriefing_stage") == 0) {
+		handle_get_debriefing_stage(input_json, req);
+	} else if (strcmp(tool_name, "create_debriefing_stage") == 0) {
+		handle_create_debriefing_stage(input_json, req);
+	} else if (strcmp(tool_name, "update_debriefing_stage") == 0) {
+		handle_update_debriefing_stage(input_json, req);
+	} else if (strcmp(tool_name, "delete_debriefing_stage") == 0) {
+		handle_delete_debriefing_stage(input_json, req);
+	} else if (strcmp(tool_name, "move_debriefing_stage") == 0) {
+		handle_move_debriefing_stage(input_json, req);
+	} else if (strcmp(tool_name, "swap_debriefing_stages") == 0) {
+		handle_swap_debriefing_stages(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
 		handle_text_to_sexp(input_json, req);
 	} else if (strcmp(tool_name, "free_sexp") == 0) {
