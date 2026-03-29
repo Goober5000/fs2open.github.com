@@ -422,47 +422,6 @@ void mcp_register_reference_tools(json_t *tools)
 			props, req);
 	}
 
-	// sexp_to_text
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Root node index of the SEXP tree to serialize");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "sexp_to_text",
-			"Convert a SEXP node tree to its text representation. "
-			"Takes a root node index and returns the S-expression as a formatted string, "
-			"suitable for copy/paste or inspection. Read-only; does not modify any nodes.",
-			props, req);
-	}
-
-	// get_sexp_node
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Index of the SEXP node to inspect");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "get_sexp_node",
-			"Get details about a single SEXP node: its kind, value, value type, "
-			"child/sibling indices (node_first/node_rest), and operator return type. "
-			"Use 'node_first' to descend into a child list (CAR) and 'node_rest' to move "
-			"to the next sibling (CDR).",
-			props, req);
-	}
-
-	// walk_sexp_tree
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Root node index to start traversal from");
-		add_integer_prop(props, "depth", "Maximum recursion depth (default: unlimited)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "walk_sexp_tree",
-			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
-			"of node descriptors with kind, value, value type, child/sibling indices, "
-			"and walk_first/walk_rest indices into the array for easy traversal.",
-			props, req);
-	}
-
 	// get_ship_class_model_details
 	register_tool_with_required_string(tools, "get_ship_class_model_details",
 		"Get 3D model details for a ship class, including subsystems, bounding box "
@@ -1910,7 +1869,7 @@ static const opr_type_info Opr_type_info[] = {
 	{ OPR_NONE, nullptr, nullptr, nullptr }
 };
 
-static const char *get_opr_type_name(int opr_value)
+const char *get_opr_type_name(int opr_value)
 {
     for (const opr_type_info *t = Opr_type_info; t->name; t++) {
         if (t->opr_value == opr_value)
@@ -2821,169 +2780,6 @@ static json_t *handle_get_root_paths()
 }
 
 // ---------------------------------------------------------------------------
-// SEXP text serialization
-// ---------------------------------------------------------------------------
-
-static json_t *handle_sexp_to_text(json_t *arguments)
-{
-	json_t *err = nullptr;
-	auto node = get_required_integer(arguments, "node", &err);
-	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", &err))
-		return err;
-
-	int n = *node;
-
-	if (Sexp_nodes[n].type == SEXP_NOT_USED)
-		return make_tool_result(true, "Node %d is not in use", n);
-
-	SCP_string text;
-	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
-
-	json_t *result = json_object();
-	json_object_set_new(result, "node", json_integer(n));
-	json_object_set_new(result, "text", json_string(text.c_str()));
-	return make_json_tool_result(result);
-}
-
-// ---------------------------------------------------------------------------
-// SEXP node navigation
-// ---------------------------------------------------------------------------
-
-static const char *get_sexp_kind_name(int n)
-{
-	switch (SEXP_NODE_TYPE(n)) {
-		case SEXP_LIST: return "list";
-		case SEXP_ATOM: return "atom";
-		default:        return "not_used";
-	}
-}
-
-static const char *get_sexp_value_type_name(int n)
-{
-	int kind = SEXP_NODE_TYPE(n);
-	if (kind != SEXP_ATOM && kind != SEXP_LIST)
-		return nullptr;
-	bool is_variable = (Sexp_nodes[n].type & SEXP_FLAG_VARIABLE) != 0;
-	switch (Sexp_nodes[n].subtype) {
-		case SEXP_ATOM_OPERATOR:       return "operator";
-		case SEXP_ATOM_NUMBER:         return is_variable ? "numeric_variable" : "numeric_literal";
-		case SEXP_ATOM_STRING:         return is_variable ? "string_variable" : "string_literal";
-		case SEXP_ATOM_CONTAINER_NAME: return "container_name";
-		case SEXP_ATOM_CONTAINER_DATA: return "container_data";
-		default:                       return nullptr;
-	}
-}
-
-static constexpr int MAX_SEXP_WALK_NODES = 500;
-
-static json_t *build_sexp_node_json(int n)
-{
-	json_t *obj = json_object();
-	json_object_set_new(obj, "node", json_integer(n));
-	json_object_set_new(obj, "value", json_string(Sexp_nodes[n].text));
-
-	json_object_set_new(obj, "kind", json_string(get_sexp_kind_name(n)));
-	const char *node_type = get_sexp_value_type_name(n);
-	json_object_set_new(obj, "value_type", node_type ? json_string(node_type) : json_null());
-
-	json_object_set_new(obj, "node_first", json_integer(Sexp_nodes[n].first));
-	json_object_set_new(obj, "node_rest", json_integer(Sexp_nodes[n].rest));
-
-	int op_index = get_operator_index(n);
-	if (op_index >= 0) {
-		int ret = query_operator_return_type(op_index);
-		json_object_set_new(obj, "return_type", json_string(get_opr_type_name(ret)));
-	} else {
-		json_object_set_new(obj, "return_type", json_null());
-	}
-
-	return obj;
-}
-
-static json_t *handle_get_sexp_node(json_t *arguments)
-{
-	json_t *err = nullptr;
-	auto node = get_required_integer(arguments, "node", &err);
-	if (!node) return err;
-
-	int n = *node;
-	if (!check_int_range(n, 0, Num_sexp_nodes - 1, "node", &err)) return err;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
-		return make_tool_result(true, "Node %d is not in use", n);
-
-	return make_json_tool_result(build_sexp_node_json(n));
-}
-
-struct walk_entry {
-	int node;
-	int depth;
-};
-
-static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int depth, int max_depth)
-{
-	if (n < 0 || n >= Num_sexp_nodes || (int)entries.size() >= MAX_SEXP_WALK_NODES)
-		return;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
-		return;
-	if (max_depth >= 0 && depth > max_depth)
-		return;
-
-	entries.push_back({n, depth});
-	collect_walk_entries(Sexp_nodes[n].first, entries, depth + 1, max_depth);
-	collect_walk_entries(Sexp_nodes[n].rest, entries, depth, max_depth);
-}
-
-static json_t *handle_walk_sexp_tree(json_t *arguments)
-{
-	json_t *err = nullptr;
-	auto node = get_required_integer(arguments, "node", &err);
-	if (!node) return err;
-
-	int n = *node;
-	if (!check_int_range(n, 0, Num_sexp_nodes - 1, "node", &err)) return err;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
-		return make_tool_result(true, "Node %d is not in use", n);
-
-	auto depth = get_optional_integer(arguments, "depth");
-	int max_depth = depth.has_value() ? *depth : -1;
-
-	// Pass 1: collect entries with depths
-	SCP_vector<walk_entry> entries;
-	collect_walk_entries(n, entries, 0, max_depth);
-
-	// Build node index -> position map
-	SCP_unordered_map<int, int> pos_map;
-	for (int i = 0; i < (int)entries.size(); i++)
-		pos_map[entries[i].node] = i;
-
-	// Pass 2: build JSON with walk references and depth
-	json_t *arr = json_array();
-	for (const auto &entry : entries) {
-		json_t *obj = build_sexp_node_json(entry.node);
-
-		json_object_set_new(obj, "depth", json_integer(entry.depth));
-
-		auto it_first = pos_map.find(Sexp_nodes[entry.node].first);
-		json_object_set_new(obj, "walk_first",
-			(it_first != pos_map.end()) ? json_integer(it_first->second) : json_integer(-1));
-
-		auto it_rest = pos_map.find(Sexp_nodes[entry.node].rest);
-		json_object_set_new(obj, "walk_rest",
-			(it_rest != pos_map.end()) ? json_integer(it_rest->second) : json_integer(-1));
-
-		json_array_append_new(arr, obj);
-	}
-
-	json_t *result = json_object();
-	json_object_set_new(result, "root", json_integer(n));
-	json_object_set_new(result, "nodes", arr);
-	if ((int)entries.size() >= MAX_SEXP_WALK_NODES)
-		json_object_set_new(result, "truncated", json_true());
-
-	return make_json_tool_result(result);
-}
-
-// ---------------------------------------------------------------------------
 // Dispatch
 // ---------------------------------------------------------------------------
 
@@ -3068,12 +2864,6 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_return_type(arguments);
 	if (strcmp(tool_name, "list_sexp_argument_values") == 0)
 		return handle_list_sexp_argument_values(arguments);
-	if (strcmp(tool_name, "sexp_to_text") == 0)
-		return handle_sexp_to_text(arguments);
-	if (strcmp(tool_name, "get_sexp_node") == 0)
-		return handle_get_sexp_node(arguments);
-	if (strcmp(tool_name, "walk_sexp_tree") == 0)
-		return handle_walk_sexp_tree(arguments);
 	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
 		return handle_get_ship_class_model_details(arguments);
 	if (strcmp(tool_name, "subsystem_names_compare") == 0)
