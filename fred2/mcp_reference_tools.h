@@ -15,4 +15,7 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments);
 // Must be called after all mongoose threads have stopped (i.e., after mg_stop()).
 void mcp_reference_tools_cleanup();
 
+// Look up the human-readable name for an OPR_* return type constant.
+const char *get_opr_type_name(int opr_value);
+
 #endif // _MCP_REFERENCE_TOOLS_H
