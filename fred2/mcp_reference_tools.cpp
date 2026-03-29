@@ -2879,8 +2879,7 @@ static json_t *build_sexp_node_json(int n)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "node", json_integer(n));
-	json_object_set_new(obj, "raw_text", json_string(Sexp_nodes[n].text));
-	json_object_set_new(obj, "processed_text", json_string(CTEXT(n)));
+	json_object_set_new(obj, "text", json_string(Sexp_nodes[n].text));
 
 	json_object_set_new(obj, "node_kind", json_string(get_sexp_node_kind_name(n)));
 	const char *node_type = get_sexp_node_type_name(n);
