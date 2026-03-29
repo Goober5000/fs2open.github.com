@@ -2937,7 +2937,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "story_filename",
-			"Text filename for the fiction stage (e.g. \"fiction.txt\"). Max 31 characters.");
+			"Text filename for the fiction stage (e.g. \"fiction.txt\"). Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
 		add_string_prop(props, "font_filename",
 			"Font name from list_fonts. Defaults to empty (uses default font).");
 		add_string_prop(props, "voice_filename",
@@ -2969,7 +2969,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_integer_prop(props, "index",
 			"0-based index of the stage to update");
 		add_string_prop(props, "story_filename",
-			"New text filename for the fiction stage. Max 31 characters.");
+			"New text filename for the fiction stage. Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
 		add_string_prop(props, "font_filename",
 			"New font name from list_fonts. Empty string clears the font.");
 		add_string_prop(props, "voice_filename",
