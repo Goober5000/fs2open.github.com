@@ -248,11 +248,11 @@ static json_t* json_doc_generate_action_element(const DocumentationAction& actio
 		action.overridable);
 }
 
-void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filename)
+json_t* build_json_doc(const ScriptingDocumentation& doc)
 {
-	std::unique_ptr<json_t> root(json_object());
+	json_t* root = json_object();
 	// Should be incremented every time an incompatible change is made
-	json_object_set_new(root.get(), "version", json_integer(2));
+	json_object_set_new(root, "version", json_integer(2));
 
 	{
 		json_t* actionArray = json_array();
@@ -261,7 +261,7 @@ void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filena
 			json_array_append_new(actionArray, json_doc_generate_action_element(action));
 		}
 
-		json_object_set_new(root.get(), "actions", actionArray);
+		json_object_set_new(root, "actions", actionArray);
 	}
 	{
 		json_t* conditionArray = json_array();
@@ -270,7 +270,7 @@ void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filena
 			json_array_append_new(conditionArray, json_string(cond.c_str()));
 		}
 
-		json_object_set_new(root.get(), "conditions", conditionArray);
+		json_object_set_new(root, "conditions", conditionArray);
 	}
 	{
 		json_t* optionsArray = json_array();
@@ -285,7 +285,7 @@ void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filena
 			json_array_append_new(optionsArray, optionsObject);
 		}
 
-		json_object_set_new(root.get(), "options", optionsArray);
+		json_object_set_new(root, "options", optionsArray);
 	}
 	{
 		json_t* enumObject = json_object();
@@ -294,7 +294,7 @@ void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filena
 			json_object_set_new(enumObject, enumVal.name.c_str(), json_integer(enumVal.value));
 		}
 
-		json_object_set_new(root.get(), "enums", enumObject);
+		json_object_set_new(root, "enums", enumObject);
 	}
 	{
 		json_t* globalVariables = json_array();
@@ -303,11 +303,19 @@ void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filena
 			json_array_append_new(globalVariables, json_doc_generate_param_element(param));
 		}
 
-		json_object_set_new(root.get(), "globalVars", globalVariables);
+		json_object_set_new(root, "globalVars", globalVariables);
 	}
-	json_object_set_new(root.get(), "elements", json_doc_generate_elements(doc.elements));
+	json_object_set_new(root, "elements", json_doc_generate_elements(doc.elements));
 
-	const auto jsonStr = json_dump_string(root.get(), JSON_INDENT(2) | JSON_SORT_KEYS);
+	return root;
+}
+
+void output_json_doc(const ScriptingDocumentation& doc, const SCP_string& filename)
+{
+	json_t* root = build_json_doc(doc);
+
+	const auto jsonStr = json_dump_string(root, JSON_INDENT(2) | JSON_SORT_KEYS);
+	json_decref(root);
 
 	std::ofstream outStr(filename, std::ios::binary);
 	outStr << jsonStr;
