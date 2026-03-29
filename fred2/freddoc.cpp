@@ -682,12 +682,6 @@ BOOL CFREDDoc::OnOpenDocument(LPCTSTR pathname)
 	return TRUE;
 }
 
-// For tokenizing
-#define MAX_FILENAME_LEN_1	31
-#if (MAX_FILENAME_LEN_1) != (MAX_FILENAME_LEN - 1)
-#error MAX_FILENAME_LEN_1 must be equal to MAX_FILENAME_LEN - 1!
-#endif
-
 BOOL CFREDDoc::OnSaveDocument(LPCTSTR pathname) {
 	Fred_mission_save save;
 	if (Mission_save_format == FSO_FORMAT_RETAIL) {
