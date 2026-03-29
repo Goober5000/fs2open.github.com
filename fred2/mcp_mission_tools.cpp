@@ -17,6 +17,9 @@
 #include "mission/missiongoals.h"
 #include "missionui/missioncmdbrief.h"
 #include "missionui/fictionviewer.h"
+#include "mission/missionbriefcommon.h"
+#include "mission/missionparse.h"
+#include "ship/ship.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
 #include "freddoc.h"
@@ -1991,6 +1994,105 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// SEXP tree freeing
+// ---------------------------------------------------------------------------
+
+static bool is_sexp_attached_to_mission(int node)
+{
+	// Mission cutscenes
+	for (const auto &cs : The_mission.cutscenes) {
+		if (cs.formula == node)
+			return true;
+	}
+
+	// Fiction viewer stages
+	for (const auto &stage : Fiction_viewer_stages) {
+		if (stage.formula == node)
+			return true;
+	}
+
+	// Briefing stages (per team)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Briefings[t].num_stages; s++) {
+			if (Briefings[t].stages[s].formula == node)
+				return true;
+		}
+	}
+
+	// Debriefing stages (per team)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Debriefings[t].num_stages; s++) {
+			if (Debriefings[t].stages[s].formula == node)
+				return true;
+		}
+	}
+
+	// Ship arrival/departure cues (parse objects)
+	for (const auto &po : Parse_objects) {
+		if (po.arrival_cue == node || po.departure_cue == node)
+			return true;
+	}
+
+	// Wing arrival/departure cues
+	for (int i = 0; i < Num_wings; i++) {
+		if (Wings[i].arrival_cue == node || Wings[i].departure_cue == node)
+			return true;
+	}
+
+	// Events
+	for (const auto &evt : Mission_events) {
+		if (evt.formula == node)
+			return true;
+	}
+
+	// Goals
+	for (const auto &goal : Mission_goals) {
+		if (goal.formula == node)
+			return true;
+	}
+
+	return false;
+}
+
+static void handle_free_sexp(json_t *input, McpToolRequest *req)
+{
+	auto node = get_required_integer(input, "node", req);
+	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req))
+		return;
+
+	int n = *node;
+
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is not in use", n);
+		return;
+	}
+
+	if (n == Locked_sexp_true || n == Locked_sexp_false) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is a locked singleton (%s) and cannot be freed", n, Sexp_nodes[n].text);
+		return;
+	}
+
+	if (is_sexp_attached_to_mission(n)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is attached to a mission entity (event, goal, briefing, etc.) and cannot be freed directly", n);
+		return;
+	}
+
+	int freed_count = free_sexp2(n);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "freed_count", json_integer(freed_count));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -2031,6 +2133,7 @@ static const char *mission_tool_names[] = {
 	"move_fiction_viewer_stage",
 	"swap_fiction_viewer_stages",
 	"text_to_sexp",
+	"free_sexp",
 	nullptr
 };
 
@@ -2652,6 +2755,19 @@ void mcp_register_mission_tools(json_t *tools)
 			"text, any parsing errors encountered, and the first (if any) syntax error.",
 			props, req);
 	}
+
+	// free_sexp
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Root node index of the SEXP tree to free");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "free_sexp",
+			"Free a SEXP node tree. Recursively frees the entire tree rooted at the "
+			"given node. Refuses to free locked singleton nodes or nodes attached to "
+			"mission entities (events, goals, briefings, arrival/departure cues, etc.).",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2745,6 +2861,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_swap_fiction_viewer_stages(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
 		handle_text_to_sexp(input_json, req);
+	} else if (strcmp(tool_name, "free_sexp") == 0) {
+		handle_free_sexp(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
