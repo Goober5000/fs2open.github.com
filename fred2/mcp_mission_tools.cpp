@@ -29,6 +29,55 @@
 #include "mainfrm.h"
 
 // ---------------------------------------------------------------------------
+// SEXP formula validation
+// ---------------------------------------------------------------------------
+
+static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpToolRequest *req)
+{
+	// Range check
+	if (!check_int_range(node, 0, Num_sexp_nodes - 1, "formula", req))
+		return false;
+
+	// Check node is in use
+	if (Sexp_nodes[node].type == SEXP_NOT_USED) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"SEXP node %d is not in use", node);
+		return false;
+	}
+
+	// Check operator return type
+	int op_const = get_operator_const(node);
+	if (op_const == OP_NOT_AN_OP) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"SEXP node %d (\"%s\") is not a valid SEXP operator",
+			node, Sexp_nodes[node].text);
+		return false;
+	}
+
+	auto actual_return_type = query_operator_return_type(op_const);
+	if (actual_return_type != expected_return_type) {
+		const char *expected_str = (expected_return_type == OPR_NULL) ? "OPR_NULL (action)" : "OPR_BOOL (boolean)";
+		const char *actual_str;
+		switch (actual_return_type) {
+			case OPR_NULL:   actual_str = "OPR_NULL (action)"; break;
+			case OPR_BOOL:   actual_str = "OPR_BOOL (boolean)"; break;
+			case OPR_NUMBER: actual_str = "OPR_NUMBER"; break;
+			case OPR_STRING: actual_str = "OPR_STRING"; break;
+			default:         actual_str = "unknown"; break;
+		}
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Formula node %d (\"%s\") has return type %s, but this entity requires %s",
+			node, Sexp_nodes[node].text, actual_str, expected_str);
+		return false;
+	}
+
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Dialog conflict guards
 // ---------------------------------------------------------------------------
 
@@ -670,7 +719,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	// Optional parameters
 	auto formula       = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, req)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
@@ -805,7 +854,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto formula       = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, req)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
@@ -1418,7 +1467,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Optional parameters
 	auto type_str   = get_optional_string(input, "goal_type", true);
 	auto formula    = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1524,7 +1573,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Extract optional fields
 	auto type_str   = get_optional_string(input, "goal_type", true);
 	auto formula    = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_int_range(*formula, 0, Num_sexp_nodes - 1, "formula", req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1743,6 +1792,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto bg640 = get_optional_string(input, "background_640", true);
 	auto bg1024 = get_optional_string(input, "background_1024", true);
 	auto formula = get_optional_integer(input, "formula");
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
 	auto insert_index = get_optional_integer(input, "index");
 
 	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
@@ -1801,6 +1851,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto new_bg640 = get_optional_string(input, "background_640", false);
 	auto new_bg1024 = get_optional_string(input, "background_1024", false);
 	auto new_formula = get_optional_integer(input, "formula");
+	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;
 
 	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
 	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
