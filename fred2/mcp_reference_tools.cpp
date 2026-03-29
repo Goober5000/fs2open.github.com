@@ -1832,34 +1832,6 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 // get_ship_class_model_details — requires model loading on main thread
 // ---------------------------------------------------------------------------
 
-// Determine usage annotation for a path by checking if it's referenced
-// by docking bays or ship bays.
-static const char *determine_path_usage(int path_index, const polymodel *pm)
-{
-	// Check if this path is a subsystem attack path
-	if (pm->paths[path_index].type == MP_TYPE_SUBSYS)
-		return "subsystem";
-
-	// Check if this path is referenced by a docking bay
-	for (int d = 0; d < pm->n_docks; d++) {
-		const auto &bay = pm->docking_bays[d];
-		for (int sp = 0; sp < bay.num_spline_paths; sp++) {
-			if (bay.splines[sp] == path_index)
-				return "dockpoint";
-		}
-	}
-
-	// Check if this path is referenced by a ship bay (fighter bay)
-	if (pm->ship_bay) {
-		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
-			if (pm->ship_bay->path_indexes[b] == path_index)
-				return "hangar_bay";
-		}
-	}
-
-	return "other";
-}
-
 extern void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_orient, object *objp, polymodel *pm, int submodel, int dock_index);
 
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
@@ -1999,8 +1971,45 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_t *path_obj = json_object();
 
 			json_object_set_new(path_obj, "name", json_string(path.name));
-			set_optional_string(path_obj, "parent_name", path.parent_name, true);
-			json_object_set_new(path_obj, "usage", json_string(determine_path_usage(p, pm)));
+
+			// Build used_by object identifying which consumer(s) use this path
+			{
+				json_t *used_by = json_object();
+
+				// Check subsystems
+				for (int s = 0; s < sip.n_subsystems; s++) {
+					if (sip.subsystems[s].path_num == p) {
+						json_object_set_new(used_by, "subsystem", json_string(sip.subsystems[s].subobj_name));
+						break;
+					}
+				}
+
+				// Check docking bays
+				for (int d = 0; d < pm->n_docks; d++) {
+					const auto &bay = pm->docking_bays[d];
+					for (int sp = 0; sp < bay.num_spline_paths; sp++) {
+						if (bay.splines[sp] == p) {
+							json_object_set_new(used_by, "dockpoint", json_string(bay.name));
+							break;
+						}
+					}
+				}
+
+				// Check hangar bay
+				if (pm->ship_bay) {
+					for (int b = 0; b < pm->ship_bay->num_paths; b++) {
+						if (pm->ship_bay->path_indexes[b] == p) {
+							json_object_set_new(used_by, "hangar_bay", json_true());
+							break;
+						}
+					}
+				}
+
+				if (json_object_size(used_by) > 0)
+					json_object_set_new(path_obj, "used_by", used_by);
+				else
+					json_decref(used_by);
+			}
 
 			// Vertices
 			json_t *verts = json_array();
@@ -2021,25 +2030,15 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 		json_object_set_new(obj, "paths", paths);
 	}
 
-	// Ship bay (fighter bay arrival/departure paths)
+	// Hangar bay path names
 	if (pm->ship_bay && pm->ship_bay->num_paths > 0) {
-		json_t *bay_obj = json_object();
-
-		json_t *bay_paths = json_array();
+		json_t *bay_path_names = json_array();
 		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
 			int path_idx = pm->ship_bay->path_indexes[b];
-			json_t *bp = json_object();
-
 			if (path_idx >= 0 && path_idx < pm->n_paths)
-				json_object_set_new(bp, "path_name", json_string(pm->paths[path_idx].name));
-
-			json_object_set_new(bp, "arrival", json_boolean((pm->ship_bay->arrive_flags & (1 << b)) != 0));
-			json_object_set_new(bp, "departure", json_boolean((pm->ship_bay->depart_flags & (1 << b)) != 0));
-
-			json_array_append_new(bay_paths, bp);
+				json_array_append_new(bay_path_names, json_string(pm->paths[path_idx].name));
 		}
-		json_object_set_new(bay_obj, "paths", bay_paths);
-		json_object_set_new(obj, "hangar_bay", bay_obj);
+		json_object_set_new(obj, "hangar_bay_path_names", bay_path_names);
 	}
 
 	// Subsystems (model is loaded at this point, so types are reliable)
@@ -2055,6 +2054,9 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
 			json_object_set_new(ss_obj, "position", build_vec3d_json(ss.pnt));
 			json_object_set_new(ss_obj, "radius", json_real(ss.radius));
+
+			if (ss.path_num >= 0 && ss.path_num < pm->n_paths)
+				json_object_set_new(ss_obj, "path_name", json_string(pm->paths[ss.path_num].name));
 
 			// Turret-specific info
 			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
