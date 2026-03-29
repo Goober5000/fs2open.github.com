@@ -260,8 +260,8 @@ static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, b
 
 	if (include_details) {
 		json_object_set_new(obj, "team", json_string(team_name_from_index(msg.multi_team)));
-		set_optional_string(obj, "talking_head", msg.avi_info.name, true);
-		set_optional_string(obj, "voice_file", msg.wave_info.name, true);
+		set_optional_filename(obj, "talking_head", msg.avi_info.name);
+		set_optional_filename(obj, "voice_file", msg.wave_info.name);
 	}
 
 	return obj;
@@ -326,8 +326,8 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", req)) return;
 
 	auto persona_str  = get_optional_string(input, "persona", false);
-	auto talking_head = get_optional_string(input, "talking_head", false);
-	auto voice_file   = get_optional_string(input, "voice_file", false);
+	auto talking_head = get_optional_filename(input, "talking_head", false);
+	auto voice_file   = get_optional_filename(input, "voice_file", false);
 	auto team_str     = get_optional_string(input, "team", true);
 	auto insert_index = get_optional_integer(input, "index");
 
@@ -428,8 +428,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	auto new_head = get_optional_string(input, "talking_head", false);
-	auto new_voice = get_optional_string(input, "voice_file", false);
+	auto new_head = get_optional_filename(input, "talking_head", false);
+	auto new_voice = get_optional_filename(input, "voice_file", false);
 
 	auto new_team_str = get_optional_string(input, "team", true);
 	std::optional<int> new_team = std::nullopt;
@@ -1188,8 +1188,9 @@ static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int inde
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
-	set_optional_string(obj, "ani_filename", stage.ani_filename, true);
-	set_optional_string(obj, "wave_filename", stage.wave_filename, true);
+	if (stage.ani_filename && stricmp(stage.ani_filename, "<default>") != 0)
+		set_optional_filename(obj, "ani_filename", stage.ani_filename);
+	set_optional_filename(obj, "wave_filename", stage.wave_filename);
 	return obj;
 }
 
@@ -1240,8 +1241,8 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", req, false);
 	if (!text) return;
 
-	auto ani = get_optional_string(input, "ani_filename", false);
-	auto wave = get_optional_string(input, "wave_filename", false);
+	auto ani = get_optional_filename(input, "ani_filename", false);
+	auto wave = get_optional_filename(input, "wave_filename", false);
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Validate filename lengths
@@ -1294,8 +1295,8 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
-	auto new_ani  = get_optional_string(input, "ani_filename", false);
-	auto new_wave = get_optional_string(input, "wave_filename", false);
+	auto new_ani  = get_optional_filename(input, "ani_filename", false);
+	auto new_wave = get_optional_filename(input, "wave_filename", false);
 
 	// Validate filename lengths
 	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
@@ -1751,11 +1752,11 @@ static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index));
 	json_object_set_new(obj, "story_filename", json_string(stage.story_filename));
-	set_optional_string(obj, "font_filename", stage.font_filename, true);
-	set_optional_string(obj, "voice_filename", stage.voice_filename, true);
+	set_optional_filename(obj, "font_filename", stage.font_filename);
+	set_optional_filename(obj, "voice_filename", stage.voice_filename);
 	set_optional_string(obj, "ui_name", stage.ui_name, true);
-	set_optional_string(obj, "background_640", stage.background[0], true);
-	set_optional_string(obj, "background_1024", stage.background[1], true);
+	set_optional_filename(obj, "background_640", stage.background[0]);
+	set_optional_filename(obj, "background_1024", stage.background[1]);
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
 	return obj;
 }
@@ -1788,14 +1789,14 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 {
 	if (!validate(validate_dialog_for_fiction, req)) return;
 
-	auto story = get_required_string(input, "story_filename", req, true);
+	auto story = get_required_filename(input, "story_filename", req);
 	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
 
-	auto font  = get_optional_string(input, "font_filename", true);
-	auto voice = get_optional_string(input, "voice_filename", true);
+	auto font  = get_optional_filename(input, "font_filename", true);
+	auto voice = get_optional_filename(input, "voice_filename", true);
 	auto ui    = get_optional_string(input, "ui_name", true);
-	auto bg640 = get_optional_string(input, "background_640", true);
-	auto bg1024 = get_optional_string(input, "background_1024", true);
+	auto bg640 = get_optional_filename(input, "background_640", true);
+	auto bg1024 = get_optional_filename(input, "background_1024", true);
 	auto formula = get_optional_integer(input, "formula");
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
 	auto insert_index = get_optional_integer(input, "index");
@@ -1849,12 +1850,12 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
 
-	auto new_story = get_optional_string(input, "story_filename", false);
-	auto new_font  = get_optional_string(input, "font_filename", false);
-	auto new_voice = get_optional_string(input, "voice_filename", false);
+	auto new_story = get_optional_filename(input, "story_filename", false);
+	auto new_font  = get_optional_filename(input, "font_filename", false);
+	auto new_voice = get_optional_filename(input, "voice_filename", false);
 	auto new_ui    = get_optional_string(input, "ui_name", false);
-	auto new_bg640 = get_optional_string(input, "background_640", false);
-	auto new_bg1024 = get_optional_string(input, "background_1024", false);
+	auto new_bg640 = get_optional_filename(input, "background_640", false);
+	auto new_bg1024 = get_optional_filename(input, "background_1024", false);
 	auto new_formula = get_optional_integer(input, "formula");
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;
 
@@ -1987,7 +1988,7 @@ static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
-	set_optional_string(obj, "voice", stricmp(stage.voice, "None") ? stage.voice : "", true);
+	set_optional_filename(obj, "voice", stage.voice);
 	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
 	return obj;
@@ -2040,7 +2041,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", req, false);
 	if (!text) return;
 
-	auto voice = get_optional_string(input, "voice", false);
+	auto voice = get_optional_filename(input, "voice", false);
 	auto rec_text = get_optional_string(input, "recommendation_text", false);
 	auto formula = get_optional_integer(input, "formula");
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
@@ -2066,10 +2067,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	debrief_stage &s = db->stages[target];
 	s.text = text;
-	if (voice && voice[0])
-		strcpy_s(s.voice, voice);
-	else
-		s.voice[0] = 0;
+	strcpy_s(s.voice, (voice && voice[0]) ? voice : "none");
 	s.recommendation_text = rec_text ? rec_text : "";
 
 	if (formula.has_value()) {
@@ -2099,7 +2097,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
-	auto new_voice = get_optional_string(input, "voice", false);
+	auto new_voice = get_optional_filename(input, "voice", false);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", false);
 	auto new_formula = get_optional_integer(input, "formula");
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;

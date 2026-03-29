@@ -52,6 +52,12 @@ void set_optional_string(json_t *obj, const char *key, const char *value, bool o
 		json_object_set_new(obj, key, json_string(value));
 }
 
+void set_optional_filename(json_t *obj, const char *key, const char *value)
+{
+	if (value && VALID_FNAME(value))
+		json_object_set_new(obj, key, json_string(value));
+}
+
 static void add_typed_prop(json_t *props, const char *name, const char *description, const char *type)
 {
 	json_t *p = json_object();
@@ -319,6 +325,20 @@ const char *get_required_string(json_t *input, const char *param_name, McpToolRe
 	return value;
 }
 
+const char *get_required_filename(json_t *input, const char *param_name, McpToolRequest *req)
+{
+	const char *value = get_required_string(input, param_name, req, false);
+	if (!value)
+		return nullptr;
+	if (!VALID_FNAME(value)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Required parameter must be a valid file name: %s", param_name);
+		return nullptr;
+	}
+	return value;
+}
+
 std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req)
 {
 	auto item = get_optional_integer(input, param_name);
@@ -415,6 +435,15 @@ const char *get_optional_string(json_t *arguments, const char *param_name, bool 
 		}
 	}
 	return nullptr;
+}
+
+const char *get_optional_filename(json_t *arguments, const char *param_name, bool null_if_invalid)
+{
+	const char *value = get_optional_string(arguments, param_name, true);
+	if (!VALID_FNAME(value)) {
+		return null_if_invalid ? nullptr : "";
+	}
+	return value;
 }
 
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name)
