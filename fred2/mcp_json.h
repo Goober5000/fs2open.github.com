@@ -25,6 +25,9 @@ json_t *make_json_tool_result(json_t *data);
 // Set a string field only if the source is non-null and, optionally, non-empty.
 void set_optional_string(json_t *obj, const char *key, const char *value, bool omit_if_empty);
 
+// Set a string field (that represents a filename) only if VALID_FNAME is true.
+void set_optional_filename(json_t *obj, const char *key, const char *value);
+
 // Schema property helpers for tool registration.
 void add_string_prop(json_t *props, const char *name, const char *description);
 void add_integer_prop(json_t *props, const char *name, const char *description);
@@ -86,6 +89,10 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 // req->success=false with an error message if the parameter is missing, or empty and disallowed.
 const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty);
 
+// Extracts a required string parameter (which represents a filename) from input JSON. Returns nullptr and sets
+// req->success=false with an error message if VALID_FNAME fails.
+const char *get_required_filename(json_t *input, const char *param_name, McpToolRequest *req);
+
 // Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
 // req->success=false with an error message if the parameter is missing or the wrong type.
 std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req);
@@ -113,6 +120,10 @@ std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_n
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or omitted.
 const char *get_optional_string(json_t *arguments, const char *param_name, bool null_if_empty);
+
+// Extracts an optional string parameter (that represents a filename) from arguments JSON (for reference tools that
+// return json_t* directly). If the string doesn't satisfy VALID_FNAME, it returns null or empty, depending on the last parameter.
+const char *get_optional_filename(json_t *arguments, const char *param_name, bool null_if_invalid);
 
 // Extracts optional integer, double, float, or bool parameters from arguments JSON (for reference
 // tools that return json_t* directly).
