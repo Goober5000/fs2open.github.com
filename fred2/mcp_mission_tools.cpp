@@ -4,6 +4,7 @@
 #include "mcp_json.h"
 #include "mcp_array_utils.h"
 #include "mcp_sexp_forest.h"
+#include "mcp_reference_tools.h"
 
 #include <jansson.h>
 #include <algorithm>
@@ -128,6 +129,18 @@ static bool validate_dialog_for_fiction(SCP_string &error_msg)
 static bool validate_dialog_for_debriefing(SCP_string &error_msg)
 {
 	return validate_single_dialog("debriefing stages", "debriefing", error_msg);
+}
+
+static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
+{
+	return validate_single_dialog("SEXP nodes", "cutscene", error_msg)
+		&& validate_single_dialog("SEXP nodes", "fiction viewer", error_msg)
+		&& validate_single_dialog("SEXP nodes", "briefing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "debriefing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "ship", error_msg)
+		&& validate_single_dialog("SEXP nodes", "wing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "event", error_msg)
+		&& validate_single_dialog("SEXP nodes", "goal", error_msg);
 }
 
 // ---------------------------------------------------------------------------
@@ -2193,11 +2206,190 @@ static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// SEXP text serialization
+// ---------------------------------------------------------------------------
+
+static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	auto node = get_required_integer(input, "node", req);
+	if (!node) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+
+	int n = *node;
+
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is not in use", n);
+		return;
+	}
+
+	SCP_string text;
+	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "text", json_string(text.c_str()));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// SEXP node navigation
+// ---------------------------------------------------------------------------
+
+static const char *get_sexp_kind_name(int n)
+{
+	switch (SEXP_NODE_TYPE(n)) {
+		case SEXP_LIST: return "list";
+		case SEXP_ATOM: return "atom";
+		default:        return "not_used";
+	}
+}
+
+static const char *get_sexp_value_type_name(int n)
+{
+	int kind = SEXP_NODE_TYPE(n);
+	if (kind != SEXP_ATOM && kind != SEXP_LIST)
+		return nullptr;
+	bool is_variable = (Sexp_nodes[n].type & SEXP_FLAG_VARIABLE) != 0;
+	switch (Sexp_nodes[n].subtype) {
+		case SEXP_ATOM_OPERATOR:       return "operator";
+		case SEXP_ATOM_NUMBER:         return is_variable ? "numeric_variable" : "numeric_literal";
+		case SEXP_ATOM_STRING:         return is_variable ? "string_variable" : "string_literal";
+		case SEXP_ATOM_CONTAINER_NAME: return "container_name";
+		case SEXP_ATOM_CONTAINER_DATA: return "container_data";
+		default:                       return nullptr;
+	}
+}
+
+static constexpr int MAX_SEXP_WALK_NODES = 500;
+
+static json_t *build_sexp_node_json(int n)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "node", json_integer(n));
+	json_object_set_new(obj, "value", json_string(Sexp_nodes[n].text));
+
+	json_object_set_new(obj, "kind", json_string(get_sexp_kind_name(n)));
+	const char *node_type = get_sexp_value_type_name(n);
+	json_object_set_new(obj, "value_type", node_type ? json_string(node_type) : json_null());
+
+	json_object_set_new(obj, "node_first", json_integer(Sexp_nodes[n].first));
+	json_object_set_new(obj, "node_rest", json_integer(Sexp_nodes[n].rest));
+
+	int op_index = get_operator_index(n);
+	if (op_index >= 0) {
+		int ret = query_operator_return_type(op_index);
+		json_object_set_new(obj, "return_type", json_string(get_opr_type_name(ret)));
+	} else {
+		json_object_set_new(obj, "return_type", json_null());
+	}
+
+	return obj;
+}
+
+static void handle_get_sexp_node(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	auto node = get_required_integer(input, "node", req);
+	if (!node) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+
+	int n = *node;
+	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is not in use", n);
+		return;
+	}
+
+	req->result_json = make_json_tool_result(build_sexp_node_json(n));
+	req->success = true;
+}
+
+struct walk_entry {
+	int node;
+	int depth;
+};
+
+static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int depth, int max_depth)
+{
+	if (n < 0 || n >= Num_sexp_nodes || (int)entries.size() >= MAX_SEXP_WALK_NODES)
+		return;
+	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
+		return;
+	if (max_depth >= 0 && depth > max_depth)
+		return;
+
+	entries.push_back({n, depth});
+	collect_walk_entries(Sexp_nodes[n].first, entries, depth + 1, max_depth);
+	collect_walk_entries(Sexp_nodes[n].rest, entries, depth, max_depth);
+}
+
+static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	auto node = get_required_integer(input, "node", req);
+	if (!node) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+
+	int n = *node;
+	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Node %d is not in use", n);
+		return;
+	}
+
+	auto depth = get_optional_integer(input, "depth");
+	int max_depth = depth.has_value() ? *depth : -1;
+
+	// Pass 1: collect entries with depths
+	SCP_vector<walk_entry> entries;
+	collect_walk_entries(n, entries, 0, max_depth);
+
+	// Build node index -> position map
+	SCP_unordered_map<int, int> pos_map;
+	for (int i = 0; i < (int)entries.size(); i++)
+		pos_map[entries[i].node] = i;
+
+	// Pass 2: build JSON with walk references and depth
+	json_t *arr = json_array();
+	for (const auto &entry : entries) {
+		json_t *obj = build_sexp_node_json(entry.node);
+
+		json_object_set_new(obj, "depth", json_integer(entry.depth));
+
+		auto it_first = pos_map.find(Sexp_nodes[entry.node].first);
+		json_object_set_new(obj, "walk_first",
+			(it_first != pos_map.end()) ? json_integer(it_first->second) : json_integer(-1));
+
+		auto it_rest = pos_map.find(Sexp_nodes[entry.node].rest);
+		json_object_set_new(obj, "walk_rest",
+			(it_rest != pos_map.end()) ? json_integer(it_rest->second) : json_integer(-1));
+
+		json_array_append_new(arr, obj);
+	}
+
+	json_t *result = json_object();
+	json_object_set_new(result, "root", json_integer(n));
+	json_object_set_new(result, "nodes", arr);
+	if ((int)entries.size() >= MAX_SEXP_WALK_NODES)
+		json_object_set_new(result, "truncated", json_true());
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // SEXP text parsing
 // ---------------------------------------------------------------------------
 
 static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
 	const char *text = get_required_string(input, "text", req, true);
 	if (!text)
 		return;
@@ -2343,6 +2535,7 @@ static bool is_sexp_attached_to_mission(int node)
 
 static void handle_free_sexp(json_t *input, McpToolRequest *req)
 {
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
 	auto node = get_required_integer(input, "node", req);
 	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req))
 		return;
@@ -2426,6 +2619,9 @@ static const char *mission_tool_names[] = {
 	"delete_debriefing_stage",
 	"move_debriefing_stage",
 	"swap_debriefing_stages",
+	"sexp_to_text",
+	"get_sexp_node",
+	"walk_sexp_tree",
 	"text_to_sexp",
 	"free_sexp",
 	nullptr
@@ -3156,6 +3352,47 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// sexp_to_text
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Root node index of the SEXP tree to serialize");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "sexp_to_text",
+			"Convert a SEXP node tree to its text representation. "
+			"Takes a root node index and returns the S-expression as a formatted string, "
+			"suitable for copy/paste or inspection. Read-only; does not modify any nodes.",
+			props, req);
+	}
+
+	// get_sexp_node
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Index of the SEXP node to inspect");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "get_sexp_node",
+			"Get details about a single SEXP node: its kind, value, value type, "
+			"child/sibling indices (node_first/node_rest), and operator return type. "
+			"Use 'node_first' to descend into a child list (CAR) and 'node_rest' to move "
+			"to the next sibling (CDR).",
+			props, req);
+	}
+
+	// walk_sexp_tree
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Root node index to start traversal from");
+		add_integer_prop(props, "depth", "Maximum recursion depth (default: unlimited)");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "walk_sexp_tree",
+			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
+			"of node descriptors with kind, value, value type, child/sibling indices, "
+			"and walk_first/walk_rest indices into the array for easy traversal.",
+			props, req);
+	}
+
 	// text_to_sexp
 	{
 		json_t *props = json_object();
@@ -3288,6 +3525,12 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_debriefing_stage(input_json, req);
 	} else if (strcmp(tool_name, "swap_debriefing_stages") == 0) {
 		handle_swap_debriefing_stages(input_json, req);
+	} else if (strcmp(tool_name, "sexp_to_text") == 0) {
+		handle_sexp_to_text(input_json, req);
+	} else if (strcmp(tool_name, "get_sexp_node") == 0) {
+		handle_get_sexp_node(input_json, req);
+	} else if (strcmp(tool_name, "walk_sexp_tree") == 0) {
+		handle_walk_sexp_tree(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
 		handle_text_to_sexp(input_json, req);
 	} else if (strcmp(tool_name, "free_sexp") == 0) {
