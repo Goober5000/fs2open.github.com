@@ -2431,13 +2431,10 @@ static json_t *handle_sexp_to_text(json_t *arguments)
 {
 	json_t *err = nullptr;
 	auto node = get_required_integer(arguments, "node", &err);
-	if (!node)
+	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", &err))
 		return err;
 
 	int n = *node;
-
-	if (n < 0 || n >= Num_sexp_nodes)
-		return make_tool_result(true, "Node index %d is out of range (valid: 0 to %d)", n, Num_sexp_nodes - 1);
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED)
 		return make_tool_result(true, "Node %d is not in use", n);
