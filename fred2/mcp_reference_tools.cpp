@@ -442,7 +442,7 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "get_sexp_node",
-			"Get details about a single SEXP node: its text, node_kind, node_type, "
+			"Get details about a single SEXP node: its kind, value, value type, "
 			"child/sibling indices (node_first/node_rest), and operator return type. "
 			"Use 'node_first' to descend into a child list (CAR) and 'node_rest' to move "
 			"to the next sibling (CDR).",
@@ -458,7 +458,7 @@ void mcp_register_reference_tools(json_t *tools)
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "walk_sexp_tree",
 			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
-			"of node descriptors with node_kind, node_type, text, child/sibling indices, "
+			"of node descriptors with kind, value, value type, child/sibling indices, "
 			"and walk_first/walk_rest indices into the array for easy traversal.",
 			props, req);
 	}
@@ -2849,7 +2849,7 @@ static json_t *handle_sexp_to_text(json_t *arguments)
 // SEXP node navigation
 // ---------------------------------------------------------------------------
 
-static const char *get_sexp_node_kind_name(int n)
+static const char *get_sexp_kind_name(int n)
 {
 	switch (SEXP_NODE_TYPE(n)) {
 		case SEXP_LIST: return "list";
@@ -2858,10 +2858,10 @@ static const char *get_sexp_node_kind_name(int n)
 	}
 }
 
-static const char *get_sexp_node_type_name(int n)
+static const char *get_sexp_value_type_name(int n)
 {
-	int node_kind = SEXP_NODE_TYPE(n);
-	if (node_kind != SEXP_ATOM && node_kind != SEXP_LIST)
+	int kind = SEXP_NODE_TYPE(n);
+	if (kind != SEXP_ATOM && kind != SEXP_LIST)
 		return nullptr;
 	switch (Sexp_nodes[n].subtype) {
 		case SEXP_ATOM_OPERATOR:       return "operator";
@@ -2879,11 +2879,11 @@ static json_t *build_sexp_node_json(int n)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "node", json_integer(n));
-	json_object_set_new(obj, "text", json_string(Sexp_nodes[n].text));
+	json_object_set_new(obj, "value", json_string(Sexp_nodes[n].text));
 
-	json_object_set_new(obj, "node_kind", json_string(get_sexp_node_kind_name(n)));
-	const char *node_type = get_sexp_node_type_name(n);
-	json_object_set_new(obj, "node_type", node_type ? json_string(node_type) : json_null());
+	json_object_set_new(obj, "kind", json_string(get_sexp_kind_name(n)));
+	const char *node_type = get_sexp_value_type_name(n);
+	json_object_set_new(obj, "value_type", node_type ? json_string(node_type) : json_null());
 
 	json_object_set_new(obj, "node_first", json_integer(Sexp_nodes[n].first));
 	json_object_set_new(obj, "node_rest", json_integer(Sexp_nodes[n].rest));
