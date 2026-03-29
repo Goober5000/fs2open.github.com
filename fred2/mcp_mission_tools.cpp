@@ -89,7 +89,7 @@ static bool validate_single_dialog(const char *items_to_modify, const char *dial
 		if (dialog_key && info.editor_key && !stricmp(dialog_key, info.editor_key)) {
 			auto wnd = info.getCWndPtr();
 			if (wnd && wnd->IsWindowVisible()) {
-				sprintf(error_msg, "Cannot modify %s while the %s is open. "
+				sprintf(error_msg, "Cannot work with %s while the %s is open. "
 					"Close it first, or use get_ui_status to check which editors are open.", items_to_modify, info.editor_name);
 				return false;
 			}
