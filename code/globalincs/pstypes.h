@@ -378,6 +378,10 @@ const size_t INVALID_SIZE = static_cast<size_t>(-1);
 
 // Some constants for stuff
 #define MAX_FILENAME_LEN	32		// Length for filenames, ie "title.pcx"
+#define MAX_FILENAME_LEN_1	31		// For tokenizing (must be MAX_FILENAME_LEN - 1)
+#if (MAX_FILENAME_LEN_1) != (MAX_FILENAME_LEN - 1)
+#error MAX_FILENAME_LEN_1 must be equal to MAX_FILENAME_LEN - 1!
+#endif
 #define MAX_PATH_LEN		256		// Length for pathnames, ie "c:\bitmaps\title.pcx"
 
 // contants and defined for byteswapping routines (useful for mac)
