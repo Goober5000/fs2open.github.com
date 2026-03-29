@@ -209,7 +209,7 @@ static const char *opr_to_string(int opr)
 		case OPR_NONE:               return "none";
 		case OPR_NUMBER:             return "number";
 		case OPR_BOOL:               return "boolean";
-		case OPR_NULL:               return "null";
+		case OPR_NULL:               return "void";
 		case OPR_AI_GOAL:            return "ai_goal";
 		case OPR_POSITIVE:           return "positive_number";
 		case OPR_STRING:             return "string";
@@ -1852,6 +1852,7 @@ static json_t *handle_get_sexp_argument_type(json_t *arguments)
 // ---------------------------------------------------------------------------
 
 struct opr_type_info {
+	sexp_opr_t opr_value;
 	const char *name;
 	const char *description;
 	const char **compatible_with; // null-terminated list of argument type names this can satisfy
@@ -1867,19 +1868,28 @@ static const char *compat_ambiguous[] = { "ambiguous", nullptr };
 static const char *compat_string[]    = { nullptr };
 
 static const opr_type_info Opr_type_info[] = {
-	{ "number",            "Returns any integer (positive or negative)", compat_number },
-	{ "positive_number",   "Returns a non-negative integer (>= 0)", compat_positive },
-	{ "boolean",           "Returns true or false", compat_boolean },
-	{ "null",              "Action operator that does not return a value", compat_null },
-	{ "ai_goal",           "Returns an AI goal (used as argument to ai-goals operators)", compat_ai_goal },
-	{ "string",            "Returns a string value", compat_string },
-	{ "ambiguous",         "Return type depends on variable type (used with variables)", compat_ambiguous },
-	{ "flexible_argument", "Flexible argument return (used with when-argument operators)", compat_flexible },
-	{ "none",              "No return type", compat_null },
+	{ OPR_NUMBER,            "number",            "Returns any integer (positive or negative)", compat_number },
+	{ OPR_POSITIVE,          "positive_number",   "Returns a non-negative integer (>= 0)", compat_positive },
+	{ OPR_BOOL,              "boolean",           "Returns true or false", compat_boolean },
+	{ OPR_NULL,              "void",              "Action operator that does not return a value", compat_null },
+	{ OPR_AI_GOAL,           "ai_goal",           "Returns an AI goal (used as argument to ai-goals operators)", compat_ai_goal },
+	{ OPR_STRING,            "string",            "Returns a string value", compat_string },
+	{ OPR_AMBIGUOUS,         "ambiguous",         "Return type depends on variable type (used with variables)", compat_ambiguous },
+	{ OPR_FLEXIBLE_ARGUMENT, "flexible_argument", "Flexible argument return (used with when-argument operators)", compat_flexible },
+	{ OPR_NONE,              "none",              "No return type", compat_null },
 
 	// sentinel
-	{ nullptr, nullptr, nullptr }
+	{ OPR_NONE, nullptr, nullptr, nullptr }
 };
+
+static const char *get_opr_type_name(int opr_value)
+{
+    for (const opr_type_info *t = Opr_type_info; t->name; t++) {
+        if (t->opr_value == opr_value)
+            return t->name;
+    }
+    return "unknown";
+}
 
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
