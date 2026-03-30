@@ -6,6 +6,7 @@
 #include <jansson.h>
 #include "globalincs/pstypes.h"
 #include "graphics/2d.h"
+#include "management.h"
 
 json_t *make_tool_result(const char *text, bool is_error)
 {
@@ -285,6 +286,19 @@ int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, c
 			param_name, input);
 	}
 	return result;
+}
+
+bool check_name_conflict(const char *entity_type, const char *name, McpToolRequest *req,
+	int exclude_ship, int exclude_wing, int exclude_waypoint_list, int exclude_jump_node)
+{
+	SCP_string conflict = check_name_conflict(entity_type, name, exclude_ship, exclude_wing,
+		exclude_waypoint_list, exclude_jump_node);
+	if (!conflict.empty()) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message), "%s", conflict.c_str());
+		return false;
+	}
+	return true;
 }
 
 bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req)
