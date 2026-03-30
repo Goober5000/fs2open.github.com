@@ -2488,6 +2488,90 @@ void generate_weaponry_usage_list(int team, int *arr)
 	}
 }
 
+SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship, int exclude_wing,
+	const waypoint_list *exclude_waypoint_list, const CJumpNode *exclude_jump_node)
+{
+	SCP_string msg;
+
+	// Name must not be empty
+	if (name[0] == '\0') {
+		msg += "This ";
+		msg += entity_type;
+		msg += " name cannot be empty";
+		return msg;
+	}
+
+	// Check wings
+	for (int i = 0; i < MAX_WINGS; i++) {
+		if (Wings[i].wave_count && i != exclude_wing && !stricmp(Wings[i].name, name)) {
+			msg += "This ";
+			msg += entity_type;
+			msg += " name is already being used by ";
+			msg += (exclude_wing >= 0) ? "another wing" : "a wing";
+			return msg;
+		}
+	}
+
+	// Check ships
+	object *ptr = GET_FIRST(&obj_used_list);
+	while (ptr != END_OF_LIST(&obj_used_list)) {
+		if ((ptr->type == OBJ_SHIP || ptr->type == OBJ_START) && ptr->instance != exclude_ship) {
+			if (!stricmp(Ships[ptr->instance].ship_name, name)) {
+				msg += "This ";
+				msg += entity_type;
+				msg += " name is already being used by ";
+				msg += (exclude_ship >= 0) ? "another ship" : "a ship";
+				return msg;
+			}
+		}
+		ptr = GET_NEXT(ptr);
+	}
+
+	// We don't need to check teams.  "Unknown" is a valid name and also an IFF.
+
+	// Check target priority groups
+	for (int i = 0; i < (int)Ai_tp_list.size(); i++) {
+		if (!stricmp(Ai_tp_list[i].name, name)) {
+			msg += "This ";
+			msg += entity_type;
+			msg += " name is already being used by a target priority group";
+			return msg;
+		}
+	}
+
+	// Check waypoint lists
+	for (const auto &wl : Waypoint_lists) {
+		if (&wl != exclude_waypoint_list && !stricmp(wl.get_name(), name)) {
+			msg += "This ";
+			msg += entity_type;
+			msg += " name is already being used by ";
+			msg += (exclude_waypoint_list != nullptr) ? "another waypoint path" : "a waypoint path";
+			return msg;
+		}
+	}
+
+	// Check jump nodes
+	for (const auto &jn : Jump_nodes) {
+		if (&jn != exclude_jump_node && !stricmp(jn.GetName(), name)) {
+			msg += "This ";
+			msg += entity_type;
+			msg += " name is already being used by ";
+			msg += (exclude_jump_node != nullptr) ? "another jump node" : "a jump node";
+			return msg;
+		}
+	}
+
+	// Name must not start with '<' (used for invalidated SEXP references)
+	if (name[0] == '<') {
+		msg += "This ";
+		msg += entity_type;
+		msg += " name is not allowed to begin with <";
+		return msg;
+	}
+
+	return "";	// no error
+}
+
 CJumpNode *jumpnode_get_by_name(const CString& name)
 {
 	CJumpNode *jnp = jumpnode_get_by_name((LPCTSTR) name);
