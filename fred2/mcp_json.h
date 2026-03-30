@@ -60,6 +60,12 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpToolRequest *req);
 int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, json_t **error_out);
 
+// Checks the given name against all entity types (ships, wings, waypoints, jump nodes, etc.)
+// for conflicts.  The exclude parameters prevent matching against the entity being renamed.
+// Returns true if the name is valid, or false with an error message on req.
+bool check_name_conflict(const char *entity_type, const char *name, McpToolRequest *req,
+	int exclude_ship = -1, int exclude_wing = -1, int exclude_waypoint_list = -1, int exclude_jump_node = -1);
+
 bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req);
 bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req);
 
