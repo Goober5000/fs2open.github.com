@@ -4789,56 +4789,55 @@ int Fred_mission_save::save_waypoints()
 	parse_comments(2);
 	fout("\t\t;! %d lists total\n", Waypoint_lists.size());
 
-	SCP_list<CJumpNode>::iterator jnp;
-	for (jnp = Jump_nodes.begin(); jnp != Jump_nodes.end(); ++jnp) {
+	for (auto &jnp : Jump_nodes) {
 		required_string_fred("$Jump Node:", "$Jump Node Name:");
 		parse_comments(2);
-		save_vector(jnp->GetSCPObject()->pos);
+		save_vector(jnp.GetSCPObject()->pos);
 
 		required_string_fred("$Jump Node Name:", "$Jump Node:");
 		parse_comments();
-		fout(" %s", jnp->GetName());
+		fout(" %s", jnp.GetName());
 
 		if (save_config.save_format != MissionFormat::RETAIL) {
 
 			// The display name is only written if there was one at the start to avoid introducing inconsistencies
-			if (save_config.always_save_display_names || jnp->HasDisplayName()) {
+			if (save_config.always_save_display_names || jnp.HasDisplayName()) {
 				char truncated_name[NAME_LENGTH];
-				strcpy_s(truncated_name, jnp->GetName());
+				strcpy_s(truncated_name, jnp.GetName());
 				end_string_at_first_hash_symbol(truncated_name);
 
 				// Also, the display name is not written if it's just the truncation of the name at the hash
-				if (save_config.always_save_display_names || strcmp(jnp->GetDisplayName(), truncated_name) != 0) {
+				if (save_config.always_save_display_names || strcmp(jnp.GetDisplayName(), truncated_name) != 0) {
 					if (optional_string_fred("+Display Name:", "$Jump Node:")) {
 						parse_comments();
 					} else {
 						fout("\n+Display Name:");
 					}
 
-					fout_ext("", "%s", jnp->GetDisplayName());
+					fout_ext("", "%s", jnp.GetDisplayName());
 				}
 			}
 
-			if (jnp->IsSpecialModel()) {
+			if (jnp.IsSpecialModel()) {
 				if (optional_string_fred("+Model File:", "$Jump Node:")) {
 					parse_comments();
 				} else {
 					fout("\n+Model File:");
 				}
 
-				int model = jnp->GetModelNumber();
+				int model = jnp.GetModelNumber();
 				polymodel* pm = model_get(model);
 				fout(" %s", pm->filename);
 			}
 
-			if (jnp->IsColored()) {
+			if (jnp.IsColored()) {
 				if (optional_string_fred("+Alphacolor:", "$Jump Node:")) {
 					parse_comments();
 				} else {
 					fout("\n+Alphacolor:");
 				}
 
-				const auto& jn_color = jnp->GetColor();
+				const auto& jn_color = jnp.GetColor();
 				fout(" %u %u %u %u", jn_color.red, jn_color.green, jn_color.blue, jn_color.alpha);
 			}
 
@@ -4846,11 +4845,11 @@ int Fred_mission_save::save_waypoints()
 			if (hidden_is_there)
 				parse_comments();
 
-			if (hidden_is_there || jnp->IsHidden()) {
+			if (hidden_is_there || jnp.IsHidden()) {
 				if (!hidden_is_there)
 					fout("\n+Hidden:");
 
-				if (jnp->IsHidden())
+				if (jnp.IsHidden())
 					fout(" %s", "true");
 				else
 					fout(" %s", "false");
