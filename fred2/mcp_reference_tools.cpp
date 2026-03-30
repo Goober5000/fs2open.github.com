@@ -1054,11 +1054,7 @@ static json_t *handle_get_iff(json_t *arguments)
 	// Color (RGB from the non-bright variant)
 	{
 		color *c = iff_get_color(iff.color_index, 0);
-		json_t *color_obj = json_object();
-		json_object_set_new(color_obj, "red", json_integer(c->red));
-		json_object_set_new(color_obj, "green", json_integer(c->green));
-		json_object_set_new(color_obj, "blue", json_integer(c->blue));
-		json_object_set_new(obj, "color", color_obj);
+		json_object_set_new(obj, "color", build_color_json(*c));
 	}
 
 	// Attacks
