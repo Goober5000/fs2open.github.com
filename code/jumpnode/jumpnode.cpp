@@ -19,30 +19,26 @@ SCP_list<CJumpNode> Jump_nodes;
  * Constructor for CJumpNode class, default
  */
 CJumpNode::CJumpNode()
-{	
+{
     gr_init_alphacolor(&m_display_color, 0, 255, 0, 255);
 
 	m_name[0] = '\0';
 	m_display[0] = '\0';
-	
-    m_pos.xyz.x = 0.0f;
-    m_pos.xyz.y = 0.0f;
-    m_pos.xyz.z = 0.0f;
 }
 
 /**
  * Constructor for CJumpNode class, with world position argument
  */
 CJumpNode::CJumpNode(const vec3d* position)
-{	
+{
 	Assert(position != NULL);
-	
+
 	gr_init_alphacolor(&m_display_color, 0, 255, 0, 255);
-	
+
 	// Set m_name and m_display
 	sprintf(m_name, XSTR( "Jump Node %d", 632), Jump_nodes.size());
 	m_display[0] = '\0';
-	
+
 	// Set m_modelnum and m_radius
 	m_modelnum = model_load(NOX(JN_DEFAULT_MODEL), nullptr, ErrorType::WARNING);
 	if (m_modelnum == -1) {
@@ -50,15 +46,11 @@ CJumpNode::CJumpNode(const vec3d* position)
 	} else {
 		m_radius = model_get_radius(m_modelnum);
 	}
-	
-    m_pos.xyz.x = position->xyz.x;
-    m_pos.xyz.y = position->xyz.y;
-    m_pos.xyz.z = position->xyz.z;
-    
+
 	// Create the object
     flagset<Object::Object_Flags> default_flags;
     default_flags.set(Object::Object_Flags::Renders);
-    m_objnum = obj_create(OBJ_JUMP_NODE, -1, -1, NULL, &m_pos, m_radius, default_flags);
+    m_objnum = obj_create(OBJ_JUMP_NODE, -1, -1, NULL, position, m_radius, default_flags);
 
 	if (m_modelnum >= 0) {
 		// set up animation in case of instrinsic_rotate
@@ -80,7 +72,6 @@ CJumpNode::CJumpNode(CJumpNode&& other) noexcept
 	other.m_flags = 0;
 
 	m_display_color = other.m_display_color;
-	m_pos = other.m_pos;
 
 	strcpy_s(m_name, other.m_name);
 	strcpy_s(m_display, other.m_display);
@@ -103,7 +94,6 @@ CJumpNode& CJumpNode::operator=(CJumpNode&& other) noexcept
 		other.m_polymodel_instance_num = -1;
 
 		m_display_color = other.m_display_color;
-		m_pos = other.m_pos;
 
 		strcpy_s(m_name, other.m_name);
 		strcpy_s(m_display, other.m_display);
@@ -158,6 +148,14 @@ int CJumpNode::GetModelNumber() const
 }
 
 /**
+ * @return Radius of jump node model
+ */
+float CJumpNode::GetRadius() const
+{
+	return m_radius;
+}
+
+/**
  * @return Index into Objects[]
  */
 int CJumpNode::GetSCPObjectNumber() const
@@ -187,7 +185,8 @@ const color &CJumpNode::GetColor() const
  */
 const vec3d *CJumpNode::GetPosition() const
 {
-	return &m_pos;
+	Assert(m_objnum != -1);
+	return &Objects[m_objnum].pos;
 }
 
 /*
@@ -533,7 +532,7 @@ CJumpNode *jumpnode_get_which_in(const object *objp)
 		if(jnp->GetModelNumber() < 0)
 			continue;
 
-		radius = model_get_radius( jnp->GetModelNumber() );
+		radius = jnp->GetRadius();
 		dist = vm_vec_dist( &objp->pos, &jnp->GetSCPObject()->pos );
 		if ( dist <= radius ) {
 			return &(*jnp);
