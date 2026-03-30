@@ -23,6 +23,8 @@
 #include "ship/ship.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
+#include "jumpnode/jumpnode.h"
+#include "object/object.h"
 #include "freddoc.h"
 #include "fred.h"
 #include "messageeditordlg.h"
@@ -129,6 +131,11 @@ static bool validate_dialog_for_fiction(SCP_string &error_msg)
 static bool validate_dialog_for_debriefing(SCP_string &error_msg)
 {
 	return validate_single_dialog("debriefing stages", "debriefing", error_msg);
+}
+
+static bool validate_dialog_for_jump_nodes(SCP_string &error_msg)
+{
+	return validate_single_dialog("jump nodes", "jump node", error_msg);
 }
 
 static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
@@ -274,7 +281,7 @@ static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, b
 	if (include_details) {
 		json_object_set_new(obj, "team", json_string(team_name_from_index(msg.multi_team)));
 		set_optional_filename(obj, "talking_head", msg.avi_info.name);
-		set_optional_filename(obj, "voice_file", msg.wave_info.name);
+		set_optional_filename(obj, "voice_filename", msg.wave_info.name);
 	}
 
 	return obj;
@@ -340,7 +347,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 	auto persona_str  = get_optional_string(input, "persona", false);
 	auto talking_head = get_optional_filename(input, "talking_head", false);
-	auto voice_file   = get_optional_filename(input, "voice_file", false);
+	auto voice_file   = get_optional_filename(input, "voice_filename", false);
 	auto team_str     = get_optional_string(input, "team", true);
 	auto insert_index = get_optional_integer(input, "index");
 
@@ -442,7 +449,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	auto new_head = get_optional_filename(input, "talking_head", false);
-	auto new_voice = get_optional_filename(input, "voice_file", false);
+	auto new_voice = get_optional_filename(input, "voice_filename", false);
 
 	auto new_team_str = get_optional_string(input, "team", true);
 	std::optional<int> new_team = std::nullopt;
@@ -535,8 +542,6 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
 	if (!validate(validate_dialog_for_messages, req)) return;
 
-	auto force = get_optional_bool(input, "force");
-
 	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
@@ -546,6 +551,8 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 		set_not_found_error(req, "Message", name);
 		return;
 	}
+
+	auto force = get_optional_bool(input, "force");
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -666,25 +673,24 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 	bool is_chained = (evt.chain_delay >= 0);
 	json_object_set_new(obj, "is_chained", json_boolean(is_chained));
 
-	if (!include_details)
-		return obj;
+	if (include_details) {
+		// Detail fields
+		json_object_set_new(obj, "repeat_count", json_integer(evt.repeat_count));
+		if (evt.flags & MEF_USING_TRIGGER_COUNT)
+			json_object_set_new(obj, "trigger_count", json_integer(evt.trigger_count));
+		json_object_set_new(obj, "interval", json_integer(evt.interval));
 
-	// Detail fields
-	json_object_set_new(obj, "repeat_count", json_integer(evt.repeat_count));
-	if (evt.flags & MEF_USING_TRIGGER_COUNT)
-		json_object_set_new(obj, "trigger_count", json_integer(evt.trigger_count));
-	json_object_set_new(obj, "interval", json_integer(evt.interval));
+		json_object_set_new(obj, "chain_and_interval_units",
+			json_string((evt.flags & MEF_USE_MSECS) ? "milliseconds" : "seconds"));
 
-	json_object_set_new(obj, "chain_and_interval_units",
-		json_string((evt.flags & MEF_USE_MSECS) ? "milliseconds" : "seconds"));
+		json_object_set_new(obj, "score", json_integer(evt.score));
+		if (is_chained)
+			json_object_set_new(obj, "chain_delay", json_integer(evt.chain_delay));
+		json_object_set_new(obj, "team", json_string(team_name_from_index(evt.team)));
 
-	json_object_set_new(obj, "score", json_integer(evt.score));
-	if (is_chained)
-		json_object_set_new(obj, "chain_delay", json_integer(evt.chain_delay));
-	json_object_set_new(obj, "team", json_string(team_name_from_index(evt.team)));
-
-	set_optional_string(obj, "objective_text", evt.objective_text.c_str(), true);
-	set_optional_string(obj, "objective_key_text", evt.objective_key_text.c_str(), true);
+		set_optional_string(obj, "objective_text", evt.objective_text.c_str(), true);
+		set_optional_string(obj, "objective_key_text", evt.objective_key_text.c_str(), true);
+	}
 
 	return obj;
 }
@@ -983,8 +989,6 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 {
 	if (!validate(validate_dialog_for_events, req)) return;
 
-	auto force = get_optional_bool(input, "force");
-
 	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
@@ -993,6 +997,8 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 		set_not_found_error(req, "Event", name);
 		return;
 	}
+
+	auto force = get_optional_bool(input, "force");
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -1425,14 +1431,13 @@ static json_t *build_goal_json(const mission_goal &goal, int index, bool include
 	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
 	json_object_set_new(obj, "formula", json_integer(goal.formula));
 
-	if (!include_details)
-		return obj;
-
-	json_object_set_new(obj, "is_valid", json_boolean(!(goal.type & INVALID_GOAL)));
-	json_object_set_new(obj, "message", json_string(goal.message.c_str()));
-	json_object_set_new(obj, "score", json_integer(goal.score));
-	json_object_set_new(obj, "team", json_string(team_name_from_index(goal.team)));
-	json_object_set_new(obj, "no_music", json_boolean(goal.flags & MGF_NO_MUSIC));
+	if (include_details) {
+		json_object_set_new(obj, "is_valid", json_boolean(!(goal.type & INVALID_GOAL)));
+		json_object_set_new(obj, "message", json_string(goal.message.c_str()));
+		json_object_set_new(obj, "score", json_integer(goal.score));
+		json_object_set_new(obj, "team", json_string(team_name_from_index(goal.team)));
+		json_object_set_new(obj, "no_music", json_boolean(goal.flags & MGF_NO_MUSIC));
+	}
 
 	return obj;
 }
@@ -1683,8 +1688,6 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 {
 	if (!validate(validate_dialog_for_goals, req)) return;
 
-	auto force = get_optional_bool(input, "force");
-
 	auto name = get_required_string(input, "name", req, true);
 	if (!name) return;
 
@@ -1693,6 +1696,8 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 		set_not_found_error(req, "Goal", name);
 		return;
 	}
+
+	auto force = get_optional_bool(input, "force");
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -2206,6 +2211,301 @@ static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Jump node tools
+// ---------------------------------------------------------------------------
+
+static json_t *build_jump_node_json(const CJumpNode &jn, int index, bool include_details = false)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(jn.GetName()));
+	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "position", build_vec3d_json(*jn.GetPosition()));
+
+	if (include_details) {
+		if (jn.HasDisplayName())
+			json_object_set_new(obj, "display_name", json_string(jn.GetDisplayName()));
+		if (jn.IsColored())
+			json_object_set_new(obj, "color", build_color_json(jn.GetColor(), true));
+		if (jn.IsSpecialModel()) {
+			const char *model_filename = model_get(jn.GetModelNumber())->filename;
+			json_object_set_new(obj, "model_filename", json_string(model_filename));
+		}
+		json_object_set_new(obj, "hidden", json_boolean(jn.IsHidden()));
+		json_object_set_new(obj, "radius", json_real(jn.GetRadius()));
+	}
+
+	return obj;
+}
+
+static void handle_list_jump_nodes(json_t * /*input*/, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+
+	json_t *arr = json_array();
+	int index = 0;
+	for (const auto &jn : Jump_nodes)
+		json_array_append_new(arr, build_jump_node_json(jn, index++));
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_jump_node(json_t *input, McpToolRequest *req)
+{
+	const char *name = get_required_string(input, "name", req, false);
+	if (!name) return;
+
+	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+
+	int index = jumpnode_lookup(name);
+	if (index >= 0) {
+		req->result_json = make_json_tool_result(build_jump_node_json(Jump_nodes[index], index, true));
+		req->success = true;
+		return;
+	}
+
+	set_not_found_error(req, "Jump node", name);
+}
+
+static void handle_create_jump_node(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+
+	auto pos = get_required_vec3d(input, "position", req);
+	if (!pos.has_value()) return;
+
+	auto display_name = get_optional_string(input, "display_name", false);
+	auto color_val    = get_optional_color(input, "color");
+	auto model_file   = get_optional_string(input, "model_filename", false);
+	auto show_polys   = get_optional_bool(input, "show_polys");
+	auto hidden       = get_optional_bool(input, "hidden");
+	auto insert_index = get_optional_integer(input, "index");
+
+	// Validate name against all entity types
+	if (!check_name_conflict("jump node", name, req)) return;
+
+	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", req)) return;
+	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", req)) return;
+
+	// Validate insert index
+	int target_index;
+	if (!insert_index.has_value()) {
+		target_index = (int)Jump_nodes.size();
+	} else {
+		if (!check_int_range(*insert_index, 0, (int)Jump_nodes.size(), "index", req))
+			return;
+		target_index = *insert_index;
+	}
+
+	// Construct the jump node
+	vec3d position = *pos;
+	CJumpNode jnp(&position);
+	jnp.SetName(name);
+
+	if (display_name)
+		jnp.SetDisplayName(display_name);
+	if (color_val.has_value())
+		jnp.SetAlphaColor(color_val->red, color_val->green, color_val->blue, color_val->alpha);
+	if (model_file)
+		jnp.SetModel(model_file, show_polys.has_value() && *show_polys);
+	else if (show_polys.has_value() && *show_polys)
+		jnp.SetModel(JN_DEFAULT_MODEL, true);
+	if (hidden.has_value() && *hidden)
+		jnp.SetVisibility(false);
+
+	// Insert
+	Jump_nodes.insert(Jump_nodes.begin() + target_index, std::move(jnp));
+
+	Jumpnode_editor_dialog.initialize_data(1);
+	mark_modified("MCP: create jump node %s", name);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "name", json_string(name));
+	json_object_set_new(result, "index", json_integer(target_index));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_update_jump_node(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+
+	const char *name = get_required_string(input, "name", req, false);
+	if (!name) return;
+
+	auto new_name     = get_optional_string(input, "new_name", true);
+	auto new_pos      = get_optional_vec3d(input, "position");
+	auto display_name = get_optional_string(input, "display_name", false);
+	auto color_val    = get_optional_color(input, "color");
+	auto model_file   = get_optional_string(input, "model_filename", false);
+	auto show_polys   = get_optional_bool(input, "show_polys");
+	auto hidden       = get_optional_bool(input, "hidden");
+
+	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", req)) return;
+	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", req)) return;
+
+	// Find the jump node
+	int index = jumpnode_lookup(name);
+	if (index < 0) {
+		set_not_found_error(req, "Jump node", name);
+		return;
+	}
+	auto &jn = Jump_nodes[index];
+
+	bool changed = false;
+
+	// Rename (with SEXP reference update)
+	if (new_name && stricmp(jn.GetName(), new_name) != 0) {
+		if (!check_name_conflict("jump node", new_name, req, -1, -1, -1, index)) return;
+		update_sexp_references(jn.GetName(), new_name, OPF_JUMP_NODE_NAME);
+		jn.SetName(new_name);
+		changed = true;
+	}
+
+	// Position
+	if (new_pos.has_value()) {
+		const vec3d *cur = jn.GetPosition();
+		if (!fl_equal(cur->xyz.x, new_pos->xyz.x) || !fl_equal(cur->xyz.y, new_pos->xyz.y) || !fl_equal(cur->xyz.z, new_pos->xyz.z)) {
+			Objects[jn.GetSCPObjectNumber()].pos = *new_pos;
+			changed = true;
+		}
+	}
+
+	// Display name
+	if (display_name) {
+		if (display_name[0] == '\0') {
+			// Empty string clears display name
+			if (jn.HasDisplayName()) {
+				jn.SetDisplayName("");
+				changed = true;
+			}
+		} else if (strcmp(jn.GetDisplayName(), display_name) != 0) {
+			jn.SetDisplayName(display_name);
+			changed = true;
+		}
+	}
+
+	// Color
+	if (color_val.has_value()) {
+		const color &c = jn.GetColor();
+		if (c.red != color_val->red || c.green != color_val->green ||
+			c.blue != color_val->blue || c.alpha != color_val->alpha) {
+			jn.SetAlphaColor(color_val->red, color_val->green, color_val->blue, color_val->alpha);
+			changed = true;
+		}
+	}
+
+	// Model
+	if (model_file) {
+		jn.SetModel(model_file, show_polys.has_value() && *show_polys);
+		changed = true;
+	} else if (show_polys.has_value()) {
+		// Reload current model with new show_polys setting
+		if (jn.IsSpecialModel()) {
+			const char *cur_model = model_get(jn.GetModelNumber())->filename;
+			jn.SetModel(cur_model, *show_polys);
+		} else {
+			jn.SetModel(JN_DEFAULT_MODEL, *show_polys);
+		}
+		changed = true;
+	}
+
+	// Hidden
+	if (hidden.has_value() && jn.IsHidden() != *hidden) {
+		jn.SetVisibility(!*hidden);
+		changed = true;
+	}
+
+	if (changed) {
+		Jumpnode_editor_dialog.initialize_data(1);
+		mark_modified("MCP: update jump node %s", jn.GetName());
+	}
+
+	req->result_json = make_json_tool_result(build_jump_node_json(jn, index, true));
+	req->success = true;
+}
+
+static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+
+	const char *name = get_required_string(input, "name", req, false);
+	if (!name) return;
+
+	// Find the jump node
+	int index = jumpnode_lookup(name);
+	if (index < 0 ) {
+		set_not_found_error(req, "Jump node", name);
+		return;
+	}
+
+	auto force = get_optional_bool(input, "force");
+
+	// Check for SEXP references unless force is set
+	if (!force.has_value() || !*force) {
+		int node;
+		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, name, node);
+		if (ref.second != sexp_src::NONE) {
+			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Jump node '%s' is referenced in %s. Use force=true to delete anyway "
+				"(references will be invalidated).", name, desc.c_str());
+			return;
+		}
+	}
+
+	// Invalidate SEXP references
+	char buf[NAME_LENGTH + 4];
+	snprintf(buf, sizeof(buf), "<%s>", name);
+	update_sexp_references(name, buf, OPF_JUMP_NODE_NAME);
+
+	Jump_nodes.erase(Jump_nodes.begin() + index);
+
+	Jumpnode_editor_dialog.initialize_data(1);
+	mark_modified("MCP: delete jump node %s", name);
+
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Deleted jump node: %s", name);
+	req->success = true;
+}
+
+// Move/swap config for jump nodes
+static MoveSwapConfig make_jump_node_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "jump node";
+	cfg.count = (int)Jump_nodes.size();
+	cfg.validate_dialog = validate_dialog_for_jump_nodes;
+	cfg.get_name = [](int i) -> const char * {
+		return Jump_nodes[i].GetName();
+	};
+	cfg.do_move = [](int from, int to) {
+		array_move_element(Jump_nodes, from, to);
+	};
+	cfg.do_swap = [](int a, int b) {
+		std::swap(Jump_nodes[a], Jump_nodes[b]);
+	};
+	return cfg;
+}
+
+static void handle_move_jump_node(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_jump_node_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_jump_nodes(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_jump_node_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // SEXP text serialization
 // ---------------------------------------------------------------------------
 
@@ -2623,6 +2923,13 @@ static const char *mission_tool_names[] = {
 	"delete_debriefing_stage",
 	"move_debriefing_stage",
 	"swap_debriefing_stages",
+	"list_jump_nodes",
+	"get_jump_node",
+	"create_jump_node",
+	"update_jump_node",
+	"delete_jump_node",
+	"move_jump_node",
+	"swap_jump_nodes",
 	"sexp_to_text",
 	"get_sexp_node",
 	"walk_sexp_tree",
@@ -2665,7 +2972,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "persona",
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation");
-		add_string_prop(props, "voice_file", "Filename for the voice audio");
+		add_string_prop(props, "voice_filename", "Filename for the voice audio");
 		add_string_enum_prop(props, "team",
 			"Multiplayer team assignment (\"none\" for all teams)",
 			team_enum_values);
@@ -2690,7 +2997,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "persona",
 			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
-		add_string_prop(props, "voice_file", "Filename for the voice audio (empty string to clear)");
+		add_string_prop(props, "voice_filename", "Filename for the voice audio (empty string to clear)");
 		add_string_enum_prop(props, "team",
 			"Multiplayer team assignment (\"none\" for all teams)",
 			team_enum_values);
@@ -3356,6 +3663,123 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// -----------------------------------------------------------------------
+	// Jump node tools
+	// -----------------------------------------------------------------------
+
+	// list_jump_nodes
+	register_tool(tools, "list_jump_nodes",
+		"List all jump nodes in the mission. Returns each node's name, "
+		"index, and position.",
+		json_object());
+
+	// get_jump_node
+	register_tool_with_required_string(tools, "get_jump_node",
+		"Get full details of a jump node by name, including position, "
+		"display name, color, model file, hidden state, and radius.",
+		"name", "Name of the jump node to retrieve");
+
+	// create_jump_node
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Unique name for the jump node");
+		add_vec3d_prop(props, "position", "World position of the jump node");
+		add_string_prop(props, "display_name",
+			"Display name shown to the player (if different from name)");
+		add_color_prop(props, "color",
+			"Custom RGBA display color. If omitted, defaults to green (0,255,0,255).");
+		add_string_prop(props, "model_filename",
+			"Model filename (POF). Defaults to \"" JN_DEFAULT_MODEL "\".");
+		add_bool_prop(props, "show_polys",
+			"If true, render as solid model instead of wireframe. Default false.");
+		add_bool_prop(props, "hidden",
+			"If true, the jump node is hidden from rendering. Default false.");
+		add_integer_prop(props, "index",
+			"Position to insert the jump node (0 = first). If omitted, appends to the end.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("position"));
+		register_tool(tools, "create_jump_node",
+			"Create a new jump node at a given position. Jump nodes are subspace "
+			"navigation points that ships can depart through.",
+			props, req);
+	}
+
+	// update_jump_node
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the jump node to update");
+		add_string_prop(props, "new_name", "New name for the jump node");
+		add_vec3d_prop(props, "position", "New world position");
+		add_string_prop(props, "display_name",
+			"New display name (empty string to clear)");
+		add_color_prop(props, "color", "New RGBA display color");
+		add_string_prop(props, "model_filename",
+			"New model filename (POF)");
+		add_bool_prop(props, "show_polys",
+			"If true, render as solid model instead of wireframe");
+		add_bool_prop(props, "hidden",
+			"If true, the jump node is hidden from rendering");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_jump_node",
+			"Update properties of an existing jump node. Only specified fields "
+			"are changed; omitted fields are left unchanged. Renaming updates "
+			"SEXP references automatically.",
+			props, req);
+	}
+
+	// delete_jump_node
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the jump node to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if the jump node is referenced in SEXPs "
+			"(references will be invalidated). Default false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "delete_jump_node",
+			"Delete a jump node from the mission. Fails if the node is "
+			"referenced in SEXPs unless force=true.",
+			props, req);
+	}
+
+	// move_jump_node
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"0-based index of the jump node to move");
+		add_integer_prop(props, "to_index",
+			"0-based target index");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_jump_node",
+			"Move a jump node from one list position to another. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_jump_nodes
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"0-based index of the first jump node");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second jump node");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_jump_nodes",
+			"Swap two jump nodes at the given positions. "
+			"Indices are 0-based.",
+			props, req);
+	}
+
+	// -----------------------------------------------------------------------
+	// SEXP tools
+	// -----------------------------------------------------------------------
+
 	// sexp_to_text
 	{
 		json_t *props = json_object();
@@ -3529,6 +3953,20 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_debriefing_stage(input_json, req);
 	} else if (strcmp(tool_name, "swap_debriefing_stages") == 0) {
 		handle_swap_debriefing_stages(input_json, req);
+	} else if (strcmp(tool_name, "list_jump_nodes") == 0) {
+		handle_list_jump_nodes(input_json, req);
+	} else if (strcmp(tool_name, "get_jump_node") == 0) {
+		handle_get_jump_node(input_json, req);
+	} else if (strcmp(tool_name, "create_jump_node") == 0) {
+		handle_create_jump_node(input_json, req);
+	} else if (strcmp(tool_name, "update_jump_node") == 0) {
+		handle_update_jump_node(input_json, req);
+	} else if (strcmp(tool_name, "delete_jump_node") == 0) {
+		handle_delete_jump_node(input_json, req);
+	} else if (strcmp(tool_name, "move_jump_node") == 0) {
+		handle_move_jump_node(input_json, req);
+	} else if (strcmp(tool_name, "swap_jump_nodes") == 0) {
+		handle_swap_jump_nodes(input_json, req);
 	} else if (strcmp(tool_name, "sexp_to_text") == 0) {
 		handle_sexp_to_text(input_json, req);
 	} else if (strcmp(tool_name, "get_sexp_node") == 0) {
