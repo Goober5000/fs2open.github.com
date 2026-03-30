@@ -136,12 +136,12 @@ static void set_missing_param_error(McpToolRequest *req, const char *param_name)
 {
 	req->success = false;
 	snprintf(req->result_message, sizeof(req->result_message),
-		"Missing required parameter: %s", param_name);
+		"Missing required parameter, or parameter is the wrong type: %s", param_name);
 }
 
 static json_t *make_missing_param_error(const char *param_name)
 {
-	return make_tool_result(true, "Missing required parameter: %s", param_name);
+	return make_tool_result(true, "Missing required parameter, or parameter is the wrong type: %s", param_name);
 }
 
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
