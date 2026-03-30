@@ -11,6 +11,7 @@
 struct McpToolRequest;  // full definition in mcpserver.h
 struct vec3d;           // full definition in pstypes.h
 struct matrix;          // full definition in pstypes.h
+struct color;           // full definition in graphics/2d.h
 
 // Build an MCP tool result with a text content item.
 json_t *make_tool_result(const char *text, bool is_error = false);
@@ -37,6 +38,7 @@ void add_string_enum_prop(json_t *props, const char *name, const char *descripti
 void add_string_array_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
 void add_vec3d_prop(json_t *props, const char *name, const char *description);
 void add_matrix_prop(json_t *props, const char *name, const char *description);
+void add_color_prop(json_t *props, const char *name, const char *description);
 
 // Register an MCP tool schema in the tools array.
 void register_tool(json_t *tools, const char *name, const char *description,
@@ -101,6 +103,7 @@ std::optional<float> get_required_float(json_t *input, const char *param_name, M
 std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpToolRequest *req);
 std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpToolRequest *req);
 std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req);
+std::optional<color> get_required_color(json_t *input, const char *param_name, McpToolRequest *req);
 
 // Extracts a required string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr and sets *error_out to an error result
@@ -116,6 +119,7 @@ std::optional<float> get_required_float(json_t *arguments, const char *param_nam
 std::optional<bool> get_required_bool(json_t *arguments, const char *param_name, json_t **error_out);
 std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out);
 std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out);
+std::optional<color> get_required_color(json_t *arguments, const char *param_name, json_t **error_out);
 
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or omitted.
@@ -133,6 +137,7 @@ std::optional<float> get_optional_float(json_t *arguments, const char *param_nam
 std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name);
 std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name);
 std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name);
+std::optional<color> get_optional_color(json_t *arguments, const char *param_name);
 
 // Extracts an optional JSON array of strings.
 std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name);
@@ -144,6 +149,11 @@ json_t *build_vec3d_json(const vec3d &v);
 // Builds a JSON {"rvec":..., "uvec":..., "fvec":...} object from a matrix.
 struct matrix;
 json_t* build_matrix_json(const matrix& m);
+
+// Builds a JSON {"red":..., "green":..., "blue":..., "alpha":..., "range":"0-255"}
+// object from a color.  Alpha is included only if include_alpha is true.
+struct color;
+json_t *build_color_json(const color &c, bool include_alpha = false);
 
 // Build a JSON string array from a list of indices, using a C-string-compatible field.
 template<typename VECTOR1_T, typename VECTOR2_T, typename ITEM_T, typename FIELD_T>
