@@ -1031,7 +1031,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 // ---------------------------------------------------------------------------
 
 // since this may return a dangling pointer, be sure not to store it in a variable!
-#define CFG_GET_NAME(cfg, index) (cfg).get_name ? (cfg).get_name(index) : (cfg).get_name_fallback(index).c_str()
+#define CFG_GET_NAME(cfg, index) ((cfg).get_name ? (cfg).get_name(index) : (cfg).get_name_fallback(index).c_str())
 
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
