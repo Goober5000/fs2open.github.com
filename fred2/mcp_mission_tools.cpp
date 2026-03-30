@@ -2120,19 +2120,19 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	debrief_stage &s = db->stages[*index];
 	bool changed = false;
 
-	if (new_text) {
+	if (new_text && s.text != new_text) {
 		s.text = new_text;
 		changed = true;
 	}
-	if (new_voice) {
+	if (new_voice && strcmp(s.voice, new_voice) != 0) {
 		strcpy_s(s.voice, new_voice);
 		changed = true;
 	}
-	if (new_rec_text) {
+	if (new_rec_text && s.recommendation_text != new_rec_text) {
 		s.recommendation_text = new_rec_text;
 		changed = true;
 	}
-	if (new_formula.has_value()) {
+	if (new_formula.has_value() && s.formula != *new_formula) {
 		int old_formula = s.formula;
 		if (old_formula >= 0)
 			free_sexp2(old_formula);
@@ -2415,6 +2415,10 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 
 	// Check for collected parse errors
 	if (!Parse_errors.empty()) {
+		// Free any partially-allocated SEXP nodes
+		if (n >= 0)
+			free_sexp2(n);
+
 		json_t *result = json_object();
 		json_t *errors = json_array();
 		for (const auto &e : Parse_errors) {
