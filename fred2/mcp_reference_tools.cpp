@@ -1494,8 +1494,9 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 		CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
 		if (fp) {
 			int len = cfilelength(fp);
-			content.resize(len);
-			cfread(content.data(), len, 1, fp);
+			content.resize(len);		// expand to fit expected data
+			int read_len = cfread(content.data(), len, 1, fp);
+			content.resize(read_len);	// trim trailing null bytes
 			cfclose(fp);
 		}
 	} else if (try_defaults) {
@@ -2502,7 +2503,7 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 			continue;
 
 		if (filter_search && filter_search[0]) {
-			if (!stristr(name, filter_search) && !stristr(shortName, filter_search) && !stristr(desc, filter_search))
+			if ((!name || !stristr(name, filter_search)) && (!shortName || !stristr(shortName, filter_search)) && (!desc || !stristr(desc, filter_search)))
 				continue;
 		}
 
@@ -2589,7 +2590,7 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 				continue;
 
 			if (filter_search && filter_search[0]) {
-				if (!stristr(ch_name, filter_search))
+				if (!ch_name || !stristr(ch_name, filter_search))
 					continue;
 			}
 
@@ -2647,7 +2648,7 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 			continue;
 
 		if (filter_search && filter_search[0]) {
-			if (!stristr(name, filter_search) && !stristr(desc, filter_search))
+			if ((!name || !stristr(name, filter_search)) && (!desc || !stristr(desc, filter_search)))
 				continue;
 		}
 
@@ -2683,7 +2684,7 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 	const char *key;
 	json_t *value;
 	json_object_foreach(enums, key, value) {
-		if (filter_search && filter_search[0] && !stristr(key, filter_search))
+		if (filter_search && filter_search[0] && (!key || !stristr(key, filter_search)))
 			continue;
 		json_object_set_new(result, key, json_incref(value));
 	}
