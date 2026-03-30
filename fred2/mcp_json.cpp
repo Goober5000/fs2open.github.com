@@ -5,6 +5,7 @@
 
 #include <jansson.h>
 #include "globalincs/pstypes.h"
+#include "graphics/2d.h"
 
 json_t *make_tool_result(const char *text, bool is_error)
 {
@@ -579,6 +580,78 @@ void add_matrix_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
+static json_t *make_color_schema()
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("object"));
+	json_t *sub = json_object();
+	for (const char *ch : {"red", "green", "blue", "alpha"}) {
+		json_t *np = json_object();
+		json_object_set_new(np, "type", json_string("integer"));
+		json_object_set_new(sub, ch, np);
+	}
+	json_object_set_new(p, "properties", sub);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("red"));
+	json_array_append_new(req, json_string("green"));
+	json_array_append_new(req, json_string("blue"));
+	json_object_set_new(p, "required", req);
+	return p;
+}
+
+static int clamp_color_channel(int val)
+{
+	if (val < 0) return 0;
+	if (val > 255) return 255;
+	return val;
+}
+
+static std::optional<color> parse_color_json(json_t *obj)
+{
+	if (!obj || !json_is_object(obj))
+		return std::nullopt;
+	json_t *jr = json_object_get(obj, "red");
+	json_t *jg = json_object_get(obj, "green");
+	json_t *jb = json_object_get(obj, "blue");
+	if (!jr || !json_is_integer(jr) || !jg || !json_is_integer(jg) || !jb || !json_is_integer(jb))
+		return std::nullopt;
+
+	int r = clamp_color_channel((int)json_integer_value(jr));
+	int g = clamp_color_channel((int)json_integer_value(jg));
+	int b = clamp_color_channel((int)json_integer_value(jb));
+
+	color c;
+
+	// Alpha is optional
+	json_t *ja = json_object_get(obj, "alpha");
+	if (ja && json_is_integer(ja)) {
+		int a = clamp_color_channel((int)json_integer_value(ja));
+		gr_init_alphacolor(&c, r, g, b, a);
+	} else {
+		gr_init_color(&c, r, g, b);
+	}
+
+	return c;
+}
+
+json_t *build_color_json(const color &c, bool include_alpha)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "red", json_integer(c.red));
+	json_object_set_new(obj, "green", json_integer(c.green));
+	json_object_set_new(obj, "blue", json_integer(c.blue));
+	if (include_alpha)
+		json_object_set_new(obj, "alpha", json_integer(c.alpha));
+	return obj;
+}
+
+void add_color_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = make_color_schema();
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
 std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
@@ -628,6 +701,30 @@ std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, M
 std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req)
 {
 	auto item = get_optional_matrix(input, param_name);
+	if (item.has_value())
+		return *item;
+	set_missing_param_error(req, param_name);
+	return std::nullopt;
+}
+
+std::optional<color> get_optional_color(json_t *arguments, const char *param_name)
+{
+	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	return parse_color_json(val);
+}
+
+std::optional<color> get_required_color(json_t *arguments, const char *param_name, json_t **error_out)
+{
+	auto item = get_optional_color(arguments, param_name);
+	if (item.has_value())
+		return *item;
+	*error_out = make_missing_param_error(param_name);
+	return std::nullopt;
+}
+
+std::optional<color> get_required_color(json_t *input, const char *param_name, McpToolRequest *req)
+{
+	auto item = get_optional_color(input, param_name);
 	if (item.has_value())
 		return *item;
 	set_missing_param_error(req, param_name);
