@@ -1,5 +1,6 @@
 #include "Editor.h"
 
+#include <algorithm>
 #include <array>
 #include <vector>
 #include <stdexcept>
@@ -974,7 +975,6 @@ int Editor::common_object_delete(int obj) {
 	const char *name;
 	int i, z, r, type;
 	object* objp;
-	SCP_list<CJumpNode>::iterator jnp;
 
 	type = Objects[obj].type;
 	if (type == OBJ_START) {
@@ -1106,11 +1106,8 @@ int Editor::common_object_delete(int obj) {
 		}
 
 	} else if (type == OBJ_JUMP_NODE) {
-		for (jnp = Jump_nodes.begin(); jnp != Jump_nodes.end(); ++jnp) {
-			if (jnp->GetSCPObject() == &Objects[obj]) {
-				break;
-			}
-		}
+		auto jnp = std::find_if(Jump_nodes.begin(), Jump_nodes.end(),
+			[obj](const CJumpNode &jn) { return jn.GetSCPObject() == &Objects[obj]; });
 
 		// come on, WMC, we don't want to call obj_delete twice...
 		// fool the destructor into not calling obj_delete yet
