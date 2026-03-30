@@ -7,6 +7,7 @@
 
 #include <jansson.h>
 #include <cstring>
+#include <thread>
 
 #include "mission/missionparse.h"
 #include "mod_table/mod_table.h"
@@ -485,6 +486,8 @@ static void handle_mcp_post(struct mg_connection *conn)
 	if (result && (error_code == 0) && (error_msg.empty())) {
 		resp = make_response(id, result);
 	} else {
+		if (result)
+			json_decref(result);
 		if (error_msg.empty()) {
 			error_msg = "Unknown error";
 		} else if (error_code == 0) {
@@ -549,10 +552,41 @@ void mcp_server_start()
 
 void mcp_server_stop()
 {
-	if (mcp_ctx != nullptr) {
-		mg_stop(mcp_ctx);
-		mcp_ctx = nullptr;
+	if (mcp_ctx == nullptr) {
+		mcp_reference_tools_cleanup();
+		return;
 	}
+
+	// Reject new tool calls immediately
+	mcp_fred_ready.store(false);
+
+	// mg_stop() blocks until all worker threads exit, but a worker may be
+	// blocked in WaitForSingleObject waiting for the main thread to process
+	// its WM_MCP_TOOL_CALL.  To avoid a bounded deadlock (up to the tool
+	// timeout), run mg_stop on a background thread and pump messages here.
+	struct mg_context *ctx = mcp_ctx;
+	mcp_ctx = nullptr;
+
+	std::atomic<bool> stop_done{false};
+	std::thread stop_thread([ctx, &stop_done]() {
+		mg_stop(ctx);
+		stop_done.store(true, std::memory_order_release);
+	});
+
+	// Pump messages so any in-flight WM_MCP_TOOL_CALL requests get processed,
+	// allowing their worker threads to unblock and exit.
+	while (!stop_done.load(std::memory_order_acquire)) {
+		DWORD result = MsgWaitForMultipleObjects(0, nullptr, FALSE, 100, QS_ALLINPUT);
+		if (result == WAIT_OBJECT_0) {
+			MSG msg;
+			while (PeekMessage(&msg, nullptr, 0, 0, PM_REMOVE)) {
+				TranslateMessage(&msg);
+				DispatchMessage(&msg);
+			}
+		}
+	}
+
+	stop_thread.join();
 	mcp_reference_tools_cleanup();
 }
 

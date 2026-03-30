@@ -176,7 +176,8 @@ static SCP_string format_string_enum_error(const char *input, const SCP_vector<c
 		msg += v;
 		msg += "\",";
 	}
-	msg.pop_back();  // remove trailing comma
+	if (!values.empty())
+		msg.pop_back();  // remove trailing comma
 	return msg;
 }
 
