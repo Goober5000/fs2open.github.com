@@ -203,22 +203,6 @@ static int opf_from_string(const char *name)
 	return -1;
 }
 
-static const char *opr_to_string(int opr)
-{
-	switch (opr) {
-		case OPR_NONE:               return "none";
-		case OPR_NUMBER:             return "number";
-		case OPR_BOOL:               return "boolean";
-		case OPR_NULL:               return "void";
-		case OPR_AI_GOAL:            return "ai_goal";
-		case OPR_POSITIVE:           return "positive_number";
-		case OPR_STRING:             return "string";
-		case OPR_AMBIGUOUS:          return "ambiguous";
-		case OPR_FLEXIBLE_ARGUMENT:  return "flexible_argument";
-		default:                     return "unknown";
-	}
-}
-
 // Returns the effective weapon category.  Most beam weapons have subtype
 // WP_LASER (because they appear in #Primary Weapons), so we use is_beam()
 // rather than relying on the raw subtype field.
@@ -1466,7 +1450,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 
 	// Return type
 	int ret = query_operator_return_type(op.value);
-	json_object_set_new(obj, "return_type", json_string(opr_to_string(ret)));
+	json_object_set_new(obj, "return_type", json_string(get_opr_type_name(ret)));
 
 	// Help text
 	int help_idx = find_item_with_field(Sexp_help, &sexp_help_struct::id, op.value);
@@ -2479,11 +2463,13 @@ static json_t *get_scripting_api_doc()
 
 // stristr (from parse/parselo.h) is used for case-insensitive substring matching.
 
+#define GET_SCRIPTING_DOC_OR_RETURN(var) \
+	json_t *var = get_scripting_api_doc(); \
+	if (!var) return make_tool_result("Failed to generate scripting API documentation.", true)
+
 static json_t *handle_list_scripting_elements(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	const char *filter_type = get_optional_string(arguments, "element_type", true);
 	const char *filter_search = get_optional_string(arguments, "search", true);
@@ -2530,9 +2516,7 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 
 static json_t *handle_get_scripting_element(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	json_t *err = nullptr;
 	const char *name = get_required_string(arguments, "name", &err, false);
@@ -2555,9 +2539,7 @@ static json_t *handle_get_scripting_element(json_t *arguments)
 
 static json_t *handle_search_scripting_children(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	const char *filter_search = get_optional_string(arguments, "search", true);
 	const char *filter_child_type = get_optional_string(arguments, "child_type", true);
@@ -2613,9 +2595,7 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 
 static json_t *handle_list_scripting_hooks(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	const char *filter_name = get_optional_string(arguments, "name", true);
 	const char *filter_search = get_optional_string(arguments, "search", true);
@@ -2672,9 +2652,7 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 
 static json_t *handle_list_scripting_enums(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	const char *filter_search = get_optional_string(arguments, "search", true);
 
@@ -2694,9 +2672,7 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 
 static json_t *handle_get_scripting_misc(json_t *arguments)
 {
-	json_t *doc = get_scripting_api_doc();
-	if (!doc)
-		return make_tool_result("Failed to generate scripting API documentation.", true);
+	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	json_t *err = nullptr;
 	const char *section = get_required_string(arguments, "section", &err, true);
@@ -2731,9 +2707,9 @@ static json_t *handle_list_missions()
 
 		// Format write_time as ISO 8601
 		char timebuf[32];
-		auto tm_ptr = localtime(&info[i].write_time);
-		if (tm_ptr) {
-			strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", tm_ptr);
+		struct tm tm_buf;
+		if (localtime_s(&tm_buf, &info[i].write_time) == 0) {
+			strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm_buf);
 			json_object_set_new(entry, "modified", json_string(timebuf));
 		}
 
