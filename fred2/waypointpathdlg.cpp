@@ -18,11 +18,7 @@
 #include "object/object.h"
 #include "object/waypoint.h"
 #include "globalincs/linklist.h"
-#include "ship/ship.h"
 #include "ai/aigoals.h"
-#include "starfield/starfield.h"
-#include "jumpnode/jumpnode.h"
-#include "iff_defs/iff_defs.h"
 
 #define ID_JUMP_NODE_MENU	8000
 #define ID_WAYPOINT_MENU	9000
@@ -138,8 +134,7 @@ void waypoint_path_dlg::initialize_data(int full_update)
 
 int waypoint_path_dlg::update_data(int redraw)
 {
-	int i, z;
-	object *ptr;
+	int z;
 
 	if (!GetSafeHwnd())
 		return 0;
@@ -153,91 +148,15 @@ int waypoint_path_dlg::update_data(int redraw)
 	}
 
 	if (cur_waypoint_list != NULL) {
-		for (i=0; i<MAX_WINGS; i++)
-		{
-			if (!stricmp(Wings[i].name, m_name)) {
-				if (bypass_errors)
-					return 1;
-
-				bypass_errors = 1;
-				z = MessageBox("This waypoint path name is already being used by a wing\n"
-					"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
-
-				if (z == IDCANCEL)
-					return -1;
-
-				m_name = _T(cur_waypoint_list->get_name());
-				UpdateData(FALSE);
-			}
-		}
-
-		ptr = GET_FIRST(&obj_used_list);
-		while (ptr != END_OF_LIST(&obj_used_list)) {
-			if ((ptr->type == OBJ_SHIP) || (ptr->type == OBJ_START)) {
-				if (!stricmp(m_name, Ships[ptr->instance].ship_name)) {
-					if (bypass_errors)
-						return 1;
-
-					bypass_errors = 1;
-					z = MessageBox("This waypoint path name is already being used by a ship\n"
-						"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
-
-					if (z == IDCANCEL)
-						return -1;
-
-					m_name = _T(cur_waypoint_list->get_name());
-					UpdateData(FALSE);
-				}
-			}
-
-			ptr = GET_NEXT(ptr);
-		}
-
-		// We don't need to check teams.  "Unknown" is a valid name and also an IFF.
-
-		for ( i=0; i < (int)Ai_tp_list.size(); i++) {
-			if (!stricmp(m_name, Ai_tp_list[i].name)) {
-				if (bypass_errors)
-					return 1;
-
-				bypass_errors = 1;
-				z = MessageBox("This waypoint path name is already being used by a target priority group.\n"
-					"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
-
-				if (z == IDCANCEL)
-					return -1;
-
-				m_name = _T(cur_waypoint_list->get_name());
-				UpdateData(FALSE);
-			}
-		}
-
-		for (const auto &ii: Waypoint_lists)
-		{
-			if (!stricmp(ii.get_name(), m_name) && (&ii != cur_waypoint_list)) {
-				if (bypass_errors)
-					return 1;
-
-				bypass_errors = 1;
-				z = MessageBox("This waypoint path name is already being used by another waypoint path\n"
-					"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
-
-				if (z == IDCANCEL)
-					return -1;
-
-				m_name = _T(cur_waypoint_list->get_name());
-				UpdateData(FALSE);
-			}
-		}
-
-		if(jumpnode_get_by_name(m_name) != NULL)
-		{
+		SCP_string conflict = check_name_conflict("waypoint path", m_name, -1, -1, cur_waypoint_list);
+		if (!conflict.empty()) {
 			if (bypass_errors)
 				return 1;
 
 			bypass_errors = 1;
-			z = MessageBox("This waypoint path name is already being used by a jump node\n"
-				"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
+			CString msg;
+			msg.Format("%s\nPress OK to restore old name", conflict.c_str());
+			z = MessageBox(msg, "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
 
 			if (z == IDCANCEL)
 				return -1;
@@ -245,22 +164,6 @@ int waypoint_path_dlg::update_data(int redraw)
 			m_name = _T(cur_waypoint_list->get_name());
 			UpdateData(FALSE);
 		}
-
-		if (!stricmp(m_name.Left(1), "<")) {
-			if (bypass_errors)
-				return 1;
-
-			bypass_errors = 1;
-			z = MessageBox("Waypoint names not allowed to begin with <\n"
-				"Press OK to restore old name", "Error", MB_ICONEXCLAMATION | MB_OKCANCEL);
-
-			if (z == IDCANCEL)
-				return -1;
-
-			m_name = _T(cur_waypoint_list->get_name());
-			UpdateData(FALSE);
-		}
-
 
 		char old_name[NAME_LENGTH];
 		strcpy_s(old_name, cur_waypoint_list->get_name());

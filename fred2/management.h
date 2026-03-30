@@ -122,6 +122,14 @@ void generate_ship_usage_list(int* arr, int wing);
 
 CJumpNode* jumpnode_get_by_name(const CString& name);
 
+// Check whether the given name is empty, starts with '<', or conflicts with an existing ship,
+// wing, waypoint path, jump node, or target priority group.
+// Returns an empty string if the name is valid, otherwise a self-contained reason string
+// (e.g. "The name is already being used by a wing").  The exclude parameters prevent matching
+// against the entity currently being renamed.
+SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship = -1, int exclude_wing = -1,
+	const waypoint_list *exclude_waypoint_list = nullptr, const CJumpNode *exclude_jump_node = nullptr);
+
 // function and defines to use when adding ships to combo boxes
 #define SHIPS_2_COMBO_SPECIAL (1 << 0)
 #define SHIPS_2_COMBO_ALL_SHIPS (1 << 1)
