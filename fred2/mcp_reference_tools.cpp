@@ -239,6 +239,8 @@ static const SCP_vector<const char*> subtype_enum_values = { "primary", "seconda
 // Tool schema registration
 // ---------------------------------------------------------------------------
 
+static json_t *load_reference_notes();
+
 void mcp_register_reference_tools(json_t *tools)
 {
 	// list_ship_types
@@ -347,16 +349,53 @@ void mcp_register_reference_tools(json_t *tools)
 		"in a session to understand the context you are working in.",
 		json_object());
 
-	// get_reference_notes
+	// list_reference_notes
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "topic", "Topic to look up (omit to list all available topics)");
-		register_tool(tools, "get_reference_notes",
-			"Get explanatory notes about FreeSpace game concepts and domain knowledge "
-			"that may not be obvious from raw data alone. Call without arguments to "
-			"list all available topics.",
+
+		// Build category enum dynamically from the reference notes file
+		SCP_vector<const char *> category_values;
+		json_t *notes_for_categories = load_reference_notes();
+		if (notes_for_categories && json_is_array(notes_for_categories)) {
+			size_t idx;
+			json_t *entry;
+			json_array_foreach(notes_for_categories, idx, entry) {
+				const char *cat = json_string_value(json_object_get(entry, "category"));
+				if (cat) {
+					bool already_listed = false;
+					for (const char *existing : category_values) {
+						if (stricmp(existing, cat) == 0) {
+							already_listed = true;
+							break;
+						}
+					}
+					if (!already_listed)
+						category_values.push_back(cat);
+				}
+			}
+		}
+
+		if (!category_values.empty())
+			add_string_enum_prop(props, "category",
+				"Filter by category. Omit to list all.",
+				category_values);
+
+		if (notes_for_categories)
+			json_decref(notes_for_categories);
+		add_string_prop(props, "search",
+			"Fuzzy search against topic names. Results are sorted by match quality.");
+		register_tool(tools, "list_reference_notes",
+			"List reference notes about FreeSpace game concepts and domain knowledge. "
+			"Returns topic names with categories and descriptions. "
+			"Use get_reference_note to read the full text of a specific topic.",
 			props);
 	}
+
+	// get_reference_note
+	register_tool_with_required_string(tools, "get_reference_note",
+		"Get the full text of a specific reference note. "
+		"Use list_reference_notes to discover available topics.",
+		"topic", "Topic name to look up.");
 
 	// get_sexp_argument_type
 	{
@@ -532,7 +571,7 @@ void mcp_register_reference_tools(json_t *tools)
 			"List all scripting API libraries and classes with summary info (name, shortName, "
 			"type, description, child count). Use this to discover available namespaces and "
 			"types before drilling into specifics with get_scripting_element. "
-			"Use get_reference_notes with topic 'scripts' for an overview of the scripting system.",
+			"Use get_reference_note with topic 'scripts' for an overview of the scripting system.",
 			props);
 	}
 
@@ -1475,7 +1514,7 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 		if (fp) {
 			int len = cfilelength(fp);
 			content.resize(len);		// expand to fit expected data
-			int read_len = cfread(content.data(), len, 1, fp);
+			int read_len = cfread(content.data(), 1, len, fp);
 			content.resize(read_len);	// trim trailing null bytes
 			cfclose(fp);
 		}
@@ -1520,9 +1559,10 @@ static json_t *load_reference_notes()
 	return root;
 }
 
-static json_t *handle_get_reference_notes(json_t *arguments)
+static json_t *handle_list_reference_notes(json_t *arguments)
 {
-	const char *topic = get_optional_string(arguments, "topic", true);
+	const char *filter_category = get_optional_string(arguments, "category", true);
+	const char *filter_search = get_optional_string(arguments, "search", true);
 
 	json_t *notes = load_reference_notes();
 	if (!notes)
@@ -1533,20 +1573,99 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
 	}
 
-	// If no topic specified, list all available topics
-	if (!topic || topic[0] == '\0') {
-		json_t *arr = json_array();
+	if (filter_search && filter_search[0] != '\0') {
+		// Fuzzy search mode: use stringcost against topic names
+
+		// Compute max topic length for threshold calculation
+		size_t max_topic_length = 0;
 		size_t index;
 		json_t *entry;
 		json_array_foreach(notes, index, entry) {
+			const char *t = json_string_value(json_object_get(entry, "topic"));
+			if (t) {
+				size_t len = strlen(t);
+				if (len > max_topic_length)
+					max_topic_length = len;
+			}
+		}
+
+		// Threshold: allows ~2 unmatched characters (same formula as OperatorComboBox)
+		size_t threshold = max_topic_length * max_topic_length * 3;
+		SCP_string search_str(filter_search);
+
+		// Collect matching entries with their costs
+		SCP_vector<std::pair<size_t, size_t>> matches;  // (index, cost)
+		json_array_foreach(notes, index, entry) {
+			// Apply category filter first
+			if (filter_category && filter_category[0] != '\0') {
+				const char *cat = json_string_value(json_object_get(entry, "category"));
+				if (!cat || stricmp(filter_category, cat) != 0)
+					continue;
+			}
+
+			const char *t = json_string_value(json_object_get(entry, "topic"));
+			if (!t)
+				continue;
+
+			SCP_string topic_str(t);
+			size_t cost = stringcost(topic_str, search_str, max_topic_length, stringcost_tolower_equal);
+			if (cost != SCP_string::npos && cost < threshold)
+				matches.emplace_back(index, cost);
+		}
+
+		// Sort by cost ascending (best match first)
+		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
+			return a.second < b.second;
+		});
+
+		// Build result array
+		json_t *arr = json_array();
+		for (const auto &match : matches) {
+			json_t *e = json_array_get(notes, match.first);
 			json_t *item = json_object();
-			json_object_set_new(item, "category", json_copy(json_object_get(entry, "category")));
-			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
-			json_object_set_new(item, "description", json_copy(json_object_get(entry, "description")));
+			json_object_set_new(item, "category", json_copy(json_object_get(e, "category")));
+			json_object_set_new(item, "topic", json_copy(json_object_get(e, "topic")));
+			json_object_set_new(item, "description", json_copy(json_object_get(e, "description")));
 			json_array_append_new(arr, item);
 		}
 		json_decref(notes);
 		return make_json_tool_result(arr);
+	}
+
+	// No search: list entries, optionally filtered by category
+	json_t *arr = json_array();
+	size_t index;
+	json_t *entry;
+	json_array_foreach(notes, index, entry) {
+		if (filter_category && filter_category[0] != '\0') {
+			const char *cat = json_string_value(json_object_get(entry, "category"));
+			if (!cat || stricmp(filter_category, cat) != 0)
+				continue;
+		}
+
+		json_t *item = json_object();
+		json_object_set_new(item, "category", json_copy(json_object_get(entry, "category")));
+		json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
+		json_object_set_new(item, "description", json_copy(json_object_get(entry, "description")));
+		json_array_append_new(arr, item);
+	}
+	json_decref(notes);
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_get_reference_note(json_t *arguments)
+{
+	json_t *err = nullptr;
+	const char *topic = get_required_string(arguments, "topic", &err, true);
+	if (!topic) return err;
+
+	json_t *notes = load_reference_notes();
+	if (!notes)
+		return make_tool_result("Failed to load reference notes.", true);
+
+	if (!json_is_array(notes)) {
+		json_decref(notes);
+		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
 	}
 
 	// Look up the requested topic (case-insensitive)
@@ -1566,7 +1685,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 	}
 
 	json_decref(notes);
-	return make_tool_result("Topic not found. Call get_reference_notes without arguments to list available topics.", true);
+	return make_tool_result("Topic not found. Use list_reference_notes to see available topics.", true);
 }
 
 // ---------------------------------------------------------------------------
@@ -2831,8 +2950,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_get_sexp_operator(arguments);
 	if (strcmp(tool_name, "get_mod_info") == 0)
 		return handle_get_mod_info();
-	if (strcmp(tool_name, "get_reference_notes") == 0)
-		return handle_get_reference_notes(arguments);
+	if (strcmp(tool_name, "list_reference_notes") == 0)
+		return handle_list_reference_notes(arguments);
+	if (strcmp(tool_name, "get_reference_note") == 0)
+		return handle_get_reference_note(arguments);
 	if (strcmp(tool_name, "get_sexp_argument_type") == 0)
 		return handle_get_sexp_argument_type(arguments);
 	if (strcmp(tool_name, "get_sexp_return_type") == 0)
