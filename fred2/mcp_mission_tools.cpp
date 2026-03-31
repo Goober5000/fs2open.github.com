@@ -2572,6 +2572,55 @@ static void handle_get_waypoint_list(json_t *input, McpToolRequest *req)
 	set_not_found_error(req, "Waypoint list", name);
 }
 
+// Helper to rename SEXP and AI goal references for an individual waypoint.
+// old_list_name and new_list_name can be the same (for reordering within one list)
+// or different (for list rename).
+static void rename_waypoint_sexp_refs(const char *old_list_name, int old_1based,
+	const char *new_list_name, int new_1based)
+{
+	char old_name[NAME_LENGTH];
+	char new_name[NAME_LENGTH];
+	waypoint_stuff_name(old_name, old_list_name, old_1based);
+	waypoint_stuff_name(new_name, new_list_name, new_1based);
+	update_sexp_references(old_name, new_name);
+	ai_update_goal_references(sexp_ref_type::WAYPOINT, old_name, new_name);
+}
+
+// Convenience overload for renaming within the same list.
+static void rename_waypoint_sexp_refs(const char *list_name, int old_1based, int new_1based)
+{
+	rename_waypoint_sexp_refs(list_name, old_1based, list_name, new_1based);
+}
+
+// Helper to invalidate SEXP and AI goal references for an individual waypoint
+// by wrapping the name in angle brackets (e.g. "Path:1" -> "<Path:1>").
+static void invalidate_waypoint_sexp_refs(const char *list_name, int one_based)
+{
+	char wpt_name[NAME_LENGTH];
+	char buf[NAME_LENGTH + 4];
+	waypoint_stuff_name(wpt_name, list_name, one_based);
+	snprintf(buf, sizeof(buf), "<%s>", wpt_name);
+	update_sexp_references(wpt_name, buf);
+	ai_update_goal_references(sexp_ref_type::WAYPOINT, wpt_name, buf);
+}
+
+static void rename_waypoint_sexp_refs_to_temp(const char *list_name, int one_based, char *temp_buf, size_t buf_size)
+{
+	char name[NAME_LENGTH];
+	waypoint_stuff_name(name, list_name, one_based);
+	snprintf(temp_buf, buf_size, "<temp_wpt_%d>", one_based);
+	update_sexp_references(name, temp_buf);
+	ai_update_goal_references(sexp_ref_type::WAYPOINT, name, temp_buf);
+}
+
+static void rename_waypoint_sexp_refs_from_temp(const char *temp_name, const char *list_name, int new_1based)
+{
+	char new_name[NAME_LENGTH];
+	waypoint_stuff_name(new_name, list_name, new_1based);
+	update_sexp_references(temp_name, new_name);
+	ai_update_goal_references(sexp_ref_type::WAYPOINT, temp_name, new_name);
+}
+
 static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 {
 	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
@@ -2658,15 +2707,8 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 		ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, old_name, new_name);
 
 		// Update SEXP references for each individual waypoint name
-		auto &wpts = wl.get_waypoints();
-		for (int wpt_idx = 0; wpt_idx < (int)wpts.size(); wpt_idx++) {
-			char old_buf[NAME_LENGTH];
-			char new_buf[NAME_LENGTH];
-			waypoint_stuff_name(old_buf, old_name, wpt_idx + 1);
-			waypoint_stuff_name(new_buf, new_name, wpt_idx + 1);
-			update_sexp_references(old_buf, new_buf);
-			ai_update_goal_references(sexp_ref_type::WAYPOINT, old_buf, new_buf);
-		}
+		for (int wpt_idx = 0; wpt_idx < (int)wl.get_waypoints().size(); wpt_idx++)
+			rename_waypoint_sexp_refs(old_name, wpt_idx + 1, new_name, wpt_idx + 1);
 
 		wl.set_name(new_name);
 		changed = true;
@@ -2735,17 +2777,8 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, name, buf);
 
 	// Invalidate references for each individual waypoint name
-	{
-		auto &wpts = Waypoint_lists[index].get_waypoints();
-		for (int wpt_idx = 0; wpt_idx < (int)wpts.size(); wpt_idx++) {
-			char wpt_name[NAME_LENGTH];
-			char wpt_buf[NAME_LENGTH + 4];
-			waypoint_stuff_name(wpt_name, name, wpt_idx + 1);
-			snprintf(wpt_buf, sizeof(wpt_buf), "<%s>", wpt_name);
-			update_sexp_references(wpt_name, wpt_buf);
-			ai_update_goal_references(sexp_ref_type::WAYPOINT, wpt_name, wpt_buf);
-		}
-	}
+	for (int wpt_idx = 0; wpt_idx < (int)Waypoint_lists[index].get_waypoints().size(); wpt_idx++)
+		invalidate_waypoint_sexp_refs(name, wpt_idx + 1);
 
 	// Remove all waypoints (waypoint_remove handles game objects and instance reindexing).
 	// When the last waypoint is removed, waypoint_remove also erases the list from
@@ -2795,6 +2828,315 @@ static void handle_move_waypoint_list(json_t *input, McpToolRequest *req)
 static void handle_swap_waypoint_lists(json_t *input, McpToolRequest *req)
 {
 	auto cfg = make_waypoint_list_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
+// Individual waypoint tools
+// ---------------------------------------------------------------------------
+
+static void handle_create_waypoint(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+
+	auto list = get_required_string(input, "list", req, false);
+	if (!list) return;
+
+	auto pos = get_required_vec3d(input, "position", req);
+	if (!pos.has_value()) return;
+
+	auto insert_index = get_optional_integer(input, "index");
+
+	// Find the waypoint list
+	int li = find_matching_waypoint_list_index(list);
+	if (li < 0) {
+		set_not_found_error(req, "Waypoint list", list);
+		return;
+	}
+
+	int wpt_count = (int)Waypoint_lists[li].get_waypoints().size();
+
+	// Validate insert index
+	int target_index;
+	if (!insert_index.has_value()) {
+		target_index = wpt_count;
+	} else {
+		if (!check_int_range(*insert_index, 0, wpt_count, "index", req))
+			return;
+		target_index = *insert_index;
+	}
+
+	// Use waypoint_add which handles game object creation and instance reindexing.
+	// waypoint_add inserts AFTER the specified instance, unless first_waypoint_in_list is true.
+	vec3d position = *pos;
+	int objnum;
+	if (target_index == 0) {
+		objnum = waypoint_add(&position, calc_waypoint_instance(li, 0), true);
+	} else {
+		objnum = waypoint_add(&position, calc_waypoint_instance(li, target_index - 1));
+	}
+
+	if (objnum < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to create waypoint in list '%s'", list);
+		return;
+	}
+
+	Waypoint_editor_dialog.initialize_data(1);
+	mark_modified("MCP: create waypoint in %s at index %d", list, target_index);
+
+	char wpt_name[NAME_LENGTH];
+	waypoint_stuff_name(wpt_name, Waypoint_lists[li].get_name(), target_index + 1);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "list", json_string(Waypoint_lists[li].get_name()));
+	json_object_set_new(result, "index", json_integer(target_index));
+	json_object_set_new(result, "name", json_string(wpt_name));
+	json_object_set_new(result, "position", build_vec3d_json(position));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_update_waypoint(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+
+	auto list = get_required_string(input, "list", req, false);
+	if (!list) return;
+
+	auto wpt_index = get_required_integer(input, "index", req);
+	if (!wpt_index.has_value()) return;
+
+	auto new_pos = get_optional_vec3d(input, "position");
+
+	// Find the waypoint list
+	int li = find_matching_waypoint_list_index(list);
+	if (li < 0) {
+		set_not_found_error(req, "Waypoint list", list);
+		return;
+	}
+
+	auto &wpts = Waypoint_lists[li].get_waypoints();
+	if (!check_int_range(*wpt_index, 0, (int)wpts.size() - 1, "index", req))
+		return;
+
+	auto &wpt = wpts[*wpt_index];
+	bool changed = false;
+
+	// Update position
+	if (new_pos.has_value()) {
+		const vec3d *cur = wpt.get_pos();
+		if (!fl_equal(cur->xyz.x, new_pos->xyz.x) || !fl_equal(cur->xyz.y, new_pos->xyz.y) || !fl_equal(cur->xyz.z, new_pos->xyz.z)) {
+			vec3d position = *new_pos;
+			wpt.set_pos(&position);
+			Objects[wpt.get_objnum()].pos = position;
+			changed = true;
+		}
+	}
+
+	if (changed) {
+		Waypoint_editor_dialog.initialize_data(1);
+		mark_modified("MCP: update waypoint %s:%d", Waypoint_lists[li].get_name(), *wpt_index + 1);
+	}
+
+	char wpt_name[NAME_LENGTH];
+	waypoint_stuff_name(wpt_name, Waypoint_lists[li].get_name(), *wpt_index + 1);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "list", json_string(Waypoint_lists[li].get_name()));
+	json_object_set_new(result, "index", json_integer(*wpt_index));
+	json_object_set_new(result, "name", json_string(wpt_name));
+	json_object_set_new(result, "position", build_vec3d_json(*wpt.get_pos()));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+
+	auto list = get_required_string(input, "list", req, false);
+	if (!list) return;
+
+	auto wpt_index = get_required_integer(input, "index", req);
+	if (!wpt_index.has_value()) return;
+
+	// Find the waypoint list
+	int li = find_matching_waypoint_list_index(list);
+	if (li < 0) {
+		set_not_found_error(req, "Waypoint list", list);
+		return;
+	}
+
+	auto &wpts = Waypoint_lists[li].get_waypoints();
+	if (!check_int_range(*wpt_index, 0, (int)wpts.size() - 1, "index", req))
+		return;
+
+	int count = (int)wpts.size();
+	int deleted_index = *wpt_index;
+
+	// Construct waypoint name for reference checking
+	char wpt_name[NAME_LENGTH];
+	waypoint_stuff_name(wpt_name, list, deleted_index + 1);
+
+	auto force = get_optional_bool(input, "force");
+
+	// Check for SEXP references unless force is set
+	if (!force.has_value() || !*force) {
+		int node;
+
+		// If this is the last waypoint, check for list references too
+		if (count == 1) {
+			auto ref = query_referenced_in_sexp(sexp_ref_type::WAYPOINT_PATH, list, node);
+			if (ref.second != sexp_src::NONE) {
+				SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+				req->success = false;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Waypoint list '%s' is referenced in %s (this is the last waypoint, so "
+					"deleting it would remove the list). Use force=true to delete anyway "
+					"(references will be invalidated).", list, desc.c_str());
+				return;
+			}
+		}
+
+		// Check the individual waypoint
+		auto ref = query_referenced_in_sexp(sexp_ref_type::WAYPOINT, wpt_name, node);
+		if (ref.second != sexp_src::NONE) {
+			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Waypoint '%s' is referenced in %s. Use force=true to delete anyway "
+				"(references will be invalidated).", wpt_name, desc.c_str());
+			return;
+		}
+	}
+
+	// Invalidate SEXP and AI goal references for this waypoint
+	invalidate_waypoint_sexp_refs(list, deleted_index + 1);
+
+	// If last waypoint, also invalidate list references
+	if (count == 1) {
+		char buf[NAME_LENGTH + 4];
+		snprintf(buf, sizeof(buf), "<%s>", list);
+		update_sexp_references(list, buf);
+		ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, list, buf);
+	}
+
+	// Save list name before removal (in case the list gets deleted)
+	char list_name[NAME_LENGTH];
+	strcpy_s(list_name, Waypoint_lists[li].get_name());
+
+	// Remove the waypoint (handles game objects, vector removal, instance reindexing)
+	waypoint_remove(&wpts[deleted_index]);
+
+	// Update SEXP and AI goal references for waypoints that shifted down
+	for (int i = deleted_index; i < count - 1; i++)
+		rename_waypoint_sexp_refs(list_name, i + 2, i + 1);
+
+	Waypoint_editor_dialog.initialize_data(1);
+	mark_modified("MCP: delete waypoint %s", wpt_name);
+
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Deleted waypoint: %s", wpt_name);
+	req->success = true;
+}
+
+static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "waypoint";
+	cfg.count = (int)Waypoint_lists[waypoint_list_index].get_waypoints().size();
+	cfg.validate_dialog = validate_dialog_for_waypoint_lists;
+
+	// Capture list index for use in lambdas
+	int li = waypoint_list_index;
+
+	cfg.get_name = [li](int i) -> const char * {
+		static char name_buf[NAME_LENGTH];
+		waypoint_stuff_name(name_buf, Waypoint_lists[li].get_name(), i + 1);
+		return name_buf;
+	};
+
+	cfg.do_move = [li](int from, int to) {
+		auto &wl = Waypoint_lists[li];
+		const char *list_name = wl.get_name();
+		auto &wpts = wl.get_waypoints();
+
+		// Determine the range of affected indices
+		int lo = std::min(from, to);
+		int hi = std::max(from, to);
+
+		// Step 1: Rename all affected waypoints to temporary names
+		SCP_vector<SCP_string> temp_names(hi - lo + 1);
+		for (int i = lo; i <= hi; i++) {
+			char temp[NAME_LENGTH + 16];
+			rename_waypoint_sexp_refs_to_temp(list_name, i + 1, temp, sizeof(temp));
+			temp_names[i - lo] = temp;
+		}
+
+		// Step 2: Structural move
+		array_move_element(wpts, from, to);
+		reindex_waypoint_instances();
+
+		// Step 3: Rename from temp names to final names
+		// After the move, the element that was at 'from' is now at 'to'.
+		// Elements between shifted by 1.
+		for (int i = lo; i <= hi; i++) {
+			rename_waypoint_sexp_refs_from_temp(temp_names[i - lo].c_str(), list_name, i + 1);
+		}
+	};
+
+	cfg.do_swap = [li](int a, int b) {
+		auto &wl = Waypoint_lists[li];
+		const char *list_name = wl.get_name();
+		auto &wpts = wl.get_waypoints();
+
+		// Step 1: Rename both to temp names
+		char temp_a[NAME_LENGTH + 16];
+		char temp_b[NAME_LENGTH + 16];
+		rename_waypoint_sexp_refs_to_temp(list_name, a + 1, temp_a, sizeof(temp_a));
+		rename_waypoint_sexp_refs_to_temp(list_name, b + 1, temp_b, sizeof(temp_b));
+
+		// Step 2: Structural swap
+		std::swap(wpts[a], wpts[b]);
+		reindex_waypoint_instances();
+
+		// Step 3: Rename from temp to final (swapped positions)
+		rename_waypoint_sexp_refs_from_temp(temp_a, list_name, b + 1);
+		rename_waypoint_sexp_refs_from_temp(temp_b, list_name, a + 1);
+	};
+
+	return cfg;
+}
+
+static void handle_move_waypoint(json_t *input, McpToolRequest *req)
+{
+	auto list = get_required_string(input, "list", req, false);
+	if (!list) return;
+
+	int li = find_matching_waypoint_list_index(list);
+	if (li < 0) {
+		set_not_found_error(req, "Waypoint list", list);
+		return;
+	}
+
+	auto cfg = make_waypoint_move_swap_config(li);
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
+{
+	auto list = get_required_string(input, "list", req, false);
+	if (!list) return;
+
+	int li = find_matching_waypoint_list_index(list);
+	if (li < 0) {
+		set_not_found_error(req, "Waypoint list", list);
+		return;
+	}
+
+	auto cfg = make_waypoint_move_swap_config(li);
 	handle_generic_swap(input, req, cfg);
 }
 
@@ -3230,6 +3572,11 @@ static const char *mission_tool_names[] = {
 	"delete_waypoint_list",
 	"move_waypoint_list",
 	"swap_waypoint_lists",
+	"create_waypoint",
+	"update_waypoint",
+	"delete_waypoint",
+	"move_waypoint",
+	"swap_waypoints",
 	"sexp_to_text",
 	"get_sexp_node",
 	"walk_sexp_tree",
@@ -4171,6 +4518,94 @@ void mcp_register_mission_tools(json_t *tools)
 	}
 
 	// -----------------------------------------------------------------------
+	// Individual waypoint tools
+	// -----------------------------------------------------------------------
+
+	// create_waypoint
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "list", "Name of the waypoint list to add to");
+		add_vec3d_prop(props, "position", "World position of the new waypoint");
+		add_integer_prop(props, "index",
+			"0-based position to insert within the list. If omitted, appends to the end.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("list"));
+		json_array_append_new(req, json_string("position"));
+		register_tool(tools, "create_waypoint",
+			"Add a new waypoint to an existing waypoint list at a given position.",
+			props, req);
+	}
+
+	// update_waypoint
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "list", "Name of the waypoint list");
+		add_integer_prop(props, "index", "0-based index of the waypoint to update");
+		add_vec3d_prop(props, "position", "New world position for the waypoint");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("list"));
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "update_waypoint",
+			"Update the position of an individual waypoint. Only specified fields "
+			"are changed; omitted fields are left unchanged.",
+			props, req);
+	}
+
+	// delete_waypoint
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "list", "Name of the waypoint list");
+		add_integer_prop(props, "index", "0-based index of the waypoint to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if the waypoint is referenced in SEXPs "
+			"(references will be invalidated). Default false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("list"));
+		json_array_append_new(req, json_string("index"));
+		register_tool(tools, "delete_waypoint",
+			"Delete a waypoint from a list. If this is the last waypoint, the entire "
+			"list is removed. Fails if the waypoint is referenced in SEXPs unless force=true. "
+			"SEXP references for subsequent waypoints are automatically renumbered.",
+			props, req);
+	}
+
+	// move_waypoint
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "list", "Name of the waypoint list");
+		add_integer_prop(props, "from_index",
+			"0-based index of the waypoint to move");
+		add_integer_prop(props, "to_index",
+			"0-based target index");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("list"));
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_waypoint",
+			"Move a waypoint from one position to another within the same list. "
+			"SEXP references are updated to follow the waypoints. Indices are 0-based.",
+			props, req);
+	}
+
+	// swap_waypoints
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "list", "Name of the waypoint list");
+		add_integer_prop(props, "index_a",
+			"0-based index of the first waypoint");
+		add_integer_prop(props, "index_b",
+			"0-based index of the second waypoint");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("list"));
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_waypoints",
+			"Swap two waypoints within the same list. "
+			"SEXP references are updated to follow the waypoints. Indices are 0-based.",
+			props, req);
+	}
+
+	// -----------------------------------------------------------------------
 	// SEXP tools
 	// -----------------------------------------------------------------------
 
@@ -4375,6 +4810,16 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_waypoint_list(input_json, req);
 	} else if (strcmp(tool_name, "swap_waypoint_lists") == 0) {
 		handle_swap_waypoint_lists(input_json, req);
+	} else if (strcmp(tool_name, "create_waypoint") == 0) {
+		handle_create_waypoint(input_json, req);
+	} else if (strcmp(tool_name, "update_waypoint") == 0) {
+		handle_update_waypoint(input_json, req);
+	} else if (strcmp(tool_name, "delete_waypoint") == 0) {
+		handle_delete_waypoint(input_json, req);
+	} else if (strcmp(tool_name, "move_waypoint") == 0) {
+		handle_move_waypoint(input_json, req);
+	} else if (strcmp(tool_name, "swap_waypoints") == 0) {
+		handle_swap_waypoints(input_json, req);
 	} else if (strcmp(tool_name, "sexp_to_text") == 0) {
 		handle_sexp_to_text(input_json, req);
 	} else if (strcmp(tool_name, "get_sexp_node") == 0) {
