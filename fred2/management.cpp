@@ -2488,8 +2488,7 @@ void generate_weaponry_usage_list(int team, int *arr)
 	}
 }
 
-SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship, int exclude_wing,
-	const waypoint_list *exclude_waypoint_list, const CJumpNode *exclude_jump_node)
+SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship, int exclude_wing, int exclude_waypoint_list, int exclude_jump_node)
 {
 	SCP_string msg;
 
@@ -2530,7 +2529,7 @@ SCP_string check_name_conflict(const char *entity_type, const char *name, int ex
 	// We don't need to check teams.  "Unknown" is a valid name and also an IFF.
 
 	// Check target priority groups
-	for (int i = 0; i < (int)Ai_tp_list.size(); i++) {
+	for (size_t i = 0; i < Ai_tp_list.size(); i++) {
 		if (!stricmp(Ai_tp_list[i].name, name)) {
 			msg += "This ";
 			msg += entity_type;
@@ -2540,23 +2539,25 @@ SCP_string check_name_conflict(const char *entity_type, const char *name, int ex
 	}
 
 	// Check waypoint lists
-	for (const auto &wl : Waypoint_lists) {
-		if (&wl != exclude_waypoint_list && !stricmp(wl.get_name(), name)) {
+	int wl_size = sz2i(Waypoint_lists.size());
+	for (int i = 0; i < wl_size; i++) {
+		if (i != exclude_waypoint_list && !stricmp(Waypoint_lists[i].get_name(), name)) {
 			msg += "This ";
 			msg += entity_type;
 			msg += " name is already being used by ";
-			msg += (exclude_waypoint_list != nullptr) ? "another waypoint path" : "a waypoint path";
+			msg += (exclude_waypoint_list >= 0) ? "another waypoint path" : "a waypoint path";
 			return msg;
 		}
 	}
 
 	// Check jump nodes
-	for (const auto &jn : Jump_nodes) {
-		if (&jn != exclude_jump_node && !stricmp(jn.GetName(), name)) {
+	int jn_size = sz2i(Jump_nodes.size());
+	for (int i = 0; i < jn_size; i++) {
+		if (i != exclude_jump_node && !stricmp(Jump_nodes[i].GetName(), name)) {
 			msg += "This ";
 			msg += entity_type;
 			msg += " name is already being used by ";
-			msg += (exclude_jump_node != nullptr) ? "another jump node" : "a jump node";
+			msg += (exclude_jump_node >= 0) ? "another jump node" : "a jump node";
 			return msg;
 		}
 	}
