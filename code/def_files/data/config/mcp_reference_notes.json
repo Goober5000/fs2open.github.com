@@ -173,5 +173,12 @@
     "description": "Checking ASCII-only constraints before passing text to FRED",
     "see_also": [],
     "text": "Use `get_server_info` to check the `supports_unicode` field before passing text to FRED. If `supports_unicode` is false, all strings passed to FRED — including ship names, message text, briefing text, and any other text fields — must contain only characters in the standard ASCII range [0–127]. Characters outside this range (accented letters, non-Latin scripts, emoji, etc.) must NOT be used, as they may corrupt data or cause undefined behavior."
+  },
+  {
+    "category": "mcp_operations",
+    "topic": "fuzzy_search",
+    "description": "How the search parameter works in list tools",
+    "see_also": [],
+    "text": "All list tools that accept a `search` parameter use **fuzzy matching** against names (not descriptions or other long text). The search does not require an exact substring — it tolerates missing, extra, or reordered characters, making it useful for approximate lookups when the exact name is not known.\n\n**Ranking**: When a search is active, results are sorted by match quality (best match first) rather than the default order. Exact and near-exact matches appear at the top.\n\n**Short queries**: Very short search strings (1-2 characters) may return many results because the fuzzy matcher is permissive with few input characters. Use 3 or more characters for more focused results.\n\n**Scope**: The search matches against the primary name field of each item (e.g., operator name, topic name, element name, hook name, enum name). It does not search descriptions, categories, or other fields."
   }
 ]
