@@ -174,12 +174,15 @@ int jumpnode_dlg::update_data(int redraw)
 		return 0;
 
 	if (query_valid_object() && Objects[cur_object_index].type == OBJ_JUMP_NODE) {
-		auto jnp = jumpnode_get_by_objnum(cur_object_index);
+		auto it = std::find_if(Jump_nodes.begin(), Jump_nodes.end(), [&](const CJumpNode& jn) { return jn.GetSCPObjectNumber() == cur_object_index; });
+		Assertion(it != Jump_nodes.end(), "Jump node object not found in Jump_nodes vector?");
+		int jnp_index = static_cast<int>(std::distance(Jump_nodes.begin(), it));
+		auto jnp = &Jump_nodes[jnp_index];
 
 		m_name.TrimLeft();
 		m_name.TrimRight();
 
-		SCP_string conflict = check_name_conflict("jump node", m_name, -1, -1, nullptr, jnp);
+		SCP_string conflict = check_name_conflict("jump node", m_name, -1, -1, -1, jnp_index);
 		if (!conflict.empty()) {
 			if (bypass_errors)
 				return 1;

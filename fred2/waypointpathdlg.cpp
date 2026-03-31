@@ -142,13 +142,20 @@ int waypoint_path_dlg::update_data(int redraw)
 	UpdateData(TRUE);
 	UpdateData(TRUE);
 
+	int waypoint_list_index = -1;
 	if (query_valid_object() && Objects[cur_object_index].type == OBJ_WAYPOINT)
 	{
-		Assert(cur_waypoint_list == find_waypoint_list_with_instance(Objects[cur_object_index].instance));
+		waypoint_list_index = calc_waypoint_list_index(Objects[cur_object_index].instance);
+		Assert(cur_waypoint_list == &Waypoint_lists[waypoint_list_index]);
+	}
+	else if (cur_waypoint_list != nullptr)
+	{
+		Assertion(false, "inconsistent state in waypoint editor!");
+		return 0;
 	}
 
 	if (cur_waypoint_list != NULL) {
-		SCP_string conflict = check_name_conflict("waypoint path", m_name, -1, -1, cur_waypoint_list);
+		SCP_string conflict = check_name_conflict("waypoint path", m_name, -1, -1, waypoint_list_index);
 		if (!conflict.empty()) {
 			if (bypass_errors)
 				return 1;
