@@ -82,6 +82,7 @@ int calc_waypoint_index(int waypoint_instance);
 
 // Creates initial waypoints after mission is loaded
 void waypoint_create_game_objects();
+void waypoint_create_game_object(waypoint *wpt, int list_index, int wpt_index);
 
 // Find a waypoint list with the specified name
 waypoint_list *find_matching_waypoint_list(const char *name);
