@@ -1540,8 +1540,9 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		json_t *entry;
 		json_array_foreach(notes, index, entry) {
 			json_t *item = json_object();
+			json_object_set_new(item, "category", json_copy(json_object_get(entry, "category")));
 			json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
-			json_object_set_new(item, "title", json_copy(json_object_get(entry, "title")));
+			json_object_set_new(item, "description", json_copy(json_object_get(entry, "description")));
 			json_array_append_new(arr, item);
 		}
 		json_decref(notes);
@@ -1556,7 +1557,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 		if (t && stricmp(topic, t) == 0) {
 			json_t *obj = json_object();
 			json_object_set_new(obj, "topic", json_copy(json_object_get(entry, "topic")));
-			json_object_set_new(obj, "title", json_copy(json_object_get(entry, "title")));
+			json_object_set_new(obj, "description", json_copy(json_object_get(entry, "description")));
 			json_object_set_new(obj, "text", json_copy(json_object_get(entry, "text")));
 			json_decref(notes);
 			return make_json_tool_result(obj);
