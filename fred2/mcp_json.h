@@ -37,6 +37,7 @@ void add_bool_prop(json_t *props, const char *name, const char *description);
 void add_string_enum_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
 void add_string_array_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
 void add_vec3d_prop(json_t *props, const char *name, const char *description);
+void add_vec3d_array_prop(json_t *props, const char *name, const char *description);
 void add_matrix_prop(json_t *props, const char *name, const char *description);
 void add_color_prop(json_t *props, const char *name, const char *description);
 
@@ -147,6 +148,11 @@ std::optional<color> get_optional_color(json_t *arguments, const char *param_nam
 
 // Extracts an optional JSON array of strings.
 std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name);
+
+// Extracts a required JSON array of vec3d objects.  Returns true on success.
+// If min_count > 0, the array must contain at least that many elements.
+bool get_required_vec3d_array(json_t *input, const char *param_name,
+	SCP_vector<vec3d> &out, McpToolRequest *req, int min_count = 0);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 struct vec3d;

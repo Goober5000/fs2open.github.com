@@ -554,20 +554,56 @@ json_t *build_vec3d_json(const vec3d &v)
 	return obj;
 }
 
-json_t* build_matrix_json(const matrix& m)
-{
-	json_t* obj = json_object();
-	json_object_set_new(obj, "rvec", build_vec3d_json(m.vec.rvec));
-	json_object_set_new(obj, "uvec", build_vec3d_json(m.vec.uvec));
-	json_object_set_new(obj, "fvec", build_vec3d_json(m.vec.fvec));
-	return obj;
-}
-
 void add_vec3d_prop(json_t *props, const char *name, const char *description)
 {
 	json_t *p = make_vec3d_schema();
 	json_object_set_new(p, "description", json_string(description));
 	json_object_set_new(props, name, p);
+}
+
+void add_vec3d_array_prop(json_t *props, const char *name, const char *description)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("array"));
+	json_object_set_new(p, "items", make_vec3d_schema());
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(props, name, p);
+}
+
+bool get_required_vec3d_array(json_t *input, const char *param_name,
+	SCP_vector<vec3d> &out, McpToolRequest *req, int min_count)
+{
+	json_t *val = input ? json_object_get(input, param_name) : nullptr;
+	if (!val || !json_is_array(val)) {
+		set_missing_param_error(req, param_name);
+		return false;
+	}
+
+	size_t arr_size = json_array_size(val);
+	if (min_count > 0 && (int)arr_size < min_count) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Parameter '%s' must contain at least %d element(s), got %d",
+			param_name, min_count, (int)arr_size);
+		return false;
+	}
+
+	out.clear();
+	out.reserve(arr_size);
+	size_t index;
+	json_t *item;
+	json_array_foreach(val, index, item) {
+		auto v = parse_vec3d_json(item);
+		if (!v.has_value()) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
+			return false;
+		}
+		out.push_back(*v);
+	}
+
+	return true;
 }
 
 static json_t *make_matrix_schema()
@@ -585,6 +621,15 @@ static json_t *make_matrix_schema()
 	json_array_append_new(req, json_string("fvec"));
 	json_object_set_new(p, "required", req);
 	return p;
+}
+
+json_t *build_matrix_json(const matrix &m)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "rvec", build_vec3d_json(m.vec.rvec));
+	json_object_set_new(obj, "uvec", build_vec3d_json(m.vec.uvec));
+	json_object_set_new(obj, "fvec", build_vec3d_json(m.vec.fvec));
+	return obj;
 }
 
 void add_matrix_prop(json_t *props, const char *name, const char *description)
