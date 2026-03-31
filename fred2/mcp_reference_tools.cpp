@@ -235,6 +235,18 @@ static const char *subsystem_type_str(int type)
 
 static const SCP_vector<const char*> subtype_enum_values = { "primary", "secondary", "beam" };
 
+// Compute the fuzzy match cost of search_str against candidate.
+// Returns SCP_string::npos if no match within threshold.
+static size_t fuzzy_match_cost(const char *candidate, const SCP_string &search_str, size_t max_length)
+{
+	SCP_string candidate_str(candidate);
+	size_t threshold = max_length * max_length * 3;
+	size_t cost = stringcost(candidate_str, search_str, max_length, stringcost_tolower_equal);
+	if (cost == SCP_string::npos || cost >= threshold)
+		return SCP_string::npos;
+	return cost;
+}
+
 // ---------------------------------------------------------------------------
 // Tool schema registration
 // ---------------------------------------------------------------------------
@@ -325,10 +337,10 @@ void mcp_register_reference_tools(json_t *tools)
 		json_t *props = json_object();
 		add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\"). Use list_sexp_categories to see valid names.");
 		add_string_prop(props, "subcategory", "Filter by subcategory name (requires category to also be specified)");
-		add_string_prop(props, "search", "Substring search against operator names");
+		add_string_prop(props, "search", "Fuzzy search against operator names. Results are sorted by match quality.");
 		register_tool(tools, "list_sexp_operators",
 			"List SEXP (S-expression) operators used in mission event logic. "
-			"Optionally filter by category, subcategory, and/or name substring. "
+			"Optionally filter by category, subcategory, and/or fuzzy name search. "
 			"max_args is -1 for variadic (unlimited argument) operators.",
 			props);
 	}
@@ -564,7 +576,7 @@ void mcp_register_reference_tools(json_t *tools)
 			"Filter by element type. Omit to list both.",
 			{ "library", "class" });
 		add_string_prop(props, "search",
-			"Case-insensitive substring search against element names and descriptions.");
+			"Fuzzy search against element names. Results are sorted by match quality.");
 		register_tool(tools, "list_scripting_elements",
 			"List all scripting API libraries and classes with summary info (name, shortName, "
 			"type, description, child count). Use this to discover available namespaces and "
@@ -583,7 +595,7 @@ void mcp_register_reference_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "search",
-			"Case-insensitive substring search against child names.");
+			"Fuzzy search against child names. Results are sorted by match quality.");
 		add_string_enum_prop(props, "child_type",
 			"Filter by child type.",
 			{ "function", "property", "operator" });
@@ -600,7 +612,7 @@ void mcp_register_reference_tools(json_t *tools)
 			"Get a specific hook by exact name (case-insensitive). Returns full details "
 			"including hookVars and conditions. Omit to list all hooks as summaries.");
 		add_string_prop(props, "search",
-			"Substring search against hook names and descriptions.");
+			"Fuzzy search against hook names. Results are sorted by match quality.");
 		add_bool_prop(props, "overridable",
 			"Filter to only overridable (true) or non-overridable (false) hooks.");
 		register_tool(tools, "list_scripting_hooks",
@@ -614,7 +626,7 @@ void mcp_register_reference_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "search",
-			"Case-insensitive substring filter on enum names.");
+			"Fuzzy search against enum names. Results are sorted by match quality.");
 		register_tool(tools, "list_scripting_enums",
 			"List all scripting enumeration constants with their integer values.",
 			props);
@@ -1274,7 +1286,13 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 			return make_tool_result("Subcategory not found in this category. Use list_sexp_categories to see valid names.", true);
 	}
 
-	json_t *arr = json_array();
+	bool has_search = filter_search && filter_search[0] != '\0';
+	SCP_string search_str;
+	if (has_search)
+		search_str = filter_search;
+
+	// Collect matching operators (with fuzzy cost if searching)
+	SCP_vector<std::pair<size_t, size_t>> matches;  // (operator_index, cost)
 	for (size_t i = 0; i < Operators.size(); i++) {
 		const auto &op = Operators[i];
 
@@ -1292,16 +1310,28 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 				continue;
 		}
 
-		// Search filter (case-insensitive substring)
-		if (filter_search && filter_search[0] != '\0') {
-			SCP_string op_lower = op.text;
-			SCP_string search_lower = filter_search;
-			SCP_tolower(op_lower);
-			SCP_tolower(search_lower);
-			if (op_lower.find(search_lower) == SCP_string::npos)
+		// Fuzzy search filter
+		if (has_search) {
+			size_t cost = fuzzy_match_cost(op.text.c_str(), search_str, Max_operator_length);
+			if (cost == SCP_string::npos)
 				continue;
+			matches.emplace_back(i, cost);
+		} else {
+			matches.emplace_back(i, 0);
 		}
+	}
 
+	// Sort by cost when searching (best match first)
+	if (has_search) {
+		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
+			return a.second < b.second;
+		});
+	}
+
+	// Build result array
+	json_t *arr = json_array();
+	for (const auto &match : matches) {
+		const auto &op = Operators[match.first];
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(op.text.c_str()));
 		json_object_set_new(item, "min_args", json_integer(op.min));
@@ -1577,11 +1607,13 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	if (!json_is_array(notes))
 		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
 
-	if (filter_search && filter_search[0] != '\0') {
-		// Fuzzy search mode: use stringcost against topic names
+	bool has_search = filter_search && filter_search[0] != '\0';
+	SCP_string search_str;
+	size_t max_topic_length = 0;
 
+	if (has_search) {
+		search_str = filter_search;
 		// Compute max topic length for threshold calculation
-		size_t max_topic_length = 0;
 		size_t index;
 		json_t *entry;
 		json_array_foreach(notes, index, entry) {
@@ -1592,52 +1624,10 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 					max_topic_length = len;
 			}
 		}
-
-		// Threshold: allows ~2 unmatched characters (same formula as OperatorComboBox)
-		size_t threshold = max_topic_length * max_topic_length * 3;
-		SCP_string search_str(filter_search);
-
-		// Collect matching entries with their costs
-		SCP_vector<std::pair<size_t, size_t>> matches;  // (index, cost)
-		json_array_foreach(notes, index, entry) {
-			// Apply category filter first
-			if (filter_category && filter_category[0] != '\0') {
-				const char *cat = json_string_value(json_object_get(entry, "category"));
-				if (!cat || stricmp(filter_category, cat) != 0)
-					continue;
-			}
-
-			const char *t = json_string_value(json_object_get(entry, "topic"));
-			if (!t)
-				continue;
-
-			SCP_string topic_str(t);
-			size_t cost = stringcost(topic_str, search_str, max_topic_length, stringcost_tolower_equal);
-			if (cost != SCP_string::npos && cost < threshold)
-				matches.emplace_back(index, cost);
-		}
-
-		// Sort by cost ascending (best match first)
-		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
-			return a.second < b.second;
-		});
-
-		// Build result array
-		json_t *arr = json_array();
-		for (const auto &match : matches) {
-			json_t *e = json_array_get(notes, match.first);
-			json_t *item = json_object();
-			json_object_set_new(item, "category", json_copy(json_object_get(e, "category")));
-			json_object_set_new(item, "topic", json_copy(json_object_get(e, "topic")));
-			json_object_set_new(item, "description", json_copy(json_object_get(e, "description")));
-			json_array_append_new(arr, item);
-		}
-		json_decref(notes);
-		return make_json_tool_result(arr);
 	}
 
-	// No search: list entries, optionally filtered by category
-	json_t *arr = json_array();
+	// Collect matching entries (with fuzzy cost if searching)
+	SCP_vector<std::pair<size_t, size_t>> matches;  // (index, cost)
 	size_t index;
 	json_t *entry;
 	json_array_foreach(notes, index, entry) {
@@ -1647,10 +1637,34 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 				continue;
 		}
 
+		if (has_search) {
+			const char *t = json_string_value(json_object_get(entry, "topic"));
+			if (!t)
+				continue;
+			size_t cost = fuzzy_match_cost(t, search_str, max_topic_length);
+			if (cost == SCP_string::npos)
+				continue;
+			matches.emplace_back(index, cost);
+		} else {
+			matches.emplace_back(index, 0);
+		}
+	}
+
+	// Sort by cost when searching (best match first)
+	if (has_search) {
+		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
+			return a.second < b.second;
+		});
+	}
+
+	// Build result array
+	json_t *arr = json_array();
+	for (const auto &match : matches) {
+		json_t *e = json_array_get(notes, match.first);
 		json_t *item = json_object();
-		json_object_set_new(item, "category", json_copy(json_object_get(entry, "category")));
-		json_object_set_new(item, "topic", json_copy(json_object_get(entry, "topic")));
-		json_object_set_new(item, "description", json_copy(json_object_get(entry, "description")));
+		json_object_set_new(item, "category", json_copy(json_object_get(e, "category")));
+		json_object_set_new(item, "topic", json_copy(json_object_get(e, "topic")));
+		json_object_set_new(item, "description", json_copy(json_object_get(e, "description")));
 		json_array_append_new(arr, item);
 	}
 	return make_json_tool_result(arr);
@@ -2577,8 +2591,6 @@ static json_t *get_scripting_api_doc()
 	return scripting_api_cache;
 }
 
-// stristr (from parse/parselo.h) is used for case-insensitive substring matching.
-
 #define GET_SCRIPTING_DOC_OR_RETURN(var) \
 	json_t *var = get_scripting_api_doc(); \
 	if (!var) return make_tool_result("Failed to generate scripting API documentation.", true)
@@ -2591,23 +2603,79 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 	const char *filter_search = get_optional_string(arguments, "search", true);
 
 	json_t *elements = json_object_get(doc, "elements");
-	json_t *arr = json_array();
 
+	bool has_search = filter_search && filter_search[0] != '\0';
+	SCP_string search_str;
+	size_t max_name_length = 0;
+
+	if (has_search) {
+		search_str = filter_search;
+		// Compute max name length for threshold calculation
+		size_t idx;
+		json_t *el;
+		json_array_foreach(elements, idx, el) {
+			const char *n = json_string_value(json_object_get(el, "name"));
+			if (n) {
+				size_t len = strlen(n);
+				if (len > max_name_length)
+					max_name_length = len;
+			}
+			const char *sn = json_string_value(json_object_get(el, "shortName"));
+			if (sn) {
+				size_t len = strlen(sn);
+				if (len > max_name_length)
+					max_name_length = len;
+			}
+		}
+	}
+
+	// Collect matching elements (with fuzzy cost if searching)
+	SCP_vector<std::pair<size_t, size_t>> matches;  // (index, cost)
 	size_t idx;
 	json_t *el;
 	json_array_foreach(elements, idx, el) {
 		const char *el_type = json_string_value(json_object_get(el, "type"));
 		const char *name = json_string_value(json_object_get(el, "name"));
 		const char *shortName = json_string_value(json_object_get(el, "shortName"));
-		const char *desc = json_string_value(json_object_get(el, "description"));
 
 		if (filter_type && el_type && stricmp(filter_type, el_type) != 0)
 			continue;
 
-		if (filter_search && filter_search[0]) {
-			if ((!name || !stristr(name, filter_search)) && (!shortName || !stristr(shortName, filter_search)) && (!desc || !stristr(desc, filter_search)))
+		if (has_search) {
+			size_t best_cost = SCP_string::npos;
+			if (name) {
+				size_t c = fuzzy_match_cost(name, search_str, max_name_length);
+				if (c != SCP_string::npos && c < best_cost)
+					best_cost = c;
+			}
+			if (shortName && shortName[0]) {
+				size_t c = fuzzy_match_cost(shortName, search_str, max_name_length);
+				if (c != SCP_string::npos && c < best_cost)
+					best_cost = c;
+			}
+			if (best_cost == SCP_string::npos)
 				continue;
+			matches.emplace_back(idx, best_cost);
+		} else {
+			matches.emplace_back(idx, 0);
 		}
+	}
+
+	// Sort by cost when searching (best match first)
+	if (has_search) {
+		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
+			return a.second < b.second;
+		});
+	}
+
+	// Build result array
+	json_t *arr = json_array();
+	for (const auto &match : matches) {
+		json_t *e = json_array_get(elements, match.first);
+		const char *name = json_string_value(json_object_get(e, "name"));
+		const char *shortName = json_string_value(json_object_get(e, "shortName"));
+		const char *el_type = json_string_value(json_object_get(e, "type"));
+		const char *desc = json_string_value(json_object_get(e, "description"));
 
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(name ? name : ""));
@@ -2617,11 +2685,11 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 		if (desc && desc[0])
 			json_object_set_new(item, "description", json_string(desc));
 
-		json_t *superClass = json_object_get(el, "superClass");
+		json_t *superClass = json_object_get(e, "superClass");
 		if (superClass && json_is_string(superClass) && json_string_value(superClass)[0])
 			json_object_set_new(item, "superClass", json_string(json_string_value(superClass)));
 
-		json_t *children = json_object_get(el, "children");
+		json_t *children = json_object_get(e, "children");
 		json_object_set_new(item, "child_count", json_integer(children ? (json_int_t)json_array_size(children) : 0));
 
 		json_array_append_new(arr, item);
@@ -2664,15 +2732,40 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 		return make_tool_result("At least one of 'search' or 'child_type' must be specified.", true);
 
 	json_t *elements = json_object_get(doc, "elements");
-	json_t *arr = json_array();
+
+	bool has_search = filter_search && filter_search[0] != '\0';
+	SCP_string search_str;
+	size_t max_name_length = 0;
+
+	if (has_search) {
+		search_str = filter_search;
+		// Compute max child name length for threshold calculation
+		size_t el_idx;
+		json_t *el;
+		json_array_foreach(elements, el_idx, el) {
+			json_t *children = json_object_get(el, "children");
+			if (!children)
+				continue;
+			size_t ch_idx;
+			json_t *ch;
+			json_array_foreach(children, ch_idx, ch) {
+				const char *n = json_string_value(json_object_get(ch, "name"));
+				if (n) {
+					size_t len = strlen(n);
+					if (len > max_name_length)
+						max_name_length = len;
+				}
+			}
+		}
+	}
+
+	// Collect matching children (with fuzzy cost if searching)
+	struct child_match { size_t el_idx; size_t ch_idx; size_t cost; };
+	SCP_vector<child_match> matches;
 
 	size_t el_idx;
 	json_t *el;
 	json_array_foreach(elements, el_idx, el) {
-		const char *parent_name = json_string_value(json_object_get(el, "name"));
-		const char *parent_short = json_string_value(json_object_get(el, "shortName"));
-		const char *parent_type = json_string_value(json_object_get(el, "type"));
-
 		json_t *children = json_object_get(el, "children");
 		if (!children)
 			continue;
@@ -2682,28 +2775,54 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 		json_array_foreach(children, ch_idx, ch) {
 			const char *ch_name = json_string_value(json_object_get(ch, "name"));
 			const char *ch_type = json_string_value(json_object_get(ch, "type"));
-			const char *ch_desc = json_string_value(json_object_get(ch, "description"));
 
 			if (filter_child_type && ch_type && stricmp(filter_child_type, ch_type) != 0)
 				continue;
 
-			if (filter_search && filter_search[0]) {
-				if (!ch_name || !stristr(ch_name, filter_search))
+			if (has_search) {
+				if (!ch_name)
 					continue;
+				size_t cost = fuzzy_match_cost(ch_name, search_str, max_name_length);
+				if (cost == SCP_string::npos)
+					continue;
+				matches.push_back({el_idx, ch_idx, cost});
+			} else {
+				matches.push_back({el_idx, ch_idx, 0});
 			}
-
-			json_t *item = json_object();
-			json_object_set_new(item, "parent_name", json_string(parent_name ? parent_name : ""));
-			if (parent_short && parent_short[0])
-				json_object_set_new(item, "parent_shortName", json_string(parent_short));
-			json_object_set_new(item, "parent_element_type", json_string(parent_type ? parent_type : ""));
-			json_object_set_new(item, "name", json_string(ch_name ? ch_name : ""));
-			json_object_set_new(item, "child_type", json_string(ch_type ? ch_type : ""));
-			if (ch_desc && ch_desc[0])
-				json_object_set_new(item, "description", json_string(ch_desc));
-
-			json_array_append_new(arr, item);
 		}
+	}
+
+	// Sort by cost when searching (best match first)
+	if (has_search) {
+		std::sort(matches.begin(), matches.end(), [](const child_match &a, const child_match &b) {
+			return a.cost < b.cost;
+		});
+	}
+
+	// Build result array
+	json_t *arr = json_array();
+	for (const auto &match : matches) {
+		json_t *e = json_array_get(elements, match.el_idx);
+		const char *parent_name = json_string_value(json_object_get(e, "name"));
+		const char *parent_short = json_string_value(json_object_get(e, "shortName"));
+		const char *parent_type = json_string_value(json_object_get(e, "type"));
+
+		json_t *ch = json_array_get(json_object_get(e, "children"), match.ch_idx);
+		const char *ch_name = json_string_value(json_object_get(ch, "name"));
+		const char *ch_type = json_string_value(json_object_get(ch, "type"));
+		const char *ch_desc = json_string_value(json_object_get(ch, "description"));
+
+		json_t *item = json_object();
+		json_object_set_new(item, "parent_name", json_string(parent_name ? parent_name : ""));
+		if (parent_short && parent_short[0])
+			json_object_set_new(item, "parent_shortName", json_string(parent_short));
+		json_object_set_new(item, "parent_element_type", json_string(parent_type ? parent_type : ""));
+		json_object_set_new(item, "name", json_string(ch_name ? ch_name : ""));
+		json_object_set_new(item, "child_type", json_string(ch_type ? ch_type : ""));
+		if (ch_desc && ch_desc[0])
+			json_object_set_new(item, "description", json_string(ch_desc));
+
+		json_array_append_new(arr, item);
 	}
 
 	return make_json_tool_result(arr);
@@ -2732,21 +2851,61 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 	}
 
 	// List mode: return summaries
-	json_t *arr = json_array();
+	bool has_search = filter_search && filter_search[0] != '\0';
+	SCP_string search_str;
+	size_t max_name_length = 0;
+
+	if (has_search) {
+		search_str = filter_search;
+		size_t idx;
+		json_t *action;
+		json_array_foreach(actions, idx, action) {
+			const char *n = json_string_value(json_object_get(action, "name"));
+			if (n) {
+				size_t len = strlen(n);
+				if (len > max_name_length)
+					max_name_length = len;
+			}
+		}
+	}
+
+	// Collect matching hooks (with fuzzy cost if searching)
+	SCP_vector<std::pair<size_t, size_t>> matches;  // (index, cost)
 	size_t idx;
 	json_t *action;
 	json_array_foreach(actions, idx, action) {
 		const char *name = json_string_value(json_object_get(action, "name"));
-		const char *desc = json_string_value(json_object_get(action, "description"));
 		bool overridable = json_is_true(json_object_get(action, "overridable"));
 
 		if (filter_overridable.has_value() && overridable != *filter_overridable)
 			continue;
 
-		if (filter_search && filter_search[0]) {
-			if ((!name || !stristr(name, filter_search)) && (!desc || !stristr(desc, filter_search)))
+		if (has_search) {
+			if (!name)
 				continue;
+			size_t cost = fuzzy_match_cost(name, search_str, max_name_length);
+			if (cost == SCP_string::npos)
+				continue;
+			matches.emplace_back(idx, cost);
+		} else {
+			matches.emplace_back(idx, 0);
 		}
+	}
+
+	// Sort by cost when searching (best match first)
+	if (has_search) {
+		std::sort(matches.begin(), matches.end(), [](const std::pair<size_t, size_t> &a, const std::pair<size_t, size_t> &b) {
+			return a.second < b.second;
+		});
+	}
+
+	// Build result array
+	json_t *arr = json_array();
+	for (const auto &match : matches) {
+		json_t *a = json_array_get(actions, match.first);
+		const char *name = json_string_value(json_object_get(a, "name"));
+		const char *desc = json_string_value(json_object_get(a, "description"));
+		bool overridable = json_is_true(json_object_get(a, "overridable"));
 
 		json_t *item = json_object();
 		json_object_set_new(item, "name", json_string(name ? name : ""));
@@ -2754,10 +2913,10 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 			json_object_set_new(item, "description", json_string(desc));
 		json_object_set_new(item, "overridable", json_boolean(overridable));
 
-		json_t *hookVars = json_object_get(action, "hookVars");
+		json_t *hookVars = json_object_get(a, "hookVars");
 		json_object_set_new(item, "hookVar_count", json_integer(hookVars ? (json_int_t)json_array_size(hookVars) : 0));
 
-		json_t *conditions = json_object_get(action, "conditions");
+		json_t *conditions = json_object_get(a, "conditions");
 		json_object_set_new(item, "condition_count", json_integer(conditions ? (json_int_t)json_array_size(conditions) : 0));
 
 		json_array_append_new(arr, item);
@@ -2773,13 +2932,55 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 	const char *filter_search = get_optional_string(arguments, "search", true);
 
 	json_t *enums = json_object_get(doc, "enums");
-	json_t *result = json_object();
+	bool has_search = filter_search && filter_search[0] != '\0';
 
+	if (has_search) {
+		SCP_string search_str(filter_search);
+
+		// Compute max key length for threshold calculation
+		size_t max_key_length = 0;
+		const char *key;
+		json_t *value;
+		json_object_foreach(enums, key, value) {
+			if (key) {
+				size_t len = strlen(key);
+				if (len > max_key_length)
+					max_key_length = len;
+			}
+		}
+
+		// Collect matching enums with their costs
+		SCP_vector<std::pair<const char *, size_t>> matches;  // (key, cost)
+		json_object_foreach(enums, key, value) {
+			if (!key)
+				continue;
+			size_t cost = fuzzy_match_cost(key, search_str, max_key_length);
+			if (cost == SCP_string::npos)
+				continue;
+			matches.emplace_back(key, cost);
+		}
+
+		// Sort by cost (best match first)
+		std::sort(matches.begin(), matches.end(), [](const std::pair<const char *, size_t> &a, const std::pair<const char *, size_t> &b) {
+			return a.second < b.second;
+		});
+
+		// Build result as ordered array of {name, value} to preserve sort order
+		json_t *arr = json_array();
+		for (const auto &match : matches) {
+			json_t *item = json_object();
+			json_object_set_new(item, "name", json_string(match.first));
+			json_object_set_new(item, "value", json_copy(json_object_get(enums, match.first)));
+			json_array_append_new(arr, item);
+		}
+		return make_json_tool_result(arr);
+	}
+
+	// No search: return as object (original format)
+	json_t *result = json_object();
 	const char *key;
 	json_t *value;
 	json_object_foreach(enums, key, value) {
-		if (filter_search && filter_search[0] && (!key || !stristr(key, filter_search)))
-			continue;
 		json_object_set_new(result, key, json_incref(value));
 	}
 
