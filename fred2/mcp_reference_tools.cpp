@@ -1558,6 +1558,7 @@ static json_t *handle_get_reference_notes(json_t *arguments)
 			json_t *obj = json_object();
 			json_object_set_new(obj, "topic", json_copy(json_object_get(entry, "topic")));
 			json_object_set_new(obj, "description", json_copy(json_object_get(entry, "description")));
+			json_object_set_new(obj, "see_also", json_copy(json_object_get(entry, "see_also")));
 			json_object_set_new(obj, "text", json_copy(json_object_get(entry, "text")));
 			json_decref(notes);
 			return make_json_tool_result(obj);
