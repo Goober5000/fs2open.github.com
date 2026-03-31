@@ -127,8 +127,7 @@ CJumpNode* jumpnode_get_by_name(const CString& name);
 // Returns an empty string if the name is valid, otherwise a self-contained reason string
 // (e.g. "The name is already being used by a wing").  The exclude parameters prevent matching
 // against the entity currently being renamed.
-SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship = -1, int exclude_wing = -1,
-	const waypoint_list *exclude_waypoint_list = nullptr, const CJumpNode *exclude_jump_node = nullptr);
+SCP_string check_name_conflict(const char *entity_type, const char *name, int exclude_ship = -1, int exclude_wing = -1, int exclude_waypoint_list = -1, int exclude_jump_node = -1);
 
 // function and defines to use when adding ships to combo boxes
 #define SHIPS_2_COMBO_SPECIAL (1 << 0)
