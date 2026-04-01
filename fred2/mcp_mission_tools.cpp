@@ -2515,6 +2515,19 @@ static void handle_swap_jump_nodes(json_t *input, McpToolRequest *req)
 // Waypoint list tools
 // ---------------------------------------------------------------------------
 
+// After any operation that inserts into or removes from a waypoints vector,
+// cur_waypoint (a raw pointer into the vector) may be invalidated by reallocation.
+// Re-derive it from cur_object_index.
+static void refresh_cur_waypoint()
+{
+	if (cur_waypoint != nullptr && query_valid_object(cur_object_index)
+		&& Objects[cur_object_index].type == OBJ_WAYPOINT)
+	{
+		cur_waypoint = find_waypoint_with_instance(Objects[cur_object_index].instance);
+		cur_waypoint_list = cur_waypoint ? cur_waypoint->get_parent_list() : nullptr;
+	}
+}
+
 static void reindex_waypoint_instances()
 {
 	for (int li = 0; li < (int)Waypoint_lists.size(); li++) {
@@ -2665,7 +2678,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 		reindex_waypoint_instances();
 	}
 
-	Waypoint_editor_dialog.initialize_data(1);
+	refresh_cur_waypoint();
 	mark_modified("MCP: create waypoint list %s", name);
 
 	json_t *result = json_object();
@@ -2790,7 +2803,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 		waypoint_remove(&wpts.back());
 	}
 
-	Waypoint_editor_dialog.initialize_data(1);
+	refresh_cur_waypoint();
 	mark_modified("MCP: delete waypoint list %s", name);
 
 	snprintf(req->result_message, sizeof(req->result_message),
@@ -2883,7 +2896,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	Waypoint_editor_dialog.initialize_data(1);
+	refresh_cur_waypoint();
 	mark_modified("MCP: create waypoint in %s at index %d", list, target_index);
 
 	char wpt_name[NAME_LENGTH];
@@ -3029,12 +3042,11 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 
 	// Remove the waypoint (handles game objects, vector removal, instance reindexing)
 	waypoint_remove(&wpts[deleted_index]);
+	refresh_cur_waypoint();
 
 	// Update SEXP and AI goal references for waypoints that shifted down
 	for (int i = deleted_index; i < count - 1; i++)
 		rename_waypoint_sexp_refs(list_name, i + 2, i + 1);
-
-	Waypoint_editor_dialog.initialize_data(1);
 	mark_modified("MCP: delete waypoint %s", wpt_name);
 
 	snprintf(req->result_message, sizeof(req->result_message),
@@ -3067,7 +3079,7 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 		int lo = std::min(from, to);
 		int hi = std::max(from, to);
 
-		// Step 1: Rename all affected waypoints to temporary names
+		// Step 1: Rename all affected SEXP refs to temporary names
 		SCP_vector<SCP_string> temp_names(hi - lo + 1);
 		for (int i = lo; i <= hi; i++) {
 			char temp[NAME_LENGTH + 16];
@@ -3075,16 +3087,20 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 			temp_names[i - lo] = temp;
 		}
 
-		// Step 2: Structural move
-		array_move_element(wpts, from, to);
-		reindex_waypoint_instances();
+		// Step 2: Shift positions (waypoint objects stay in place)
+		vec3d saved_pos = *wpts[from].get_pos();
+		if (from < to) {
+			for (int i = from; i < to; i++)
+				wpts[i].set_pos(wpts[i + 1].get_pos());
+		} else {
+			for (int i = from; i > to; i--)
+				wpts[i].set_pos(wpts[i - 1].get_pos());
+		}
+		wpts[to].set_pos(&saved_pos);
 
 		// Step 3: Rename from temp names to final names
-		// After the move, the element that was at 'from' is now at 'to'.
-		// Elements between shifted by 1.
-		for (int i = lo; i <= hi; i++) {
+		for (int i = lo; i <= hi; i++)
 			rename_waypoint_sexp_refs_from_temp(temp_names[i - lo].c_str(), list_name, i + 1);
-		}
 	};
 
 	cfg.do_swap = [li](int a, int b) {
@@ -3092,15 +3108,17 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 		const char *list_name = wl.get_name();
 		auto &wpts = wl.get_waypoints();
 
-		// Step 1: Rename both to temp names
+		// Step 1: Rename both SEXP refs to temp names
 		char temp_a[NAME_LENGTH + 16];
 		char temp_b[NAME_LENGTH + 16];
 		rename_waypoint_sexp_refs_to_temp(list_name, a + 1, temp_a, sizeof(temp_a));
 		rename_waypoint_sexp_refs_to_temp(list_name, b + 1, temp_b, sizeof(temp_b));
 
-		// Step 2: Structural swap
-		std::swap(wpts[a], wpts[b]);
-		reindex_waypoint_instances();
+		// Step 2: Swap positions (waypoint objects stay in place)
+		vec3d pos_a = *wpts[a].get_pos();
+		vec3d pos_b = *wpts[b].get_pos();
+		wpts[a].set_pos(&pos_b);
+		wpts[b].set_pos(&pos_a);
 
 		// Step 3: Rename from temp to final (swapped positions)
 		rename_waypoint_sexp_refs_from_temp(temp_a, list_name, b + 1);
