@@ -138,6 +138,7 @@ void mcp_sexp_forest_cleanup()
 
 sexp_list_item *mcp_sexp_forest_get_listing(int opf, int parent_node, int arg_index)
 {
+	Assertion(!mcp_sexp_forest_is_dirty(), "mcp_sexp_forest_get_listing called while forest is dirty");
 	std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
 	return g_sexp_forest.get_listing_opf(opf, parent_node, arg_index);
 }
