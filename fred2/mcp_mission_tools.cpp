@@ -2671,6 +2671,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 			wi++;
 		}
 	}
+	obj_merge_created_list();
 
 	// Move to requested position if not at end
 	if (target_index != list_index) {
@@ -2895,6 +2896,10 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 			"Failed to create waypoint in list '%s'", list);
 		return;
 	}
+
+	// Merge the newly created object into the main object list so it's
+	// visible and selectable in the editor.
+	obj_merge_created_list();
 
 	refresh_cur_waypoint();
 	mark_modified("MCP: create waypoint in %s at index %d", list, target_index);
