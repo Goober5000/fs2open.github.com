@@ -8,6 +8,8 @@
 #include <utility>
 #include <vector>
 
+#include "globalincs/pstypes.h"
+
 // ---------------------------------------------------------------------------
 // Raw array overloads (array + count + max_size)
 // ---------------------------------------------------------------------------
@@ -30,6 +32,7 @@ bool array_insert_slot(T *arr, int &count, int max_size, int index)
 template <typename T>
 void array_remove_slot(T *arr, int &count, int index)
 {
+	Assertion(index >= 0 && index < count, "array_remove_slot: index %d out of range [0, %d)", index, count);
 	for (int i = index; i < count - 1; i++)
 		arr[i] = std::move(arr[i + 1]);
 	count--;
@@ -73,6 +76,7 @@ void array_insert_slot(std::vector<T> &vec, int &count, int index)
 template <typename T>
 void array_remove_slot(std::vector<T> &vec, int &count, int index)
 {
+	Assertion(index >= 0 && index < count, "array_remove_slot: index %d out of range [0, %d)", index, count);
 	for (int i = index; i < count - 1; i++)
 		vec[i] = std::move(vec[i + 1]);
 	count--;
@@ -82,6 +86,8 @@ void array_remove_slot(std::vector<T> &vec, int &count, int index)
 template <typename T>
 void array_move_element(std::vector<T> &vec, int from, int to)
 {
+	Assertion(from >= 0 && from < (int)vec.size(), "array_move_element: from %d out of range [0, %d)", from, (int)vec.size());
+	Assertion(to >= 0 && to < (int)vec.size(), "array_move_element: to %d out of range [0, %d)", to, (int)vec.size());
 	if (from == to)
 		return;
 	T temp = std::move(vec[from]);

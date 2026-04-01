@@ -8,7 +8,10 @@
 
 #include <jansson.h>
 #include <algorithm>
+#include <cerrno>
+#include <climits>
 #include <cstdarg>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 
@@ -1344,11 +1347,11 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 	if (new_ani) {
-		strcpy_s(s.ani_filename, new_ani);
+		strcpy_s(s.ani_filename, new_ani[0] ? new_ani : "<default>");
 		changed = true;
 	}
 	if (new_wave) {
-		strcpy_s(s.wave_filename, new_wave);
+		strcpy_s(s.wave_filename, new_wave[0] ? new_wave : "none");
 		changed = true;
 	}
 
@@ -3667,6 +3670,17 @@ static bool validate_sexp_variable_number_value(const char *value, McpToolReques
 		}
 		p++;
 	}
+
+	// Check numeric range (errno catches overflow on platforms where long == int)
+	errno = 0;
+	long val = strtol(value, nullptr, 10);
+	if (errno == ERANGE || val < INT_MIN || val > INT_MAX) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"default_value is out of range for a 32-bit integer, got '%s'", value);
+		return false;
+	}
+
 	return true;
 }
 
