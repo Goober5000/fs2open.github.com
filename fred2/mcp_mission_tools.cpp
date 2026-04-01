@@ -2908,6 +2908,14 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	// visible and selectable in the editor.
 	obj_merge_created_list();
 
+	// Update SEXP and AI goal references for waypoints that shifted up.
+	// Rename in reverse order to avoid collisions (N -> N+1, then N-1 -> N, etc.)
+	if (target_index < wpt_count) {
+		const char *list_name = Waypoint_lists[li].get_name();
+		for (int i = wpt_count - 1; i >= target_index; i--)
+			rename_waypoint_sexp_refs(list_name, i + 1, i + 2);
+	}
+
 	refresh_cur_waypoint();
 
 	int one_based = target_index + 1;
