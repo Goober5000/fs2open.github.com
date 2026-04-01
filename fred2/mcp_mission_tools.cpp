@@ -251,6 +251,21 @@ static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_
 }
 
 // ---------------------------------------------------------------------------
+// SEXP variable type/flag data
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> sexp_var_type_values = { "number", "string" };
+
+static const flag_entry sexp_var_flag_entries[] = {
+	{ "save_on_mission_progress", SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS },
+	{ "save_on_mission_close",    SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE },
+	{ "save_to_player_file",      SEXP_VARIABLE_SAVE_TO_PLAYER_FILE },
+	{ "network",                  SEXP_VARIABLE_NETWORK },
+};
+
+static constexpr size_t sexp_var_flag_entries_count = sizeof(sexp_var_flag_entries) / sizeof(sexp_var_flag_entries[0]);
+
+// ---------------------------------------------------------------------------
 // Autosave helper
 // ---------------------------------------------------------------------------
 
@@ -3578,6 +3593,351 @@ static void handle_free_sexp(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// SEXP variable tool handlers (run on main thread)
+// ---------------------------------------------------------------------------
+
+static json_t *build_sexp_variable_json(int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_string(Sexp_variables[index].variable_name));
+	json_object_set_new(obj, "default_value", json_string(Sexp_variables[index].text));
+
+	if (Sexp_variables[index].type & SEXP_VARIABLE_NUMBER)
+		json_object_set_new(obj, "type", json_string("number"));
+	else
+		json_object_set_new(obj, "type", json_string("string"));
+
+	json_object_set_new(obj, "flags",
+		flags_to_json_array(Sexp_variables[index].type, sexp_var_flag_entries, sexp_var_flag_entries_count));
+
+	return obj;
+}
+
+static bool validate_sexp_variable_name(const char *name, McpToolRequest *req, int exclude_index = -1)
+{
+	if (!check_string_length(name, TOKEN_LENGTH - 1, "name", req))
+		return false;
+
+	if (strchr(name, ' ') != nullptr) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Variable names cannot contain spaces");
+		return false;
+	}
+
+	auto rval = strcspn(name, "@()[] ;\"\\/");
+	if (rval != strlen(name)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Invalid character '%c' in variable name", name[rval]);
+		return false;
+	}
+
+	int existing = get_index_sexp_variable_name(name);
+	if (existing >= 0 && existing != exclude_index) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"A SEXP variable with name '%s' already exists", name);
+		return false;
+	}
+
+	return true;
+}
+
+static bool validate_sexp_variable_number_value(const char *value, McpToolRequest *req)
+{
+	// Validate that value is a valid integer (optional leading minus, then digits)
+	const char *p = value;
+	if (*p == '-' || *p == '+')
+		p++;
+	if (*p == '\0') {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"default_value must be a valid integer for number type variables, got '%s'", value);
+		return false;
+	}
+	while (*p) {
+		if (*p < '0' || *p > '9') {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"default_value must be a valid integer for number type variables, got '%s'", value);
+			return false;
+		}
+		p++;
+	}
+	return true;
+}
+
+static bool validate_sexp_variable_flags(int flags, McpToolRequest *req)
+{
+	if ((flags & SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS) && (flags & SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE)) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"save_on_mission_progress and save_on_mission_close are mutually exclusive");
+		return false;
+	}
+	return true;
+}
+
+static void update_sexp_node_variable_references(const char *old_name, const char *new_name)
+{
+	for (int i = 0; i < Num_sexp_nodes; i++) {
+		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, old_name)) {
+			strcpy_s(Sexp_nodes[i].text, new_name);
+		}
+	}
+}
+
+static int reset_sexp_node_variable_references(const char *var_name, int var_type)
+{
+	int count = 0;
+	const char *placeholder = (var_type & SEXP_VARIABLE_NUMBER) ? "number" : "string";
+
+	for (int i = 0; i < Num_sexp_nodes; i++) {
+		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name)) {
+			Sexp_nodes[i].type &= ~SEXP_FLAG_VARIABLE;
+			strcpy_s(Sexp_nodes[i].text, placeholder);
+			count++;
+		}
+	}
+	return count;
+}
+
+static bool is_variable_referenced_in_sexp_nodes(const char *var_name)
+{
+	for (int i = 0; i < Num_sexp_nodes; i++) {
+		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name))
+			return true;
+	}
+	return false;
+}
+
+static void handle_list_sexp_variables(json_t * /*input*/, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	json_t *arr = json_array();
+	for (int i = 0; i < MAX_SEXP_VARIABLES; i++) {
+		if (Sexp_variables[i].type & SEXP_VARIABLE_SET)
+			json_array_append_new(arr, build_sexp_variable_json(i));
+	}
+
+	req->result_json = make_json_tool_result(arr);
+	req->success = true;
+}
+
+static void handle_get_sexp_variable(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = get_index_sexp_variable_name(name);
+	if (idx < 0) {
+		set_not_found_error(req, "SEXP variable", name);
+		return;
+	}
+
+	req->result_json = make_json_tool_result(build_sexp_variable_json(idx));
+	req->success = true;
+}
+
+static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+	if (!validate_sexp_variable_name(name, req)) return;
+
+	auto default_value = get_required_string(input, "default_value", req, false);
+	if (!default_value) return;
+	if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", req)) return;
+
+	auto type_str = get_required_string(input, "type", req, true);
+	if (!type_str) return;
+	if (!check_string_enum(type_str, sexp_var_type_values, "type", req)) return;
+
+	int type_bits;
+	if (!stricmp(type_str, "number")) {
+		type_bits = SEXP_VARIABLE_NUMBER;
+		if (!validate_sexp_variable_number_value(default_value, req)) return;
+	} else {
+		type_bits = SEXP_VARIABLE_STRING;
+	}
+
+	// Parse optional flags
+	int flag_bits = 0;
+	auto flags_arr = get_optional_string_array(input, "flags");
+	if (flags_arr.has_value()) {
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
+			return;
+		if (!validate_sexp_variable_flags(flag_bits, req)) return;
+	}
+
+	// Check capacity
+	if (sexp_variable_count() >= MAX_SEXP_VARIABLES) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Maximum number of SEXP variables (%d) reached", MAX_SEXP_VARIABLES);
+		return;
+	}
+
+	int result = sexp_add_variable(default_value, name, type_bits | flag_bits);
+	if (result < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Failed to add SEXP variable (no free slot)");
+		return;
+	}
+
+	sexp_variable_sort();
+	mcp_sexp_forest_mark_dirty();
+	mark_modified("MCP: create SEXP variable %s", name);
+
+	// Re-lookup after sort since index may have changed
+	int new_idx = get_index_sexp_variable_name(name);
+	req->result_json = make_json_tool_result(build_sexp_variable_json(new_idx));
+	req->success = true;
+}
+
+static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = get_index_sexp_variable_name(name);
+	if (idx < 0) {
+		set_not_found_error(req, "SEXP variable", name);
+		return;
+	}
+
+	// Save originals
+	char old_name[TOKEN_LENGTH];
+	strcpy_s(old_name, Sexp_variables[idx].variable_name);
+	int old_type = Sexp_variables[idx].type;
+
+	// Extract optional fields
+	auto new_name = get_optional_string(input, "new_name", true);
+	if (new_name) {
+		if (!validate_sexp_variable_name(new_name, req, idx)) return;
+	}
+
+	auto default_value = get_optional_string(input, "default_value", false);
+	if (default_value) {
+		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", req)) return;
+	}
+
+	auto type_str = get_optional_string(input, "type", true);
+	int type_bits;
+	if (type_str) {
+		if (!check_string_enum(type_str, sexp_var_type_values, "type", req)) return;
+		type_bits = !stricmp(type_str, "number") ? SEXP_VARIABLE_NUMBER : SEXP_VARIABLE_STRING;
+	} else {
+		type_bits = old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING);
+	}
+
+	int flag_bits;
+	auto flags_arr = get_optional_string_array(input, "flags");
+	if (flags_arr.has_value()) {
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
+			return;
+		if (!validate_sexp_variable_flags(flag_bits, req)) return;
+	} else {
+		flag_bits = old_type & (SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS | SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE |
+			SEXP_VARIABLE_SAVE_TO_PLAYER_FILE | SEXP_VARIABLE_NETWORK);
+	}
+
+	// Validate number value if applicable
+	const char *final_value = default_value ? default_value : Sexp_variables[idx].text;
+	if ((type_bits & SEXP_VARIABLE_NUMBER) && default_value) {
+		if (!validate_sexp_variable_number_value(default_value, req)) return;
+	}
+	// Also validate if type changed to number and we're keeping the old value
+	if ((type_bits & SEXP_VARIABLE_NUMBER) && !(old_type & SEXP_VARIABLE_NUMBER) && !default_value) {
+		if (!validate_sexp_variable_number_value(Sexp_variables[idx].text, req)) return;
+	}
+
+	const char *final_name = new_name ? new_name : old_name;
+	int final_type = type_bits | flag_bits;
+
+	bool changed = false;
+
+	// Update SEXP node references if name changed
+	if (new_name && strcmp(old_name, new_name) != 0) {
+		update_sexp_node_variable_references(old_name, new_name);
+		changed = true;
+	}
+
+	// Check if anything actually changed
+	if (!changed) {
+		if (default_value && strcmp(Sexp_variables[idx].text, default_value) != 0)
+			changed = true;
+		else if (final_type != (old_type & ~(SEXP_VARIABLE_SET | SEXP_VARIABLE_MODIFIED)))
+			changed = true;
+	}
+
+	// Apply the modification
+	sexp_fred_modify_variable(final_value, final_name, idx, final_type);
+
+	if (new_name && strcmp(old_name, new_name) != 0)
+		sexp_variable_sort();
+
+	if (changed) {
+		mcp_sexp_forest_mark_dirty();
+		mark_modified("MCP: update SEXP variable %s", final_name);
+	}
+
+	// Re-lookup after potential sort
+	int new_idx = get_index_sexp_variable_name(final_name);
+	req->result_json = make_json_tool_result(build_sexp_variable_json(new_idx));
+	req->success = true;
+}
+
+static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	auto name = get_required_string(input, "name", req, true);
+	if (!name) return;
+
+	int idx = get_index_sexp_variable_name(name);
+	if (idx < 0) {
+		set_not_found_error(req, "SEXP variable", name);
+		return;
+	}
+
+	auto force = get_optional_bool(input, "force");
+
+	// Check for references unless force is set
+	if (!force.has_value() || !*force) {
+		if (is_variable_referenced_in_sexp_nodes(name)) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"SEXP variable '%s' is referenced in SEXP expressions. "
+				"Use force=true to delete anyway (references will be reset to placeholder values).", name);
+			return;
+		}
+	}
+
+	int var_type = Sexp_variables[idx].type;
+
+	// Reset any SEXP node references
+	reset_sexp_node_variable_references(name, var_type);
+
+	sexp_variable_delete(idx);
+	sexp_variable_sort();
+	mcp_sexp_forest_mark_dirty();
+	mark_modified("MCP: delete SEXP variable %s", name);
+
+	snprintf(req->result_message, sizeof(req->result_message), "Deleted SEXP variable: %s", name);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -3648,6 +4008,11 @@ static const char *mission_tool_names[] = {
 	"walk_sexp_tree",
 	"text_to_sexp",
 	"free_sexp",
+	"list_sexp_variables",
+	"get_sexp_variable",
+	"create_sexp_variable",
+	"update_sexp_variable",
+	"delete_sexp_variable",
 	nullptr
 };
 
@@ -4743,6 +5108,82 @@ void mcp_register_mission_tools(json_t *tools)
 			"mission entities (events, goals, briefings, arrival/departure cues, etc.).",
 			props, req);
 	}
+
+	// list_sexp_variables
+	register_tool(tools, "list_sexp_variables",
+		"List all SEXP variables defined in this mission. "
+		"Returns each variable's name, default value, type (number or string), and flags.",
+		nullptr);
+
+	// get_sexp_variable
+	register_tool_with_required_string(tools, "get_sexp_variable",
+		"Get full details of a SEXP variable by name, including default value, "
+		"type, and persistence/network flags.",
+		"name", "Name of the variable to retrieve");
+
+	// create_sexp_variable
+	{
+		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Unique variable name. Cannot contain spaces or the characters @, (, ).");
+		add_string_prop(props, "default_value",
+			"Default value for the variable. Must be a valid integer for number type.");
+		add_string_enum_prop(props, "type",
+			"Data type of the variable",
+			sexp_var_type_values);
+		add_string_array_prop(props, "flags",
+			"Persistence and network flags. save_on_mission_progress and save_on_mission_close "
+			"are mutually exclusive.",
+			flag_names);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("default_value"));
+		json_array_append_new(req, json_string("type"));
+		register_tool(tools, "create_sexp_variable",
+			"Create a new SEXP variable. Variables are automatically kept in sorted alphabetical order.",
+			props, req);
+	}
+
+	// update_sexp_variable
+	{
+		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+		json_t *props = json_object();
+		add_string_prop(props, "name",
+			"Name of the existing variable to update");
+		add_string_prop(props, "new_name",
+			"New name for the variable. All SEXP node references will be updated automatically.");
+		add_string_prop(props, "default_value",
+			"New default value. Must be a valid integer for number type.");
+		add_string_enum_prop(props, "type",
+			"New data type. Changing type may invalidate existing SEXP references.",
+			sexp_var_type_values);
+		add_string_array_prop(props, "flags",
+			"New persistence and network flags (replaces all existing flags). "
+			"save_on_mission_progress and save_on_mission_close are mutually exclusive.",
+			flag_names);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_sexp_variable",
+			"Update a SEXP variable's properties. Only provided fields are changed. "
+			"If renaming, all SEXP node references are updated automatically.",
+			props, req);
+	}
+
+	// delete_sexp_variable
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the variable to delete");
+		add_bool_prop(props, "force",
+			"If true, delete even if referenced in SEXP expressions "
+			"(references will be reset to placeholder values)");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "delete_sexp_variable",
+			"Delete a SEXP variable. By default, refuses to delete if the variable "
+			"is referenced in any SEXP expressions.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -4896,6 +5337,16 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_text_to_sexp(input_json, req);
 	} else if (strcmp(tool_name, "free_sexp") == 0) {
 		handle_free_sexp(input_json, req);
+	} else if (strcmp(tool_name, "list_sexp_variables") == 0) {
+		handle_list_sexp_variables(input_json, req);
+	} else if (strcmp(tool_name, "get_sexp_variable") == 0) {
+		handle_get_sexp_variable(input_json, req);
+	} else if (strcmp(tool_name, "create_sexp_variable") == 0) {
+		handle_create_sexp_variable(input_json, req);
+	} else if (strcmp(tool_name, "update_sexp_variable") == 0) {
+		handle_update_sexp_variable(input_json, req);
+	} else if (strcmp(tool_name, "delete_sexp_variable") == 0) {
+		handle_delete_sexp_variable(input_json, req);
 	} else {
 		req->success = false;
 		snprintf(req->result_message, sizeof(req->result_message),
