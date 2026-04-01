@@ -27,6 +27,17 @@ static const char *MCP_PROTOCOL_VERSION = "2025-06-18";
 static void send_json_response(struct mg_connection *conn, json_t *response)
 {
 	char *body = json_dumps(response, JSON_COMPACT | JSON_REAL_PRECISION(6));
+	if (body == nullptr) {
+		const char *fallback = "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"JSON serialization failed\"}}";
+		mg_printf(conn,
+			"HTTP/1.1 500 Internal Server Error\r\n"
+			"Content-Type: application/json\r\n"
+			"Connection: close\r\n"
+			"Content-Length: %d\r\n"
+			"\r\n%s",
+			(int)strlen(fallback), fallback);
+		return;
+	}
 	size_t body_len = strlen(body);
 
 	// Write header and body separately so that large responses are not
@@ -547,7 +558,12 @@ void mcp_server_start()
 	};
 
 	mcp_ctx = mg_start(mcp_request_handler, nullptr, options);
+	if (mcp_ctx == nullptr) {
+		Warning(LOCATION, "MCP server failed to start on 127.0.0.1:%d (port may be in use)", Mcp_server_port);
+		return;
+	}
 	mprintf(("MCP server listening on 127.0.0.1:%d\n", Mcp_server_port));
+	mcp_fred_ready.store(true);
 }
 
 void mcp_server_stop()
