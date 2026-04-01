@@ -2794,14 +2794,17 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	for (int wpt_idx = 0; wpt_idx < (int)Waypoint_lists[index].get_waypoints().size(); wpt_idx++)
 		invalidate_waypoint_sexp_refs(name, wpt_idx + 1);
 
-	// Remove all waypoints (waypoint_remove handles game objects and instance reindexing).
+	// Remove all waypoints (waypoint_remove skips obj_delete in FRED, so we must do it).
 	// When the last waypoint is removed, waypoint_remove also erases the list from
 	// Waypoint_lists, so we must not hold a reference across that call.
 	while (index < (int)Waypoint_lists.size() && !stricmp(Waypoint_lists[index].get_name(), name)) {
 		auto &wpts = Waypoint_lists[index].get_waypoints();
 		if (wpts.empty())
 			break;
+		int objnum = wpts.back().get_objnum();
+		unmark_object(objnum);
 		waypoint_remove(&wpts.back());
+		obj_delete(objnum);
 	}
 
 	refresh_cur_waypoint();
@@ -3041,12 +3044,15 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 		ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, list, buf);
 	}
 
-	// Save list name before removal (in case the list gets deleted)
+	// Save info before removal (waypoint_remove may erase the list)
 	char list_name[NAME_LENGTH];
 	strcpy_s(list_name, Waypoint_lists[li].get_name());
+	int objnum = wpts[deleted_index].get_objnum();
 
-	// Remove the waypoint (handles game objects, vector removal, instance reindexing)
+	// Remove the waypoint from data structures (waypoint_remove skips obj_delete in FRED)
+	unmark_object(objnum);
 	waypoint_remove(&wpts[deleted_index]);
+	obj_delete(objnum);
 	refresh_cur_waypoint();
 
 	// Update SEXP and AI goal references for waypoints that shifted down
