@@ -2824,7 +2824,13 @@ static json_t *handle_list_missions()
 		// Format write_time as ISO 8601
 		char timebuf[32];
 		struct tm tm_buf;
-		if (localtime_s(&tm_buf, &info[i].write_time) == 0) {
+		bool time_ok;
+#ifdef _WIN32
+		time_ok = (localtime_s(&tm_buf, &info[i].write_time) == 0);
+#else
+		time_ok = (localtime_r(&info[i].write_time, &tm_buf) != nullptr);
+#endif
+		if (time_ok) {
 			strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm_buf);
 			json_object_set_new(entry, "modified", json_string(timebuf));
 		}
