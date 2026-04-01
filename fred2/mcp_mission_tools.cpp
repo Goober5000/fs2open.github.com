@@ -3106,9 +3106,22 @@ static void do_waypoint_move(int li, int from, int to)
 	}
 	wpts[to].set_pos(&saved_pos);
 
-	// Step 3: Rename from temp names to final names
-	for (int i = lo; i <= hi; i++)
-		rename_waypoint_sexp_refs_from_temp(temp_names[i - lo].c_str(), list_name, i + 1);
+	// Step 3: Rename from temp names to final (shifted) names.
+	// temp_names[i - lo] holds the temp name for what was originally at 0-based index i.
+	// Map each original index to its new index after the move:
+	//   - The element at 'from' moved to 'to'
+	//   - If from < to: elements at from+1..to shifted down by 1
+	//   - If from > to: elements at to..from-1 shifted up by 1
+	for (int i = lo; i <= hi; i++) {
+		int new_index;
+		if (i == from)
+			new_index = to;
+		else if (from < to)
+			new_index = i - 1;  // shifted down
+		else
+			new_index = i + 1;  // shifted up
+		rename_waypoint_sexp_refs_from_temp(temp_names[i - lo].c_str(), list_name, new_index + 1);
+	}
 }
 
 // Swap two waypoint positions within a list (positions move, objects stay in place).
