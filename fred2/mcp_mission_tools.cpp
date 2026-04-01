@@ -1057,30 +1057,20 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 // Generic move/swap handlers
 // ---------------------------------------------------------------------------
 
-// since this may return a dangling pointer, be sure not to store it in a variable!
-#define CFG_GET_NAME(cfg, index) ((cfg).get_name ? (cfg).get_name(index) : (cfg).get_name_fallback(index).c_str())
-
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
 struct MoveSwapConfig
 {
-	const char *entity_name;
-	int count;
+	const char *entity_name = nullptr;
+	int count = 0;
 	bool one_based = false;		// if true, user-facing indices start at 1 instead of 0
-	std::function<bool(SCP_string&)> validate_dialog;
-	std::function<const char *(int)> get_name;
-	std::function<void(int, int)> do_move;
-	std::function<void(int, int)> do_swap;
+	std::function<bool(SCP_string&)> validate_dialog = nullptr;
+	std::function<SCP_string(int)> get_name = nullptr;	// copy-return isn't ideal, but certain use cases work better with it and the MCP isn't performance-critical
+	std::function<void(int, int)> do_move = nullptr;
+	std::function<void(int, int)> do_swap = nullptr;
 
 	int min_index() const { return one_based ? 1 : 0; }
 	int max_index() const { return one_based ? count : count - 1; }
-
-	SCP_string get_name_fallback(int index) const
-	{
-		SCP_string name;
-		sprintf(name, "%s %d", entity_name, index);
-		return name;
-	}
 };
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
@@ -1094,7 +1084,7 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(CFG_GET_NAME(cfg, *from_index)));
+		json_object_set_new(data, "name", json_string(cfg.get_name(*from_index).c_str()));
 		json_object_set_new(data, "index", json_integer(*from_index));
 		req->result_json = make_json_tool_result(data);
 		req->success = true;
@@ -1103,10 +1093,10 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 	cfg.do_move(*from_index, *to_index);
 
-	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, CFG_GET_NAME(cfg, *to_index), *from_index, *to_index);
+	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(*to_index).c_str(), *from_index, *to_index);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(CFG_GET_NAME(cfg, *to_index)));
+	json_object_set_new(data, "name", json_string(cfg.get_name(*to_index).c_str()));
 	json_object_set_new(data, "index", json_integer(*to_index));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
@@ -1124,15 +1114,15 @@ static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSw
 	if (index_a != index_b) {
 		cfg.do_swap(*index_a, *index_b);
 
-		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, CFG_GET_NAME(cfg, *index_b), CFG_GET_NAME(cfg, *index_a));
+		mark_modified("MCP: swap %ss %s and %s", cfg.entity_name, cfg.get_name(*index_b).c_str(), cfg.get_name(*index_a).c_str());
 	}
 
 	json_t *data = json_object();
 	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(CFG_GET_NAME(cfg, *index_a)));
+	json_object_set_new(a_obj, "name", json_string(cfg.get_name(*index_a).c_str()));
 	json_object_set_new(a_obj, "index", json_integer(*index_a));
 	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(CFG_GET_NAME(cfg, *index_b)));
+	json_object_set_new(b_obj, "name", json_string(cfg.get_name(*index_b).c_str()));
 	json_object_set_new(b_obj, "index", json_integer(*index_b));
 	json_object_set_new(data, "a", a_obj);
 	json_object_set_new(data, "b", b_obj);
@@ -1150,7 +1140,7 @@ static MoveSwapConfig make_message_move_swap_config()
 	cfg.entity_name = "message";
 	cfg.count = Num_messages - Num_builtin_messages;
 	cfg.validate_dialog = validate_dialog_for_messages;
-	cfg.get_name = [](int i) -> const char * {
+	cfg.get_name = [](int i) {
 		return Messages[Num_builtin_messages + i].name;
 	};
 	cfg.do_move = [](int from, int to) {
@@ -1168,8 +1158,8 @@ static MoveSwapConfig make_event_move_swap_config()
 	cfg.entity_name = "event";
 	cfg.count = (int)Mission_events.size();
 	cfg.validate_dialog = validate_dialog_for_events;
-	cfg.get_name = [](int i) -> const char * {
-		return Mission_events[i].name.c_str();
+	cfg.get_name = [](int i) {
+		return Mission_events[i].name;
 	};
 	cfg.do_move = [](int from, int to) {
 		update_annotation_paths_for_move(from, to);
@@ -1396,7 +1386,11 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 	cfg.entity_name = "cmd brief stage";
 	cfg.count = cb->num_stages;
 	cfg.validate_dialog = validate_dialog_for_cmd_brief;
-	cfg.get_name = nullptr;	// stages don't have names; use the fallback function
+	cfg.get_name = [cb](int index) {
+		SCP_string name;
+		sprintf(name, "cmd brief stage %d", index);
+		return name;
+	};
 	cfg.do_move = [cb](int from, int to) {
 		array_move_element(cb->stage, from, to);
 	};
@@ -1760,8 +1754,8 @@ static MoveSwapConfig make_goal_move_swap_config()
 	cfg.entity_name = "goal";
 	cfg.count = (int)Mission_goals.size();
 	cfg.validate_dialog = validate_dialog_for_goals;
-	cfg.get_name = [](int i) -> const char * {
-		return Mission_goals[i].name.c_str();
+	cfg.get_name = [](int i) {
+		return Mission_goals[i].name;
 	};
 	cfg.do_move = [](int from, int to) {
 		array_move_element(Mission_goals, from, to);
@@ -1983,7 +1977,11 @@ static MoveSwapConfig make_fiction_move_swap_config()
 	cfg.entity_name = "fiction viewer stage";
 	cfg.count = (int)Fiction_viewer_stages.size();
 	cfg.validate_dialog = validate_dialog_for_fiction;
-	cfg.get_name = nullptr;	// stages don't have names; use the fallback function
+	cfg.get_name = [](int index) {
+		SCP_string name;
+		sprintf(name, "fiction viewer stage %d", index);
+		return name;
+	};
 	cfg.do_move = [](int from, int to) {
 		array_move_element(Fiction_viewer_stages, from, to);
 	};
@@ -2207,7 +2205,11 @@ static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
 	cfg.entity_name = "debriefing stage";
 	cfg.count = db->num_stages;
 	cfg.validate_dialog = validate_dialog_for_debriefing;
-	cfg.get_name = nullptr;
+	cfg.get_name = [](int index) {
+		SCP_string name;
+		sprintf(name, "debriefing stage %d", index);
+		return name;
+	};
 	cfg.do_move = [db](int from, int to) {
 		array_move_element(db->stages, from, to);
 	};
@@ -2506,7 +2508,7 @@ static MoveSwapConfig make_jump_node_move_swap_config()
 	cfg.entity_name = "jump node";
 	cfg.count = (int)Jump_nodes.size();
 	cfg.validate_dialog = validate_dialog_for_jump_nodes;
-	cfg.get_name = [](int i) -> const char * {
+	cfg.get_name = [](int i) {
 		return Jump_nodes[i].GetName();
 	};
 	cfg.do_move = [](int from, int to) {
@@ -2841,7 +2843,7 @@ static MoveSwapConfig make_waypoint_list_move_swap_config()
 	cfg.entity_name = "waypoint list";
 	cfg.count = (int)Waypoint_lists.size();
 	cfg.validate_dialog = validate_dialog_for_waypoint_lists;
-	cfg.get_name = [](int i) -> const char * {
+	cfg.get_name = [](int i) {
 		return Waypoint_lists[i].get_name();
 	};
 	cfg.do_move = [](int from, int to) {
@@ -3172,8 +3174,8 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 	// Capture list index for use in lambdas
 	int li = waypoint_list_index;
 
-	cfg.get_name = [li](int i) -> const char * {
-		static char name_buf[NAME_LENGTH];
+	cfg.get_name = [li](int i) {
+		SCP_string name_buf;
 		waypoint_stuff_name(name_buf, Waypoint_lists[li].get_name(), i);
 		return name_buf;
 	};
