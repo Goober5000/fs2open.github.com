@@ -2856,6 +2856,8 @@ static void handle_swap_waypoint_lists(json_t *input, McpToolRequest *req)
 // Individual waypoint tools
 // ---------------------------------------------------------------------------
 
+static void do_waypoint_move(int li, int from, int to);
+
 static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 {
 	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
@@ -2887,14 +2889,14 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 		target_index = *insert_index - 1;
 	}
 
-	// Use waypoint_add which handles game object creation and instance reindexing.
-	// waypoint_add inserts AFTER the specified instance, unless first_waypoint_in_list is true.
+	// Always append to end so the new game object has the highest object number,
+	// preserving object creation order in the editor's listing.
 	vec3d position = *pos;
 	int objnum;
-	if (target_index == 0) {
+	if (wpt_count == 0) {
 		objnum = waypoint_add(&position, calc_waypoint_instance(li, 0), true);
 	} else {
-		objnum = waypoint_add(&position, calc_waypoint_instance(li, target_index - 1));
+		objnum = waypoint_add(&position, calc_waypoint_instance(li, wpt_count - 1));
 	}
 
 	if (objnum < 0) {
@@ -2904,17 +2906,12 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	// Merge the newly created object into the main object list so it's
-	// visible and selectable in the editor.
 	obj_merge_created_list();
 
-	// Update SEXP and AI goal references for waypoints that shifted up.
-	// Rename in reverse order to avoid collisions (N -> N+1, then N-1 -> N, etc.)
-	if (target_index < wpt_count) {
-		const char *list_name = Waypoint_lists[li].get_name();
-		for (int i = wpt_count - 1; i >= target_index; i--)
-			rename_waypoint_sexp_refs(list_name, i + 1, i + 2);
-	}
+	// If the target is not the end, shift positions so the new waypoint
+	// appears at the desired index.  do_waypoint_move handles SEXP ref updates.
+	if (target_index < wpt_count)
+		do_waypoint_move(li, wpt_count, target_index);
 
 	refresh_cur_waypoint();
 
