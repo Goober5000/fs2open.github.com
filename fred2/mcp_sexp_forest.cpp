@@ -41,7 +41,7 @@ void mcp_sexp_forest_mark_dirty()
 	g_dirty_roots_nonempty.store(false);
 }
 
-void mcp_sexp_forest_mark_dirty(SCP_vector<int> roots)
+void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 {
 	if (g_sexp_forest_dirty.load())
 		return;  // full rebuild already pending; partial set is redundant
