@@ -221,6 +221,10 @@ void CMainFrame::OnClose()
 	// and now if we *are* closing, prevent the dialog from coming up
 	FREDDoc_ptr->SetModifiedFlag(FALSE);
 
+	// Stop MCP server before window destruction to prevent races
+	// with mongoose threads accessing Fred_main_wnd
+	mcp_server_stop();
+
 	// do the closing stuff
 	theApp.write_ini_file();
 	SaveBarState("Tools state");
