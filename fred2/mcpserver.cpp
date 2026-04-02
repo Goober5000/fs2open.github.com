@@ -520,8 +520,11 @@ static void *mcp_request_handler(enum mg_event event, struct mg_connection *conn
 	const struct mg_request_info *info = mg_get_request_info(conn);
 
 	if (strcmp(info->request_method, "GET") == 0) {
-		serve_html_status(conn);
-		return (void *)"";
+		if (strcmp(info->uri, "/") == 0 || strcmp(info->uri, "/mcp") == 0) {
+			serve_html_status(conn);
+			return (void *)"";
+		}
+		// Fall through to 404 for other GET paths
 	}
 
 	if (strcmp(info->request_method, "POST") == 0 && strcmp(info->uri, "/mcp") == 0) {
