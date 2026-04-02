@@ -346,6 +346,7 @@ int sexp_tree::save_branch(int cur, int at_root)
 			start = node;
 		} else if (last >= 0){
 			Sexp_nodes[last].rest = node;
+			Sexp_nodes[node].parent = Sexp_nodes[last].parent;
 		}
 
 		last = node;
