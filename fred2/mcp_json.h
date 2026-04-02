@@ -155,16 +155,13 @@ bool get_required_vec3d_array(json_t *input, const char *param_name,
 	SCP_vector<vec3d> &out, McpToolRequest *req, int min_count = 0);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
-struct vec3d;
 json_t *build_vec3d_json(const vec3d &v);
 
 // Builds a JSON {"rvec":..., "uvec":..., "fvec":...} object from a matrix.
-struct matrix;
 json_t* build_matrix_json(const matrix& m);
 
 // Builds a JSON {"red":..., "green":..., "blue":..., "alpha":..., "range":"0-255"}
 // object from a color.  Alpha is included only if include_alpha is true.
-struct color;
 json_t *build_color_json(const color &c, bool include_alpha = false);
 
 // Build a JSON string array from a list of indices, using a C-string-compatible field.
