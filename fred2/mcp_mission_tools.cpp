@@ -3305,6 +3305,7 @@ static json_t *build_sexp_node_json(int n)
 	const char *node_type = get_sexp_value_type_name(n);
 	json_object_set_new(obj, "value_type", node_type ? json_string(node_type) : json_null());
 
+	json_object_set_new(obj, "node_parent", json_integer(Sexp_nodes[n].parent));
 	json_object_set_new(obj, "node_first", json_integer(Sexp_nodes[n].first));
 	json_object_set_new(obj, "node_rest", json_integer(Sexp_nodes[n].rest));
 
