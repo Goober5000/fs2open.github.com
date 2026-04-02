@@ -380,8 +380,6 @@ void mcp_register_reference_tools(json_t *tools)
 				"Filter by category. Omit to list all.",
 				category_values);
 
-		if (notes_for_categories)
-			json_decref(notes_for_categories);
 		add_string_prop(props, "search",
 			"Fuzzy search against topic names. Results are sorted by match quality.");
 		register_tool(tools, "list_reference_notes",
@@ -1545,8 +1543,15 @@ static json_t *handle_get_mod_info()
 // Reference notes — domain knowledge for AI agents
 // ---------------------------------------------------------------------------
 
+static json_t *reference_notes_cache = nullptr;
+
+// Returns a borrowed reference to the cached notes array.
+// Caller must NOT call json_decref on the result.
 static json_t *load_reference_notes()
 {
+	if (reference_notes_cache)
+		return reference_notes_cache;
+
 	SCP_string content = load_config_file("mcp_reference_notes.json", true);
 	if (content.empty())
 		return nullptr;
@@ -1556,7 +1561,8 @@ static json_t *load_reference_notes()
 	if (!root)
 		mprintf(("MCP: Failed to parse mcp_reference_notes.json: %s (line %d)\n", err.text, err.line));
 
-	return root;
+	reference_notes_cache = root;
+	return reference_notes_cache;
 }
 
 static json_t *handle_list_reference_notes(json_t *arguments)
@@ -1568,10 +1574,8 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	if (!notes)
 		return make_tool_result("Failed to load reference notes.", true);
 
-	if (!json_is_array(notes)) {
-		json_decref(notes);
+	if (!json_is_array(notes))
 		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
-	}
 
 	if (filter_search && filter_search[0] != '\0') {
 		// Fuzzy search mode: use stringcost against topic names
@@ -1649,7 +1653,6 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 		json_object_set_new(item, "description", json_copy(json_object_get(entry, "description")));
 		json_array_append_new(arr, item);
 	}
-	json_decref(notes);
 	return make_json_tool_result(arr);
 }
 
@@ -1663,10 +1666,8 @@ static json_t *handle_get_reference_note(json_t *arguments)
 	if (!notes)
 		return make_tool_result("Failed to load reference notes.", true);
 
-	if (!json_is_array(notes)) {
-		json_decref(notes);
+	if (!json_is_array(notes))
 		return make_tool_result("Reference notes file has invalid format (expected JSON array).", true);
-	}
 
 	// Look up the requested topic (case-insensitive)
 	size_t index;
@@ -1679,12 +1680,10 @@ static json_t *handle_get_reference_note(json_t *arguments)
 			json_object_set_new(obj, "description", json_copy(json_object_get(entry, "description")));
 			json_object_set_new(obj, "see_also", json_copy(json_object_get(entry, "see_also")));
 			json_object_set_new(obj, "text", json_copy(json_object_get(entry, "text")));
-			json_decref(notes);
 			return make_json_tool_result(obj);
 		}
 	}
 
-	json_decref(notes);
 	return make_tool_result("Topic not found. Use list_reference_notes to see available topics.", true);
 }
 
@@ -3006,6 +3005,11 @@ void mcp_reference_tools_cleanup()
 	for (auto &pair : model_details_cache)
 		json_decref(pair.second);
 	model_details_cache.clear();
+
+	if (reference_notes_cache) {
+		json_decref(reference_notes_cache);
+		reference_notes_cache = nullptr;
+	}
 
 	if (scripting_api_cache) {
 		json_decref(scripting_api_cache);
