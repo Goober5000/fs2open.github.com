@@ -295,7 +295,7 @@ static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, b
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(msg.name));
 	if (msg_absolute_index >= Num_builtin_messages)
-		json_object_set_new(obj, "index", json_integer(msg_absolute_index - Num_builtin_messages));
+		json_object_set_new(obj, "index", json_integer(msg_absolute_index - Num_builtin_messages + 1));
 	json_object_set_new(obj, "message", json_string(msg.message));
 
 	const char *persona = persona_name_from_index(msg.persona_index);
@@ -404,11 +404,11 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		// Default: append to end
 		target_index = Num_messages;
 	} else {
-		// Caller specifies a mission-relative index (0 = first mission message)
+		// Caller specifies a mission-relative index (1 = first mission message)
 		// Note: the upper bound is allowed, and means append
-		if (!check_int_range(*insert_index, 0, Num_messages - Num_builtin_messages, "index", req))
+		if (!check_int_range(*insert_index, 1, Num_messages - Num_builtin_messages + 1, "index", req))
 			return;
-		target_index = Num_builtin_messages + *insert_index;
+		target_index = Num_builtin_messages + *insert_index - 1;
 	}
 
 	// Insert a slot at the target position
@@ -438,7 +438,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Return the created message
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index - Num_builtin_messages));
+	json_object_set_new(data, "index", json_integer(target_index - Num_builtin_messages + 1));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -691,7 +691,7 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
-	json_object_set_new(obj, "index", json_integer(evt_index));
+	json_object_set_new(obj, "index", json_integer(evt_index + 1));
 	json_object_set_new(obj, "formula", json_integer(evt.formula));
 
 	bool is_chained = (evt.chain_delay >= 0);
@@ -821,9 +821,9 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Mission_events.size();
 	} else {
-		if (!check_int_range(*insert_index, 0, (int)Mission_events.size(), "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Mission_events.size() + 1, "index", req))
 			return;
-		target_index = *insert_index;
+		target_index = *insert_index - 1;
 	}
 
 	if (!formula.has_value()) {
@@ -861,7 +861,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	// Return the created event
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index));
+	json_object_set_new(data, "index", json_integer(target_index + 1));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -1142,15 +1142,16 @@ static MoveSwapConfig make_message_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "message";
 	cfg.count = Num_messages - Num_builtin_messages;
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_messages;
 	cfg.get_name = [](int i) {
-		return Messages[Num_builtin_messages + i].name;
+		return Messages[Num_builtin_messages + i - 1].name;
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Messages, Num_builtin_messages + from, Num_builtin_messages + to);
+		array_move_element(Messages, Num_builtin_messages + from - 1, Num_builtin_messages + to - 1);
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Messages[Num_builtin_messages + a], Messages[Num_builtin_messages + b]);
+		std::swap(Messages[Num_builtin_messages + a - 1], Messages[Num_builtin_messages + b - 1]);
 	};
 	return cfg;
 }
@@ -1160,17 +1161,18 @@ static MoveSwapConfig make_event_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "event";
 	cfg.count = (int)Mission_events.size();
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_events;
 	cfg.get_name = [](int i) {
-		return Mission_events[i].name;
+		return Mission_events[i - 1].name;
 	};
 	cfg.do_move = [](int from, int to) {
-		update_annotation_paths_for_move(from, to);
-		array_move_element(Mission_events, from, to);
+		update_annotation_paths_for_move(from - 1, to - 1);
+		array_move_element(Mission_events, from - 1, to - 1);
 	};
 	cfg.do_swap = [](int a, int b) {
-		update_annotation_paths_for_swap(a, b);
-		std::swap(Mission_events[a], Mission_events[b]);
+		update_annotation_paths_for_swap(a - 1, b - 1);
+		std::swap(Mission_events[a - 1], Mission_events[b - 1]);
 	};
 	return cfg;
 }
@@ -1223,7 +1225,7 @@ static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int index)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
 	if (stage.ani_filename && stricmp(stage.ani_filename, "<default>") != 0)
 		set_optional_filename(obj, "ani_filename", stage.ani_filename);
@@ -1255,9 +1257,9 @@ static void handle_get_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
 
-	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(cb->stage[*index], *index));
+	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(cb->stage[*index - 1], *index - 1));
 	req->success = true;
 }
 
@@ -1291,10 +1293,10 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target = cb->num_stages;
 	} else {
-		// Upper bound is num_stages (append position)
-		if (!check_int_range(*insert_index, 0, cb->num_stages, "index", req))
+		// Upper bound is num_stages + 1 (append position)
+		if (!check_int_range(*insert_index, 1, cb->num_stages + 1, "index", req))
 			return;
-		target = *insert_index;
+		target = *insert_index - 1;
 	}
 
 	// Insert slot
@@ -1312,10 +1314,10 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	strcpy_s(s.wave_filename, (wave && wave[0]) ? wave : "none");
 	s.wave = -1;
 
-	mark_modified("MCP: create cmd brief stage %d", target);
+	mark_modified("MCP: create cmd brief stage %d", target + 1);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "index", json_integer(target));
+	json_object_set_new(data, "index", json_integer(target + 1));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -1329,7 +1331,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
 	auto new_ani  = get_optional_filename(input, "ani_filename", false);
@@ -1339,7 +1341,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
 	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "wave_filename", req)) return;
 
-	cmd_brief_stage &s = cb->stage[*index];
+	cmd_brief_stage &s = cb->stage[*index - 1];
 	bool changed = false;
 
 	if (new_text && strcmp(s.text.c_str(), new_text) != 0) {
@@ -1359,7 +1361,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		mark_modified("MCP: update cmd brief stage %d", *index);
 	}
 
-	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(s, *index));
+	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(s, *index - 1));
 	req->success = true;
 }
 
@@ -1372,9 +1374,9 @@ static void handle_delete_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, cb->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
 
-	array_remove_slot(cb->stage, cb->num_stages, *index);
+	array_remove_slot(cb->stage, cb->num_stages, *index - 1);
 
 	mark_modified("MCP: delete cmd brief stage %d", *index);
 
@@ -1388,6 +1390,7 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 	MoveSwapConfig cfg;
 	cfg.entity_name = "cmd brief stage";
 	cfg.count = cb->num_stages;
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_cmd_brief;
 	cfg.get_name = [cb](int index) {
 		SCP_string name;
@@ -1395,10 +1398,10 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 		return name;
 	};
 	cfg.do_move = [cb](int from, int to) {
-		array_move_element(cb->stage, from, to);
+		array_move_element(cb->stage, from - 1, to - 1);
 	};
 	cfg.do_swap = [cb](int a, int b) {
-		std::swap(cb->stage[a], cb->stage[b]);
+		std::swap(cb->stage[a - 1], cb->stage[b - 1]);
 	};
 	return cfg;
 }
@@ -1449,7 +1452,7 @@ static json_t *build_goal_json(const mission_goal &goal, int index, bool include
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(goal.name.c_str()));
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
 	json_object_set_new(obj, "formula", json_integer(goal.formula));
 
@@ -1541,9 +1544,9 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Mission_goals.size();
 	} else {
-		if (!check_int_range(*insert_index, 0, (int)Mission_goals.size(), "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Mission_goals.size() + 1, "index", req))
 			return;
-		target_index = *insert_index;
+		target_index = *insert_index - 1;
 	}
 
 	if (!formula.has_value()) {
@@ -1577,7 +1580,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 
 	json_t *data = json_object();
 	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index));
+	json_object_set_new(data, "index", json_integer(target_index + 1));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -1756,15 +1759,16 @@ static MoveSwapConfig make_goal_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "goal";
 	cfg.count = (int)Mission_goals.size();
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_goals;
 	cfg.get_name = [](int i) {
-		return Mission_goals[i].name;
+		return Mission_goals[i - 1].name;
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Mission_goals, from, to);
+		array_move_element(Mission_goals, from - 1, to - 1);
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Mission_goals[a], Mission_goals[b]);
+		std::swap(Mission_goals[a - 1], Mission_goals[b - 1]);
 	};
 	return cfg;
 }
@@ -1790,7 +1794,7 @@ static const SCP_vector<const char *> fiction_ui_name_values = { "FS2", "WCS" };
 static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage, int index)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "story_filename", json_string(stage.story_filename));
 	set_optional_filename(obj, "font_filename", stage.font_filename);
 	set_optional_filename(obj, "voice_filename", stage.voice_filename);
@@ -1819,9 +1823,9 @@ static void handle_get_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
 
-	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(Fiction_viewer_stages[*index], *index));
+	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(Fiction_viewer_stages[*index - 1], *index - 1));
 	req->success = true;
 }
 
@@ -1851,9 +1855,9 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!insert_index.has_value()) {
 		target = (int)Fiction_viewer_stages.size();
 	} else {
-		if (!check_int_range(*insert_index, 0, (int)Fiction_viewer_stages.size(), "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Fiction_viewer_stages.size() + 1, "index", req))
 			return;
-		target = *insert_index;
+		target = *insert_index - 1;
 	}
 
 	fiction_viewer_stage stage;
@@ -1874,10 +1878,10 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	Fiction_viewer_stages.insert(Fiction_viewer_stages.begin() + target, stage);
 	mcp_sexp_forest_mark_dirty({ stage.formula });
 
-	mark_modified("MCP: create fiction viewer stage %d", target);
+	mark_modified("MCP: create fiction viewer stage %d", target + 1);
 
 	json_t *result = json_object();
-	json_object_set_new(result, "index", json_integer(target));
+	json_object_set_new(result, "index", json_integer(target + 1));
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
 }
@@ -1888,7 +1892,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
 
 	auto new_story = get_optional_filename(input, "story_filename", false);
 	auto new_font  = get_optional_filename(input, "font_filename", false);
@@ -1911,7 +1915,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
 	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
 
-	fiction_viewer_stage &s = Fiction_viewer_stages[*index];
+	fiction_viewer_stage &s = Fiction_viewer_stages[*index - 1];
 	bool changed = false;
 
 	if (new_story && strcmp(s.story_filename, new_story) != 0) {
@@ -1949,7 +1953,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (changed)
 		mark_modified("MCP: update fiction viewer stage %d", *index);
 
-	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(s, *index));
+	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(s, *index - 1));
 	req->success = true;
 }
 
@@ -1959,14 +1963,14 @@ static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, (int)Fiction_viewer_stages.size() - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
 
 	// Free the SEXP formula
-	int formula = Fiction_viewer_stages[*index].formula;
+	int formula = Fiction_viewer_stages[*index - 1].formula;
 	if (formula >= 0)
 		free_sexp2(formula);
 
-	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index);
+	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index - 1);
 
 	mark_modified("MCP: delete fiction viewer stage %d", *index);
 	snprintf(req->result_message, sizeof(req->result_message),
@@ -1979,6 +1983,7 @@ static MoveSwapConfig make_fiction_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "fiction viewer stage";
 	cfg.count = (int)Fiction_viewer_stages.size();
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_fiction;
 	cfg.get_name = [](int index) {
 		SCP_string name;
@@ -1986,10 +1991,10 @@ static MoveSwapConfig make_fiction_move_swap_config()
 		return name;
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Fiction_viewer_stages, from, to);
+		array_move_element(Fiction_viewer_stages, from - 1, to - 1);
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Fiction_viewer_stages[a], Fiction_viewer_stages[b]);
+		std::swap(Fiction_viewer_stages[a - 1], Fiction_viewer_stages[b - 1]);
 	};
 	return cfg;
 }
@@ -2030,7 +2035,7 @@ static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
 static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
 	set_optional_filename(obj, "voice", stage.voice);
 	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
@@ -2062,9 +2067,9 @@ static void handle_get_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
 
-	req->result_json = make_json_tool_result(build_debrief_stage_json(db->stages[*index], *index));
+	req->result_json = make_json_tool_result(build_debrief_stage_json(db->stages[*index - 1], *index - 1));
 	req->success = true;
 }
 
@@ -2097,9 +2102,9 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target = db->num_stages;
 	} else {
-		if (!check_int_range(*insert_index, 0, db->num_stages, "index", req))
+		if (!check_int_range(*insert_index, 1, db->num_stages + 1, "index", req))
 			return;
-		target = *insert_index;
+		target = *insert_index - 1;
 	}
 
 	if (!array_insert_slot(db->stages, db->num_stages, MAX_DEBRIEF_STAGES, target)) {
@@ -2121,10 +2126,10 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	}
 
 	mcp_sexp_forest_mark_dirty({ s.formula });
-	mark_modified("MCP: create debriefing stage %d", target);
+	mark_modified("MCP: create debriefing stage %d", target + 1);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "index", json_integer(target));
+	json_object_set_new(data, "index", json_integer(target + 1));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
 }
@@ -2138,7 +2143,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
 	auto new_voice = get_optional_filename(input, "voice", false);
@@ -2148,7 +2153,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice", req)) return;
 
-	debrief_stage &s = db->stages[*index];
+	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;
 
 	if (new_text && s.text != new_text) {
@@ -2175,7 +2180,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (changed)
 		mark_modified("MCP: update debriefing stage %d", *index);
 
-	req->result_json = make_json_tool_result(build_debrief_stage_json(s, *index));
+	req->result_json = make_json_tool_result(build_debrief_stage_json(s, *index - 1));
 	req->success = true;
 }
 
@@ -2188,13 +2193,13 @@ static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	auto index = get_required_integer(input, "index", req);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 0, db->num_stages - 1, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
 
-	int formula = db->stages[*index].formula;
+	int formula = db->stages[*index - 1].formula;
 	if (formula >= 0)
 		free_sexp2(formula);
 
-	array_remove_slot(db->stages, db->num_stages, *index);
+	array_remove_slot(db->stages, db->num_stages, *index - 1);
 
 	mark_modified("MCP: delete debriefing stage %d", *index);
 	snprintf(req->result_message, sizeof(req->result_message),
@@ -2207,6 +2212,7 @@ static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
 	MoveSwapConfig cfg;
 	cfg.entity_name = "debriefing stage";
 	cfg.count = db->num_stages;
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_debriefing;
 	cfg.get_name = [](int index) {
 		SCP_string name;
@@ -2214,10 +2220,10 @@ static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
 		return name;
 	};
 	cfg.do_move = [db](int from, int to) {
-		array_move_element(db->stages, from, to);
+		array_move_element(db->stages, from - 1, to - 1);
 	};
 	cfg.do_swap = [db](int a, int b) {
-		std::swap(db->stages[a], db->stages[b]);
+		std::swap(db->stages[a - 1], db->stages[b - 1]);
 	};
 	return cfg;
 }
@@ -2248,7 +2254,7 @@ static json_t *build_jump_node_json(const CJumpNode &jn, int index, bool include
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(jn.GetName()));
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "position", build_vec3d_json(*jn.GetPosition()));
 
 	if (include_details) {
@@ -2325,9 +2331,9 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Jump_nodes.size();
 	} else {
-		if (!check_int_range(*insert_index, 0, (int)Jump_nodes.size(), "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Jump_nodes.size() + 1, "index", req))
 			return;
-		target_index = *insert_index;
+		target_index = *insert_index - 1;
 	}
 
 	// Construct the jump node
@@ -2354,7 +2360,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 	json_t *result = json_object();
 	json_object_set_new(result, "name", json_string(name));
-	json_object_set_new(result, "index", json_integer(target_index));
+	json_object_set_new(result, "index", json_integer(target_index + 1));
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
 }
@@ -2510,15 +2516,16 @@ static MoveSwapConfig make_jump_node_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "jump node";
 	cfg.count = (int)Jump_nodes.size();
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_jump_nodes;
 	cfg.get_name = [](int i) {
-		return Jump_nodes[i].GetName();
+		return Jump_nodes[i - 1].GetName();
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Jump_nodes, from, to);
+		array_move_element(Jump_nodes, from - 1, to - 1);
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Jump_nodes[a], Jump_nodes[b]);
+		std::swap(Jump_nodes[a - 1], Jump_nodes[b - 1]);
 	};
 	return cfg;
 }
@@ -2566,7 +2573,7 @@ static json_t *build_waypoint_list_json(const waypoint_list &wl, int index, bool
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(wl.get_name()));
-	json_object_set_new(obj, "index", json_integer(index));
+	json_object_set_new(obj, "index", json_integer(index + 1));
 
 	if (include_points) {
 		json_t *arr = json_array();
@@ -2678,9 +2685,9 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Waypoint_lists.size();
 	} else {
-		if (!check_int_range(*insert_index, 0, (int)Waypoint_lists.size(), "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Waypoint_lists.size() + 1, "index", req))
 			return;
-		target_index = *insert_index;
+		target_index = *insert_index - 1;
 	}
 
 	// Create the waypoint list (appends to end but does NOT create game objects)
@@ -2708,7 +2715,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 
 	json_t *result = json_object();
 	json_object_set_new(result, "name", json_string(name));
-	json_object_set_new(result, "index", json_integer(target_index));
+	json_object_set_new(result, "index", json_integer(target_index + 1));
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
 }
@@ -2845,16 +2852,17 @@ static MoveSwapConfig make_waypoint_list_move_swap_config()
 	MoveSwapConfig cfg;
 	cfg.entity_name = "waypoint list";
 	cfg.count = (int)Waypoint_lists.size();
+	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_waypoint_lists;
 	cfg.get_name = [](int i) {
-		return Waypoint_lists[i].get_name();
+		return Waypoint_lists[i - 1].get_name();
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Waypoint_lists, from, to);
+		array_move_element(Waypoint_lists, from - 1, to - 1);
 		reindex_waypoint_instances();
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Waypoint_lists[a], Waypoint_lists[b]);
+		std::swap(Waypoint_lists[a - 1], Waypoint_lists[b - 1]);
 		reindex_waypoint_instances();
 	};
 	return cfg;
@@ -4071,7 +4079,7 @@ void mcp_register_mission_tools(json_t *tools)
 			"Multiplayer team assignment (\"none\" for all teams)",
 			team_enum_values);
 		add_integer_prop(props, "index",
-			"Position to insert the message among mission messages (0 = first). "
+			"Position to insert the message among mission messages (1 = first). "
 			"If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
@@ -4123,15 +4131,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the message among mission messages");
+			"Current 1-based index of the message among mission messages");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the message to");
+			"Target 1-based index to move the message to");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_message",
 			"Move a mission message from one position to another. "
-			"Indices are 0-based within mission messages.",
+			"Indices are 1-based within mission messages.",
 			props, req);
 	}
 
@@ -4139,15 +4147,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first message among mission messages");
+			"1-based index of the first message among mission messages");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second message among mission messages");
+			"1-based index of the second message among mission messages");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_messages",
 			"Swap two mission messages at the given positions. "
-			"Indices are 0-based within mission messages.",
+			"Indices are 1-based within mission messages.",
 			props, req);
 	}
 
@@ -4188,7 +4196,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
 		add_string_prop(props, "objective_key_text", "Localization key for the objective text");
 		add_integer_prop(props, "index",
-			"Position to insert the event (0 = first). If omitted, appends to the end.");
+			"Position to insert the event (1 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "create_event",
@@ -4252,15 +4260,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the event");
+			"Current 1-based index of the event");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the event to");
+			"Target 1-based index to move the event to");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_event",
 			"Move a mission event from one position to another. "
-			"Indices are 0-based. Updates event annotation paths.",
+			"Indices are 1-based. Updates event annotation paths.",
 			props, req);
 	}
 
@@ -4268,15 +4276,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first event");
+			"1-based index of the first event");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second event");
+			"1-based index of the second event");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_events",
 			"Swap two mission events at the given positions. "
-			"Indices are 0-based. Updates event annotation paths.",
+			"Indices are 1-based. Updates event annotation paths.",
 			props, req);
 	}
 
@@ -4301,7 +4309,7 @@ void mcp_register_mission_tools(json_t *tools)
 	// get_cmd_brief_stage
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "index", "0-based index of the stage to retrieve");
+		add_integer_prop(props, "index", "1-based index of the stage to retrieve");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -4319,7 +4327,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(props, "wave_filename",
 			"Voice audio filename (wav/ogg). Defaults to \"none\".");
 		add_integer_prop(props, "index",
-			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+			"Position to insert the stage (1 = first). If omitted, appends to the end.");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
@@ -4333,7 +4341,7 @@ void mcp_register_mission_tools(json_t *tools)
 	// update_cmd_brief_stage
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "index", "0-based index of the stage to update");
+		add_integer_prop(props, "index", "1-based index of the stage to update");
 		add_string_prop(props, "text", "New text for this stage");
 		add_string_prop(props, "ani_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
 		add_string_prop(props, "wave_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
@@ -4349,7 +4357,7 @@ void mcp_register_mission_tools(json_t *tools)
 	// delete_cmd_brief_stage
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "index", "0-based index of the stage to delete");
+		add_integer_prop(props, "index", "1-based index of the stage to delete");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -4362,16 +4370,16 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the stage");
+			"Current 1-based index of the stage");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the stage to");
+			"Target 1-based index to move the stage to");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_cmd_brief_stage",
 			"Move a command briefing stage from one position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4379,16 +4387,16 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first stage");
+			"1-based index of the first stage");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second stage");
+			"1-based index of the second stage");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_cmd_brief_stages",
 			"Swap two command briefing stages at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4427,7 +4435,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_bool_prop(props, "no_music",
 			"If true, no event music plays when goal is achieved");
 		add_integer_prop(props, "index",
-			"Position to insert the goal (0 = first). If omitted, appends to the end.");
+			"Position to insert the goal (1 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "create_goal",
@@ -4484,15 +4492,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the goal");
+			"Current 1-based index of the goal");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the goal to");
+			"Target 1-based index to move the goal to");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_goal",
 			"Move a mission goal from one position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4500,15 +4508,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first goal");
+			"1-based index of the first goal");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second goal");
+			"1-based index of the second goal");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_goals",
 			"Swap two mission goals at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4526,7 +4534,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to retrieve");
+			"1-based index of the stage to retrieve");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "get_fiction_viewer_stage",
@@ -4553,7 +4561,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
 			"Defaults to true.");
 		add_integer_prop(props, "index",
-			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+			"Position to insert the stage (1 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("story_filename"));
 		register_tool(tools, "create_fiction_viewer_stage",
@@ -4568,7 +4576,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to update");
+			"1-based index of the stage to update");
 		add_string_prop(props, "story_filename",
 			"New text filename for the fiction stage. Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
 		add_string_prop(props, "font_filename",
@@ -4595,7 +4603,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to delete");
+			"1-based index of the stage to delete");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "delete_fiction_viewer_stage",
@@ -4608,15 +4616,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the stage");
+			"Current 1-based index of the stage");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the stage to");
+			"Target 1-based index to move the stage to");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_fiction_viewer_stage",
 			"Move a fiction viewer stage from one position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4624,15 +4632,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first stage");
+			"1-based index of the first stage");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second stage");
+			"1-based index of the second stage");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_fiction_viewer_stages",
 			"Swap two fiction viewer stages at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4658,7 +4666,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to retrieve");
+			"1-based index of the stage to retrieve");
 		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -4678,7 +4686,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
 			"Defaults to true (stage always shown).");
 		add_integer_prop(props, "index",
-			"Position to insert the stage (0 = first). If omitted, appends to the end.");
+			"Position to insert the stage (1 = first). If omitted, appends to the end.");
 		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
@@ -4693,7 +4701,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to update");
+			"1-based index of the stage to update");
 		add_string_prop(props, "text", "New debriefing text for this stage");
 		add_string_prop(props, "voice",
 			"New voice audio filename. Empty string clears the voice.");
@@ -4713,7 +4721,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
-			"0-based index of the stage to delete");
+			"1-based index of the stage to delete");
 		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -4727,16 +4735,16 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"Current 0-based index of the stage");
+			"Current 1-based index of the stage");
 		add_integer_prop(props, "to_index",
-			"Target 0-based index to move the stage to");
+			"Target 1-based index to move the stage to");
 		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_debriefing_stage",
 			"Move a debriefing stage from one position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4744,16 +4752,16 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first stage");
+			"1-based index of the first stage");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second stage");
+			"1-based index of the second stage");
 		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_debriefing_stages",
 			"Swap two debriefing stages at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4789,7 +4797,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_bool_prop(props, "hidden",
 			"If true, the jump node is hidden from rendering. Default false.");
 		add_integer_prop(props, "index",
-			"Position to insert the jump node (0 = first). If omitted, appends to the end.");
+			"Position to insert the jump node (1 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("position"));
@@ -4842,15 +4850,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"0-based index of the jump node to move");
+			"1-based index of the jump node to move");
 		add_integer_prop(props, "to_index",
-			"0-based target index");
+			"1-based target index");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_jump_node",
 			"Move a jump node from one list position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4858,15 +4866,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first jump node");
+			"1-based index of the first jump node");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second jump node");
+			"1-based index of the second jump node");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_jump_nodes",
 			"Swap two jump nodes at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4894,7 +4902,7 @@ void mcp_register_mission_tools(json_t *tools)
 			"Array of 3D positions ({x, y, z} objects) for the waypoints in this list. "
 			"At least one point is required.");
 		add_integer_prop(props, "index",
-			"Position to insert the waypoint list (0 = first). If omitted, appends to the end.");
+			"Position to insert the waypoint list (1 = first). If omitted, appends to the end.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("points"));
@@ -4936,15 +4944,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "from_index",
-			"0-based index of the waypoint list to move");
+			"1-based index of the waypoint list to move");
 		add_integer_prop(props, "to_index",
-			"0-based target index");
+			"1-based target index");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
 		register_tool(tools, "move_waypoint_list",
 			"Move a waypoint list from one position to another. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 
@@ -4952,15 +4960,15 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "index_a",
-			"0-based index of the first waypoint list");
+			"1-based index of the first waypoint list");
 		add_integer_prop(props, "index_b",
-			"0-based index of the second waypoint list");
+			"1-based index of the second waypoint list");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
 		register_tool(tools, "swap_waypoint_lists",
 			"Swap two waypoint lists at the given positions. "
-			"Indices are 0-based.",
+			"Indices are 1-based.",
 			props, req);
 	}
 

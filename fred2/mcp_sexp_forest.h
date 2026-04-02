@@ -18,7 +18,7 @@ void mcp_sexp_forest_mark_dirty();
 // Mark specific root nodes dirty (partial rebuild).
 // roots must be valid Sexp_nodes[] root indices saved after the most recent save_tree() call.
 // Safe to call from any thread.
-void mcp_sexp_forest_mark_dirty(SCP_vector<int> roots);
+void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots);
 
 // Rebuild the forest from the current Sexp_nodes[] array.
 // MUST be called on the main thread only.
