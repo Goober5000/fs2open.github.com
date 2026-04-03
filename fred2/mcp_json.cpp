@@ -238,8 +238,8 @@ int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, c
 		}
 	}
 	if (result < 0) {
-		sink.set_error("Parameter '%s' could not be found in the list of allowed values (value=%s)",
-			param_name, input);
+		SCP_string msg = format_string_enum_error(input, lookup_vec, param_name);
+		sink.set_error("%s", msg.c_str());
 	}
 	return result;
 }
