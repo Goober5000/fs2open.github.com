@@ -19,6 +19,7 @@
 template <typename T>
 bool array_insert_slot(T *arr, int &count, int max_size, int index)
 {
+	Assertion(index >= 0 && index <= count, "array_insert_slot: index %d out of range [0, %d]", index, count);
 	if (count >= max_size)
 		return false;
 	for (int i = count; i > index; i--)
@@ -40,8 +41,10 @@ void array_remove_slot(T *arr, int &count, int index)
 
 // Move element at `from` to `to`, shifting intermediate elements.
 template <typename T>
-void array_move_element(T *arr, int from, int to)
+void array_move_element(T *arr, int count, int from, int to)
 {
+	Assertion(from >= 0 && from < count, "array_move_element: from %d out of range [0, %d)", from, count);
+	Assertion(to >= 0 && to < count, "array_move_element: to %d out of range [0, %d)", to, count);
 	if (from == to)
 		return;
 	T temp = std::move(arr[from]);
@@ -64,6 +67,7 @@ void array_move_element(T *arr, int from, int to)
 template <typename T>
 void array_insert_slot(std::vector<T> &vec, int &count, int index)
 {
+	Assertion(index >= 0 && index <= count, "array_insert_slot: index %d out of range [0, %d]", index, count);
 	if (count >= (int)vec.size())
 		vec.resize(count + 1);
 	for (int i = count; i > index; i--)

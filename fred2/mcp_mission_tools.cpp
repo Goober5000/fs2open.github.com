@@ -1422,7 +1422,7 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 		return name;
 	};
 	cfg.do_move = [cb](int from, int to) {
-		array_move_element(cb->stage, from - 1, to - 1);
+		array_move_element(cb->stage, cb->num_stages, from - 1, to - 1);
 	};
 	cfg.do_swap = [cb](int a, int b) {
 		std::swap(cb->stage[a - 1], cb->stage[b - 1]);
@@ -2241,7 +2241,7 @@ static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
 		return name;
 	};
 	cfg.do_move = [db](int from, int to) {
-		array_move_element(db->stages, from - 1, to - 1);
+		array_move_element(db->stages, db->num_stages, from - 1, to - 1);
 	};
 	cfg.do_swap = [db](int a, int b) {
 		std::swap(db->stages[a - 1], db->stages[b - 1]);
