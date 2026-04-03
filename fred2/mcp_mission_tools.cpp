@@ -36,6 +36,31 @@
 #include "mainfrm.h"
 
 // ---------------------------------------------------------------------------
+// SEXP syntax checking helper
+// ---------------------------------------------------------------------------
+
+// Run check_sexp_syntax on a node and return a JSON object describing any
+// syntax error found, or nullptr if the syntax is clean.  Caller must
+// json_decref the returned object when done (if non-null).
+static json_t *build_syntax_error_json(int node)
+{
+	int bad_node = -1;
+	int syntax_result = check_sexp_syntax(node, OPR_AMBIGUOUS, 1, &bad_node);
+
+	if (syntax_result == SEXP_CHECK_NO_ERROR)
+		return nullptr;
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "error_code", json_integer(syntax_result));
+	json_object_set_new(obj, "error_message", json_string(sexp_error_message(syntax_result)));
+	if (bad_node >= 0) {
+		json_object_set_new(obj, "bad_node", json_integer(bad_node));
+		json_object_set_new(obj, "bad_node_text", json_string(Sexp_nodes[bad_node].text));
+	}
+	return obj;
+}
+
+// ---------------------------------------------------------------------------
 // SEXP formula validation
 // ---------------------------------------------------------------------------
 
@@ -78,6 +103,24 @@ static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpToo
 		snprintf(req->result_message, sizeof(req->result_message),
 			"Formula node %d (\"%s\") has return type %s, but this entity requires %s",
 			node, Sexp_nodes[node].text, actual_str, expected_str);
+		return false;
+	}
+
+	// Check syntax
+	json_t *syntax_err = build_syntax_error_json(node);
+	if (syntax_err) {
+		const char *err_msg = json_string_value(json_object_get(syntax_err, "error_message"));
+		const char *bad_text = json_string_value(json_object_get(syntax_err, "bad_node_text"));
+		req->success = false;
+		if (bad_text && bad_text[0])
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Formula node %d has syntax error: %s (at \"%s\")",
+				node, err_msg ? err_msg : "unknown", bad_text);
+		else
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Formula node %d has syntax error: %s",
+				node, err_msg ? err_msg : "unknown");
+		json_decref(syntax_err);
 		return false;
 	}
 
@@ -3477,23 +3520,12 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	}
 
 	// Run syntax check
-	int bad_node = -1;
-	int syntax_result = check_sexp_syntax(n, OPR_AMBIGUOUS, 1, &bad_node);
-
 	json_t *result = json_object();
 	json_object_set_new(result, "node", json_integer(n));
 
-	if (syntax_result != SEXP_CHECK_NO_ERROR) {
-		json_t *warnings = json_object();
-		json_object_set_new(warnings, "error_code", json_integer(syntax_result));
-		json_object_set_new(warnings, "error_message", json_string(sexp_error_message(syntax_result)));
-		if (bad_node >= 0) {
-			json_object_set_new(warnings, "bad_node", json_integer(bad_node));
-			json_object_set_new(warnings, "bad_node_text",
-				json_string(Sexp_nodes[bad_node].text));
-		}
-		json_object_set_new(result, "syntax_error", warnings);
-	}
+	json_t *syntax_err = build_syntax_error_json(n);
+	if (syntax_err)
+		json_object_set_new(result, "syntax_error", syntax_err);
 
 	// Round-trip the text for verification
 	SCP_string round_tripped;
