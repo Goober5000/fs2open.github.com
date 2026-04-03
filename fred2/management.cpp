@@ -472,9 +472,6 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 
 	Fred_main_wnd -> init_tools();
 
-	// Signal that FRED2 is fully initialized and MCP tools may run
-	mcp_fred_ready.store(true);
-
 	return true;
 }
 

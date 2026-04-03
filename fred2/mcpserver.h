@@ -46,7 +46,7 @@ void mcp_server_stop();
 bool mcp_server_is_running();
 
 // Flag indicating that FRED2 is fully initialized and MCP tools may run.
-// Set by fred_init() after all startup is complete.
+// Set by mcp_server_start() when the HTTP server begins listening.
 extern std::atomic<bool> mcp_fred_ready;
 
 // Marshal a tool call to the main MFC thread with a configurable timeout.
