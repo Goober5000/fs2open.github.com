@@ -553,18 +553,28 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 	// Update talking head
 	if (new_head) {
-		if (Messages[idx].avi_info.name)
-			free(Messages[idx].avi_info.name);
-		Messages[idx].avi_info.name = new_head[0] ? strdup(new_head) : nullptr;
-		changed = true;
+		const char *old_head = Messages[idx].avi_info.name;
+		bool old_empty = !old_head || !old_head[0];
+		bool new_empty = !new_head[0];
+		if (old_empty != new_empty || (!old_empty && stricmp(old_head, new_head) != 0)) {
+			if (old_head)
+				free(Messages[idx].avi_info.name);
+			Messages[idx].avi_info.name = new_head[0] ? strdup(new_head) : nullptr;
+			changed = true;
+		}
 	}
 
 	// Update voice file
 	if (new_voice) {
-		if (Messages[idx].wave_info.name)
-			free(Messages[idx].wave_info.name);
-		Messages[idx].wave_info.name = new_voice[0] ? strdup(new_voice) : nullptr;
-		changed = true;
+		const char *old_voice = Messages[idx].wave_info.name;
+		bool old_empty = !old_voice || !old_voice[0];
+		bool new_empty = !new_voice[0];
+		if (old_empty != new_empty || (!old_empty && stricmp(old_voice, new_voice) != 0)) {
+			if (old_voice)
+				free(Messages[idx].wave_info.name);
+			Messages[idx].wave_info.name = new_voice[0] ? strdup(new_voice) : nullptr;
+			changed = true;
+		}
 	}
 
 	// Update team
@@ -831,21 +841,11 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
 
 	// Auto-set MEF_ flags if parameters provided
-	std::optional<int> mef_flags;
-	if (trigger_count.has_value()) {
-		if (mef_flags.has_value()) {
-			*mef_flags |= MEF_USING_TRIGGER_COUNT;
-		} else {
-			mef_flags = MEF_USING_TRIGGER_COUNT;
-		}
-	}
-	if (units && !stricmp(units, "milliseconds")) {
-		if (mef_flags.has_value()) {
-			*mef_flags |= MEF_USE_MSECS;
-		} else {
-			mef_flags = MEF_USE_MSECS;
-		}
-	}
+	int mef_flags = 0;
+	if (trigger_count.has_value() && *trigger_count > 0)
+		mef_flags |= MEF_USING_TRIGGER_COUNT;
+	if (units && !stricmp(units, "milliseconds"))
+		mef_flags |= MEF_USE_MSECS;
 
 	// Validate insert index
 	int target_index;
@@ -874,7 +874,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	evt.score         = score.value_or(0);
 	evt.chain_delay   = chain_delay.value_or(-1);	// -1 means no chain
 	evt.team          = multi_team;
-	evt.flags         = mef_flags.value_or(0);
+	evt.flags         = mef_flags;
 	evt.mission_log_flags = 0;
 
 	if (objective_text && objective_text[0])
@@ -965,7 +965,10 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		if (!new_mef_flags.has_value()) {
 			new_mef_flags = evt.flags;
 		}
-		*new_mef_flags |= MEF_USING_TRIGGER_COUNT;
+		if (*trigger_count > 0)
+			*new_mef_flags |= MEF_USING_TRIGGER_COUNT;
+		else
+			*new_mef_flags &= ~MEF_USING_TRIGGER_COUNT;
 	}
 	if (units) {
 		if (!new_mef_flags.has_value()) {
@@ -3460,10 +3463,8 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	if (!text)
 		return;
 
-	// Save/restore global parse state
-	char *old_Mp = Mp;
-	char old_Current_filename[MAX_PATH_LEN];
-	strcpy_s(old_Current_filename, Current_filename);
+	// Save global parse state (Mp, Current_filename, Warning_count, Error_count)
+	pause_parse();
 
 	SCP_string buf(text);
 	Mp = buf.data();
@@ -3476,8 +3477,9 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	int n = get_sexp_main();
 
 	Parse_collect_errors = false;
-	Mp = old_Mp;
-	strcpy_s(Current_filename, old_Current_filename);
+
+	// Restore global parse state
+	unpause_parse();
 
 	// Check for collected parse errors
 	if (!Parse_errors.empty()) {
@@ -3563,7 +3565,7 @@ static bool is_sexp_attached_to_mission(int node)
 
 	// Ship arrival/departure cues (parse objects)
 	for (const auto &po : Parse_objects) {
-		if (po.arrival_cue == node || po.departure_cue == node)
+		if (po.arrival_cue == node || po.departure_cue == node || po.ai_goals == node)
 			return true;
 	}
 
@@ -3761,6 +3763,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	bool op_is_locked = (op_node == Locked_sexp_true || op_node == Locked_sexp_false);
 
 	// Parse arguments (if any)
+	json_t *warnings = nullptr;
 	json_t *args = json_object_get(input, "operator_arguments");
 	if (args && json_is_array(args) && json_array_size(args) > 0) {
 		size_t num_args = json_array_size(args);
@@ -3776,6 +3779,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					free_sexp2(next);
 				if (!op_is_locked)
 					free_sexp2(op_node);
+				if (warnings) json_decref(warnings);
 				return;
 			}
 
@@ -3787,6 +3791,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					free_sexp2(next);
 				if (!op_is_locked)
 					free_sexp2(op_node);
+				if (warnings) json_decref(warnings);
 				return;
 			}
 
@@ -3795,12 +3800,19 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					free_sexp2(next);
 				if (!op_is_locked)
 					free_sexp2(op_node);
+				if (warnings) json_decref(warnings);
 				return;
 			}
 
 			// Type-check this argument against the operator's expected type
 			int expected_opf = query_operator_argument_type(op_idx, i);
-			if (expected_opf != OPF_NONE) {
+			if (expected_opf == OPF_NONE) {
+				// Argument index exceeds operator's expected count; warn but allow
+				if (!warnings) warnings = json_array();
+				SCP_string wmsg;
+				sprintf(wmsg, "Argument %d exceeds expected argument count for '%s'; type not checked", i, op_name);
+				json_array_append_new(warnings, json_string(wmsg.c_str()));
+			} else {
 				bool is_variable = (!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value[0] == '@';
 				int node_opr = -1;
 
@@ -3822,6 +3834,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 						free_sexp2(next);
 					if (!op_is_locked)
 						free_sexp2(op_node);
+					if (warnings) json_decref(warnings);
 					return;
 				}
 			}
@@ -3833,6 +3846,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					free_sexp2(next);
 				if (!op_is_locked)
 					free_sexp2(op_node);
+				if (warnings) json_decref(warnings);
 				return;
 			}
 			next = arg_node;
@@ -3844,11 +3858,18 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 			op_node = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, op_node, -1);
 		}
 		Sexp_nodes[op_node].rest = next;
+
+		// Set parent pointers on argument chain
+		for (int arg = next; arg != -1; arg = Sexp_nodes[arg].rest)
+			Sexp_nodes[arg].parent = op_node;
 	}
 
 	mcp_sexp_forest_mark_dirty({ op_node });
 
-	req->result_json = make_json_tool_result(build_sexp_node_json(op_node));
+	json_t *result_obj = build_sexp_node_json(op_node);
+	if (warnings)
+		json_object_set_new(result_obj, "warnings", warnings);
+	req->result_json = make_json_tool_result(result_obj);
 	req->success = true;
 }
 
@@ -4029,7 +4050,9 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 	// Parse optional flags
 	int flag_bits = 0;
-	auto flags_arr = get_optional_string_array(input, "flags");
+	auto flags_arr = get_optional_string_array(input, "flags", &sink);
+	if (!flags_arr.has_value() && json_object_get(input, "flags"))
+		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
 		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
 			return;
@@ -4097,7 +4120,9 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	int flag_bits;
-	auto flags_arr = get_optional_string_array(input, "flags");
+	auto flags_arr = get_optional_string_array(input, "flags", &sink);
+	if (!flags_arr.has_value() && json_object_get(input, "flags"))
+		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
 		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
 			return;
