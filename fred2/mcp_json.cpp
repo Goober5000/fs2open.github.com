@@ -10,15 +10,13 @@
 
 bool McpErrorSink::has_error() const
 {
-	if (m_req)
-		return !m_req->success;
-	if (m_err)
-		return *m_err != nullptr;
-	return false;
+	return m_has_error;
 }
 
 void McpErrorSink::set_error(const char *fmt, ...)
 {
+	m_has_error = true;
+
 	va_list args;
 	va_start(args, fmt);
 
