@@ -107,6 +107,21 @@ void add_string_array_prop(json_t *props, const char *name, const char *descript
 	json_object_set_new(props, name, p);
 }
 
+void add_object_array_prop(json_t *props, const char *name, const char *description,
+	json_t *item_properties, json_t *item_required)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("array"));
+	json_object_set_new(p, "description", json_string(description));
+	json_t *items = json_object();
+	json_object_set_new(items, "type", json_string("object"));
+	json_object_set_new(items, "properties", item_properties);
+	if (item_required)
+		json_object_set_new(items, "required", item_required);
+	json_object_set_new(p, "items", items);
+	json_object_set_new(props, name, p);
+}
+
 void register_tool(json_t *tools, const char *name, const char *description,
 	json_t *properties, json_t *required_arr)
 {
