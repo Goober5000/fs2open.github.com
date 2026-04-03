@@ -395,7 +395,7 @@ std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name)
 	return std::nullopt;
 }
 
-std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name, McpErrorSink *sink)
+std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_array(val)) {
@@ -405,8 +405,8 @@ std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *argument
 		json_array_foreach(val, index, item) {
 			if (json_is_string(item)) {
 				result.push_back(json_string_value(item));
-			} else if (sink) {
-				sink->set_error("'%s' array element %zu is not a string", param_name, index);
+			} else {
+				sink.set_error("'%s' array element " SIZE_T_ARG " is not a string", param_name, index);
 				return std::nullopt;
 			}
 		}
