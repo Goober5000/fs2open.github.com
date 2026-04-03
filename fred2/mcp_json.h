@@ -13,11 +13,27 @@ struct vec3d;           // full definition in pstypes.h
 struct matrix;          // full definition in pstypes.h
 struct color;           // full definition in graphics/2d.h
 
+// Abstracts over the two error-reporting conventions used by MCP tools.
+// Mission tools write errors into McpToolRequest*; reference tools produce json_t*.
+// Functions that take McpErrorSink& work with both conventions.
+class McpErrorSink {
+public:
+	explicit McpErrorSink(McpToolRequest *req) : m_req(req), m_err(nullptr) {}
+	explicit McpErrorSink(json_t **err) : m_req(nullptr), m_err(err) {}
+
+	void set_error(const char *fmt, ...);
+
+private:
+	McpToolRequest *m_req;
+	json_t **m_err;
+};
+
 // Build an MCP tool result with a text content item.
 json_t *make_tool_result(const char *text, bool is_error = false);
 
 // Build an MCP tool result with a text content item, formatted with arguments.
 json_t *make_tool_result(bool is_error, const char *format, ...);
+json_t *vmake_tool_result(bool is_error, const char *format, va_list args);
 
 // Build an MCP tool-result whose text content is pretty-printed JSON.
 // Takes ownership of `data` (decrefs it after serializing).
@@ -51,84 +67,50 @@ void register_tool(json_t *tools, const char *name, const char *description,
 void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
 	const char *param_name, const char *param_desc);
 
-// Various validation functions
-bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req);
-bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out);
-bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpToolRequest *req);
-bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, json_t **error_out);
-bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req);
-bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out);
-int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req);
-int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out);
-int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpToolRequest *req);
-int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, json_t **error_out);
+// Validation functions (unified via McpErrorSink)
+bool check_string_length(const char *input, size_t max_len, const char *param_name, McpErrorSink &sink);
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpErrorSink &sink);
+bool check_int_range(int input, int min, int max, const char *param_name, McpErrorSink &sink);
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpErrorSink &sink);
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpErrorSink &sink);
 
 // Checks the given name against all entity types (ships, wings, waypoints, jump nodes, etc.)
 // for conflicts.  The exclude parameters prevent matching against the entity being renamed.
-// Returns true if the name is valid, or false with an error message on req.
-bool check_name_conflict(const char *entity_type, const char *name, McpToolRequest *req,
+// Returns true if the name is valid, or false with an error message.
+bool check_name_conflict(const char *entity_type, const char *name, McpErrorSink &sink,
 	int exclude_ship = -1, int exclude_wing = -1, int exclude_waypoint_list = -1, int exclude_jump_node = -1);
 
-bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req);
-bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req);
+bool validate(std::function<const char *()> error_msg_fn, McpErrorSink &sink);
+bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink);
 
 template<typename T>
-bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validate_fn, McpToolRequest *req)
+bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validate_fn, McpErrorSink &sink)
 {
 	SCP_string failure_msg;
 	if (!validate_fn(input, failure_msg)) {
-		req->success = false;
-		strncpy(req->result_message, failure_msg.c_str(), sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		sink.set_error("%s", failure_msg.c_str());
 		return false;
 	}
 	return true;
 }
 
-template<typename T>
-bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validate_fn, json_t **error_out)
-{
-	SCP_string failure_msg;
-	if (!validate_fn(input, failure_msg)) {
-		*error_out = make_tool_result(failure_msg.c_str(), true);
-		return false;
-	}
-	return true;
-}
+// Extracts a required string parameter from input JSON. Returns nullptr and
+// reports an error via sink if the parameter is missing, or empty and disallowed.
+const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty);
 
-// Extracts a required string parameter from input JSON. Returns nullptr and sets
-// req->success=false with an error message if the parameter is missing, or empty and disallowed.
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty);
+// Extracts a required string parameter (which represents a filename) from input JSON.
+// Returns nullptr and reports an error via sink if VALID_FNAME fails.
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink);
 
-// Extracts a required string parameter (which represents a filename) from input JSON. Returns nullptr and sets
-// req->success=false with an error message if VALID_FNAME fails.
-const char *get_required_filename(json_t *input, const char *param_name, McpToolRequest *req);
-
-// Extracts required integer, number, or bool parameters from input JSON. Returns false and sets
-// req->success=false with an error message if the parameter is missing or the wrong type.
-std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<double> get_required_double(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<float> get_required_float(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req);
-std::optional<color> get_required_color(json_t *input, const char *param_name, McpToolRequest *req);
-
-// Extracts a required string parameter from arguments JSON (for reference tools that
-// return json_t* directly). Returns nullptr and sets *error_out to an error result
-// if the parameter is missing, or empty and disallowed.
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool disallow_empty);
-
-// Extracts required integer, double, float, or bool parameters from arguments JSON (for reference
-// tools that return json_t* directly). Returns false and sets *error_out to an error result
-// if the parameter is missing or the wrong type.
-std::optional<int> get_required_integer(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<double> get_required_double(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<float> get_required_float(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<bool> get_required_bool(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out);
-std::optional<color> get_required_color(json_t *arguments, const char *param_name, json_t **error_out);
+// Extracts required typed parameters from input JSON.
+// Returns std::nullopt and reports an error via sink if the parameter is missing or the wrong type.
+std::optional<int> get_required_integer(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<double> get_required_double(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<float> get_required_float(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpErrorSink &sink);
+std::optional<color> get_required_color(json_t *input, const char *param_name, McpErrorSink &sink);
 
 // Extracts an optional string parameter from arguments JSON (for reference tools that
 // return json_t* directly). Returns nullptr if the parameter is missing or omitted.
@@ -154,7 +136,7 @@ std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *argument
 // Extracts a required JSON array of vec3d objects.  Returns true on success.
 // If min_count > 0, the array must contain at least that many elements.
 bool get_required_vec3d_array(json_t *input, const char *param_name,
-	SCP_vector<vec3d> &out, McpToolRequest *req, int min_count = 0);
+	SCP_vector<vec3d> &out, McpErrorSink &sink, int min_count = 0);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 json_t *build_vec3d_json(const vec3d &v);
@@ -188,8 +170,8 @@ json_t *build_array_with_field(const VECTOR1_T& index_vector, const VECTOR2_T& i
 	return arr;
 }
 
-// Sets req->success=false and formats "EntityType not found: name" into result_message.
-void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name);
+// Reports "EntityType not found: name" via the error sink.
+void set_not_found_error(McpErrorSink &sink, const char *entity_type, const char *name);
 
 // Builds an MCP error result with "EntityType not found: name" text (for reference tools).
 json_t *make_not_found_error(const char *entity_type, const char *name);
