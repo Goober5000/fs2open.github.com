@@ -8,6 +8,15 @@
 #include "graphics/2d.h"
 #include "management.h"
 
+bool McpErrorSink::has_error() const
+{
+	if (m_req)
+		return !m_req->success;
+	if (m_err)
+		return *m_err != nullptr;
+	return false;
+}
+
 void McpErrorSink::set_error(const char *fmt, ...)
 {
 	va_list args;
@@ -278,9 +287,10 @@ bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 
 const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty)
 {
-	const char *value = get_optional_string(input, param_name, false);
+	const char *value = get_optional_string(input, param_name, sink, false);
 	if (!value) {
-		set_missing_param_error(sink, param_name);
+		if (!sink.has_error())
+			set_missing_param_error(sink, param_name);
 		return nullptr;
 	}
 	if (!value[0] && disallow_empty) {
@@ -304,41 +314,45 @@ const char *get_required_filename(json_t *input, const char *param_name, McpErro
 
 std::optional<int> get_required_integer(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_integer(input, param_name);
+	auto item = get_optional_integer(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
 std::optional<double> get_required_double(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_double(input, param_name);
+	auto item = get_optional_double(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
 std::optional<float> get_required_float(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_float(input, param_name);
+	auto item = get_optional_float(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
 std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_bool(input, param_name);
+	auto item = get_optional_bool(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-const char *get_optional_string(json_t *arguments, const char *param_name, bool null_if_empty)
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_string(val)) {
@@ -346,51 +360,65 @@ const char *get_optional_string(json_t *arguments, const char *param_name, bool 
 		if (str[0] || !null_if_empty) {
 			return str;
 		}
+	} else if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a string", param_name);
 	}
 	return nullptr;
 }
 
-const char *get_optional_filename(json_t *arguments, const char *param_name, bool null_if_invalid)
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid)
 {
-	const char *value = get_optional_string(arguments, param_name, true);
+	const char *value = get_optional_string(arguments, param_name, sink, true);
 	if (!VALID_FNAME(value)) {
 		return null_if_invalid ? nullptr : "";
 	}
 	return value;
 }
 
-std::optional<int> get_optional_integer(json_t *arguments, const char *param_name)
+std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_integer(val)) {
 		return (int)json_integer_value(val);
 	}
+	if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be an integer", param_name);
+	}
 	return std::nullopt;
 }
 
-std::optional<double> get_optional_double(json_t *arguments, const char *param_name)
+std::optional<double> get_optional_double(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
 		return json_number_value(val);
 	}
+	if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a number", param_name);
+	}
 	return std::nullopt;
 }
 
-std::optional<float> get_optional_float(json_t *arguments, const char *param_name)
+std::optional<float> get_optional_float(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
 		return (float)json_number_value(val);
 	}
+	if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a number", param_name);
+	}
 	return std::nullopt;
 }
 
-std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name)
+std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_boolean(val)) {
 		return json_is_true(val);
+	}
+	if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a boolean", param_name);
 	}
 	return std::nullopt;
 }
@@ -411,6 +439,9 @@ std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *argument
 			}
 		}
 		return result;
+	}
+	if (val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be an array", param_name);
 	}
 	return std::nullopt;
 }
@@ -471,23 +502,26 @@ void add_vec3d_array_prop(json_t *props, const char *name, const char *descripti
 	json_object_set_new(props, name, p);
 }
 
-bool get_required_vec3d_array(json_t *input, const char *param_name,
-	SCP_vector<vec3d> &out, McpErrorSink &sink, int min_count)
+std::optional<SCP_vector<vec3d>> get_required_vec3d_array(json_t *input, const char *param_name, McpErrorSink &sink, int min_count)
 {
 	json_t *val = input ? json_object_get(input, param_name) : nullptr;
-	if (!val || !json_is_array(val)) {
+	if (!val) {
 		set_missing_param_error(sink, param_name);
-		return false;
+		return std::nullopt;
+	}
+	if (!json_is_array(val)) {
+		sink.set_error("Parameter '%s' must be an array", param_name);
+		return std::nullopt;
 	}
 
 	size_t arr_size = json_array_size(val);
 	if (min_count > 0 && (int)arr_size < min_count) {
 		sink.set_error("Parameter '%s' must contain at least %d element(s), got %d",
 			param_name, min_count, (int)arr_size);
-		return false;
+		return std::nullopt;
 	}
 
-	out.clear();
+	SCP_vector<vec3d> out;
 	out.reserve(arr_size);
 	size_t index;
 	json_t *item;
@@ -495,12 +529,12 @@ bool get_required_vec3d_array(json_t *input, const char *param_name,
 		auto v = parse_vec3d_json(item);
 		if (!v.has_value()) {
 			sink.set_error("Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
-			return false;
+			return std::nullopt;
 		}
 		out.push_back(*v);
 	}
 
-	return true;
+	return out;
 }
 
 static json_t *make_matrix_schema()
@@ -608,55 +642,73 @@ void add_color_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
-std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name)
+std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	return parse_vec3d_json(val);
+	auto result = parse_vec3d_json(val);
+	if (!result.has_value() && val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a vec3d object", param_name);
+	}
+	return result;
 }
 
-std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name)
+std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	if (!val || !json_is_object(val))
+	if (!val)
 		return std::nullopt;
+	if (!json_is_object(val)) {
+		if (!json_is_null(val))
+			sink.set_error("Parameter '%s' must be a matrix object", param_name);
+		return std::nullopt;
+	}
 	auto rvec = parse_vec3d_json(json_object_get(val, "rvec"));
 	auto uvec = parse_vec3d_json(json_object_get(val, "uvec"));
 	auto fvec = parse_vec3d_json(json_object_get(val, "fvec"));
-	if (!rvec.has_value() || !uvec.has_value() || !fvec.has_value())
+	if (!rvec.has_value() || !uvec.has_value() || !fvec.has_value()) {
+		sink.set_error("Parameter '%s' must be a matrix object", param_name);
 		return std::nullopt;
+	}
 	return matrix{ *rvec, *uvec, *fvec };
 }
 
 std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_vec3d(input, param_name);
+	auto item = get_optional_vec3d(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
 std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_matrix(input, param_name);
+	auto item = get_optional_matrix(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-std::optional<color> get_optional_color(json_t *arguments, const char *param_name)
+std::optional<color> get_optional_color(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	return parse_color_json(val);
+	auto result = parse_color_json(val);
+	if (!result.has_value() && val && !json_is_null(val)) {
+		sink.set_error("Parameter '%s' must be a color object", param_name);
+	}
+	return result;
 }
 
 std::optional<color> get_required_color(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	auto item = get_optional_color(input, param_name);
+	auto item = get_optional_color(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(sink, param_name);
+	if (!sink.has_error())
+		set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
