@@ -15,7 +15,7 @@ void McpErrorSink::set_error(const char *fmt, ...)
 
 	if (m_req) {
 		m_req->success = false;
-		vsnprintf(m_req->result_message, sizeof(m_req->result_message), fmt, args);
+		vsprintf(m_req->result_message, fmt, args);
 	} else if (m_err) {
 		*m_err = vmake_tool_result(true, fmt, args);
 	}

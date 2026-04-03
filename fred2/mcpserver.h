@@ -31,7 +31,7 @@ struct McpToolRequest {
 
 	// Result fields, filled by main thread handler
 	bool success;
-	char result_message[512];
+	SCP_string result_message;
 
 	// Optional structured result (caller must json_decref if non-null)
 	json_t *result_json;
