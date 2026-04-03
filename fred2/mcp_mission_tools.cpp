@@ -3612,6 +3612,53 @@ static void handle_free_sexp(json_t *input, McpToolRequest *req)
 
 static const SCP_vector<const char *> sexp_arg_type_values = { "number", "string", "boolean", "node" };
 
+// Check if an MCP argument type is compatible with the expected OPF type at a
+// given operator argument position.
+//   opf         - expected OPF_* type from query_operator_argument_type
+//   arg_type    - one of "number", "string", "boolean", "node"
+//   is_variable - true if the value has an @ prefix (variable reference)
+//   node_opr    - for "node" type, the OPR return type of the referenced operator; ignored otherwise
+static bool is_arg_type_compatible(int opf, const char *arg_type, bool is_variable, int node_opr)
+{
+	if (opf == OPF_NONE || opf == OPF_UNUSED)
+		return false;
+
+	// Variables are compatible with OPF_VARIABLE_NAME and OPF_AMBIGUOUS,
+	// plus the same OPFs as their base type
+	if (is_variable) {
+		if (opf == OPF_VARIABLE_NAME || opf == OPF_AMBIGUOUS)
+			return true;
+	}
+
+	if (!stricmp(arg_type, "boolean"))
+		return opf == OPF_BOOL;
+
+	if (!stricmp(arg_type, "node"))
+		return sexp_query_type_match(opf, node_opr);
+
+	if (!stricmp(arg_type, "number")) {
+		if (opf == OPF_AMBIGUOUS)
+			return true;
+		sexp_opr_t opr;
+		if (map_opf_to_opr((sexp_opf_t)opf, opr))
+			return opr == OPR_NUMBER || opr == OPR_POSITIVE;
+		return false;
+	}
+
+	if (!stricmp(arg_type, "string")) {
+		if (opf == OPF_AMBIGUOUS)
+			return true;
+		// Sub-expression OPFs (those that map to an OPR type) don't accept strings
+		sexp_opr_t opr;
+		if (map_opf_to_opr((sexp_opf_t)opf, opr))
+			return false;
+		// Data OPFs (ship, wing, message, etc.) accept strings
+		return true;
+	}
+
+	return false;
+}
+
 // Parse and allocate a single argument node.  Returns the allocated node index,
 // or -1 on error (with req->result_message set).  `next` is the rest pointer
 // for the new node (building the chain right-to-left).
@@ -3750,6 +3797,36 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				if (!op_is_locked)
 					free_sexp2(op_node);
 				return;
+			}
+
+			// Type-check this argument against the operator's expected type
+			int expected_opf = query_operator_argument_type(op_idx, i);
+			if (expected_opf != OPF_NONE) {
+				bool is_variable = (!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value[0] == '@';
+				int node_opr = -1;
+
+				if (!stricmp(type_str, "node")) {
+					// Determine the referenced operator's return type
+					char *endptr;
+					long node_idx = strtol(value, &endptr, 10);
+					if (*endptr == '\0' && endptr != value && node_idx >= 0 && node_idx < Num_sexp_nodes) {
+						int ref_op = get_operator_index((int)node_idx);
+						if (ref_op >= 0)
+							node_opr = query_operator_return_type(ref_op);
+					}
+				}
+
+				if (!is_arg_type_compatible(expected_opf, type_str, is_variable, node_opr)) {
+					req->success = false;
+					snprintf(req->result_message, sizeof(req->result_message),
+						"Argument %d: type '%s' is not compatible with expected type '%s' for operator '%s'",
+						i, type_str, opf_to_string(expected_opf), op_name);
+					if (next != -1)
+						free_sexp2(next);
+					if (!op_is_locked)
+						free_sexp2(op_node);
+					return;
+				}
 			}
 
 			int arg_node = create_sexp_arg_node(type_str, value, next, i, req);
