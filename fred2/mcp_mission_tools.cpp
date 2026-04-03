@@ -3852,6 +3852,14 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 			next = arg_node;
 		}
 
+		// Warn if fewer arguments than the operator expects
+		if ((int)num_args < Operators[op_idx].min) {
+			if (!warnings) warnings = json_array();
+			SCP_string wmsg;
+			sprintf(wmsg, "Operator '%s' expects at least %d argument(s), but only " SIZE_T_ARG " provided", op_name, Operators[op_idx].min, num_args);
+			json_array_append_new(warnings, json_string(wmsg.c_str()));
+		}
+
 		// Link arguments to operator
 		if (op_is_locked) {
 			// Locked singletons can't have rest modified; wrap in a list first
@@ -3862,6 +3870,12 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		// Set parent pointers on argument chain
 		for (int arg = next; arg != -1; arg = Sexp_nodes[arg].rest)
 			Sexp_nodes[arg].parent = op_node;
+	} else if (Operators[op_idx].min > 0) {
+		// No arguments provided but operator expects some
+		warnings = json_array();
+		SCP_string wmsg;
+		sprintf(wmsg, "Operator '%s' expects at least %d argument(s), but none were provided", op_name, Operators[op_idx].min);
+		json_array_append_new(warnings, json_string(wmsg.c_str()));
 	}
 
 	mcp_sexp_forest_mark_dirty({ op_node });
@@ -4050,7 +4064,7 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 	// Parse optional flags
 	int flag_bits = 0;
-	auto flags_arr = get_optional_string_array(input, "flags", &sink);
+	auto flags_arr = get_optional_string_array(input, "flags", sink);
 	if (!flags_arr.has_value() && json_object_get(input, "flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
@@ -4120,7 +4134,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	int flag_bits;
-	auto flags_arr = get_optional_string_array(input, "flags", &sink);
+	auto flags_arr = get_optional_string_array(input, "flags", sink);
 	if (!flags_arr.has_value() && json_object_get(input, "flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
