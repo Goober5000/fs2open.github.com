@@ -348,7 +348,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	// Determine range based on "source" parameter
-	const char *source = get_optional_string(input, "source", true);
+	const char *source = get_optional_string(input, "source", sink, true);
 
 	if (source && !check_string_enum(source, message_enum_values, "source", sink))
 		return;
@@ -405,11 +405,11 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	auto message = get_required_string(input, "message", sink, false);
 	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", sink)) return;
 
-	auto persona_str  = get_optional_string(input, "persona", false);
-	auto talking_head = get_optional_filename(input, "talking_head", false);
-	auto voice_file   = get_optional_filename(input, "voice_filename", false);
-	auto team_str     = get_optional_string(input, "team", true);
-	auto insert_index = get_optional_integer(input, "index");
+	auto persona_str  = get_optional_string(input, "persona", sink, false);
+	auto talking_head = get_optional_filename(input, "talking_head", sink, false);
+	auto voice_file   = get_optional_filename(input, "voice_filename", sink, false);
+	auto team_str     = get_optional_string(input, "team", sink, true);
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Check for duplicate name
 	if (find_item_with_string(Messages, &MMessage::name, name) >= 0) {
@@ -488,10 +488,10 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg = get_optional_string(input, "message", false);
+	auto new_msg = get_optional_string(input, "message", sink, false);
 	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", sink)) return;
 
-	auto persona_str = get_optional_string(input, "persona", false);
+	auto persona_str = get_optional_string(input, "persona", sink, false);
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
 		if (persona_str[0]) {
@@ -503,10 +503,10 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	auto new_head = get_optional_filename(input, "talking_head", false);
-	auto new_voice = get_optional_filename(input, "voice_filename", false);
+	auto new_head = get_optional_filename(input, "talking_head", sink, false);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
 
-	auto new_team_str = get_optional_string(input, "team", true);
+	auto new_team_str = get_optional_string(input, "team", sink, true);
 	std::optional<int> new_team = std::nullopt;
 	if (new_team_str) {
 		if (!check_string_enum(new_team_str, team_enum_values, "team", sink))
@@ -514,7 +514,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(new_team_str);
 	}
 
-	auto new_name = get_optional_string(input, "new_name", false);
+	auto new_name = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
@@ -614,7 +614,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -800,22 +800,22 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Optional parameters
-	auto formula       = get_optional_integer(input, "formula");
+	auto formula       = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
-	auto is_chained    = get_optional_bool(input, "is_chained");
-	auto repeat_count  = get_optional_integer(input, "repeat_count");
-	auto trigger_count = get_optional_integer(input, "trigger_count");
-	auto interval      = get_optional_integer(input, "interval");
+	auto is_chained    = get_optional_bool(input, "is_chained", sink);
+	auto repeat_count  = get_optional_integer(input, "repeat_count", sink);
+	auto trigger_count = get_optional_integer(input, "trigger_count", sink);
+	auto interval      = get_optional_integer(input, "interval", sink);
 
-	auto units = get_optional_string(input, "chain_and_interval_units", true);
+	auto units = get_optional_string(input, "chain_and_interval_units", sink, true);
 	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
-	auto score         = get_optional_integer(input, "score");
-	auto chain_delay   = get_optional_integer(input, "chain_delay");
+	auto score         = get_optional_integer(input, "score", sink);
+	auto chain_delay   = get_optional_integer(input, "chain_delay", sink);
 
 	// if an event is chained but a chain delay is not specified, set the delay to 0;
 	// similarly, if an event is explicitly unchained, set the delay to -1
@@ -825,7 +825,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Team
-	auto team_str = get_optional_string(input, "team", true);
+	auto team_str = get_optional_string(input, "team", sink, true);
 	int multi_team = -1;
 	if (team_str) {
 		if (!check_string_enum(team_str, team_enum_values, "team", sink))
@@ -833,8 +833,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		multi_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text = get_optional_string(input, "objective_text", false);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
+	auto objective_text = get_optional_string(input, "objective_text", sink, false);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
 
 	// Auto-set MEF_ flags if parameters provided
 	int mef_flags = 0;
@@ -906,7 +906,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	mission_event &evt = Mission_events[idx];
 
 	// Validate new_name
-	auto new_name      = get_optional_string(input, "new_name", false);
+	auto new_name      = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
@@ -921,26 +921,26 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Extract optional fields
-	auto formula       = get_optional_integer(input, "formula");
+	auto formula       = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
-	auto is_chained    = get_optional_bool(input, "is_chained");
-	auto repeat_count  = get_optional_integer(input, "repeat_count");
-	auto trigger_count = get_optional_integer(input, "trigger_count");
-	auto interval      = get_optional_integer(input, "interval");
+	auto is_chained    = get_optional_bool(input, "is_chained", sink);
+	auto repeat_count  = get_optional_integer(input, "repeat_count", sink);
+	auto trigger_count = get_optional_integer(input, "trigger_count", sink);
+	auto interval      = get_optional_integer(input, "interval", sink);
 
-	auto units = get_optional_string(input, "chain_and_interval_units", true);
+	auto units = get_optional_string(input, "chain_and_interval_units", sink, true);
 	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
-	auto score         = get_optional_integer(input, "score");
-	auto chain_delay   = get_optional_integer(input, "chain_delay");
+	auto score         = get_optional_integer(input, "score", sink);
+	auto chain_delay   = get_optional_integer(input, "chain_delay", sink);
 
 	if (!chain_delay.has_value() && is_chained.has_value()) {
 		chain_delay = *is_chained ? 0 : -1;
 	}
 
 	// Team
-	auto team_str = get_optional_string(input, "team", true);
+	auto team_str = get_optional_string(input, "team", sink, true);
 	std::optional<int> new_team = std::nullopt;
 	if (team_str) {
 		if (!check_string_enum(team_str, team_enum_values, "team", sink))
@@ -948,8 +948,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text     = get_optional_string(input, "objective_text", false);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", false);
+	auto objective_text     = get_optional_string(input, "objective_text", sink, false);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
 
 	// Auto-set MEF_ flags if parameters provided
 	std::optional<int> new_mef_flags;
@@ -1046,7 +1046,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -1234,7 +1234,7 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto team_str = get_optional_string(input, "team", true);
+	auto team_str = get_optional_string(input, "team", sink, true);
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
@@ -1306,9 +1306,9 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto ani = get_optional_filename(input, "animation_filename", false);
-	auto wave = get_optional_filename(input, "voice_filename", false);
-	auto insert_index = get_optional_integer(input, "index");
+	auto ani = get_optional_filename(input, "animation_filename", sink, false);
+	auto wave = get_optional_filename(input, "voice_filename", sink, false);
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Validate filename lengths
 	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
@@ -1356,9 +1356,9 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", false);
-	auto new_ani  = get_optional_filename(input, "animation_filename", false);
-	auto new_wave = get_optional_filename(input, "voice_filename", false);
+	auto new_text = get_optional_string(input, "text", sink, false);
+	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false);
+	auto new_wave = get_optional_filename(input, "voice_filename", sink, false);
 
 	// Validate filename lengths
 	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
@@ -1536,17 +1536,17 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Optional parameters
-	auto type_str   = get_optional_string(input, "goal_type", true);
-	auto formula    = get_optional_integer(input, "formula");
+	auto type_str   = get_optional_string(input, "goal_type", sink, true);
+	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", false);
-	auto score      = get_optional_integer(input, "score");
-	auto team_str   = get_optional_string(input, "team", true);
-	auto invalid    = get_optional_bool(input, "invalid");
-	auto no_music   = get_optional_bool(input, "no_music");
+	auto message    = get_optional_string(input, "message", sink, false);
+	auto score      = get_optional_integer(input, "score", sink);
+	auto team_str   = get_optional_string(input, "team", sink, true);
+	auto invalid    = get_optional_bool(input, "invalid", sink);
+	auto no_music   = get_optional_bool(input, "no_music", sink);
 
 	// Resolve type
 	int goal_type = PRIMARY_GOAL;
@@ -1624,7 +1624,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	mission_goal &goal = Mission_goals[idx];
 
 	// Validate new_name
-	auto new_name = get_optional_string(input, "new_name", false);
+	auto new_name = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
@@ -1639,14 +1639,14 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	}
 
 	// Extract optional fields
-	auto type_str   = get_optional_string(input, "goal_type", true);
-	auto formula    = get_optional_integer(input, "formula");
+	auto type_str   = get_optional_string(input, "goal_type", sink, true);
+	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", false);
-	auto score      = get_optional_integer(input, "score");
-	auto team_str   = get_optional_string(input, "team", true);
-	auto invalid    = get_optional_bool(input, "invalid");
-	auto no_music   = get_optional_bool(input, "no_music");
+	auto message    = get_optional_string(input, "message", sink, false);
+	auto score      = get_optional_integer(input, "score", sink);
+	auto team_str   = get_optional_string(input, "team", sink, true);
+	auto invalid    = get_optional_bool(input, "invalid", sink);
+	auto no_music   = get_optional_bool(input, "no_music", sink);
 
 	// Validate type
 	int new_type = -1;
@@ -1742,7 +1742,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -1857,14 +1857,14 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto story = get_required_filename(input, "story_filename", sink);
 	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
 
-	auto font  = get_optional_filename(input, "font_filename", true);
-	auto voice = get_optional_filename(input, "voice_filename", true);
-	auto ui    = get_optional_string(input, "ui_name", true);
-	auto bg640 = get_optional_filename(input, "background_640", true);
-	auto bg1024 = get_optional_filename(input, "background_1024", true);
-	auto formula = get_optional_integer(input, "formula");
+	auto font  = get_optional_filename(input, "font_filename", sink, true);
+	auto voice = get_optional_filename(input, "voice_filename", sink, true);
+	auto ui    = get_optional_string(input, "ui_name", sink, true);
+	auto bg640 = get_optional_filename(input, "background_640", sink, true);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, true);
+	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
 	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
@@ -1914,13 +1914,13 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
-	auto new_story = get_optional_filename(input, "story_filename", false);
-	auto new_font  = get_optional_filename(input, "font_filename", false);
-	auto new_voice = get_optional_filename(input, "voice_filename", false);
-	auto new_ui    = get_optional_string(input, "ui_name", false);
-	auto new_bg640 = get_optional_filename(input, "background_640", false);
-	auto new_bg1024 = get_optional_filename(input, "background_1024", false);
-	auto new_formula = get_optional_integer(input, "formula");
+	auto new_story = get_optional_filename(input, "story_filename", sink, false);
+	auto new_font  = get_optional_filename(input, "font_filename", sink, false);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_ui    = get_optional_string(input, "ui_name", sink, false);
+	auto new_bg640 = get_optional_filename(input, "background_640", sink, false);
+	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false);
+	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
 	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
@@ -2041,7 +2041,7 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto team_str = get_optional_string(input, "team", true);
+	auto team_str = get_optional_string(input, "team", sink, true);
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
@@ -2113,11 +2113,11 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto voice = get_optional_filename(input, "voice_filename", false);
-	auto rec_text = get_optional_string(input, "recommendation_text", false);
-	auto formula = get_optional_integer(input, "formula");
+	auto voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto rec_text = get_optional_string(input, "recommendation_text", sink, false);
+	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
@@ -2165,10 +2165,10 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", false);
-	auto new_voice = get_optional_filename(input, "voice_filename", false);
-	auto new_rec_text = get_optional_string(input, "recommendation_text", false);
-	auto new_formula = get_optional_integer(input, "formula");
+	auto new_text = get_optional_string(input, "text", sink, false);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, false);
+	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
 	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
@@ -2337,12 +2337,12 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
-	auto display_name = get_optional_string(input, "display_name", false);
-	auto color_val    = get_optional_color(input, "color");
-	auto model_file   = get_optional_string(input, "model_filename", false);
-	auto show_polys   = get_optional_bool(input, "show_polys");
-	auto hidden       = get_optional_bool(input, "hidden");
-	auto insert_index = get_optional_integer(input, "index");
+	auto display_name = get_optional_string(input, "display_name", sink, false);
+	auto color_val    = get_optional_color(input, "color", sink);
+	auto model_file   = get_optional_string(input, "model_filename", sink, false);
+	auto show_polys   = get_optional_bool(input, "show_polys", sink);
+	auto hidden       = get_optional_bool(input, "hidden", sink);
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Validate name against all entity types
 	if (!check_name_conflict("jump node", name, sink)) return;
@@ -2394,13 +2394,13 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	auto new_name     = get_optional_string(input, "new_name", true);
-	auto new_pos      = get_optional_vec3d(input, "position");
-	auto display_name = get_optional_string(input, "display_name", false);
-	auto color_val    = get_optional_color(input, "color");
-	auto model_file   = get_optional_string(input, "model_filename", false);
-	auto show_polys   = get_optional_bool(input, "show_polys");
-	auto hidden       = get_optional_bool(input, "hidden");
+	auto new_name     = get_optional_string(input, "new_name", sink, true);
+	auto new_pos      = get_optional_vec3d(input, "position", sink);
+	auto display_name = get_optional_string(input, "display_name", sink, false);
+	auto color_val    = get_optional_color(input, "color", sink);
+	auto model_file   = get_optional_string(input, "model_filename", sink, false);
+	auto show_polys   = get_optional_bool(input, "show_polys", sink);
+	auto hidden       = get_optional_bool(input, "hidden", sink);
 
 	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
@@ -2502,7 +2502,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -2709,10 +2709,11 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
-	SCP_vector<vec3d> points;
-	if (!get_required_vec3d_array(input, "points", points, sink, 1)) return;
+	auto points_opt = get_required_vec3d_array(input, "points", sink, 1);
+	if (!points_opt.has_value()) return;
+	auto &points = *points_opt;
 
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Validate name against all entity types
 	if (!check_name_conflict("waypoint path", name, sink)) return;
@@ -2762,7 +2763,7 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	auto new_name = get_optional_string(input, "new_name", true);
+	auto new_name = get_optional_string(input, "new_name", sink, true);
 
 	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 
@@ -2818,7 +2819,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -2929,7 +2930,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
-	auto insert_index = get_optional_integer(input, "index");
+	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
@@ -2992,7 +2993,7 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 	auto wpt_index = get_required_integer(input, "index", sink);
 	if (!wpt_index.has_value()) return;
 
-	auto new_pos = get_optional_vec3d(input, "position");
+	auto new_pos = get_optional_vec3d(input, "position", sink);
 
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
@@ -3054,7 +3055,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 	char wpt_name[NAME_LENGTH];
 	waypoint_stuff_name(wpt_name, list, *wpt_index);
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -3385,7 +3386,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto depth = get_optional_integer(input, "depth");
+	auto depth = get_optional_integer(input, "depth", sink);
 	int max_depth = depth.has_value() ? *depth : -1;
 
 	// Pass 1: collect entries with depths
@@ -4083,17 +4084,17 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	int old_type = Sexp_variables[idx].type;
 
 	// Extract optional fields
-	auto new_name = get_optional_string(input, "new_name", true);
+	auto new_name = get_optional_string(input, "new_name", sink, true);
 	if (new_name) {
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
 	}
 
-	auto default_value = get_optional_string(input, "default_value", false);
+	auto default_value = get_optional_string(input, "default_value", sink, false);
 	if (default_value) {
 		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 	}
 
-	auto type_str = get_optional_string(input, "type", true);
+	auto type_str = get_optional_string(input, "type", sink, true);
 	int type_bits;
 	if (type_str) {
 		if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
@@ -4178,7 +4179,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto force = get_optional_bool(input, "force");
+	auto force = get_optional_bool(input, "force", sink);
 
 	// Check for references unless force is set
 	if (!force.has_value() || !*force) {
