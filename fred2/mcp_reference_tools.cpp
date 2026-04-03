@@ -799,9 +799,13 @@ static json_t *handle_get_ship_type(json_t *arguments)
 
 static json_t *handle_list_ship_classes(json_t *arguments)
 {
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
 	// Optional filters
-	const char *filter_species = get_optional_string(arguments, "species", true);
-	const char *filter_type    = get_optional_string(arguments, "ship_type", true);
+	const char *filter_species = get_optional_string(arguments, "species", sink, true);
+	const char *filter_type    = get_optional_string(arguments, "ship_type", sink, true);
+	if (err) return err;
 
 	int filter_species_idx = -1;
 	if (filter_species) {
@@ -1006,7 +1010,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *st = get_optional_string(arguments, "subtype", true);
+	const char *st = get_optional_string(arguments, "subtype", sink, true);
 	if (st) {
 		if (!check_string_enum(st, subtype_enum_values, "subtype", sink))
 			return err;
@@ -1346,9 +1350,13 @@ static json_t *handle_list_sexp_categories()
 
 static json_t *handle_list_sexp_operators(json_t *arguments)
 {
-	const char *filter_category    = get_optional_string(arguments, "category", true);
-	const char *filter_subcategory = get_optional_string(arguments, "subcategory", true);
-	const char *filter_search      = get_optional_string(arguments, "search", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_category    = get_optional_string(arguments, "category", sink, true);
+	const char *filter_subcategory = get_optional_string(arguments, "subcategory", sink, true);
+	const char *filter_search      = get_optional_string(arguments, "search", sink, true);
+	if (err) return err;
 
 	// Subcategory requires category (names can appear in multiple categories)
 	if (filter_subcategory && !filter_category)
@@ -1693,8 +1701,12 @@ static json_t *load_reference_notes()
 
 static json_t *handle_list_reference_notes(json_t *arguments)
 {
-	const char *filter_category = get_optional_string(arguments, "category", true);
-	const char *filter_search = get_optional_string(arguments, "search", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_category = get_optional_string(arguments, "category", sink, true);
+	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	if (err) return err;
 
 	json_t *notes = load_reference_notes();
 	if (!notes)
@@ -1978,7 +1990,11 @@ static const T *find_type_info(const T *table, const char *name)
 
 static json_t *handle_get_sexp_argument_type(json_t *arguments)
 {
-	const char *name = get_optional_string(arguments, "name", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *name = get_optional_string(arguments, "name", sink, true);
+	if (err) return err;
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -2059,7 +2075,11 @@ const char *get_opr_type_name(int opr_value)
 
 static json_t *handle_get_sexp_return_type(json_t *arguments)
 {
-	const char *name = get_optional_string(arguments, "name", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *name = get_optional_string(arguments, "name", sink, true);
+	if (err) return err;
 
 	// List all types if no name given
 	if (!name || name[0] == '\0') {
@@ -2456,13 +2476,15 @@ static json_t *handle_coordinate_transform(json_t *arguments)
 	matrix ref_orient = *ref_orient_opt;
 
 	// Optional: reference_frame_position (defaults to origin)
-	vec3d ref_position = get_optional_vec3d(arguments, "reference_frame_position")
+	vec3d ref_position = get_optional_vec3d(arguments, "reference_frame_position", sink)
 		.value_or(vmd_zero_vector);
+	if (err) return err;
 
 	// Optional inputs (at least one required)
-	auto position = get_optional_vec3d(arguments, "position");
-	auto normal = get_optional_vec3d(arguments, "normal");
-	auto orientation = get_optional_matrix(arguments, "orientation");
+	auto position = get_optional_vec3d(arguments, "position", sink);
+	auto normal = get_optional_vec3d(arguments, "normal", sink);
+	auto orientation = get_optional_matrix(arguments, "orientation", sink);
+	if (err) return err;
 
 	if (!position && !normal && !orientation)
 		return make_tool_result(
@@ -2656,8 +2678,12 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 {
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
-	const char *filter_type = get_optional_string(arguments, "element_type", true);
-	const char *filter_search = get_optional_string(arguments, "search", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_type = get_optional_string(arguments, "element_type", sink, true);
+	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	if (err) return err;
 
 	json_t *elements = json_object_get(doc, "elements");
 
@@ -2756,8 +2782,12 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 {
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
-	const char *filter_search = get_optional_string(arguments, "search", true);
-	const char *filter_child_type = get_optional_string(arguments, "child_type", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	const char *filter_child_type = get_optional_string(arguments, "child_type", sink, true);
+	if (err) return err;
 
 	if ((!filter_search || !filter_search[0]) && (!filter_child_type || !filter_child_type[0]))
 		return make_tool_result("At least one of 'search' or 'child_type' must be specified.", true);
@@ -2863,9 +2893,13 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 {
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
-	const char *filter_name = get_optional_string(arguments, "name", true);
-	const char *filter_search = get_optional_string(arguments, "search", true);
-	auto filter_overridable = get_optional_bool(arguments, "overridable");
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_name = get_optional_string(arguments, "name", sink, true);
+	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	auto filter_overridable = get_optional_bool(arguments, "overridable", sink);
+	if (err) return err;
 
 	json_t *actions = json_object_get(doc, "actions");
 
@@ -2928,7 +2962,11 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 {
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
-	const char *filter_search = get_optional_string(arguments, "search", true);
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+
+	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	if (err) return err;
 
 	json_t *enums = json_object_get(doc, "enums");
 	bool has_search = filter_search && filter_search[0] != '\0';
@@ -3102,8 +3140,9 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 			"Unknown argument type. Call get_sexp_argument_type without arguments to list all types.", true);
 
 	// Optional: node index for context-filtered results
-	int parent_node = get_optional_integer(arguments, "node").value_or(-1);
-	int arg_index = get_optional_integer(arguments, "arg_index").value_or(-1);
+	int parent_node = get_optional_integer(arguments, "node", sink).value_or(-1);
+	int arg_index = get_optional_integer(arguments, "arg_index", sink).value_or(-1);
+	if (err) return err;
 
 	// If context was requested and the forest is dirty, rebuild it first.
 	// Retry a few times because the forest can be marked dirty again between

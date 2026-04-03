@@ -22,6 +22,7 @@ public:
 	explicit McpErrorSink(json_t **err) : m_req(nullptr), m_err(err) {}
 
 	void set_error(const char *fmt, ...);
+	bool has_error() const;
 
 private:
 	McpToolRequest *m_req;
@@ -112,38 +113,37 @@ std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, M
 std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpErrorSink &sink);
 std::optional<color> get_required_color(json_t *input, const char *param_name, McpErrorSink &sink);
 
-// Extracts an optional string parameter from arguments JSON (for reference tools that
-// return json_t* directly). Returns nullptr if the parameter is missing or omitted.
-const char *get_optional_string(json_t *arguments, const char *param_name, bool null_if_empty);
+// Extracts an optional string parameter from arguments JSON.
+// Returns nullptr if the parameter is missing; reports a type error via sink if present but not a string.
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty);
 
-// Extracts an optional string parameter (that represents a filename) from arguments JSON (for reference tools that
-// return json_t* directly). If the string doesn't satisfy VALID_FNAME, it returns null or empty, depending on the last parameter.
-const char *get_optional_filename(json_t *arguments, const char *param_name, bool null_if_invalid);
+// Extracts an optional string parameter (that represents a filename) from arguments JSON.
+// If the string doesn't satisfy VALID_FNAME, it returns null or empty, depending on null_if_invalid.
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid);
 
-// Extracts optional integer, double, float, or bool parameters from arguments JSON (for reference
-// tools that return json_t* directly).
-std::optional<int> get_optional_integer(json_t *arguments, const char *param_name);
-std::optional<double> get_optional_double(json_t *arguments, const char *param_name);
-std::optional<float> get_optional_float(json_t *arguments, const char *param_name);
-std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name);
-std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name);
-std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name);
-std::optional<color> get_optional_color(json_t *arguments, const char *param_name);
+// Extracts optional typed parameters from arguments JSON.
+// Returns std::nullopt if the parameter is missing; reports a type error via sink if present but the wrong type.
+std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<double> get_optional_double(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<float> get_optional_float(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name, McpErrorSink &sink);
+std::optional<color> get_optional_color(json_t *arguments, const char *param_name, McpErrorSink &sink);
 
 // Extracts an optional JSON array of strings.
-// If sink is provided, reports an error and returns nullopt when a non-string element is found.
+// Reports an error via sink if the value is not an array, or if a non-string element is found.
 std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name, McpErrorSink &sink);
 
 // Extracts a required JSON array of vec3d objects.  Returns true on success.
 // If min_count > 0, the array must contain at least that many elements.
-bool get_required_vec3d_array(json_t *input, const char *param_name,
-	SCP_vector<vec3d> &out, McpErrorSink &sink, int min_count = 0);
+std::optional<SCP_vector<vec3d>> get_required_vec3d_array(json_t *input, const char *param_name, McpErrorSink &sink, int min_count = 0);
 
 // Builds a JSON {"x":..., "y":..., "z":...} object from a vec3d.
 json_t *build_vec3d_json(const vec3d &v);
 
 // Builds a JSON {"rvec":..., "uvec":..., "fvec":...} object from a matrix.
-json_t* build_matrix_json(const matrix& m);
+json_t *build_matrix_json(const matrix &m);
 
 // Builds a JSON {"red":..., "green":..., "blue":..., "alpha":..., "range":"0-255"}
 // object from a color.  Alpha is included only if include_alpha is true.
