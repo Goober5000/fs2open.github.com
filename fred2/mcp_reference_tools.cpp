@@ -758,7 +758,8 @@ static json_t *handle_list_ship_types()
 static json_t *handle_get_ship_type(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int idx = ship_type_name_lookup(name);
@@ -881,7 +882,8 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 static json_t *handle_get_ship_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int idx = ship_info_lookup(name);
@@ -994,9 +996,10 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
 	json_t *err = nullptr;
+	McpErrorSink sink(&err);
 	const char *st = get_optional_string(arguments, "subtype", true);
 	if (st) {
-		if (!check_string_enum(st, subtype_enum_values, "subtype", &err))
+		if (!check_string_enum(st, subtype_enum_values, "subtype", sink))
 			return err;
 		if (stricmp(st, "primary") == 0)
 			filter = FILTER_PRIMARY;
@@ -1032,7 +1035,8 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 static json_t *handle_get_weapon_class(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int idx = weapon_info_lookup(name);
@@ -1169,7 +1173,8 @@ static json_t *handle_list_iffs()
 static json_t *handle_get_iff(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int idx = iff_lookup(name);
@@ -1223,7 +1228,8 @@ static json_t *handle_list_intel_entries()
 static json_t *handle_get_intel_entry(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int idx = intel_info_lookup(name);
@@ -1537,7 +1543,8 @@ static void build_argument_types_json(json_t *obj, int op_index, int min_args, i
 static json_t *handle_get_sexp_operator(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	// Find operator by name
@@ -1696,7 +1703,8 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 static json_t *handle_get_reference_note(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *topic = get_required_string(arguments, "topic", &err, true);
+	McpErrorSink sink(&err);
+	const char *topic = get_required_string(arguments, "topic", sink, true);
 	if (!topic) return err;
 
 	json_t *notes = load_reference_notes();
@@ -2060,7 +2068,8 @@ extern void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *globa
 static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);
@@ -2353,9 +2362,10 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err, false);
+	McpErrorSink sink(&err);
+	const char *name1 = get_required_string(arguments, "name1", sink, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err, false);
+	const char *name2 = get_required_string(arguments, "name2", sink, false);
 	if (!name2) return err;
 
 	int cmp = subsystem_stricmp(name1, name2);
@@ -2372,9 +2382,10 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name1 = get_required_string(arguments, "name1", &err, false);
+	McpErrorSink sink(&err);
+	const char *name1 = get_required_string(arguments, "name1", sink, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", &err, false);
+	const char *name2 = get_required_string(arguments, "name2", sink, false);
 	if (!name2) return err;
 
 	bool equal = subsystem_stricmp(name1, name2) == 0;
@@ -2397,16 +2408,17 @@ static json_t *handle_subsystem_names_equal(json_t *arguments)
 static json_t *handle_coordinate_transform(json_t *arguments)
 {
 	json_t *err = nullptr;
+	McpErrorSink sink(&err);
 
 	// Required: mode
-	const char *mode_str = get_required_string(arguments, "mode", &err, true);
+	const char *mode_str = get_required_string(arguments, "mode", sink, true);
 	if (!mode_str) return err;
 	static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
-	if (!check_string_enum(mode_str, mode_values, "mode", &err)) return err;
+	if (!check_string_enum(mode_str, mode_values, "mode", sink)) return err;
 	bool local_to_world = (strcmp(mode_str, "local_to_world") == 0);
 
 	// Required: reference_frame_orientation
-	auto ref_orient_opt = get_required_matrix(arguments, "reference_frame_orientation", &err);
+	auto ref_orient_opt = get_required_matrix(arguments, "reference_frame_orientation", sink);
 	if (!ref_orient_opt.has_value()) return err;
 	matrix ref_orient = *ref_orient_opt;
 
@@ -2699,7 +2711,8 @@ static json_t *handle_get_scripting_element(json_t *arguments)
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, false);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, false);
 	if (!name)
 		return err;
 
@@ -2956,7 +2969,8 @@ static json_t *handle_get_scripting_misc(json_t *arguments)
 	GET_SCRIPTING_DOC_OR_RETURN(doc);
 
 	json_t *err = nullptr;
-	const char *section = get_required_string(arguments, "section", &err, true);
+	McpErrorSink sink(&err);
+	const char *section = get_required_string(arguments, "section", sink, true);
 	if (!section)
 		return err;
 
@@ -3050,7 +3064,8 @@ static json_t *handle_get_root_paths()
 static json_t *handle_list_sexp_argument_values(json_t *arguments)
 {
 	json_t *err = nullptr;
-	const char *name = get_required_string(arguments, "name", &err, true);
+	McpErrorSink sink(&err);
+	const char *name = get_required_string(arguments, "name", sink, true);
 	if (!name)
 		return err;
 
