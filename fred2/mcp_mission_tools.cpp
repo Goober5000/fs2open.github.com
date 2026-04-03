@@ -236,7 +236,7 @@ static bool reject_team_none(const char *team_str, const char *entity_name, McpT
 {
 	if (!stricmp(team_str, "none")) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"A team of \"none\" is not valid for a %s. Use \"Team 1\" or \"Team 2\".", entity_name);
 		return true;
 	}
@@ -416,7 +416,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Check for duplicate name
 	if (find_item_with_string(Messages, &MMessage::name, name) >= 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"A message with name '%s' already exists", name);
 		return;
 	}
@@ -527,7 +527,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"A message name cannot be blank!");
 			return;
 		}
@@ -535,7 +535,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		// Check for duplicate if the name is actually different
 		if ((stricmp(Messages[idx].name, new_name) != 0) && (find_item_with_string(Messages, &MMessage::name, new_name) >= 0)) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"A message with name '%s' already exists", new_name);
 			return;
 		}
@@ -625,7 +625,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Message '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", name, desc.c_str());
 			return;
@@ -649,7 +649,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: delete message %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message), "Deleted message: %s", name);
+	sprintf(req->result_message, "Deleted message: %s", name);
 	req->success = true;
 }
 
@@ -929,14 +929,14 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"An event name cannot be blank!");
 			return;
 		}
 		if (stricmp(evt.name.c_str(), new_name) != 0 &&
 			find_item_with_string(Mission_events, &mission_event::name, new_name) >= 0) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"An event with name '%s' already exists", new_name);
 			return;
 		}
@@ -1074,7 +1074,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Event '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", name, desc.c_str());
 			return;
@@ -1095,7 +1095,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: delete event %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message), "Deleted event: %s", name);
+	sprintf(req->result_message, "Deleted event: %s", name);
 	req->success = true;
 }
 
@@ -1321,7 +1321,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	if (cb->num_stages >= CMD_BRIEF_STAGES_MAX) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Cannot add more than %d command briefing stages", CMD_BRIEF_STAGES_MAX);
 		return;
 	}
@@ -1351,7 +1351,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	// Insert slot
 	if (!array_insert_slot(cb->stage, cb->num_stages, CMD_BRIEF_STAGES_MAX, target)) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Cannot add more than %d command briefing stages", CMD_BRIEF_STAGES_MAX);
 		return;
 	}
@@ -1431,7 +1431,7 @@ static void handle_delete_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: delete cmd brief stage %d", *index);
 
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted command briefing stage %d", *index);
 	req->success = true;
 }
@@ -1560,7 +1560,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Check for duplicate name
 	if (find_item_with_string(Mission_goals, &mission_goal::name, name) >= 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"A goal with name '%s' already exists", name);
 		return;
 	}
@@ -1661,14 +1661,14 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"A goal name cannot be blank!");
 			return;
 		}
 		if (stricmp(goal.name.c_str(), new_name) != 0 &&
 			find_item_with_string(Mission_goals, &mission_goal::name, new_name) >= 0) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"A goal with name '%s' already exists", new_name);
 			return;
 		}
@@ -1787,7 +1787,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Goal '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", name, desc.c_str());
 			return;
@@ -1806,7 +1806,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: delete goal %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message), "Deleted goal: %s", name);
+	sprintf(req->result_message, "Deleted goal: %s", name);
 	req->success = true;
 }
 
@@ -2034,7 +2034,7 @@ static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index - 1);
 
 	mark_modified("MCP: delete fiction viewer stage %d", *index);
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted fiction viewer stage %d", *index);
 	req->success = true;
 }
@@ -2147,7 +2147,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	if (db->num_stages >= MAX_DEBRIEF_STAGES) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Cannot add more than %d debriefing stages", MAX_DEBRIEF_STAGES);
 		return;
 	}
@@ -2174,7 +2174,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 
 	if (!array_insert_slot(db->stages, db->num_stages, MAX_DEBRIEF_STAGES, target)) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Cannot add more than %d debriefing stages", MAX_DEBRIEF_STAGES);
 		return;
 	}
@@ -2269,7 +2269,7 @@ static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
 	array_remove_slot(db->stages, db->num_stages, *index - 1);
 
 	mark_modified("MCP: delete debriefing stage %d", *index);
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted debriefing stage %d", *index);
 	req->success = true;
 }
@@ -2560,7 +2560,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Jump node '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", name, desc.c_str());
 			return;
@@ -2577,7 +2577,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	Jumpnode_editor_dialog.initialize_data(1);
 	mark_modified("MCP: delete jump node %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted jump node: %s", name);
 	req->success = true;
 }
@@ -2869,7 +2869,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Waypoint list '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", name, desc.c_str());
 			return;
@@ -2884,7 +2884,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 			if (ref.second != sexp_src::NONE) {
 				SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Waypoint '%s' is referenced in %s. Use force=true to delete anyway "
 					"(references will be invalidated).", wpt_name, desc.c_str());
 				return;
@@ -2918,7 +2918,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	refresh_cur_waypoint();
 	mark_modified("MCP: delete waypoint list %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted waypoint list: %s", name);
 	req->success = true;
 }
@@ -3007,7 +3007,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 
 	if (objnum < 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Failed to create waypoint in list '%s'", list);
 		return;
 	}
@@ -3129,7 +3129,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 			if (ref.second != sexp_src::NONE) {
 				SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Waypoint list '%s' is referenced in %s (this is the last waypoint, so "
 					"deleting it would remove the list). Use force=true to delete anyway "
 					"(references will be invalidated).", list, desc.c_str());
@@ -3142,7 +3142,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 		if (ref.second != sexp_src::NONE) {
 			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Waypoint '%s' is referenced in %s. Use force=true to delete anyway "
 				"(references will be invalidated).", wpt_name, desc.c_str());
 			return;
@@ -3176,7 +3176,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 		rename_waypoint_sexp_refs(list_name, i + 2, i + 1);
 	mark_modified("MCP: delete waypoint %s", wpt_name);
 
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Deleted waypoint: %s", wpt_name);
 	req->success = true;
 }
@@ -3332,7 +3332,7 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is not in use", n);
 		return;
 	}
@@ -3414,7 +3414,7 @@ static void handle_get_sexp_node(json_t *input, McpToolRequest *req)
 	int n = *node;
 	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is not in use", n);
 		return;
 	}
@@ -3453,7 +3453,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 	int n = *node;
 	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is not in use", n);
 		return;
 	}
@@ -3551,13 +3551,13 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 		req->result_json = make_json_tool_result(result);
 		json_object_set_new(req->result_json, "isError", json_true());
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"SEXP text had %d parse error(s); see parse_errors in result",
 			error_count);
 		return;
 	} else if (n < 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Could not parse SEXP; get_sexp_main() returned %d", n);
 		return;
 	}
@@ -3654,21 +3654,21 @@ static void handle_free_sexp(json_t *input, McpToolRequest *req)
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is not in use", n);
 		return;
 	}
 
 	if (n == Locked_sexp_true || n == Locked_sexp_false) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is a locked singleton (%s) and cannot be freed", n, Sexp_nodes[n].text);
 		return;
 	}
 
 	if (is_sexp_attached_to_mission(n)) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Node %d is attached to a mission entity (event, goal, briefing, etc.) and cannot be freed directly", n);
 		return;
 	}
@@ -3746,7 +3746,7 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 		int var_idx = get_index_sexp_variable_name(var_name);
 		if (var_idx < 0) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Unknown SEXP variable '%s' in argument %d", var_name, arg_index);
 			return -1;
 		}
@@ -3771,7 +3771,7 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 			locked_node = Locked_sexp_false;
 		else {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Boolean argument %d must be \"true\" or \"false\", got \"%s\"", arg_index, value);
 			return -1;
 		}
@@ -3783,19 +3783,19 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 		long idx = strtol(value, &endptr, 10);
 		if (*endptr != '\0' || endptr == value) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value);
 			return -1;
 		}
 		if (idx < 0 || idx >= Num_sexp_nodes) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Node argument %d: node index %ld is out of range (0-%d)", arg_index, idx, Num_sexp_nodes - 1);
 			return -1;
 		}
 		if (Sexp_nodes[(int)idx].type == SEXP_NOT_USED) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"Node argument %d: node %ld is not in use", arg_index, idx);
 			return -1;
 		}
@@ -3805,7 +3805,7 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 
 	// Should not reach here if type was validated
 	req->success = false;
-	snprintf(req->result_message, sizeof(req->result_message),
+	sprintf(req->result_message,
 		"Unknown argument type \"%s\" in argument %d", type_str, arg_index);
 	return -1;
 }
@@ -3823,7 +3823,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	int op_idx = get_operator_index(op_name);
 	if (op_idx < 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Unknown SEXP operator: '%s'", op_name);
 		return;
 	}
@@ -3845,7 +3845,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 			json_t *arg = json_array_get(args, i);
 			if (!json_is_object(arg)) {
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Argument %d is not an object", i);
 				// Free any nodes we've already allocated
 				if (next != -1)
@@ -3859,7 +3859,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 			const char *value = json_string_value(json_object_get(arg, "value"));
 			if (!type_str || !value) {
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Argument %d: 'type' and 'value' are required", i);
 				if (next != -1)
 					free_sexp2(next);
@@ -3895,7 +3895,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 
 				if (!is_arg_type_compatible(expected_opf, type_str, is_variable, node_opr)) {
 					req->success = false;
-					snprintf(req->result_message, sizeof(req->result_message),
+					sprintf(req->result_message,
 						"Argument %d: type '%s' is not compatible with expected type '%s' for operator '%s'",
 						i, type_str, opf_to_string(expected_opf), op_name);
 					if (next != -1)
@@ -4125,7 +4125,7 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	int result = sexp_add_variable(default_value, name, type_bits | flag_bits);
 	if (result < 0) {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Failed to add SEXP variable (no free slot)");
 		return;
 	}
@@ -4258,7 +4258,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 	if (!force.has_value() || !*force) {
 		if (is_variable_referenced_in_sexp_nodes(name)) {
 			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
+			sprintf(req->result_message,
 				"SEXP variable '%s' is referenced in SEXP expressions. "
 				"Use force=true to delete anyway (references will be reset to placeholder values).", name);
 			return;
@@ -4275,7 +4275,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 	mcp_sexp_forest_mark_dirty();
 	mark_modified("MCP: delete SEXP variable %s", name);
 
-	snprintf(req->result_message, sizeof(req->result_message), "Deleted SEXP variable: %s", name);
+	sprintf(req->result_message, "Deleted SEXP variable: %s", name);
 	req->success = true;
 }
 
@@ -5725,7 +5725,7 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_delete_sexp_variable(input_json, req);
 	} else {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Unknown mission tool: %s", tool_name);
 	}
 }
