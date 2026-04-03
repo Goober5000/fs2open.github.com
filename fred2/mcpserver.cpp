@@ -324,10 +324,11 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 	if (strcmp(tool_name, "set_timeout") == 0) {
 		json_t *arguments = json_object_get(params, "arguments");
 		json_t *err = nullptr;
-		auto seconds = get_required_integer(arguments, "seconds", &err);
+		McpErrorSink sink(&err);
+		auto seconds = get_required_integer(arguments, "seconds", sink);
 		if (!seconds.has_value())
 			return err;
-		if (!check_int_range(*seconds, 1, 300, "seconds", &err))
+		if (!check_int_range(*seconds, 1, 300, "seconds", sink))
 			return err;
 
 		mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
@@ -349,7 +350,8 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		// Extract filepath from arguments
 		json_t *arguments = json_object_get(params, "arguments");
 		json_t *err = nullptr;
-		const char *filepath = get_required_string(arguments, "filepath", &err, true);
+		McpErrorSink sink(&err);
+		const char *filepath = get_required_string(arguments, "filepath", sink, true);
 		if (!filepath) return err;
 
 		McpToolId tool;
