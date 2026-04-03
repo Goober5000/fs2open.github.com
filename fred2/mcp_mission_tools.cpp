@@ -3818,7 +3818,6 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	sexp_variable_sort();
-	mcp_sexp_forest_mark_dirty();
 	mark_modified("MCP: create SEXP variable %s", name);
 
 	// Re-lookup after sort since index may have changed
@@ -3892,7 +3891,8 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	bool changed = false;
 
 	// Update SEXP node references if name changed
-	if (new_name && strcmp(old_name, new_name) != 0) {
+	bool renamed = new_name && strcmp(old_name, new_name) != 0;
+	if (renamed) {
 		update_sexp_node_variable_references(old_name, new_name);
 		changed = true;
 	}
@@ -3908,11 +3908,13 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	// Apply the modification
 	sexp_fred_modify_variable(final_value, final_name, idx, final_type);
 
-	if (new_name && strcmp(old_name, new_name) != 0)
+	if (renamed)
 		sexp_variable_sort();
 
 	if (changed) {
-		mcp_sexp_forest_mark_dirty();
+		// Only the rename path modifies Sexp_nodes; value/type/flag changes don't
+		if (renamed)
+			mcp_sexp_forest_mark_dirty();
 		mark_modified("MCP: update SEXP variable %s", final_name);
 	}
 
