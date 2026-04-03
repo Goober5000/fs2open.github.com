@@ -469,11 +469,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: create message %s", name);
 
-	// Return the created message
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index - Num_builtin_messages + 1));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_message_json(Messages[target_index], target_index, true));
 	req->success = true;
 }
 
@@ -889,11 +885,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: create event %s", name);
 
-	// Return the created event
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index + 1));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_event_json(Mission_events[target_index], target_index, true));
 	req->success = true;
 }
 
@@ -1348,9 +1340,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: create cmd brief stage %d", target + 1);
 
-	json_t *data = json_object();
-	json_object_set_new(data, "index", json_integer(target + 1));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(cb->stage[target], target));
 	req->success = true;
 }
 
@@ -1613,10 +1603,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 
 	mark_modified("MCP: create goal %s", name);
 
-	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(name));
-	json_object_set_new(data, "index", json_integer(target_index + 1));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_goal_json(Mission_goals[target_index], target_index, true));
 	req->success = true;
 }
 
@@ -1914,9 +1901,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 	mark_modified("MCP: create fiction viewer stage %d", target + 1);
 
-	json_t *result = json_object();
-	json_object_set_new(result, "index", json_integer(target + 1));
-	req->result_json = make_json_tool_result(result);
+	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(Fiction_viewer_stages[target], target));
 	req->success = true;
 }
 
@@ -2164,9 +2149,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	mcp_sexp_forest_mark_dirty({ s.formula });
 	mark_modified("MCP: create debriefing stage %d", target + 1);
 
-	json_t *data = json_object();
-	json_object_set_new(data, "index", json_integer(target + 1));
-	req->result_json = make_json_tool_result(data);
+	req->result_json = make_json_tool_result(build_debrief_stage_json(db->stages[target], target));
 	req->success = true;
 }
 
@@ -2399,10 +2382,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	Jumpnode_editor_dialog.initialize_data(1);
 	mark_modified("MCP: create jump node %s", name);
 
-	json_t *result = json_object();
-	json_object_set_new(result, "name", json_string(name));
-	json_object_set_new(result, "index", json_integer(target_index + 1));
-	req->result_json = make_json_tool_result(result);
+	req->result_json = make_json_tool_result(build_jump_node_json(Jump_nodes[target_index], target_index, true));
 	req->success = true;
 }
 
@@ -2628,6 +2608,19 @@ static json_t *build_waypoint_list_json(const waypoint_list &wl, int index, bool
 	return obj;
 }
 
+static json_t *build_waypoint_json(const char *list_name, int one_based_index, const vec3d &pos)
+{
+	char wpt_name[NAME_LENGTH];
+	waypoint_stuff_name(wpt_name, list_name, one_based_index);
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "list", json_string(list_name));
+	json_object_set_new(obj, "index", json_integer(one_based_index));
+	json_object_set_new(obj, "name", json_string(wpt_name));
+	json_object_set_new(obj, "position", build_vec3d_json(pos));
+	return obj;
+}
+
 static void handle_list_waypoint_lists(json_t * /*input*/, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -2757,10 +2750,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	refresh_cur_waypoint();
 	mark_modified("MCP: create waypoint list %s", name);
 
-	json_t *result = json_object();
-	json_object_set_new(result, "name", json_string(name));
-	json_object_set_new(result, "index", json_integer(target_index + 1));
-	req->result_json = make_json_tool_result(result);
+	req->result_json = make_json_tool_result(build_waypoint_list_json(Waypoint_lists[target_index], target_index, true));
 	req->success = true;
 }
 
@@ -2987,15 +2977,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	int one_based = target_index + 1;
 	mark_modified("MCP: create waypoint %s:%d", Waypoint_lists[li].get_name(), one_based);
 
-	char wpt_name[NAME_LENGTH];
-	waypoint_stuff_name(wpt_name, Waypoint_lists[li].get_name(), one_based);
-
-	json_t *result = json_object();
-	json_object_set_new(result, "list", json_string(Waypoint_lists[li].get_name()));
-	json_object_set_new(result, "index", json_integer(one_based));
-	json_object_set_new(result, "name", json_string(wpt_name));
-	json_object_set_new(result, "position", build_vec3d_json(position));
-	req->result_json = make_json_tool_result(result);
+	req->result_json = make_json_tool_result(build_waypoint_json(Waypoint_lists[li].get_name(), one_based, position));
 	req->success = true;
 }
 
@@ -3039,15 +3021,7 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 	if (changed)
 		mark_modified("MCP: update waypoint %s:%d", Waypoint_lists[li].get_name(), *wpt_index);
 
-	char wpt_name[NAME_LENGTH];
-	waypoint_stuff_name(wpt_name, Waypoint_lists[li].get_name(), *wpt_index);
-
-	json_t *result = json_object();
-	json_object_set_new(result, "list", json_string(Waypoint_lists[li].get_name()));
-	json_object_set_new(result, "index", json_integer(*wpt_index));
-	json_object_set_new(result, "name", json_string(wpt_name));
-	json_object_set_new(result, "position", build_vec3d_json(*wpt.get_pos()));
-	req->result_json = make_json_tool_result(result);
+	req->result_json = make_json_tool_result(build_waypoint_json(Waypoint_lists[li].get_name(), *wpt_index, *wpt.get_pos()));
 	req->success = true;
 }
 
