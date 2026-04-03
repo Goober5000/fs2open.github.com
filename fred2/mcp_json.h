@@ -18,8 +18,8 @@ struct color;           // full definition in graphics/2d.h
 // Functions that take McpErrorSink& work with both conventions.
 class McpErrorSink {
 public:
-	explicit McpErrorSink(McpToolRequest *req) : m_req(req), m_err(nullptr) {}
-	explicit McpErrorSink(json_t **err) : m_req(nullptr), m_err(err) {}
+	explicit McpErrorSink(McpToolRequest *req) : m_req(req), m_err(nullptr), m_has_error(false) {}
+	explicit McpErrorSink(json_t **err) : m_req(nullptr), m_err(err), m_has_error(false) {}
 
 	void set_error(const char *fmt, ...);
 	bool has_error() const;
@@ -27,6 +27,7 @@ public:
 private:
 	McpToolRequest *m_req;
 	json_t **m_err;
+	bool m_has_error;
 };
 
 // Build an MCP tool result with a text content item.

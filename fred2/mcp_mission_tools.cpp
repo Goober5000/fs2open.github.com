@@ -349,6 +349,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	// Determine range based on "source" parameter
 	const char *source = get_optional_string(input, "source", sink, true);
+	if (sink.has_error()) return;
 
 	if (source && !check_string_enum(source, message_enum_values, "source", sink))
 		return;
@@ -410,6 +411,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	auto voice_file   = get_optional_filename(input, "voice_filename", sink, false);
 	auto team_str     = get_optional_string(input, "team", sink, true);
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	// Check for duplicate name
 	if (find_item_with_string(Messages, &MMessage::name, name) >= 0) {
@@ -488,10 +490,16 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg = get_optional_string(input, "message", sink, false);
+	auto new_msg      = get_optional_string(input, "message", sink, false);
+	auto persona_str  = get_optional_string(input, "persona", sink, false);
+	auto new_head     = get_optional_filename(input, "talking_head", sink, false);
+	auto new_voice    = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_team_str = get_optional_string(input, "team", sink, true);
+	auto new_name     = get_optional_string(input, "new_name", sink, false);
+	if (sink.has_error()) return;
+
 	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", sink)) return;
 
-	auto persona_str = get_optional_string(input, "persona", sink, false);
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
 		if (persona_str[0]) {
@@ -503,10 +511,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	auto new_head = get_optional_filename(input, "talking_head", sink, false);
-	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
-
-	auto new_team_str = get_optional_string(input, "team", sink, true);
 	std::optional<int> new_team = std::nullopt;
 	if (new_team_str) {
 		if (!check_string_enum(new_team_str, team_enum_values, "team", sink))
@@ -514,7 +518,6 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(new_team_str);
 	}
 
-	auto new_name = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
 		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
@@ -615,6 +618,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -835,6 +839,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	auto objective_text = get_optional_string(input, "objective_text", sink, false);
 	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
+	if (sink.has_error()) return;
 
 	// Auto-set MEF_ flags if parameters provided
 	int mef_flags = 0;
@@ -950,6 +955,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	auto objective_text     = get_optional_string(input, "objective_text", sink, false);
 	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
+	if (sink.has_error()) return;
 
 	// Auto-set MEF_ flags if parameters provided
 	std::optional<int> new_mef_flags;
@@ -1047,6 +1053,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -1235,6 +1242,7 @@ static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", sink, true);
+	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
@@ -1309,6 +1317,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto ani = get_optional_filename(input, "animation_filename", sink, false);
 	auto wave = get_optional_filename(input, "voice_filename", sink, false);
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	// Validate filename lengths
 	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
@@ -1359,6 +1368,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto new_text = get_optional_string(input, "text", sink, false);
 	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false);
 	auto new_wave = get_optional_filename(input, "voice_filename", sink, false);
+	if (sink.has_error()) return;
 
 	// Validate filename lengths
 	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
@@ -1547,6 +1557,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	auto team_str   = get_optional_string(input, "team", sink, true);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
 	auto no_music   = get_optional_bool(input, "no_music", sink);
+	if (sink.has_error()) return;
 
 	// Resolve type
 	int goal_type = PRIMARY_GOAL;
@@ -1647,6 +1658,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	auto team_str   = get_optional_string(input, "team", sink, true);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
 	auto no_music   = get_optional_bool(input, "no_music", sink);
+	if (sink.has_error()) return;
 
 	// Validate type
 	int new_type = -1;
@@ -1743,6 +1755,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -1865,6 +1878,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
 	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
@@ -1921,6 +1935,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto new_bg640 = get_optional_filename(input, "background_640", sink, false);
 	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false);
 	auto new_formula = get_optional_integer(input, "formula", sink);
+	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
 	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
@@ -2042,6 +2057,7 @@ static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", sink, true);
+	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
@@ -2118,6 +2134,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
@@ -2169,6 +2186,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, false);
 	auto new_formula = get_optional_integer(input, "formula", sink);
+	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
 	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
@@ -2343,6 +2361,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	// Validate name against all entity types
 	if (!check_name_conflict("jump node", name, sink)) return;
@@ -2401,6 +2420,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	auto model_file   = get_optional_string(input, "model_filename", sink, false);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
+	if (sink.has_error()) return;
 
 	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
@@ -2503,6 +2523,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -2714,6 +2735,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	auto &points = *points_opt;
 
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	// Validate name against all entity types
 	if (!check_name_conflict("waypoint path", name, sink)) return;
@@ -2764,6 +2786,7 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 	if (!name) return;
 
 	auto new_name = get_optional_string(input, "new_name", sink, true);
+	if (sink.has_error()) return;
 
 	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 
@@ -2820,6 +2843,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -2931,6 +2955,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	if (!pos.has_value()) return;
 
 	auto insert_index = get_optional_integer(input, "index", sink);
+	if (sink.has_error()) return;
 
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
@@ -2994,6 +3019,7 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 	if (!wpt_index.has_value()) return;
 
 	auto new_pos = get_optional_vec3d(input, "position", sink);
+	if (sink.has_error()) return;
 
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
@@ -3056,6 +3082,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 	waypoint_stuff_name(wpt_name, list, *wpt_index);
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for SEXP references unless force is set
 	if (!force.has_value() || !*force) {
@@ -3387,6 +3414,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 	}
 
 	auto depth = get_optional_integer(input, "depth", sink);
+	if (sink.has_error()) return;
 	int max_depth = depth.has_value() ? *depth : -1;
 
 	// Pass 1: collect entries with depths
@@ -4085,16 +4113,17 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto new_name = get_optional_string(input, "new_name", sink, true);
+	auto default_value = get_optional_string(input, "default_value", sink, false);
+	auto type_str = get_optional_string(input, "type", sink, true);
+	if (sink.has_error()) return;
+
 	if (new_name) {
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
 	}
-
-	auto default_value = get_optional_string(input, "default_value", sink, false);
 	if (default_value) {
 		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 	}
 
-	auto type_str = get_optional_string(input, "type", sink, true);
 	int type_bits;
 	if (type_str) {
 		if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
@@ -4180,6 +4209,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	auto force = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
 
 	// Check for references unless force is set
 	if (!force.has_value() || !*force) {
