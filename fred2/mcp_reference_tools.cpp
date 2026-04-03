@@ -184,7 +184,7 @@ static const std::pair<int, const char *> s_opf_names[] = {
 	{ OPF_PROP_CLASS_NAME,             "prop_class_name"                },
 };
 
-static const char *opf_to_string(int opf)
+const char *opf_to_string(int opf)
 {
 	for (const auto &p : s_opf_names)
 		if (p.first == opf)
