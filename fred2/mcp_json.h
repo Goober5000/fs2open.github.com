@@ -36,6 +36,8 @@ void add_number_prop(json_t *props, const char *name, const char *description);
 void add_bool_prop(json_t *props, const char *name, const char *description);
 void add_string_enum_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
 void add_string_array_prop(json_t *props, const char *name, const char *description, const SCP_vector<const char *> &allowed_values);
+void add_object_array_prop(json_t *props, const char *name, const char *description,
+	json_t *item_properties, json_t *item_required = nullptr);
 void add_vec3d_prop(json_t *props, const char *name, const char *description);
 void add_vec3d_array_prop(json_t *props, const char *name, const char *description);
 void add_matrix_prop(json_t *props, const char *name, const char *description);
