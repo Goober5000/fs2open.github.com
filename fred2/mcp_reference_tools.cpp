@@ -3144,14 +3144,12 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 	int arg_index = get_optional_integer(arguments, "arg_index", sink).value_or(-1);
 	if (err) return err;
 
-	// If context was requested and the forest is dirty, rebuild it first.
+	// If the forest is dirty, rebuild it first.
 	// Retry a few times because the forest can be marked dirty again between
 	// the rebuild completing on the main thread and our call to get_listing.
-	if (parent_node >= 0) {
-		for (int attempt = 0; attempt < 3 && mcp_sexp_forest_is_dirty(); attempt++) {
-			json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
-			json_decref(rebuild_result);
-		}
+	for (int attempt = 0; attempt < 3 && mcp_sexp_forest_is_dirty(); attempt++) {
+		json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
+		json_decref(rebuild_result);
 	}
 
 	// Get the value list from the forest (or with no context if parent_node < 0)
