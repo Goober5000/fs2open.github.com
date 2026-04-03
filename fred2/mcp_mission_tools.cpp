@@ -64,26 +64,22 @@ static json_t *build_syntax_error_json(int node)
 // SEXP formula validation
 // ---------------------------------------------------------------------------
 
-static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpToolRequest *req)
+static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink &sink)
 {
 	// Range check
-	if (!check_int_range(node, 0, Num_sexp_nodes - 1, "formula", req))
+	if (!check_int_range(node, 0, Num_sexp_nodes - 1, "formula", sink))
 		return false;
 
 	// Check node is in use
 	if (Sexp_nodes[node].type == SEXP_NOT_USED) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"SEXP node %d is not in use", node);
+		sink.set_error("SEXP node %d is not in use", node);
 		return false;
 	}
 
 	// Check operator return type
 	int op_const = get_operator_const(node);
 	if (op_const == OP_NOT_AN_OP) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"SEXP node %d (\"%s\") is not a valid SEXP operator",
+		sink.set_error("SEXP node %d (\"%s\") is not a valid SEXP operator",
 			node, Sexp_nodes[node].text);
 		return false;
 	}
@@ -99,9 +95,7 @@ static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpToo
 			case OPR_STRING: actual_str = "OPR_STRING"; break;
 			default:         actual_str = "unknown"; break;
 		}
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Formula node %d (\"%s\") has return type %s, but this entity requires %s",
+		sink.set_error("Formula node %d (\"%s\") has return type %s, but this entity requires %s",
 			node, Sexp_nodes[node].text, actual_str, expected_str);
 		return false;
 	}
@@ -111,14 +105,11 @@ static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpToo
 	if (syntax_err) {
 		const char *err_msg = json_string_value(json_object_get(syntax_err, "error_message"));
 		const char *bad_text = json_string_value(json_object_get(syntax_err, "bad_node_text"));
-		req->success = false;
 		if (bad_text && bad_text[0])
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Formula node %d has syntax error: %s (at \"%s\")",
+			sink.set_error("Formula node %d has syntax error: %s (at \"%s\")",
 				node, err_msg ? err_msg : "unknown", bad_text);
 		else
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Formula node %d has syntax error: %s",
+			sink.set_error("Formula node %d has syntax error: %s",
 				node, err_msg ? err_msg : "unknown");
 		json_decref(syntax_err);
 		return false;
@@ -278,6 +269,7 @@ static json_t *flags_to_json_array(int bitmask, const flag_entry entries[], size
 static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_entry entries[], size_t count,
 	const char *param_name, int &out_flags, McpToolRequest *req)
 {
+	McpErrorSink sink(req);
 	auto lookup_fn = [&](const char *str)->int
 	{
 		for (size_t i = 0; i < count; i++)
@@ -288,7 +280,7 @@ static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_
 
 	out_flags = 0;
 	for (const auto &s : strings) {
-		int i = check_lookup(s.c_str(), lookup_fn, param_name, req);
+		int i = check_lookup(s.c_str(), lookup_fn, param_name, sink);
 		if (i < 0)
 			return false;
 		out_flags |= entries[i].bit;
@@ -356,10 +348,11 @@ static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, b
 
 static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
+	McpErrorSink sink(req);
 	// Determine range based on "source" parameter
 	const char *source = get_optional_string(input, "source", true);
 
-	if (source && !check_string_enum(source, message_enum_values, "source", req))
+	if (source && !check_string_enum(source, message_enum_values, "source", sink))
 		return;
 
 	int start, end;
@@ -368,7 +361,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 		end = Num_builtin_messages;
 	} else {
 		// Default: mission messages — check for conflicting dialogs
-		if (!validate(validate_dialog_for_messages, req)) return;
+		if (!validate(validate_dialog_for_messages, sink)) return;
 		start = Num_builtin_messages;
 		end = Num_messages;
 	}
@@ -383,19 +376,20 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
-	const char *name = get_required_string(input, "name", req, false);
+	McpErrorSink sink(req);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	// Find the message
 	int idx = find_item_with_string(Messages, &MMessage::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Message", name);
+		set_not_found_error(sink,"Message", name);
 		return;
 	}
 
 	// Check for conflicting dialogs if this is a mission-specific message
 	if (idx >= Num_builtin_messages) {
-		if (!validate(validate_dialog_for_messages, req)) return;
+		if (!validate(validate_dialog_for_messages, sink)) return;
 	}
 
 	req->result_json = make_json_tool_result(build_message_json(Messages[idx], idx, true));
@@ -404,13 +398,14 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 
 static void handle_create_message(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_messages, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_messages, sink)) return;
 
-	auto name    = get_required_string(input, "name", req, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+	auto name    = get_required_string(input, "name", sink, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
-	auto message = get_required_string(input, "message", req, false);
-	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", req)) return;
+	auto message = get_required_string(input, "message", sink, false);
+	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", sink)) return;
 
 	auto persona_str  = get_optional_string(input, "persona", false);
 	auto talking_head = get_optional_filename(input, "talking_head", false);
@@ -429,14 +424,14 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// Look up persona by name
 	int persona_index = -1;
 	if (persona_str && persona_str[0]) {
-		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
+		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
 		if (persona_index < 0) return;
 	}
 
 	// Validate team
 	int multi_team = -1;
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return;
 		multi_team = team_index_from_name(team_str);
 	}
@@ -449,7 +444,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	} else {
 		// Caller specifies a mission-relative index (1 = first mission message)
 		// Note: the upper bound is allowed, and means append
-		if (!check_int_range(*insert_index, 1, Num_messages - Num_builtin_messages + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, Num_messages - Num_builtin_messages + 1, "index", sink))
 			return;
 		target_index = Num_builtin_messages + *insert_index - 1;
 	}
@@ -488,26 +483,27 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 
 static void handle_update_message(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_messages, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_messages, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		set_not_found_error(req, "Message", name);
+		set_not_found_error(sink,"Message", name);
 		return;
 	}
 
 	auto new_msg = get_optional_string(input, "message", false);
-	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", req)) return;
+	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", sink)) return;
 
 	auto persona_str = get_optional_string(input, "persona", false);
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
 		if (persona_str[0]) {
-			int persona_idx = check_lookup(persona_str, message_persona_name_lookup, "persona", req);
+			int persona_idx = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
 			if (persona_idx < 0) return;
 			persona_index = persona_idx;
 		} else {
@@ -521,14 +517,14 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	auto new_team_str = get_optional_string(input, "team", true);
 	std::optional<int> new_team = std::nullopt;
 	if (new_team_str) {
-		if (!check_string_enum(new_team_str, team_enum_values, "team", req))
+		if (!check_string_enum(new_team_str, team_enum_values, "team", sink))
 			return;
 		new_team = team_index_from_name(new_team_str);
 	}
 
 	auto new_name = get_optional_string(input, "new_name", false);
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -607,15 +603,16 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 static void handle_delete_message(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_messages, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_messages, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		set_not_found_error(req, "Message", name);
+		set_not_found_error(sink,"Message", name);
 		return;
 	}
 
@@ -764,7 +761,8 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 
 static void handle_list_events(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_events, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_events, sink)) return;
 
 	json_t *arr = json_array();
 	for (int i = 0; i < (int)Mission_events.size(); i++)
@@ -776,14 +774,15 @@ static void handle_list_events(json_t * /*input*/, McpToolRequest *req)
 
 static void handle_get_event(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_events, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", req, false);
+	auto name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Event", name);
+		set_not_found_error(sink,"Event", name);
 		return;
 	}
 
@@ -793,16 +792,15 @@ static void handle_get_event(json_t *input, McpToolRequest *req)
 
 static void handle_create_event(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_events, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
 	// Check for duplicate name
 	if (find_item_with_string(Mission_events, &mission_event::name, name) >= 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"An event with name '%s' already exists", name);
+		sink.set_error("An event with name '%s' already exists", name);
 		return;
 	}
 
@@ -810,14 +808,14 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	// Optional parameters
 	auto formula       = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
 	auto interval      = get_optional_integer(input, "interval");
 
 	auto units = get_optional_string(input, "chain_and_interval_units", true);
-	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", req))
+	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
 	auto score         = get_optional_integer(input, "score");
@@ -834,7 +832,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto team_str = get_optional_string(input, "team", true);
 	int multi_team = -1;
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return;
 		multi_team = team_index_from_name(team_str);
 	}
@@ -864,7 +862,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Mission_events.size();
 	} else {
-		if (!check_int_range(*insert_index, 1, (int)Mission_events.size() + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Mission_events.size() + 1, "index", sink))
 			return;
 		target_index = *insert_index - 1;
 	}
@@ -911,14 +909,15 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 static void handle_update_event(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_events, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Event", name);
+		set_not_found_error(sink,"Event", name);
 		return;
 	}
 
@@ -927,7 +926,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	// Validate new_name
 	auto new_name      = get_optional_string(input, "new_name", false);
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -945,14 +944,14 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto formula       = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained");
 	auto repeat_count  = get_optional_integer(input, "repeat_count");
 	auto trigger_count = get_optional_integer(input, "trigger_count");
 	auto interval      = get_optional_integer(input, "interval");
 
 	auto units = get_optional_string(input, "chain_and_interval_units", true);
-	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", req))
+	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
 	auto score         = get_optional_integer(input, "score");
@@ -966,7 +965,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto team_str = get_optional_string(input, "team", true);
 	std::optional<int> new_team = std::nullopt;
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return;
 		new_team = team_index_from_name(team_str);
 	}
@@ -1054,14 +1053,15 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 static void handle_delete_event(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_events, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Event", name);
+		set_not_found_error(sink,"Event", name);
 		return;
 	}
 
@@ -1121,12 +1121,13 @@ struct MoveSwapConfig
 
 static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (!validate(cfg.validate_dialog, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(cfg.validate_dialog, sink)) return;
 
-	auto from_index = get_required_integer(input, "from_index", req);
-	if (!from_index.has_value() || !check_int_range(*from_index, cfg.min_index(), cfg.max_index(), "from_index", req)) return;
-	auto to_index = get_required_integer(input, "to_index", req);
-	if (!to_index.has_value() || !check_int_range(*to_index, cfg.min_index(), cfg.max_index(), "to_index", req)) return;
+	auto from_index = get_required_integer(input, "from_index", sink);
+	if (!from_index.has_value() || !check_int_range(*from_index, cfg.min_index(), cfg.max_index(), "from_index", sink)) return;
+	auto to_index = get_required_integer(input, "to_index", sink);
+	if (!to_index.has_value() || !check_int_range(*to_index, cfg.min_index(), cfg.max_index(), "to_index", sink)) return;
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
@@ -1150,12 +1151,13 @@ static void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSw
 
 static void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfig &cfg)
 {
-	if (!validate(cfg.validate_dialog, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(cfg.validate_dialog, sink)) return;
 
-	auto index_a = get_required_integer(input, "index_a", req);
-	if (!index_a.has_value() || !check_int_range(*index_a, cfg.min_index(), cfg.max_index(), "index_a", req)) return;
-	auto index_b = get_required_integer(input, "index_b", req);
-	if (!index_b.has_value() || !check_int_range(*index_b, cfg.min_index(), cfg.max_index(), "index_b", req)) return;
+	auto index_a = get_required_integer(input, "index_a", sink);
+	if (!index_a.has_value() || !check_int_range(*index_a, cfg.min_index(), cfg.max_index(), "index_a", sink)) return;
+	auto index_b = get_required_integer(input, "index_b", sink);
+	if (!index_b.has_value() || !check_int_range(*index_b, cfg.min_index(), cfg.max_index(), "index_b", sink)) return;
 
 	if (index_a != index_b) {
 		cfg.do_swap(*index_a, *index_b);
@@ -1252,11 +1254,12 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 // Returns nullptr and sets error on failure.
 static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 {
+	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", true);
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return nullptr;
 		if (reject_team_none(team_str, "command briefing", req)) return nullptr;
 		team_index = team_index_from_name(team_str);
@@ -1278,7 +1281,8 @@ static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int inde
 
 static void handle_list_cmd_brief_stages(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
@@ -1293,14 +1297,15 @@ static void handle_list_cmd_brief_stages(json_t *input, McpToolRequest *req)
 
 static void handle_get_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
 	req->result_json = make_json_tool_result(build_cmd_brief_stage_json(cb->stage[*index - 1], *index - 1));
 	req->success = true;
@@ -1308,7 +1313,8 @@ static void handle_get_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
@@ -1320,7 +1326,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", req, false);
+	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
 	auto ani = get_optional_filename(input, "ani_filename", false);
@@ -1328,8 +1334,8 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Validate filename lengths
-	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
-	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "wave_filename", req)) return;
+	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "ani_filename", sink)) return;
+	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "wave_filename", sink)) return;
 
 	// Resolve insert position
 	int target;
@@ -1337,7 +1343,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		target = cb->num_stages;
 	} else {
 		// Upper bound is num_stages + 1 (append position)
-		if (!check_int_range(*insert_index, 1, cb->num_stages + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, cb->num_stages + 1, "index", sink))
 			return;
 		target = *insert_index - 1;
 	}
@@ -1367,22 +1373,23 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
 	auto new_ani  = get_optional_filename(input, "ani_filename", false);
 	auto new_wave = get_optional_filename(input, "wave_filename", false);
 
 	// Validate filename lengths
-	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", req)) return;
-	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "wave_filename", req)) return;
+	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", sink)) return;
+	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "wave_filename", sink)) return;
 
 	cmd_brief_stage &s = cb->stage[*index - 1];
 	bool changed = false;
@@ -1410,14 +1417,15 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 static void handle_delete_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_cmd_brief, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
 	auto *cb = get_cmd_brief_for_team(input, req);
 	if (!cb) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, cb->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
 	array_remove_slot(cb->stage, cb->num_stages, *index - 1);
 
@@ -1512,7 +1520,8 @@ static json_t *build_goal_json(const mission_goal &goal, int index, bool include
 
 static void handle_list_goals(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_goals, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_goals, sink)) return;
 
 	json_t *arr = json_array();
 	for (int i = 0; i < (int)Mission_goals.size(); i++)
@@ -1524,14 +1533,15 @@ static void handle_list_goals(json_t * /*input*/, McpToolRequest *req)
 
 static void handle_get_goal(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_goals, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", req, false);
+	auto name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Goal", name);
+		set_not_found_error(sink,"Goal", name);
 		return;
 	}
 
@@ -1541,10 +1551,11 @@ static void handle_get_goal(json_t *input, McpToolRequest *req)
 
 static void handle_create_goal(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_goals, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
 	// Check for duplicate name
 	if (find_item_with_string(Mission_goals, &mission_goal::name, name) >= 0) {
@@ -1559,7 +1570,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Optional parameters
 	auto type_str   = get_optional_string(input, "goal_type", true);
 	auto formula    = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1569,7 +1580,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Resolve type
 	int goal_type = PRIMARY_GOAL;
 	if (type_str) {
-		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", req))
+		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", sink))
 			return;
 		goal_type = goal_type_from_name(type_str);
 	}
@@ -1577,7 +1588,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Resolve team
 	int team = 0;
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return;
 		team = team_index_from_name(team_str);
 	}
@@ -1587,7 +1598,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = (int)Mission_goals.size();
 	} else {
-		if (!check_int_range(*insert_index, 1, (int)Mission_goals.size() + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Mission_goals.size() + 1, "index", sink))
 			return;
 		target_index = *insert_index - 1;
 	}
@@ -1630,14 +1641,15 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 
 static void handle_update_goal(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_goals, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Goal", name);
+		set_not_found_error(sink,"Goal", name);
 		return;
 	}
 
@@ -1646,7 +1658,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Validate new_name
 	auto new_name = get_optional_string(input, "new_name", false);
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 		if (!new_name[0]) {
 			req->success = false;
 			snprintf(req->result_message, sizeof(req->result_message),
@@ -1665,7 +1677,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Extract optional fields
 	auto type_str   = get_optional_string(input, "goal_type", true);
 	auto formula    = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto message    = get_optional_string(input, "message", false);
 	auto score      = get_optional_integer(input, "score");
 	auto team_str   = get_optional_string(input, "team", true);
@@ -1675,7 +1687,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Validate type
 	int new_type = -1;
 	if (type_str) {
-		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", req))
+		if (!check_string_enum(type_str, goal_type_enum_values, "goal_type", sink))
 			return;
 		new_type = goal_type_from_name(type_str);
 	}
@@ -1683,7 +1695,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Validate team
 	std::optional<int> new_team = std::nullopt;
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return;
 		new_team = team_index_from_name(team_str);
 	}
@@ -1754,14 +1766,15 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 
 static void handle_delete_goal(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_goals, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
 	if (idx < 0) {
-		set_not_found_error(req, "Goal", name);
+		set_not_found_error(sink,"Goal", name);
 		return;
 	}
 
@@ -1850,7 +1863,8 @@ static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage
 
 static void handle_list_fiction_viewer_stages(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_fiction, sink)) return;
 
 	json_t *arr = json_array();
 	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++)
@@ -1862,11 +1876,12 @@ static void handle_list_fiction_viewer_stages(json_t * /*input*/, McpToolRequest
 
 static void handle_get_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
 	req->result_json = make_json_tool_result(build_fiction_viewer_stage_json(Fiction_viewer_stages[*index - 1], *index - 1));
 	req->success = true;
@@ -1874,10 +1889,11 @@ static void handle_get_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 
 static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto story = get_required_filename(input, "story_filename", req);
-	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
+	auto story = get_required_filename(input, "story_filename", sink);
+	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
 
 	auto font  = get_optional_filename(input, "font_filename", true);
 	auto voice = get_optional_filename(input, "voice_filename", true);
@@ -1885,20 +1901,20 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto bg640 = get_optional_filename(input, "background_640", true);
 	auto bg1024 = get_optional_filename(input, "background_1024", true);
 	auto formula = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index");
 
-	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
-	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", req)) return;
-	if (ui && !check_string_enum(ui, fiction_ui_name_values, "ui_name", req)) return;
-	if (bg640 && !check_string_length(bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
-	if (bg1024 && !check_string_length(bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
+	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
+	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
+	if (ui && !check_string_enum(ui, fiction_ui_name_values, "ui_name", sink)) return;
+	if (bg640 && !check_string_length(bg640, MAX_FILENAME_LEN - 1, "background_640", sink)) return;
+	if (bg1024 && !check_string_length(bg1024, MAX_FILENAME_LEN - 1, "background_1024", sink)) return;
 
 	int target;
 	if (!insert_index.has_value()) {
 		target = (int)Fiction_viewer_stages.size();
 	} else {
-		if (!check_int_range(*insert_index, 1, (int)Fiction_viewer_stages.size() + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Fiction_viewer_stages.size() + 1, "index", sink))
 			return;
 		target = *insert_index - 1;
 	}
@@ -1931,11 +1947,12 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
 	auto new_story = get_optional_filename(input, "story_filename", false);
 	auto new_font  = get_optional_filename(input, "font_filename", false);
@@ -1944,19 +1961,19 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto new_bg640 = get_optional_filename(input, "background_640", false);
 	auto new_bg1024 = get_optional_filename(input, "background_1024", false);
 	auto new_formula = get_optional_integer(input, "formula");
-	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;
+	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
-	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", req)) return;
-	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", req)) return;
-	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", req)) return;
+	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
+	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
+	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 	if (new_ui) {
 		if (!new_ui[0])
 			new_ui = fiction_ui_name_values[0];
-		else if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", req))
+		else if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", sink))
 			return;
 	}
-	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", req)) return;
-	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", req)) return;
+	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", sink)) return;
+	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", sink)) return;
 
 	fiction_viewer_stage &s = Fiction_viewer_stages[*index - 1];
 	bool changed = false;
@@ -2002,11 +2019,12 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 
 static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_fiction, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", req)) return;
+	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
 	// Free the SEXP formula
 	int formula = Fiction_viewer_stages[*index - 1].formula;
@@ -2062,11 +2080,12 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 // Defaults to Team 1. Rejects "none".
 static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
 {
+	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", true);
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", req))
+		if (!check_string_enum(team_str, team_enum_values, "team", sink))
 			return nullptr;
 		if (reject_team_none(team_str, "debriefing", req)) return nullptr;
 		team_index = team_index_from_name(team_str);
@@ -2088,7 +2107,8 @@ static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 
 static void handle_list_debriefing_stages(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_debriefing, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
 	auto *db = get_debriefing_for_team(input, req);
 	if (!db) return;
@@ -2103,14 +2123,15 @@ static void handle_list_debriefing_stages(json_t *input, McpToolRequest *req)
 
 static void handle_get_debriefing_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_debriefing, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
 	auto *db = get_debriefing_for_team(input, req);
 	if (!db) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	req->result_json = make_json_tool_result(build_debrief_stage_json(db->stages[*index - 1], *index - 1));
 	req->success = true;
@@ -2118,7 +2139,8 @@ static void handle_get_debriefing_stage(json_t *input, McpToolRequest *req)
 
 static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_debriefing, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
 	auto *db = get_debriefing_for_team(input, req);
 	if (!db) return;
@@ -2130,22 +2152,22 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", req, false);
+	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
 	auto voice = get_optional_filename(input, "voice", false);
 	auto rec_text = get_optional_string(input, "recommendation_text", false);
 	auto formula = get_optional_integer(input, "formula");
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, req)) return;
+	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index");
 
-	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice", req)) return;
+	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice", sink)) return;
 
 	int target;
 	if (!insert_index.has_value()) {
 		target = db->num_stages;
 	} else {
-		if (!check_int_range(*insert_index, 1, db->num_stages + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, db->num_stages + 1, "index", sink))
 			return;
 		target = *insert_index - 1;
 	}
@@ -2179,22 +2201,23 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 
 static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_debriefing, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
 	auto *db = get_debriefing_for_team(input, req);
 	if (!db) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
 	auto new_voice = get_optional_filename(input, "voice", false);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", false);
 	auto new_formula = get_optional_integer(input, "formula");
-	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, req)) return;
+	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
-	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice", req)) return;
+	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice", sink)) return;
 
 	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;
@@ -2229,14 +2252,15 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 
 static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_debriefing, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
 	auto *db = get_debriefing_for_team(input, req);
 	if (!db) return;
 
-	auto index = get_required_integer(input, "index", req);
+	auto index = get_required_integer(input, "index", sink);
 	if (!index.has_value()) return;
-	if (!check_int_range(*index, 1, db->num_stages, "index", req)) return;
+	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	int formula = db->stages[*index - 1].formula;
 	if (formula >= 0)
@@ -2318,7 +2342,8 @@ static json_t *build_jump_node_json(const CJumpNode &jn, int index, bool include
 
 static void handle_list_jump_nodes(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
 	json_t *arr = json_array();
 	int index = 0;
@@ -2331,10 +2356,11 @@ static void handle_list_jump_nodes(json_t * /*input*/, McpToolRequest *req)
 
 static void handle_get_jump_node(json_t *input, McpToolRequest *req)
 {
-	const char *name = get_required_string(input, "name", req, false);
+	McpErrorSink sink(req);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
 	int index = jumpnode_lookup(name);
 	if (index >= 0) {
@@ -2343,17 +2369,18 @@ static void handle_get_jump_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	set_not_found_error(req, "Jump node", name);
+	set_not_found_error(sink,"Jump node", name);
 }
 
 static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
-	auto pos = get_required_vec3d(input, "position", req);
+	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
 	auto display_name = get_optional_string(input, "display_name", false);
@@ -2364,17 +2391,17 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Validate name against all entity types
-	if (!check_name_conflict("jump node", name, req)) return;
+	if (!check_name_conflict("jump node", name, sink)) return;
 
-	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", req)) return;
-	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", req)) return;
+	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
+	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", sink)) return;
 
 	// Validate insert index
 	int target_index;
 	if (!insert_index.has_value()) {
 		target_index = (int)Jump_nodes.size();
 	} else {
-		if (!check_int_range(*insert_index, 1, (int)Jump_nodes.size() + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Jump_nodes.size() + 1, "index", sink))
 			return;
 		target_index = *insert_index - 1;
 	}
@@ -2410,9 +2437,10 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	const char *name = get_required_string(input, "name", req, false);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	auto new_name     = get_optional_string(input, "new_name", true);
@@ -2423,14 +2451,14 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	auto show_polys   = get_optional_bool(input, "show_polys");
 	auto hidden       = get_optional_bool(input, "hidden");
 
-	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
-	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", req)) return;
-	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", req)) return;
+	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
+	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
+	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", sink)) return;
 
 	// Find the jump node
 	int index = jumpnode_lookup(name);
 	if (index < 0) {
-		set_not_found_error(req, "Jump node", name);
+		set_not_found_error(sink,"Jump node", name);
 		return;
 	}
 	auto &jn = Jump_nodes[index];
@@ -2439,7 +2467,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 
 	// Rename (with SEXP reference update)
 	if (new_name && stricmp(jn.GetName(), new_name) != 0) {
-		if (!check_name_conflict("jump node", new_name, req, -1, -1, -1, index)) return;
+		if (!check_name_conflict("jump node", new_name, sink, -1, -1, -1, index)) return;
 		update_sexp_references(jn.GetName(), new_name, OPF_JUMP_NODE_NAME);
 		jn.SetName(new_name);
 		changed = true;
@@ -2510,15 +2538,16 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 
 static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_jump_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	const char *name = get_required_string(input, "name", req, false);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	// Find the jump node
 	int index = jumpnode_lookup(name);
 	if (index < 0 ) {
-		set_not_found_error(req, "Jump node", name);
+		set_not_found_error(sink,"Jump node", name);
 		return;
 	}
 
@@ -2632,7 +2661,8 @@ static json_t *build_waypoint_list_json(const waypoint_list &wl, int index, bool
 
 static void handle_list_waypoint_lists(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
 	json_t *arr = json_array();
 	for (int i = 0; i < (int)Waypoint_lists.size(); i++)
@@ -2644,10 +2674,11 @@ static void handle_list_waypoint_lists(json_t * /*input*/, McpToolRequest *req)
 
 static void handle_get_waypoint_list(json_t *input, McpToolRequest *req)
 {
-	const char *name = get_required_string(input, "name", req, false);
+	McpErrorSink sink(req);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
 	int index = find_matching_waypoint_list_index(name);
 	if (index >= 0) {
@@ -2656,7 +2687,7 @@ static void handle_get_waypoint_list(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	set_not_found_error(req, "Waypoint list", name);
+	set_not_found_error(sink,"Waypoint list", name);
 }
 
 // Helper to rename SEXP and AI goal references for an individual waypoint.
@@ -2710,25 +2741,26 @@ static void rename_waypoint_sexp_refs_from_temp(const char *temp_name, const cha
 
 static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", req)) return;
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
 
 	SCP_vector<vec3d> points;
-	if (!get_required_vec3d_array(input, "points", points, req, 1)) return;
+	if (!get_required_vec3d_array(input, "points", points, sink, 1)) return;
 
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Validate name against all entity types
-	if (!check_name_conflict("waypoint path", name, req)) return;
+	if (!check_name_conflict("waypoint path", name, sink)) return;
 
 	// Validate insert index
 	int target_index;
 	if (!insert_index.has_value()) {
 		target_index = (int)Waypoint_lists.size();
 	} else {
-		if (!check_int_range(*insert_index, 1, (int)Waypoint_lists.size() + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, (int)Waypoint_lists.size() + 1, "index", sink))
 			return;
 		target_index = *insert_index - 1;
 	}
@@ -2765,19 +2797,20 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 
 static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	const char *name = get_required_string(input, "name", req, false);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	auto new_name = get_optional_string(input, "new_name", true);
 
-	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", req)) return;
+	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 
 	// Find the waypoint list
 	int index = find_matching_waypoint_list_index(name);
 	if (index < 0) {
-		set_not_found_error(req, "Waypoint list", name);
+		set_not_found_error(sink,"Waypoint list", name);
 		return;
 	}
 	auto &wl = Waypoint_lists[index];
@@ -2786,7 +2819,7 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 
 	// Rename (with SEXP and AI goal reference updates)
 	if (new_name && stricmp(wl.get_name(), new_name) != 0) {
-		if (!check_name_conflict("waypoint path", new_name, req, -1, -1, index)) return;
+		if (!check_name_conflict("waypoint path", new_name, sink, -1, -1, index)) return;
 
 		const char *old_name = wl.get_name();
 
@@ -2813,15 +2846,16 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 
 static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	const char *name = get_required_string(input, "name", req, false);
+	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
 	// Find the waypoint list
 	int index = find_matching_waypoint_list_index(name);
 	if (index < 0) {
-		set_not_found_error(req, "Waypoint list", name);
+		set_not_found_error(sink,"Waypoint list", name);
 		return;
 	}
 
@@ -2931,12 +2965,13 @@ static void do_waypoint_move(int li, int from, int to);
 
 static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", req, false);
+	auto list = get_required_string(input, "list", sink, false);
 	if (!list) return;
 
-	auto pos = get_required_vec3d(input, "position", req);
+	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
 	auto insert_index = get_optional_integer(input, "index");
@@ -2944,7 +2979,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
 	if (li < 0) {
-		set_not_found_error(req, "Waypoint list", list);
+		set_not_found_error(sink,"Waypoint list", list);
 		return;
 	}
 
@@ -2955,7 +2990,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	if (!insert_index.has_value()) {
 		target_index = wpt_count;
 	} else {
-		if (!check_int_range(*insert_index, 1, wpt_count + 1, "index", req))
+		if (!check_int_range(*insert_index, 1, wpt_count + 1, "index", sink))
 			return;
 		target_index = *insert_index - 1;
 	}
@@ -3003,12 +3038,13 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 
 static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", req, false);
+	auto list = get_required_string(input, "list", sink, false);
 	if (!list) return;
 
-	auto wpt_index = get_required_integer(input, "index", req);
+	auto wpt_index = get_required_integer(input, "index", sink);
 	if (!wpt_index.has_value()) return;
 
 	auto new_pos = get_optional_vec3d(input, "position");
@@ -3016,12 +3052,12 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
 	if (li < 0) {
-		set_not_found_error(req, "Waypoint list", list);
+		set_not_found_error(sink,"Waypoint list", list);
 		return;
 	}
 
 	auto &wpts = Waypoint_lists[li].get_waypoints();
-	if (!check_int_range(*wpt_index, 1, (int)wpts.size(), "index", req))
+	if (!check_int_range(*wpt_index, 1, (int)wpts.size(), "index", sink))
 		return;
 
 	auto &wpt = wpts[*wpt_index - 1];
@@ -3054,23 +3090,24 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 
 static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_waypoint_lists, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", req, false);
+	auto list = get_required_string(input, "list", sink, false);
 	if (!list) return;
 
-	auto wpt_index = get_required_integer(input, "index", req);
+	auto wpt_index = get_required_integer(input, "index", sink);
 	if (!wpt_index.has_value()) return;
 
 	// Find the waypoint list
 	int li = find_matching_waypoint_list_index(list);
 	if (li < 0) {
-		set_not_found_error(req, "Waypoint list", list);
+		set_not_found_error(sink,"Waypoint list", list);
 		return;
 	}
 
 	auto &wpts = Waypoint_lists[li].get_waypoints();
-	if (!check_int_range(*wpt_index, 1, (int)wpts.size(), "index", req))
+	if (!check_int_range(*wpt_index, 1, (int)wpts.size(), "index", sink))
 		return;
 
 	int count = (int)wpts.size();
@@ -3249,12 +3286,13 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 
 static void handle_move_waypoint(json_t *input, McpToolRequest *req)
 {
-	auto list = get_required_string(input, "list", req, false);
+	McpErrorSink sink(req);
+	auto list = get_required_string(input, "list", sink, false);
 	if (!list) return;
 
 	int li = find_matching_waypoint_list_index(list);
 	if (li < 0) {
-		set_not_found_error(req, "Waypoint list", list);
+		set_not_found_error(sink,"Waypoint list", list);
 		return;
 	}
 
@@ -3264,12 +3302,13 @@ static void handle_move_waypoint(json_t *input, McpToolRequest *req)
 
 static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
 {
-	auto list = get_required_string(input, "list", req, false);
+	McpErrorSink sink(req);
+	auto list = get_required_string(input, "list", sink, false);
 	if (!list) return;
 
 	int li = find_matching_waypoint_list_index(list);
 	if (li < 0) {
-		set_not_found_error(req, "Waypoint list", list);
+		set_not_found_error(sink,"Waypoint list", list);
 		return;
 	}
 
@@ -3283,10 +3322,11 @@ static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
 
 static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
-	auto node = get_required_integer(input, "node", req);
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
 	if (!node) return;
-	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
 
@@ -3365,10 +3405,11 @@ static json_t *build_sexp_node_json(int n)
 
 static void handle_get_sexp_node(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
-	auto node = get_required_integer(input, "node", req);
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
 	if (!node) return;
-	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
 	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
@@ -3403,10 +3444,11 @@ static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int dep
 
 static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
-	auto node = get_required_integer(input, "node", req);
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
 	if (!node) return;
-	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req)) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
 	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
@@ -3462,8 +3504,9 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 
 static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
-	const char *text = get_required_string(input, "text", req, true);
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	const char *text = get_required_string(input, "text", sink, true);
 	if (!text)
 		return;
 
@@ -3601,9 +3644,10 @@ static bool is_sexp_attached_to_mission(int node)
 
 static void handle_free_sexp(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
-	auto node = get_required_integer(input, "node", req);
-	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", req))
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
+	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink))
 		return;
 
 	int n = *node;
@@ -3768,11 +3812,12 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 
 static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto op_name = get_required_string(input, "operator", req, true);
+	auto op_name = get_required_string(input, "operator", sink, true);
 	if (!op_name) return;
-	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator", req)) return;
+	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator", sink)) return;
 
 	// Validate operator name
 	int op_idx = get_operator_index(op_name);
@@ -3823,7 +3868,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				return;
 			}
 
-			if (!check_string_enum(type_str, sexp_arg_type_values, "type", req)) {
+			if (!check_string_enum(type_str, sexp_arg_type_values, "type", sink)) {
 				if (next != -1)
 					free_sexp2(next);
 				if (!op_is_locked)
@@ -3908,54 +3953,44 @@ static json_t *build_sexp_variable_json(int index)
 	return obj;
 }
 
-static bool validate_sexp_variable_name(const char *name, McpToolRequest *req, int exclude_index = -1)
+static bool validate_sexp_variable_name(const char *name, McpErrorSink &sink, int exclude_index = -1)
 {
-	if (!check_string_length(name, TOKEN_LENGTH - 1, "name", req))
+	if (!check_string_length(name, TOKEN_LENGTH - 1, "name", sink))
 		return false;
 
 	if (strchr(name, ' ') != nullptr) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Variable names cannot contain spaces");
+		sink.set_error("Variable names cannot contain spaces");
 		return false;
 	}
 
 	auto rval = strcspn(name, "@()[] ;\"\\/");
 	if (rval != strlen(name)) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Invalid character '%c' in variable name", name[rval]);
+		sink.set_error("Invalid character '%c' in variable name", name[rval]);
 		return false;
 	}
 
 	int existing = get_index_sexp_variable_name(name);
 	if (existing >= 0 && existing != exclude_index) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"A SEXP variable with name '%s' already exists", name);
+		sink.set_error("A SEXP variable with name '%s' already exists", name);
 		return false;
 	}
 
 	return true;
 }
 
-static bool validate_sexp_variable_number_value(const char *value, McpToolRequest *req)
+static bool validate_sexp_variable_number_value(const char *value, McpErrorSink &sink)
 {
 	// Validate that value is a valid integer (optional leading minus, then digits)
 	const char *p = value;
 	if (*p == '-' || *p == '+')
 		p++;
 	if (*p == '\0') {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"default_value must be a valid integer for number type variables, got '%s'", value);
+		sink.set_error("default_value must be a valid integer for number type variables, got '%s'", value);
 		return false;
 	}
 	while (*p) {
 		if (*p < '0' || *p > '9') {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"default_value must be a valid integer for number type variables, got '%s'", value);
+			sink.set_error("default_value must be a valid integer for number type variables, got '%s'", value);
 			return false;
 		}
 		p++;
@@ -3965,21 +4000,17 @@ static bool validate_sexp_variable_number_value(const char *value, McpToolReques
 	errno = 0;
 	long val = strtol(value, nullptr, 10);
 	if (errno == ERANGE || val < INT_MIN || val > INT_MAX) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"default_value is out of range for a 32-bit integer, got '%s'", value);
+		sink.set_error("default_value is out of range for a 32-bit integer, got '%s'", value);
 		return false;
 	}
 
 	return true;
 }
 
-static bool validate_sexp_variable_flags(int flags, McpToolRequest *req)
+static bool validate_sexp_variable_flags(int flags, McpErrorSink &sink)
 {
 	if ((flags & SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS) && (flags & SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE)) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"save_on_mission_progress and save_on_mission_close are mutually exclusive");
+		sink.set_error("save_on_mission_progress and save_on_mission_close are mutually exclusive");
 		return false;
 	}
 	return true;
@@ -4020,7 +4051,8 @@ static bool is_variable_referenced_in_sexp_nodes(const char *var_name)
 
 static void handle_list_sexp_variables(json_t * /*input*/, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
 	json_t *arr = json_array();
 	for (int i = 0; i < MAX_SEXP_VARIABLES; i++) {
@@ -4034,14 +4066,15 @@ static void handle_list_sexp_variables(json_t * /*input*/, McpToolRequest *req)
 
 static void handle_get_sexp_variable(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(req, "SEXP variable", name);
+		set_not_found_error(sink,"SEXP variable", name);
 		return;
 	}
 
@@ -4051,24 +4084,25 @@ static void handle_get_sexp_variable(json_t *input, McpToolRequest *req)
 
 static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
-	if (!validate_sexp_variable_name(name, req)) return;
+	if (!validate_sexp_variable_name(name, sink)) return;
 
-	auto default_value = get_required_string(input, "default_value", req, false);
+	auto default_value = get_required_string(input, "default_value", sink, false);
 	if (!default_value) return;
-	if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", req)) return;
+	if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 
-	auto type_str = get_required_string(input, "type", req, true);
+	auto type_str = get_required_string(input, "type", sink, true);
 	if (!type_str) return;
-	if (!check_string_enum(type_str, sexp_var_type_values, "type", req)) return;
+	if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
 
 	int type_bits;
 	if (!stricmp(type_str, "number")) {
 		type_bits = SEXP_VARIABLE_NUMBER;
-		if (!validate_sexp_variable_number_value(default_value, req)) return;
+		if (!validate_sexp_variable_number_value(default_value, sink)) return;
 	} else {
 		type_bits = SEXP_VARIABLE_STRING;
 	}
@@ -4079,14 +4113,12 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	if (flags_arr.has_value()) {
 		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
 			return;
-		if (!validate_sexp_variable_flags(flag_bits, req)) return;
+		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	}
 
 	// Check capacity
 	if (sexp_variable_count() >= MAX_SEXP_VARIABLES) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Maximum number of SEXP variables (%d) reached", MAX_SEXP_VARIABLES);
+		sink.set_error("Maximum number of SEXP variables (%d) reached", MAX_SEXP_VARIABLES);
 		return;
 	}
 
@@ -4109,14 +4141,15 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(req, "SEXP variable", name);
+		set_not_found_error(sink,"SEXP variable", name);
 		return;
 	}
 
@@ -4128,18 +4161,18 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	// Extract optional fields
 	auto new_name = get_optional_string(input, "new_name", true);
 	if (new_name) {
-		if (!validate_sexp_variable_name(new_name, req, idx)) return;
+		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
 	}
 
 	auto default_value = get_optional_string(input, "default_value", false);
 	if (default_value) {
-		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", req)) return;
+		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 	}
 
 	auto type_str = get_optional_string(input, "type", true);
 	int type_bits;
 	if (type_str) {
-		if (!check_string_enum(type_str, sexp_var_type_values, "type", req)) return;
+		if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
 		type_bits = !stricmp(type_str, "number") ? SEXP_VARIABLE_NUMBER : SEXP_VARIABLE_STRING;
 	} else {
 		type_bits = old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING);
@@ -4150,7 +4183,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	if (flags_arr.has_value()) {
 		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
 			return;
-		if (!validate_sexp_variable_flags(flag_bits, req)) return;
+		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	} else {
 		flag_bits = old_type & (SEXP_VARIABLE_SAVE_ON_MISSION_PROGRESS | SEXP_VARIABLE_SAVE_ON_MISSION_CLOSE |
 			SEXP_VARIABLE_SAVE_TO_PLAYER_FILE | SEXP_VARIABLE_NETWORK);
@@ -4159,11 +4192,11 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	// Validate number value if applicable
 	const char *final_value = default_value ? default_value : Sexp_variables[idx].text;
 	if ((type_bits & SEXP_VARIABLE_NUMBER) && default_value) {
-		if (!validate_sexp_variable_number_value(default_value, req)) return;
+		if (!validate_sexp_variable_number_value(default_value, sink)) return;
 	}
 	// Also validate if type changed to number and we're keeping the old value
 	if ((type_bits & SEXP_VARIABLE_NUMBER) && !(old_type & SEXP_VARIABLE_NUMBER) && !default_value) {
-		if (!validate_sexp_variable_number_value(Sexp_variables[idx].text, req)) return;
+		if (!validate_sexp_variable_number_value(Sexp_variables[idx].text, sink)) return;
 	}
 
 	const char *final_name = new_name ? new_name : old_name;
@@ -4207,14 +4240,15 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 {
-	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", req, true);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(req, "SEXP variable", name);
+		set_not_found_error(sink,"SEXP variable", name);
 		return;
 	}
 
