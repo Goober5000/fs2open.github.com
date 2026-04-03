@@ -131,7 +131,8 @@ std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_n
 std::optional<color> get_optional_color(json_t *arguments, const char *param_name);
 
 // Extracts an optional JSON array of strings.
-std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name);
+// If sink is provided, reports an error and returns nullopt when a non-string element is found.
+std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name, McpErrorSink *sink = nullptr);
 
 // Extracts a required JSON array of vec3d objects.  Returns true on success.
 // If min_count > 0, the array must contain at least that many elements.
