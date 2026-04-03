@@ -38,12 +38,21 @@
 // ---------------------------------------------------------------------------
 // Reference tool handlers run on Mongoose worker threads and read global game
 // data arrays (Ship_info, Weapon_info, Species_info, Iff_info, Operators,
-// Intel_info, Ship_types, Personas, etc.) without synchronization.  This is
-// safe because these arrays are populated during game data parsing at startup
-// and are never modified during a FRED session.
+// Intel_info, Ship_types, Personas, etc.) without synchronization.
 //
-// The model_details_cache below is the exception: model loading can happen
-// on-demand from this file, so the cache is protected by a mutex.
+// CONTRACT: These arrays are populated during game data parsing at startup
+// (before mcp_server_start() is called) and MUST NOT be modified while the
+// MCP server is running.  If this invariant ever changes (e.g. hot-reload
+// of table data while the server is active), a reader lock must be added to
+// all reference tool handlers.
+//
+// Lazy-init caches (model_details_cache, scripting_api_cache,
+// reference_notes_cache) are the exceptions: they are populated on first
+// access from worker threads and are protected by their respective mutexes.
+//
+// cfile operations (cfopen, cf_get_file_list, cf_create_default_path_string)
+// are also called from worker threads and are serialized via
+// cfile_access_mutex, defined near load_config_file below.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -1593,6 +1602,12 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 // Config file loading helper
 // ---------------------------------------------------------------------------
 
+// Mutex protecting cfile operations (cf_exists_full, cfopen, cfread, cfclose,
+// cf_get_file_list, cf_create_default_path_string) called from mongoose
+// worker threads.  The cfile subsystem uses global state that is not
+// documented as thread-safe.
+static std::mutex cfile_access_mutex;
+
 // Load a file from the mod's data/config directory.  If try_defaults is true,
 // falls back to the built-in default embedded in the executable.  Returns the
 // file content as a string, or an empty string on failure.
@@ -1600,16 +1615,21 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 {
 	SCP_string content;
 
-	if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
-		CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
-		if (fp) {
-			int len = cfilelength(fp);
-			content.resize(len);		// expand to fit expected data
-			int read_len = cfread(content.data(), 1, len, fp);
-			content.resize(read_len);	// trim trailing null bytes
-			cfclose(fp);
+	{
+		std::lock_guard<std::mutex> lock(cfile_access_mutex);
+		if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
+			CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
+			if (fp) {
+				int len = cfilelength(fp);
+				content.resize(len);		// expand to fit expected data
+				int read_len = cfread(content.data(), 1, len, fp);
+				content.resize(read_len);	// trim trailing null bytes
+				cfclose(fp);
+			}
 		}
-	} else if (try_defaults) {
+	}
+
+	if (content.empty() && try_defaults) {
 		auto def = defaults_get_file(filename);
 		if (def.data)
 			content.assign(reinterpret_cast<const char *>(def.data), def.size);
@@ -1640,10 +1660,17 @@ static json_t *reference_notes_cache = nullptr;
 
 // Returns a borrowed reference to the cached notes array.
 // Caller must NOT call json_decref on the result.
+// Protected by cfile_access_mutex to prevent concurrent first-call races
+// (load_config_file also acquires this mutex, but std::mutex is not
+// recursive, so we must not hold it across that call -- instead we
+// load outside the lock and then write the cache under the lock).
 static json_t *load_reference_notes()
 {
-	if (reference_notes_cache)
-		return reference_notes_cache;
+	{
+		std::lock_guard<std::mutex> lock(cfile_access_mutex);
+		if (reference_notes_cache)
+			return reference_notes_cache;
+	}
 
 	SCP_string content = load_config_file("mcp_reference_notes.json", true);
 	if (content.empty())
@@ -1651,10 +1678,16 @@ static json_t *load_reference_notes()
 
 	json_error_t err;
 	json_t *root = json_loads(content.c_str(), 0, &err);
-	if (!root)
+	if (!root) {
 		mprintf(("MCP: Failed to parse mcp_reference_notes.json: %s (line %d)\n", err.text, err.line));
+		return nullptr;
+	}
 
-	reference_notes_cache = root;
+	std::lock_guard<std::mutex> lock(cfile_access_mutex);
+	if (!reference_notes_cache)
+		reference_notes_cache = root;
+	else
+		json_decref(root);  // another thread beat us
 	return reference_notes_cache;
 }
 
@@ -2600,29 +2633,18 @@ static json_t *handle_list_fonts()
 
 static json_t *get_scripting_api_doc()
 {
-	// Fast path: return cached result
-	{
-		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
-		if (scripting_api_cache)
-			return scripting_api_cache;  // borrowed reference
-	}
+	// Hold the lock across the entire generation + cache write to prevent
+	// two threads from calling OutputDocumentation concurrently.
+	// Doc generation is a one-time cost; the second thread simply blocks.
+	std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
+	if (scripting_api_cache)
+		return scripting_api_cache;
 
-	// Generate the documentation (reads only static data, safe from worker threads)
 	const auto doc = Script_system.OutputDocumentation([](const SCP_string& error) {
 		mprintf(("MCP scripting API: documentation error: %s\n", error.c_str()));
 	});
 
-	json_t *result = scripting::build_json_doc(doc);
-
-	// Cache the result
-	{
-		std::lock_guard<std::mutex> lock(scripting_api_cache_mutex);
-		if (!scripting_api_cache)
-			scripting_api_cache = result;
-		else
-			json_decref(result);
-	}
-
+	scripting_api_cache = scripting::build_json_doc(doc);
 	return scripting_api_cache;
 }
 
@@ -2989,11 +3011,13 @@ static json_t *handle_list_missions()
 {
 	SCP_vector<SCP_string> names;
 	SCP_vector<file_list_info> info;
-	cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
-
-	// Build the directory path (without a filename)
 	SCP_string directory;
-	cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
+
+	{
+		std::lock_guard<std::mutex> lock(cfile_access_mutex);
+		cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
+		cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
+	}
 
 	json_t *arr = json_array();
 	for (size_t i = 0; i < names.size(); i++) {
@@ -3044,13 +3068,16 @@ static json_t *handle_get_root_paths()
 	json_t *arr = json_array();
 	SCP_string buf;
 
-	for (auto &q : queries) {
-		buf.clear();
-		if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
-			json_t *entry = json_object();
-			json_object_set_new(entry, "label", json_string(q.label));
-			json_object_set_new(entry, "path", json_string(buf.c_str()));
-			json_array_append_new(arr, entry);
+	{
+		std::lock_guard<std::mutex> lock(cfile_access_mutex);
+		for (auto &q : queries) {
+			buf.clear();
+			if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
+				json_t *entry = json_object();
+				json_object_set_new(entry, "label", json_string(q.label));
+				json_object_set_new(entry, "path", json_string(buf.c_str()));
+				json_array_append_new(arr, entry);
+			}
 		}
 	}
 
@@ -3079,9 +3106,13 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 	int arg_index = get_optional_integer(arguments, "arg_index").value_or(-1);
 
 	// If context was requested and the forest is dirty, rebuild it first.
-	if (parent_node >= 0 && mcp_sexp_forest_is_dirty()) {
-		json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
-		json_decref(rebuild_result);
+	// Retry a few times because the forest can be marked dirty again between
+	// the rebuild completing on the main thread and our call to get_listing.
+	if (parent_node >= 0) {
+		for (int attempt = 0; attempt < 3 && mcp_sexp_forest_is_dirty(); attempt++) {
+			json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
+			json_decref(rebuild_result);
+		}
 	}
 
 	// Get the value list from the forest (or with no context if parent_node < 0)

@@ -133,13 +133,18 @@ void mcp_sexp_forest_cleanup()
 // Returns a heap-allocated sexp_list_item list; caller must free it.
 // Acquires g_sexp_forest_mutex for the duration of the call.
 //
-// NOTE: if dirty, the caller must have already marshaled a rebuild to the
-// main thread before calling this function.
+// NOTE: if dirty, the caller should have already marshaled a rebuild to the
+// main thread before calling this function.  If the forest is still dirty
+// (e.g. due to a TOCTOU race), we return nullptr rather than asserting,
+// since the caller can handle an empty list gracefully.
 
 sexp_list_item *mcp_sexp_forest_get_listing(int opf, int parent_node, int arg_index)
 {
-	Assertion(!mcp_sexp_forest_is_dirty(), "mcp_sexp_forest_get_listing called while forest is dirty");
 	std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
+	if (mcp_sexp_forest_is_dirty()) {
+		Warning(LOCATION, "mcp_sexp_forest_get_listing called while forest is dirty");
+		return nullptr;
+	}
 	return g_sexp_forest.get_listing_opf(opf, parent_node, arg_index);
 }
 
