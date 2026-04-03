@@ -297,7 +297,18 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 
 static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &error_msg)
 {
-	const char *tool_name = get_optional_string(params, "name", true);
+	const char *tool_name;
+	{
+		json_t *err = nullptr;
+		McpErrorSink sink(&err);
+		tool_name = get_optional_string(params, "name", sink, true);
+		if (err) {
+			error_code = -32602;
+			error_msg = "Invalid params";
+			json_decref(err);
+			return nullptr;
+		}
+	}
 
 	if (!tool_name) {
 		error_code = -32602;
