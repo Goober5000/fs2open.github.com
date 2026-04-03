@@ -18,4 +18,7 @@ void mcp_reference_tools_cleanup();
 // Look up the human-readable name for an OPR_* return type constant.
 const char *get_opr_type_name(int opr_value);
 
+// Look up the human-readable name for an OPF_* argument type constant.
+const char *opf_to_string(int opf);
+
 #endif // _MCP_REFERENCE_TOOLS_H
