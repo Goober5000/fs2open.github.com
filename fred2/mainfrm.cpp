@@ -773,12 +773,12 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		Undo_count = 0;
 		req->success = true;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Mission loaded successfully: %s", Mission_filename);
 	} else {
 		Mission_filename[0] = '\0';
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Failed to load mission: %s", req->filepath);
 	}
 }
@@ -801,11 +801,11 @@ static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
 		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		req->success = true;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Mission saved successfully: %s", req->filepath);
 	} else {
 		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
+		sprintf(req->result_message,
 			"Failed to save mission: %s", req->filepath);
 	}
 }
@@ -828,8 +828,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		FREDDoc_ptr->SetTitle("Untitled");
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		req->success = true;
-		strncpy(req->result_message, "New empty mission created", sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		req->result_message = "New empty mission created";
 		break;
 
 	case McpToolId::LOAD_SHIP_MODEL:
@@ -838,18 +837,18 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			int sip_idx = ship_info_lookup(req->filepath);
 			if (sip_idx < 0) {
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Ship class not found: %s", req->filepath);
 			} else {
 				int model_num = model_load(&Ship_info[sip_idx], false);
 				if (model_num >= 0) {
 					Ship_info[sip_idx].model_num = model_num;
 					req->success = true;
-					snprintf(req->result_message, sizeof(req->result_message),
+					sprintf(req->result_message,
 						"Model loaded for %s", req->filepath);
 				} else {
 					req->success = false;
-					snprintf(req->result_message, sizeof(req->result_message),
+					sprintf(req->result_message,
 						"Failed to load model for %s", req->filepath);
 				}
 			}
@@ -862,16 +861,16 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			int sip_idx = ship_info_lookup(req->filepath);
 			if (sip_idx < 0) {
 				req->success = false;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Ship class not found: %s", req->filepath);
 			} else if (Ship_info[sip_idx].model_num >= 0) {
 				model_unload(Ship_info[sip_idx].model_num);
 				req->success = true;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Model unloaded for %s", req->filepath);
 			} else {
 				req->success = true;
-				snprintf(req->result_message, sizeof(req->result_message),
+				sprintf(req->result_message,
 					"Model was not loaded for %s", req->filepath);
 			}
 		}
@@ -880,8 +879,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 	case McpToolId::REBUILD_SEXP_FOREST:
 		mcp_sexp_forest_rebuild();
 		req->success = true;
-		strncpy(req->result_message, "SEXP forest rebuilt", sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		req->result_message = "SEXP forest rebuilt";
 		break;
 
 	case McpToolId::GET_SERVER_INFO:
@@ -980,8 +978,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			}
 
 			req->success = true;
-			strncpy(req->result_message, buf.c_str(), sizeof(req->result_message) - 1);
-			req->result_message[sizeof(req->result_message) - 1] = '\0';
+			req->result_message = std::move(buf);
 		}
 		break;
 
@@ -991,7 +988,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	default:
 		req->success = false;
-		strncpy(req->result_message, "Unknown MCP tool", sizeof(req->result_message) - 1);
+		req->result_message = "Unknown MCP tool";
 		break;
 	}
 
