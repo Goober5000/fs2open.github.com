@@ -8,6 +8,21 @@
 #include "graphics/2d.h"
 #include "management.h"
 
+void McpErrorSink::set_error(const char *fmt, ...)
+{
+	va_list args;
+	va_start(args, fmt);
+
+	if (m_req) {
+		m_req->success = false;
+		vsnprintf(m_req->result_message, sizeof(m_req->result_message), fmt, args);
+	} else if (m_err) {
+		*m_err = vmake_tool_result(true, fmt, args);
+	}
+
+	va_end(args);
+}
+
 json_t *make_tool_result(const char *text, bool is_error)
 {
 	json_t *result = json_object();
@@ -24,13 +39,17 @@ json_t *make_tool_result(const char *text, bool is_error)
 
 json_t *make_tool_result(bool is_error, const char *format, ...)
 {
-	SCP_string buf;
-
 	va_list args;
 	va_start(args, format);
-	vsprintf(buf, format, args);
+	auto result = vmake_tool_result(is_error, format, args);
 	va_end(args);
+	return result;
+}
 
+json_t *vmake_tool_result(bool is_error, const char *format, va_list args)
+{
+	SCP_string buf;
+	vsprintf(buf, format, args);
 	return make_tool_result(buf.c_str(), is_error);
 }
 
@@ -149,36 +168,16 @@ void register_tool_with_required_string(json_t *tools, const char *tool_name, co
 	register_tool(tools, tool_name, description, props, req);
 }
 
-static void set_missing_param_error(McpToolRequest *req, const char *param_name)
+static void set_missing_param_error(McpErrorSink &sink, const char *param_name)
 {
-	req->success = false;
-	snprintf(req->result_message, sizeof(req->result_message),
-		"Missing required parameter, or parameter is the wrong type: %s", param_name);
+	sink.set_error("Missing required parameter, or parameter is the wrong type: %s", param_name);
 }
 
-static json_t *make_missing_param_error(const char *param_name)
-{
-	return make_tool_result(true, "Missing required parameter, or parameter is the wrong type: %s", param_name);
-}
-
-bool check_string_length(const char *input, size_t max_len, const char *param_name, McpToolRequest *req)
+bool check_string_length(const char *input, size_t max_len, const char *param_name, McpErrorSink &sink)
 {
 	size_t len = strlen(input);
 	if (len > max_len) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
-		return false;
-	}
-	return true;
-}
-
-bool check_string_length(const char *input, size_t max_len, const char *param_name, json_t **error_out)
-{
-	size_t len = strlen(input);
-	if (len > max_len) {
-		*error_out = make_tool_result(true,
-			"Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
+		sink.set_error("Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
 		return false;
 	}
 	return true;
@@ -198,75 +197,37 @@ static SCP_string format_string_enum_error(const char *input, const SCP_vector<c
 	return msg;
 }
 
-bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpToolRequest *req)
-{
-	for (const char *v : values)
-		if (stricmp(input, v) == 0)
-			return true;
-	req->success = false;
-	SCP_string msg = format_string_enum_error(input, values, param_name);
-	strncpy(req->result_message, msg.c_str(), sizeof(req->result_message) - 1);
-	req->result_message[sizeof(req->result_message) - 1] = '\0';
-	return false;
-}
-
-bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, json_t **error_out)
+bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpErrorSink &sink)
 {
 	for (const char *v : values)
 		if (stricmp(input, v) == 0)
 			return true;
 	SCP_string msg = format_string_enum_error(input, values, param_name);
-	*error_out = make_tool_result(msg.c_str(), true);
+	sink.set_error("%s", msg.c_str());
 	return false;
 }
 
-bool check_int_range(int input, int min, int max, const char *param_name, McpToolRequest *req)
+bool check_int_range(int input, int min, int max, const char *param_name, McpErrorSink &sink)
 {
 	if (input < min || input > max) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter '%s' is out of range (value=%d; min=%d; max=%d)",
+		sink.set_error("Parameter '%s' is out of range (value=%d; min=%d; max=%d)",
 			param_name, input, min, max);
 		return false;
 	}
 	return true;
 }
 
-bool check_int_range(int input, int min, int max, const char *param_name, json_t **error_out)
-{
-	if (input < min || input > max) {
-		*error_out = make_tool_result(true,
-			"Parameter '%s' is out of range (value=%d; min=%d; max=%d)",
-			param_name, input, min, max);
-		return false;
-	}
-	return true;
-}
-
-int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpToolRequest *req)
+int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpErrorSink &sink)
 {
 	int result = lookup_fn(input);
 	if (result < 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+		sink.set_error("Parameter '%s' could not be found in the list of allowed values (value=%s)",
 			param_name, input);
 	}
 	return result;
 }
 
-int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, json_t **error_out)
-{
-	int result = lookup_fn(input);
-	if (result < 0) {
-		*error_out = make_tool_result(true,
-			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
-			param_name, input);
-	}
-	return result;
-}
-
-int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpToolRequest *req)
+int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpErrorSink &sink)
 {
 	int count = sz2i(lookup_vec.size());
 	int result = -1;
@@ -277,182 +238,103 @@ int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, c
 		}
 	}
 	if (result < 0) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
+		sink.set_error("Parameter '%s' could not be found in the list of allowed values (value=%s)",
 			param_name, input);
 	}
 	return result;
 }
 
-int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, json_t **error_out)
-{
-	int count = sz2i(lookup_vec.size());
-	int result = -1;
-	for (int i = 0; i < count; i++) {
-		if (!stricmp(input, lookup_vec[i])) {
-			result = i;
-			break;
-		}
-	}
-	if (result < 0) {
-		*error_out = make_tool_result(true,
-			"Parameter '%s' could not be found in the list of allowed values (value=%s)",
-			param_name, input);
-	}
-	return result;
-}
-
-bool check_name_conflict(const char *entity_type, const char *name, McpToolRequest *req,
+bool check_name_conflict(const char *entity_type, const char *name, McpErrorSink &sink,
 	int exclude_ship, int exclude_wing, int exclude_waypoint_list, int exclude_jump_node)
 {
 	SCP_string conflict = check_name_conflict(entity_type, name, exclude_ship, exclude_wing,
 		exclude_waypoint_list, exclude_jump_node);
 	if (!conflict.empty()) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message), "%s", conflict.c_str());
+		sink.set_error("%s", conflict.c_str());
 		return false;
 	}
 	return true;
 }
 
-bool validate(std::function<const char *()> error_msg_fn, McpToolRequest *req)
+bool validate(std::function<const char *()> error_msg_fn, McpErrorSink &sink)
 {
 	auto failure_msg = error_msg_fn();
 	if (failure_msg) {
-		req->success = false;
-		strncpy(req->result_message, failure_msg, sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		sink.set_error("%s", failure_msg);
 		return false;
 	}
 	return true;
 }
 
-bool validate(std::function<bool(SCP_string&)> validate_fn, McpToolRequest *req)
+bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 {
 	SCP_string failure_msg;
 	if (!validate_fn(failure_msg)) {
-		req->success = false;
-		strncpy(req->result_message, failure_msg.c_str(), sizeof(req->result_message) - 1);
-		req->result_message[sizeof(req->result_message) - 1] = '\0';
+		sink.set_error("%s", failure_msg.c_str());
 		return false;
 	}
 	return true;
 }
 
-const char *get_required_string(json_t *input, const char *param_name, McpToolRequest *req, bool disallow_empty)
+const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty)
 {
 	const char *value = get_optional_string(input, param_name, false);
 	if (!value) {
-		set_missing_param_error(req, param_name);
+		set_missing_param_error(sink, param_name);
 		return nullptr;
 	}
 	if (!value[0] && disallow_empty) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Required parameter must not be empty: %s", param_name);
+		sink.set_error("Required parameter must not be empty: %s", param_name);
 		return nullptr;
 	}
 	return value;
 }
 
-const char *get_required_filename(json_t *input, const char *param_name, McpToolRequest *req)
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink)
 {
-	const char *value = get_required_string(input, param_name, req, false);
+	const char *value = get_required_string(input, param_name, sink, false);
 	if (!value)
 		return nullptr;
 	if (!VALID_FNAME(value)) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Required parameter must be a valid file name: %s", param_name);
+		sink.set_error("Required parameter must be a valid file name: %s", param_name);
 		return nullptr;
 	}
 	return value;
 }
 
-std::optional<int> get_required_integer(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<int> get_required_integer(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_integer(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-std::optional<double> get_required_double(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<double> get_required_double(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_double(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-std::optional<float> get_required_float(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<float> get_required_float(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_float(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<bool> get_required_bool(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_bool(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
-	return std::nullopt;
-}
-
-const char *get_required_string(json_t *arguments, const char *param_name, json_t **error_out, bool disallow_empty)
-{
-	const char *str = get_optional_string(arguments, param_name, false);
-	if (!str) {
-		*error_out = make_missing_param_error(param_name);
-		return nullptr;
-	}
-	if (!str[0] && disallow_empty) {
-		*error_out = make_tool_result(true, "Required parameter must not be empty: %s", param_name);
-		return nullptr;
-	}
-	return str;
-}
-
-std::optional<int> get_required_integer(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_integer(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<double> get_required_double(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_double(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<float> get_required_float(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_float(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<bool> get_required_bool(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_bool(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -586,19 +468,17 @@ void add_vec3d_array_prop(json_t *props, const char *name, const char *descripti
 }
 
 bool get_required_vec3d_array(json_t *input, const char *param_name,
-	SCP_vector<vec3d> &out, McpToolRequest *req, int min_count)
+	SCP_vector<vec3d> &out, McpErrorSink &sink, int min_count)
 {
 	json_t *val = input ? json_object_get(input, param_name) : nullptr;
 	if (!val || !json_is_array(val)) {
-		set_missing_param_error(req, param_name);
+		set_missing_param_error(sink, param_name);
 		return false;
 	}
 
 	size_t arr_size = json_array_size(val);
 	if (min_count > 0 && (int)arr_size < min_count) {
-		req->success = false;
-		snprintf(req->result_message, sizeof(req->result_message),
-			"Parameter '%s' must contain at least %d element(s), got %d",
+		sink.set_error("Parameter '%s' must contain at least %d element(s), got %d",
 			param_name, min_count, (int)arr_size);
 		return false;
 	}
@@ -610,9 +490,7 @@ bool get_required_vec3d_array(json_t *input, const char *param_name,
 	json_array_foreach(val, index, item) {
 		auto v = parse_vec3d_json(item);
 		if (!v.has_value()) {
-			req->success = false;
-			snprintf(req->result_message, sizeof(req->result_message),
-				"Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
+			sink.set_error("Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
 			return false;
 		}
 		out.push_back(*v);
@@ -745,39 +623,21 @@ std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_n
 	return matrix{ *rvec, *uvec, *fvec };
 }
 
-std::optional<vec3d> get_required_vec3d(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_vec3d(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<matrix> get_required_matrix(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_matrix(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_vec3d(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<matrix> get_required_matrix(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_matrix(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -787,28 +647,18 @@ std::optional<color> get_optional_color(json_t *arguments, const char *param_nam
 	return parse_color_json(val);
 }
 
-std::optional<color> get_required_color(json_t *arguments, const char *param_name, json_t **error_out)
-{
-	auto item = get_optional_color(arguments, param_name);
-	if (item.has_value())
-		return *item;
-	*error_out = make_missing_param_error(param_name);
-	return std::nullopt;
-}
-
-std::optional<color> get_required_color(json_t *input, const char *param_name, McpToolRequest *req)
+std::optional<color> get_required_color(json_t *input, const char *param_name, McpErrorSink &sink)
 {
 	auto item = get_optional_color(input, param_name);
 	if (item.has_value())
 		return *item;
-	set_missing_param_error(req, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-void set_not_found_error(McpToolRequest *req, const char *entity_type, const char *name)
+void set_not_found_error(McpErrorSink &sink, const char *entity_type, const char *name)
 {
-	req->success = false;
-	snprintf(req->result_message, sizeof(req->result_message), "%s not found: '%s'", entity_type, name);
+	sink.set_error("%s not found: '%s'", entity_type, name);
 }
 
 json_t *make_not_found_error(const char *entity_type, const char *name)
