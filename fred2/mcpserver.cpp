@@ -305,10 +305,6 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		return nullptr;
 	}
 
-	if (strcmp(tool_name, "get_server_info") == 0) {
-		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, "");
-	}
-
 	if (strcmp(tool_name, "get_timeout") == 0) {
 		DWORD seconds = mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000;
 		json_t *result = make_tool_result(false, "timeout (seconds): %u", seconds);
@@ -341,6 +337,10 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 	// All tools below require FRED2 to be fully initialized
 	if (!mcp_fred_ready.load())
 		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
+
+	if (strcmp(tool_name, "get_server_info") == 0) {
+		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, "");
+	}
 
 	if (strcmp(tool_name, "load_mission") == 0 ||
 		strcmp(tool_name, "save_mission") == 0)
