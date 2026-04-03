@@ -3607,6 +3607,178 @@ static void handle_free_sexp(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// create_sexp_node handler (run on main thread)
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> sexp_arg_type_values = { "number", "string", "boolean", "node" };
+
+// Parse and allocate a single argument node.  Returns the allocated node index,
+// or -1 on error (with req->result_message set).  `next` is the rest pointer
+// for the new node (building the chain right-to-left).
+static int create_sexp_arg_node(const char *type_str, const char *value, int next, int arg_index, McpToolRequest *req)
+{
+	// Variable handling for number/string types
+	if ((!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value[0] == '@') {
+		const char *var_name = value + 1;
+		int var_idx = get_index_sexp_variable_name(var_name);
+		if (var_idx < 0) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Unknown SEXP variable '%s' in argument %d", var_name, arg_index);
+			return -1;
+		}
+		int subtype = !stricmp(type_str, "number") ? SEXP_ATOM_NUMBER : SEXP_ATOM_STRING;
+		return alloc_sexp(Sexp_variables[var_idx].variable_name,
+			SEXP_ATOM | SEXP_FLAG_VARIABLE, subtype, -1, next);
+	}
+
+	if (!stricmp(type_str, "number")) {
+		return alloc_sexp(value, SEXP_ATOM, SEXP_ATOM_NUMBER, -1, next);
+	}
+
+	if (!stricmp(type_str, "string")) {
+		return alloc_sexp(value, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
+	}
+
+	if (!stricmp(type_str, "boolean")) {
+		int locked_node;
+		if (!stricmp(value, "true"))
+			locked_node = Locked_sexp_true;
+		else if (!stricmp(value, "false"))
+			locked_node = Locked_sexp_false;
+		else {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Boolean argument %d must be \"true\" or \"false\", got \"%s\"", arg_index, value);
+			return -1;
+		}
+		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, locked_node, next);
+	}
+
+	if (!stricmp(type_str, "node")) {
+		char *endptr;
+		long idx = strtol(value, &endptr, 10);
+		if (*endptr != '\0' || endptr == value) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value);
+			return -1;
+		}
+		if (idx < 0 || idx >= Num_sexp_nodes) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Node argument %d: node index %ld is out of range (0-%d)", arg_index, idx, Num_sexp_nodes - 1);
+			return -1;
+		}
+		if (Sexp_nodes[(int)idx].type == SEXP_NOT_USED) {
+			req->success = false;
+			snprintf(req->result_message, sizeof(req->result_message),
+				"Node argument %d: node %ld is not in use", arg_index, idx);
+			return -1;
+		}
+		// Always wrap in SEXP_LIST to avoid corrupting existing tree linkage
+		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, (int)idx, next);
+	}
+
+	// Should not reach here if type was validated
+	req->success = false;
+	snprintf(req->result_message, sizeof(req->result_message),
+		"Unknown argument type \"%s\" in argument %d", type_str, arg_index);
+	return -1;
+}
+
+static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
+{
+	if (!validate(validate_dialog_for_sexp_nodes, req)) return;
+
+	auto op_name = get_required_string(input, "operator", req, true);
+	if (!op_name) return;
+	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator", req)) return;
+
+	// Validate operator name
+	int op_idx = get_operator_index(op_name);
+	if (op_idx < 0) {
+		req->success = false;
+		snprintf(req->result_message, sizeof(req->result_message),
+			"Unknown SEXP operator: '%s'", op_name);
+		return;
+	}
+
+	// Create operator atom
+	int op_node = alloc_sexp(op_name, SEXP_ATOM, SEXP_ATOM_OPERATOR, -1, -1);
+
+	// Handle locked singletons (true/false operators)
+	bool op_is_locked = (op_node == Locked_sexp_true || op_node == Locked_sexp_false);
+
+	// Parse arguments (if any)
+	json_t *args = json_object_get(input, "operator_arguments");
+	if (args && json_is_array(args) && json_array_size(args) > 0) {
+		size_t num_args = json_array_size(args);
+
+		// Build argument chain right-to-left
+		int next = -1;
+		for (int i = (int)num_args - 1; i >= 0; i--) {
+			json_t *arg = json_array_get(args, i);
+			if (!json_is_object(arg)) {
+				req->success = false;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Argument %d is not an object", i);
+				// Free any nodes we've already allocated
+				if (next != -1)
+					free_sexp2(next);
+				if (!op_is_locked)
+					free_sexp2(op_node);
+				return;
+			}
+
+			const char *type_str = json_string_value(json_object_get(arg, "type"));
+			const char *value = json_string_value(json_object_get(arg, "value"));
+			if (!type_str || !value) {
+				req->success = false;
+				snprintf(req->result_message, sizeof(req->result_message),
+					"Argument %d: 'type' and 'value' are required", i);
+				if (next != -1)
+					free_sexp2(next);
+				if (!op_is_locked)
+					free_sexp2(op_node);
+				return;
+			}
+
+			if (!check_string_enum(type_str, sexp_arg_type_values, "type", req)) {
+				if (next != -1)
+					free_sexp2(next);
+				if (!op_is_locked)
+					free_sexp2(op_node);
+				return;
+			}
+
+			int arg_node = create_sexp_arg_node(type_str, value, next, i, req);
+			if (arg_node < 0) {
+				// Error already set by create_sexp_arg_node
+				if (next != -1)
+					free_sexp2(next);
+				if (!op_is_locked)
+					free_sexp2(op_node);
+				return;
+			}
+			next = arg_node;
+		}
+
+		// Link arguments to operator
+		if (op_is_locked) {
+			// Locked singletons can't have rest modified; wrap in a list first
+			op_node = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, op_node, -1);
+		}
+		Sexp_nodes[op_node].rest = next;
+	}
+
+	mcp_sexp_forest_mark_dirty({ op_node });
+
+	req->result_json = make_json_tool_result(build_sexp_node_json(op_node));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // SEXP variable tool handlers (run on main thread)
 // ---------------------------------------------------------------------------
 
@@ -4035,6 +4207,7 @@ static const char *mission_tool_names[] = {
 	"walk_sexp_tree",
 	"text_to_sexp",
 	"free_sexp",
+	"create_sexp_node",
 	"list_sexp_variables",
 	"get_sexp_variable",
 	"create_sexp_variable",
@@ -5136,6 +5309,37 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// create_sexp_node
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "operator",
+			"Name of the SEXP operator (e.g. \"when\", \"is-destroyed-delay\")");
+
+		json_t *arg_props = json_object();
+		add_string_enum_prop(arg_props, "type",
+			"Argument type",
+			sexp_arg_type_values);
+		add_string_prop(arg_props, "value",
+			"Argument value. For number/string: literal value (prefix with @ "
+			"for SEXP variable). For boolean: \"true\" or \"false\". "
+			"For node: the node index.");
+		json_t *arg_req = json_array();
+		json_array_append_new(arg_req, json_string("type"));
+		json_array_append_new(arg_req, json_string("value"));
+		add_object_array_prop(props, "operator_arguments",
+			"List of arguments for the operator. Each argument has a 'type' "
+			"(number, string, boolean, node) and a 'value'.",
+			arg_props, arg_req);
+
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("operator"));
+		register_tool(tools, "create_sexp_node",
+			"Create a SEXP expression node with an operator and optional arguments. "
+			"Returns the root operator node, suitable for assigning as an event or "
+			"goal formula. Does not enforce argument count or check syntax.",
+			props, req);
+	}
+
 	// list_sexp_variables
 	register_tool(tools, "list_sexp_variables",
 		"List all SEXP variables defined in this mission. "
@@ -5364,6 +5568,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_text_to_sexp(input_json, req);
 	} else if (strcmp(tool_name, "free_sexp") == 0) {
 		handle_free_sexp(input_json, req);
+	} else if (strcmp(tool_name, "create_sexp_node") == 0) {
+		handle_create_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "list_sexp_variables") == 0) {
 		handle_list_sexp_variables(input_json, req);
 	} else if (strcmp(tool_name, "get_sexp_variable") == 0) {
