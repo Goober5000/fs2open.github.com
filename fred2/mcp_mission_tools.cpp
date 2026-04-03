@@ -1261,8 +1261,8 @@ static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int inde
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
 	if (stage.ani_filename && stricmp(stage.ani_filename, "<default>") != 0)
-		set_optional_filename(obj, "ani_filename", stage.ani_filename);
-	set_optional_filename(obj, "wave_filename", stage.wave_filename);
+		set_optional_filename(obj, "animation_filename", stage.ani_filename);
+	set_optional_filename(obj, "voice_filename", stage.wave_filename);
 	return obj;
 }
 
@@ -1314,13 +1314,13 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto ani = get_optional_filename(input, "ani_filename", false);
-	auto wave = get_optional_filename(input, "wave_filename", false);
+	auto ani = get_optional_filename(input, "animation_filename", false);
+	auto wave = get_optional_filename(input, "voice_filename", false);
 	auto insert_index = get_optional_integer(input, "index");
 
 	// Validate filename lengths
-	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "ani_filename", sink)) return;
-	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "wave_filename", sink)) return;
+	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
+	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	// Resolve insert position
 	int target;
@@ -1367,12 +1367,12 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
-	auto new_ani  = get_optional_filename(input, "ani_filename", false);
-	auto new_wave = get_optional_filename(input, "wave_filename", false);
+	auto new_ani  = get_optional_filename(input, "animation_filename", false);
+	auto new_wave = get_optional_filename(input, "voice_filename", false);
 
 	// Validate filename lengths
-	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "ani_filename", sink)) return;
-	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "wave_filename", sink)) return;
+	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
+	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	cmd_brief_stage &s = cb->stage[*index - 1];
 	bool changed = false;
@@ -2074,7 +2074,7 @@ static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
-	set_optional_filename(obj, "voice", stage.voice);
+	set_optional_filename(obj, "voice_filename", stage.voice);
 	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
 	return obj;
@@ -2128,13 +2128,13 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto voice = get_optional_filename(input, "voice", false);
+	auto voice = get_optional_filename(input, "voice_filename", false);
 	auto rec_text = get_optional_string(input, "recommendation_text", false);
 	auto formula = get_optional_integer(input, "formula");
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index");
 
-	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice", sink)) return;
+	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	int target;
 	if (!insert_index.has_value()) {
@@ -2183,12 +2183,12 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", false);
-	auto new_voice = get_optional_filename(input, "voice", false);
+	auto new_voice = get_optional_filename(input, "voice_filename", false);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", false);
 	auto new_formula = get_optional_integer(input, "formula");
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
-	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice", sink)) return;
+	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;
@@ -2328,10 +2328,10 @@ static void handle_list_jump_nodes(json_t * /*input*/, McpToolRequest *req)
 static void handle_get_jump_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
+
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
-
-	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
 	int index = jumpnode_lookup(name);
 	if (index >= 0) {
@@ -2644,10 +2644,10 @@ static void handle_list_waypoint_lists(json_t * /*input*/, McpToolRequest *req)
 static void handle_get_waypoint_list(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
+
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
-
-	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
 	int index = find_matching_waypoint_list_index(name);
 	if (index >= 0) {
@@ -3913,11 +3913,6 @@ static bool validate_sexp_variable_name(const char *name, McpErrorSink &sink, in
 	if (!check_string_length(name, TOKEN_LENGTH - 1, "name", sink))
 		return false;
 
-	if (strchr(name, ' ') != nullptr) {
-		sink.set_error("Variable names cannot contain spaces");
-		return false;
-	}
-
 	auto rval = strcspn(name, "@()[] ;\"\\/");
 	if (rval != strlen(name)) {
 		sink.set_error("Invalid character '%c' in variable name", name[rval]);
@@ -4596,9 +4591,9 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "text", "The text displayed during this stage");
-		add_string_prop(props, "ani_filename",
+		add_string_prop(props, "animation_filename",
 			"Animation filename (ani/eff/png). Defaults to \"<default>\".");
-		add_string_prop(props, "wave_filename",
+		add_string_prop(props, "voice_filename",
 			"Voice audio filename (wav/ogg). Defaults to \"none\".");
 		add_integer_prop(props, "index",
 			"Position to insert the stage (1 = first). If omitted, appends to the end.");
@@ -4617,8 +4612,8 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *props = json_object();
 		add_integer_prop(props, "index", "1-based index of the stage to update");
 		add_string_prop(props, "text", "New text for this stage");
-		add_string_prop(props, "ani_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
-		add_string_prop(props, "wave_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
+		add_string_prop(props, "animation_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
+		add_string_prop(props, "voice_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
 		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
@@ -4953,7 +4948,7 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "text", "The debriefing text displayed during this stage");
-		add_string_prop(props, "voice",
+		add_string_prop(props, "voice_filename",
 			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
 		add_string_prop(props, "recommendation_text",
 			"Recommendation text displayed during this stage. Defaults to empty.");
@@ -4977,7 +4972,7 @@ void mcp_register_mission_tools(json_t *tools)
 		add_integer_prop(props, "index",
 			"1-based index of the stage to update");
 		add_string_prop(props, "text", "New debriefing text for this stage");
-		add_string_prop(props, "voice",
+		add_string_prop(props, "voice_filename",
 			"New voice audio filename. Empty string clears the voice.");
 		add_string_prop(props, "recommendation_text",
 			"New recommendation text. Empty string clears the recommendation.");
