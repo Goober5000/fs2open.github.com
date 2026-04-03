@@ -193,7 +193,7 @@ static json_t *mcp_wait_for_result(McpToolRequest *req)
 			result = req->result_json;
 			req->result_json = nullptr;  // take ownership
 		} else {
-			result = make_tool_result(req->result_message, !req->success);
+			result = make_tool_result(req->result_message.c_str(), !req->success);
 		}
 
 		// Release our reference; if handler already released, we clean up
@@ -230,7 +230,6 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 	req->filepath[sizeof(req->filepath) - 1] = '\0';
 	req->input_json = nullptr;
 	req->success = false;
-	req->result_message[0] = '\0';
 	req->result_json = nullptr;
 	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
 	if (!req->completion_event) {
@@ -280,7 +279,6 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 	// No path separator normalization — filepath holds a tool name, not a path
 	req->input_json = input_json ? json_incref(input_json) : nullptr;
 	req->success = false;
-	req->result_message[0] = '\0';
 	req->result_json = nullptr;
 	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
 	if (!req->completion_event) {
