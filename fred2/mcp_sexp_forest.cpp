@@ -3,6 +3,7 @@
 #include "sexp_tree.h"
 #include "parse/sexp.h"
 
+#include <jansson.h>
 #include <mutex>
 #include <atomic>
 
@@ -126,29 +127,30 @@ void mcp_sexp_forest_cleanup()
 }
 
 // ---------------------------------------------------------------------------
-// Accessor used by MCP tools (mongoose thread)
+// Combined rebuild + listing (main thread only)
 // ---------------------------------------------------------------------------
-// Defined here as a friend-style accessor so mcp_reference_tools.cpp can
-// call get_listing_opf on the forest without exposing the sexp_tree globally.
-// Returns a heap-allocated sexp_list_item list; caller must free it.
-// Acquires g_sexp_forest_mutex for the duration of the call.
-//
-// NOTE: if dirty, the caller should have already marshaled a rebuild to the
-// main thread before calling this function.  If the forest is still dirty
-// (e.g. due to a TOCTOU race), we return nullptr rather than asserting,
-// since the caller can handle an empty list gracefully.
+// Rebuilds the forest if dirty, then calls get_listing_opf and converts
+// the result to a JSON array of strings.  This must run on the main thread
+// because the get_listing_opf_* helpers read main-thread-owned globals
+// (Ships[], Wings[], Messages[], Mission_events[], etc.).
 
-sexp_list_item *mcp_sexp_forest_get_listing(int opf, int parent_node, int arg_index)
+json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int arg_index)
 {
-	std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
-	if (mcp_sexp_forest_is_dirty()) {
-		Warning(LOCATION, "mcp_sexp_forest_get_listing called while forest is dirty");
-		return nullptr;
+	// Rebuild if needed — this is a no-op when the forest is already clean.
+	mcp_sexp_forest_rebuild();
+
+	sexp_list_item *list;
+	{
+		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
+		list = g_sexp_forest.get_listing_opf(opf, parent_node, arg_index);
 	}
-	return g_sexp_forest.get_listing_opf(opf, parent_node, arg_index);
-}
 
-bool mcp_sexp_forest_is_dirty()
-{
-	return g_sexp_forest_dirty.load() || g_dirty_roots_nonempty.load();
+	json_t *values = json_array();
+	for (sexp_list_item *item = list; item != nullptr; item = item->next)
+		json_array_append_new(values, json_string(item->text.c_str()));
+
+	if (list)
+		list->destroy();
+
+	return values;
 }

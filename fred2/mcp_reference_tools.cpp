@@ -3166,27 +3166,26 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 	int arg_index = get_optional_integer(arguments, "arg_index", sink).value_or(-1);
 	if (err) return err;
 
-	// If the forest is dirty, rebuild it first.
-	// Retry a few times because the forest can be marked dirty again between
-	// the rebuild completing on the main thread and our call to get_listing.
-	for (int attempt = 0; attempt < 3 && mcp_sexp_forest_is_dirty(); attempt++) {
-		json_t *rebuild_result = mcp_execute_on_main_thread(McpToolId::REBUILD_SEXP_FOREST, "");
-		json_decref(rebuild_result);
-	}
+	// Marshal the listing call to the main thread.  The get_listing_opf_*
+	// helpers read main-thread-owned globals (Ships[], Wings[], etc.), so they
+	// must not run on a mongoose worker thread.  The main-thread handler also
+	// rebuilds the forest if dirty, eliminating the old retry loop.
+	json_t *listing_args = json_object();
+	json_object_set_new(listing_args, "opf", json_integer(opf));
+	json_object_set_new(listing_args, "parent_node", json_integer(parent_node));
+	json_object_set_new(listing_args, "arg_index", json_integer(arg_index));
 
-	// Get the value list from the forest (or with no context if parent_node < 0)
-	sexp_list_item *list = mcp_sexp_forest_get_listing(opf, parent_node, arg_index);
+	json_t *listing_result = mcp_execute_on_main_thread(McpToolId::GET_SEXP_LISTING, "get_sexp_listing", listing_args);
+	json_decref(listing_args);
 
-	json_t *values = json_array();
-	for (sexp_list_item *item = list; item != nullptr; item = item->next)
-		json_array_append_new(values, json_string(item->text.c_str()));
-
-	if (list)
-		list->destroy();
+	// On success, listing_result is the raw JSON array of value strings.
+	// On timeout/error, it's a tool-result object with "isError" — pass it through.
+	if (!json_is_array(listing_result))
+		return listing_result;
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(name));
-	json_object_set_new(obj, "values", values);
+	json_object_set_new(obj, "values", listing_result);
 	return make_json_tool_result(obj);
 }
 
