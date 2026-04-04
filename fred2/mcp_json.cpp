@@ -24,6 +24,8 @@ void McpErrorSink::set_error(const char *fmt, ...)
 		m_req->success = false;
 		vsprintf(m_req->result_message, fmt, args);
 	} else if (m_err) {
+		if (*m_err)
+			json_decref(*m_err);
 		*m_err = vmake_tool_result(true, fmt, args);
 	}
 
@@ -182,6 +184,7 @@ static void set_missing_param_error(McpErrorSink &sink, const char *param_name)
 
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpErrorSink &sink)
 {
+	Assertion(input != nullptr, "check_string_length called with null input for param '%s'", param_name);
 	size_t len = strlen(input);
 	if (len > max_len) {
 		sink.set_error("Parameter '%s' is too long (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")", param_name, len, max_len);
@@ -206,6 +209,7 @@ static SCP_string format_string_enum_error(const char *input, const SCP_vector<c
 
 bool check_string_enum(const char *input, const SCP_vector<const char *> &values, const char *param_name, McpErrorSink &sink)
 {
+	Assertion(input != nullptr, "check_string_enum called with null input for param '%s'", param_name);
 	for (const char *v : values)
 		if (stricmp(input, v) == 0)
 			return true;
@@ -226,6 +230,7 @@ bool check_int_range(int input, int min, int max, const char *param_name, McpErr
 
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpErrorSink &sink)
 {
+	Assertion(input != nullptr, "check_lookup called with null input for param '%s'", param_name);
 	int result = lookup_fn(input);
 	if (result < 0) {
 		sink.set_error("Parameter '%s' could not be found in the list of allowed values (value=%s)",
@@ -236,6 +241,7 @@ int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, c
 
 int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpErrorSink &sink)
 {
+	Assertion(input != nullptr, "check_lookup called with null input for param '%s'", param_name);
 	int count = sz2i(lookup_vec.size());
 	int result = -1;
 	for (int i = 0; i < count; i++) {
@@ -377,7 +383,12 @@ std::optional<int> get_optional_integer(json_t *arguments, const char *param_nam
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_integer(val)) {
-		return (int)json_integer_value(val);
+		json_int_t raw = json_integer_value(val);
+		if (raw < INT_MIN || raw > INT_MAX) {
+			sink.set_error("Parameter '%s' is out of 32-bit integer range", param_name);
+			return std::nullopt;
+		}
+		return (int)raw;
 	}
 	if (val && !json_is_null(val)) {
 		sink.set_error("Parameter '%s' must be an integer", param_name);
