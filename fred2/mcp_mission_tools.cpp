@@ -863,6 +863,24 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
 	if (sink.has_error()) return;
 
+	// Range validation
+	if (repeat_count.has_value() && *repeat_count == 0) {
+		sink.set_error("Parameter 'repeat_count' cannot be 0 (use -1 for infinite, or a positive value)");
+		return;
+	}
+	if (trigger_count.has_value() && *trigger_count == 0) {
+		sink.set_error("Parameter 'trigger_count' cannot be 0 (use -1 for infinite, or a positive value)");
+		return;
+	}
+	if (interval.has_value() && *interval < 1) {
+		sink.set_error("Parameter 'interval' must be >= 1");
+		return;
+	}
+	if (chain_delay.has_value() && *chain_delay < -1) {
+		sink.set_error("Parameter 'chain_delay' must be >= -1 (-1 = not chained)");
+		return;
+	}
+
 	// Auto-set MEF_ flags if parameters provided
 	int mef_flags = 0;
 	if (trigger_count.has_value() && *trigger_count > 0)
@@ -987,6 +1005,24 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto objective_text     = get_optional_string(input, "objective_text", sink, false);
 	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
 	if (sink.has_error()) return;
+
+	// Range validation
+	if (repeat_count.has_value() && *repeat_count == 0) {
+		sink.set_error("Parameter 'repeat_count' cannot be 0 (use -1 for infinite, or a positive value)");
+		return;
+	}
+	if (trigger_count.has_value() && *trigger_count == 0) {
+		sink.set_error("Parameter 'trigger_count' cannot be 0 (use -1 for infinite, or a positive value)");
+		return;
+	}
+	if (interval.has_value() && *interval < 1) {
+		sink.set_error("Parameter 'interval' must be >= 1");
+		return;
+	}
+	if (chain_delay.has_value() && *chain_delay < -1) {
+		sink.set_error("Parameter 'chain_delay' must be >= -1 (-1 = not chained)");
+		return;
+	}
 
 	// Auto-set MEF_ flags if parameters provided
 	std::optional<int> new_mef_flags;
@@ -3875,7 +3911,11 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					char *endptr;
 					long node_idx = strtol(value, &endptr, 10);
 					if (*endptr == '\0' && endptr != value && node_idx >= 0 && node_idx < Num_sexp_nodes) {
-						int ref_op = get_operator_index((int)node_idx);
+						int ref_node = (int)node_idx;
+						// If this is a list wrapper, the operator is the first child
+						if (Sexp_nodes[ref_node].subtype == SEXP_ATOM_LIST && Sexp_nodes[ref_node].first >= 0)
+							ref_node = Sexp_nodes[ref_node].first;
+						int ref_op = get_operator_index(ref_node);
 						if (ref_op >= 0)
 							node_opr = query_operator_return_type(ref_op);
 					}

@@ -772,6 +772,8 @@ static void mcp_handle_load_mission(McpToolRequest *req)
 		FREDDoc_ptr->SetTitle((LPCTSTR)title);
 		FREDDoc_ptr->SetModifiedFlag(FALSE);
 		Undo_count = 0;
+		if (Fred_view_wnd)
+			Fred_view_wnd->Invalidate();
 		req->success = true;
 		sprintf(req->result_message,
 			"Mission loaded successfully: %s", Mission_filename);
@@ -836,6 +838,8 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			req->success = false;
 		} else {
 			create_new_mission();
+			if (Fred_view_wnd)
+				Fred_view_wnd->Invalidate();
 			FREDDoc_ptr->SetTitle("Untitled");
 			FREDDoc_ptr->SetModifiedFlag(FALSE);
 			req->success = true;
