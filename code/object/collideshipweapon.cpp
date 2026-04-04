@@ -221,6 +221,7 @@ static std::tuple<bool, bool, ship_weapon_collision_data> ship_weapon_check_coll
 	float	dist = vm_vec_dist_quick(&ship_objp->pos, &weapon_objp->pos);
 	bool should_update_danger_weapon = (dist < weapon_objp->phys_info.speed);
 	bool should_detonate = false;
+	bool postproc = should_update_danger_weapon;
 
 	int	valid_hit_occurred = 0;				// If this is set, then hitpos is set
 	int	quadrant_num = -1;
@@ -510,10 +511,10 @@ static std::tuple<bool, bool, ship_weapon_collision_data> ship_weapon_check_coll
 		*next_hit = (int) (1000.0f * (mc->hit_dist*(flFrametime + time_limit) - flFrametime) );
 		if (*next_hit > 0)
 			// if hit occurs outside of this frame, do not do damage
-			return { false, false, {std::nullopt, -1, false, -1, -1, ZERO_VECTOR, false, false} }; //No hit, but continue checking
+			return { postproc, false, {std::nullopt, -1, false, -1, -1, ZERO_VECTOR, should_update_danger_weapon, false} }; //No hit, but continue checking
 	}
 
-	bool postproc = valid_hit_occurred || notify_ai_shield_down >= 0;
+	postproc = postproc || valid_hit_occurred || notify_ai_shield_down >= 0;
 	ship_weapon_collision_data collision_data {
 		valid_hit_occurred ? std::optional(*mc) : std::nullopt, notify_ai_shield_down, postproc, quadrant_num, shield_tri_hit, shield_hitpos,
 		should_update_danger_weapon, false
@@ -531,9 +532,7 @@ static std::tuple<bool, bool, ship_weapon_collision_data> ship_weapon_check_coll
 				if (!(shipp->flags[Ship::Ship_Flags::Dont_collide_invis])) {
 					// Detonation writes are deferred to the main thread for thread safety
 					should_detonate = true;
-
-					if (ship_objp == Player_obj)
-						nprintf(("Jim", "Frame %i: Weapon %d set to detonate, dist = %7.3f.\n", Framecount, OBJ_INDEX(weapon_objp), dist));
+					postproc = true;
 					valid_hit_occurred = 1; //No hit, continue checking
 				}
 			}
@@ -541,7 +540,7 @@ static std::tuple<bool, bool, ship_weapon_collision_data> ship_weapon_check_coll
 	}
 
 	collision_data.should_detonate = should_detonate;
-	return { postproc || should_detonate || should_update_danger_weapon, !static_cast<bool>(valid_hit_occurred), collision_data} ;
+	return { postproc, !static_cast<bool>(valid_hit_occurred), collision_data} ;
 }
 
 static void ship_weapon_process_collision(obj_pair* pair, const ship_weapon_collision_data& collision_data) {
@@ -562,6 +561,9 @@ static void ship_weapon_process_collision(obj_pair* pair, const ship_weapon_coll
 	if (collision_data.should_detonate) {
 		wp->lifeleft = 0.001f;
 		wp->weapon_flags.set(Weapon::Weapon_Flags::Begun_detonation);
+
+		if (ship_objp == Player_obj)
+			nprintf(("Jim", "Frame %i: Weapon %d set to detonate, dist = %7.3f.\n", Framecount, OBJ_INDEX(weapon_objp), vm_vec_dist_quick(&ship_objp->pos, &weapon_objp->pos)));
 	}
 
 	if (collision_data.notify_ai_shield_down >= 0)
