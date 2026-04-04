@@ -2151,6 +2151,18 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			return json_incref(it->second);
 	}
 
+	// Hold the cache mutex across the entire load-read-cache-unload cycle to
+	// prevent a use-after-free if two threads request the same uncached class:
+	// without this, Thread A could unload the model while Thread B still reads it.
+	std::lock_guard<std::mutex> cache_lock(model_cache_mutex);
+
+	// Re-check cache — another thread may have populated it while we waited.
+	{
+		auto it = model_details_cache.find(canonical_name);
+		if (it != model_details_cache.end())
+			return json_incref(it->second);
+	}
+
 	// Load the model if not already loaded
 	const auto &sip = Ship_info[sip_idx];
 	bool we_loaded_model = false;
@@ -2405,12 +2417,9 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 	json_t *result = make_json_tool_result(obj);
 
-	// Cache the result for future calls
-	{
-		std::lock_guard<std::mutex> lock(model_cache_mutex);
-		if (model_details_cache.find(canonical_name) == model_details_cache.end())
-			model_details_cache.emplace(SCP_string(canonical_name), json_incref(result));
-	}
+	// Cache the result for future calls (cache mutex already held)
+	if (model_details_cache.find(canonical_name) == model_details_cache.end())
+		model_details_cache.emplace(SCP_string(canonical_name), json_incref(result));
 
 	// Unload the model if we were the ones who loaded it
 	if (we_loaded_model) {
