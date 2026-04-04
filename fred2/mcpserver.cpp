@@ -28,7 +28,7 @@ static void send_json_response(struct mg_connection *conn, json_t *response)
 {
 	char *body = json_dumps(response, JSON_COMPACT | JSON_REAL_PRECISION(6));
 	if (body == nullptr) {
-		const char *fallback = "{\"jsonrpc\":\"2.0\",\"error\":{\"code\":-32603,\"message\":\"JSON serialization failed\"}}";
+		const char *fallback = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"JSON serialization failed\"}}";
 		mg_printf(conn,
 			"HTTP/1.1 500 Internal Server Error\r\n"
 			"Content-Type: application/json\r\n"
