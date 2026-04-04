@@ -28,15 +28,12 @@ void mcp_sexp_forest_rebuild();
 // MUST be called after all mongoose threads have stopped (i.e., after mg_stop()).
 void mcp_sexp_forest_cleanup();
 
-// Returns true if the forest needs a rebuild before use.
-bool mcp_sexp_forest_is_dirty();
-
-// Call get_listing_opf on the cached forest under its mutex.
-// parent_node is a Sexp_nodes[] index (-1 for no context).
-// Returns a heap-allocated sexp_list_item chain; caller must free with ->destroy().
-// The caller must ensure the forest is not dirty before calling this
-// (i.e., marshal REBUILD_SEXP_FOREST to the main thread if dirty).
-class sexp_list_item;
-sexp_list_item *mcp_sexp_forest_get_listing(int opf, int parent_node, int arg_index);
+// Rebuild the forest if dirty, then call get_listing_opf and return the
+// results as a JSON array of strings.  MUST be called on the main thread.
+// This is the preferred entry point — it avoids the thread-safety issues
+// of calling get_listing_opf on a worker thread (the opf helpers read
+// main-thread-owned globals like Ships[], Wings[], Messages[], etc.).
+struct json_t;
+json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int arg_index);
 
 #endif // _MCP_SEXP_FOREST_H
