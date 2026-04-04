@@ -816,19 +816,31 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	switch (req->tool) {
 	case McpToolId::LOAD_MISSION:
-		mcp_handle_load_mission(req);
+		if (!validate_no_dialogs_open(req->result_message)) {
+			req->success = false;
+		} else {
+			mcp_handle_load_mission(req);
+		}
 		break;
 
 	case McpToolId::SAVE_MISSION:
-		mcp_handle_save_mission(req, MissionFormat::STANDARD);
+		if (!validate_no_dialogs_open(req->result_message)) {
+			req->success = false;
+		} else {
+			mcp_handle_save_mission(req, MissionFormat::STANDARD);
+		}
 		break;
 
 	case McpToolId::NEW_MISSION:
-		create_new_mission();
-		FREDDoc_ptr->SetTitle("Untitled");
-		FREDDoc_ptr->SetModifiedFlag(FALSE);
-		req->success = true;
-		req->result_message = "New empty mission created";
+		if (!validate_no_dialogs_open(req->result_message)) {
+			req->success = false;
+		} else {
+			create_new_mission();
+			FREDDoc_ptr->SetTitle("Untitled");
+			FREDDoc_ptr->SetModifiedFlag(FALSE);
+			req->success = true;
+			req->result_message = "New empty mission created";
+		}
 		break;
 
 	case McpToolId::LOAD_SHIP_MODEL:
