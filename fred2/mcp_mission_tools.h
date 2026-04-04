@@ -2,6 +2,7 @@
 #define _MCP_MISSION_TOOLS_H
 
 #include <jansson.h>
+#include "globalincs/vmallocator.h"
 
 struct McpToolRequest;
 
@@ -16,5 +17,9 @@ json_t *mcp_route_mission_tool(const char *tool_name, json_t *arguments);
 // Main-thread handler for MISSION_TOOL calls.
 // Called from OnMcpToolCall when req->tool == McpToolId::MISSION_TOOL.
 void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolRequest *req);
+
+// Returns false (with error_msg) if any editor dialog is open.
+// Used by LOAD_MISSION / SAVE_MISSION / NEW_MISSION to prevent data loss.
+bool validate_no_dialogs_open(SCP_string &error_msg);
 
 #endif // _MCP_MISSION_TOOLS_H

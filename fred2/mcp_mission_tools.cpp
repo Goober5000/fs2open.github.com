@@ -195,6 +195,26 @@ static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
 		&& validate_single_dialog("SEXP nodes", "goal", error_msg);
 }
 
+bool validate_no_dialogs_open(SCP_string &error_msg)
+{
+	SCP_string open_list;
+	for (size_t i = 0; i < g_editor_info_count; ++i) {
+		auto &info = g_editor_info[i];
+		auto wnd = info.getCWndPtr();
+		if (wnd && wnd->IsWindowVisible()) {
+			if (!open_list.empty())
+				open_list += ", ";
+			open_list += info.editor_name;
+		}
+	}
+	if (!open_list.empty()) {
+		sprintf(error_msg, "Cannot perform this operation while editor dialogs are open: %s. "
+			"Close them first, or use get_ui_status to check which editors are open.", open_list.c_str());
+		return false;
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Persona helpers
 // ---------------------------------------------------------------------------
