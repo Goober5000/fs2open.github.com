@@ -864,11 +864,16 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		// Build default SEXP formula: (when (true) (do-nothing))
 		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
 		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);
-		formula = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
-		if (*formula < 0) {
+		int when_node = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
+		if (do_nothing < 0 || true_node < 0 || when_node < 0) {
+			// Clean up any nodes that were successfully allocated
+			if (when_node >= 0) free_sexp2(when_node);
+			else if (true_node >= 0) free_sexp2(true_node);
+			else if (do_nothing >= 0) free_sexp2(do_nothing);
 			sink.set_error("Failed to allocate SEXP nodes for default event formula");
 			return;
 		}
+		formula = when_node;
 	}
 
 	// Construct the event
