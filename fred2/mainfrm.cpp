@@ -882,6 +882,17 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		req->result_message = "SEXP forest rebuilt";
 		break;
 
+	case McpToolId::GET_SEXP_LISTING:
+		{
+			Assertion(req->input_json != nullptr, "GET_SEXP_LISTING requires input_json");
+			int opf = (int)json_integer_value(json_object_get(req->input_json, "opf"));
+			int parent_node = (int)json_integer_value(json_object_get(req->input_json, "parent_node"));
+			int arg_index = (int)json_integer_value(json_object_get(req->input_json, "arg_index"));
+			req->result_json = mcp_sexp_forest_get_listing_on_main_thread(opf, parent_node, arg_index);
+			req->success = true;
+		}
+		break;
+
 	case McpToolId::GET_SERVER_INFO:
 		{
 			json_t *info = json_object();
