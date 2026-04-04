@@ -67,6 +67,8 @@ static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
 // Scripting API cache
 // ---------------------------------------------------------------------------
 
+static std::thread s_cache_warmup_thread;
+
 static std::mutex scripting_api_cache_mutex;
 static json_t* scripting_api_cache = nullptr;
 
@@ -3280,13 +3282,17 @@ void mcp_reference_tools_init()
 	// scripting tool call doesn't pay the full 30-60s generation cost.
 	// get_scripting_api_doc() is mutex-protected, so concurrent tool calls
 	// will simply block on the lock until the cache is ready.
-	std::thread([]() {
+	s_cache_warmup_thread = std::thread([]() {
 		get_scripting_api_doc();
-	}).detach();
+	});
 }
 
 void mcp_reference_tools_cleanup()
 {
+	// Wait for the cache warmup thread to finish before freeing caches.
+	if (s_cache_warmup_thread.joinable())
+		s_cache_warmup_thread.join();
+
 	// Called after mg_stop() — no mongoose threads running, no lock needed.
 	for (auto &pair : model_details_cache)
 		json_decref(pair.second);
