@@ -35,6 +35,8 @@
 #include "eventeditor.h"
 #include "mainfrm.h"
 
+#define PLACEHOLDER_STRING "<placeholder>"
+
 // ---------------------------------------------------------------------------
 // SEXP syntax checking helper
 // ---------------------------------------------------------------------------
@@ -3726,6 +3728,10 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 			sink.set_error("Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value);
 			return -1;
 		}
+		// -1 is a placeholder meaning "empty slot, to be filled later"
+		if (idx == -1) {
+			return alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
+		}
 		if (idx < 0 || idx >= Num_sexp_nodes) {
 			sink.set_error("Node argument %d: node index %ld is out of range (0-%d)", arg_index, idx, Num_sexp_nodes - 1);
 			return -1;
@@ -3807,9 +3813,15 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				return;
 			}
 
+			// A node value of -1 is a placeholder that bypasses type checking
+			bool is_placeholder = (!stricmp(type_str, "node") && !strcmp(value, "-1"))
+				|| (!stricmp(type_str, "string") && !strcmp(value, PLACEHOLDER_STRING));
+
 			// Type-check this argument against the operator's expected type
 			int expected_opf = query_operator_argument_type(op_idx, i);
-			if (expected_opf == OPF_NONE) {
+			if (is_placeholder) {
+				// Placeholder nodes skip type checking entirely
+			} else if (expected_opf == OPF_NONE) {
 				// Argument index exceeds operator's expected count; warn but allow
 				if (!warnings) warnings = json_array();
 				SCP_string wmsg;
@@ -5420,7 +5432,10 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_prop(arg_props, "value",
 			"Argument value. For number/string: literal value (prefix with @ "
 			"for SEXP variable). For boolean: \"true\" or \"false\". "
-			"For node: the node index.");
+			"For node: a node index, or \"-1\" as a placeholder. "
+			"A node value of -1 or a string value of " PLACEHOLDER_STRING
+			" bypasses type checking, serves as a placeholder, and can be "
+			"used in any argument position as an empty slot to fill later.");
 		json_t *arg_req = json_array();
 		json_array_append_new(arg_req, json_string("type"));
 		json_array_append_new(arg_req, json_string("value"));
