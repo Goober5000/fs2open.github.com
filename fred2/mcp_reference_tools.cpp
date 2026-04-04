@@ -9,6 +9,7 @@
 #include <climits>
 #include <cstring>
 #include <mutex>
+#include <thread>
 
 #include "globalincs/utility.h"
 
@@ -672,14 +673,18 @@ void mcp_register_reference_tools(json_t *tools)
 			"List all scripting API libraries and classes with summary info (name, shortName, "
 			"type, description, child count). Use this to discover available namespaces and "
 			"types before drilling into specifics with get_scripting_element. "
-			"Use get_reference_note with topic 'scripts' for an overview of the scripting system.",
+			"Use get_reference_note with topic 'scripts' for an overview of the scripting system. "
+			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 			props);
 	}
 
 	// get_scripting_element
 	register_tool_with_required_string(tools, "get_scripting_element",
 		"Get full details of a scripting library or class, including all its children "
-		"(functions, properties, operators). Matches by name or shortName, case-insensitive.",
+		"(functions, properties, operators). Matches by name or shortName, case-insensitive. "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 		"name", "Name or shortName of the element (e.g. \"Mission\", \"mn\", \"ship\")");
 
 	// search_scripting_children
@@ -692,7 +697,9 @@ void mcp_register_reference_tools(json_t *tools)
 			{ "function", "property", "operator" });
 		register_tool(tools, "search_scripting_children",
 			"Search for functions, properties, or operators across all scripting libraries "
-			"and classes. Returns matches with parent context. At least one parameter required.",
+			"and classes. Returns matches with parent context. At least one parameter required. "
+			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 			props);
 	}
 
@@ -709,7 +716,9 @@ void mcp_register_reference_tools(json_t *tools)
 		register_tool(tools, "list_scripting_hooks",
 			"List scripting hooks (actions) that fire at engine events. Without 'name', "
 			"returns summaries. With 'name', returns full hook details including typed "
-			"hookVars and conditions.",
+			"hookVars and conditions. "
+			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 			props);
 	}
 
@@ -719,7 +728,9 @@ void mcp_register_reference_tools(json_t *tools)
 		add_string_prop(props, "search",
 			"Fuzzy search against enum names. Results are sorted by match quality.");
 		register_tool(tools, "list_scripting_enums",
-			"List all scripting enumeration constants with their integer values.",
+			"List all scripting enumeration constants with their integer values. "
+			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 			props);
 	}
 
@@ -733,7 +744,9 @@ void mcp_register_reference_tools(json_t *tools)
 		json_array_append_new(req, json_string("section"));
 		register_tool(tools, "get_scripting_misc",
 			"Get miscellaneous scripting API sections: 'conditions' (hook condition types), "
-			"'options' (engine options), or 'globalVars' (global hook variables).",
+			"'options' (engine options), or 'globalVars' (global hook variables). "
+			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 			props, req);
 	}
 
@@ -3252,6 +3265,17 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 // ---------------------------------------------------------------------------
 // Cleanup
 // ---------------------------------------------------------------------------
+
+void mcp_reference_tools_init()
+{
+	// Warm the scripting API cache on a background thread so the first
+	// scripting tool call doesn't pay the full 30-60s generation cost.
+	// get_scripting_api_doc() is mutex-protected, so concurrent tool calls
+	// will simply block on the lock until the cache is ready.
+	std::thread([]() {
+		get_scripting_api_doc();
+	}).detach();
+}
 
 void mcp_reference_tools_cleanup()
 {

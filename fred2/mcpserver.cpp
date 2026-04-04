@@ -578,6 +578,8 @@ void mcp_server_start()
 	}
 	mprintf(("MCP server listening on 127.0.0.1:%d\n", Mcp_server_port));
 	mcp_fred_ready.store(true);
+
+	mcp_reference_tools_init();
 }
 
 void mcp_server_stop()
