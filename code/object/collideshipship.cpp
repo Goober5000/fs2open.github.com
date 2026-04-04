@@ -259,21 +259,14 @@ int ship_ship_check_collision(collision_info_struct *ship_ship_hit_info)
 			SCP_vector<int> submodel_vector;
 			model_get_moving_submodel_list(submodel_vector, heavy_obj);
 
-			// Build a local collision_checked override array so we don't write to shared pmi state.
-			// This is essential for thread safety when multiple pairs share the same heavy ship.
-			SCP_vector<char> collision_checked_local(pm->n_models, 0);
-			for (int j = 0; j < pm->n_models; j++) {
-				collision_checked_local[j] = pmi->submodel[j].collision_checked;
-			}
-
 			// turn off all moving submodels, collide against only 1 at a time.
+			mc.collision_checked.assign(pm->n_models, 0);
 			for (auto submodel : submodel_vector) {
-				collision_checked_local[submodel] = true;
+				mc.collision_checked[submodel] = true;
 			}
 
 			// Only check single submodel now, since children of moving submodels are handled as moving as well
 			mc.flags = orig_flags | MC_SUBMODEL;
-			mc.collision_checked_override = collision_checked_local.data();
 
 			if (heavy_sip->collision_lod > -1) {
 				mc.lod = heavy_sip->collision_lod;
@@ -282,11 +275,11 @@ int ship_ship_check_collision(collision_info_struct *ship_ship_hit_info)
 			// check each submodel in turn
 			for (auto submodel : submodel_vector) {
 				// turn on just one submodel for collision test
-				collision_checked_local[submodel] = false;
+				mc.collision_checked[submodel] = false;
 
 				if (pmi->submodel[submodel].blown_off)
 				{
-					collision_checked_local[submodel] = true;
+					mc.collision_checked[submodel] = true;
 					continue;
 				}
 
@@ -322,11 +315,11 @@ int ship_ship_check_collision(collision_info_struct *ship_ship_hit_info)
 				}
 
 				// re-disable this submodel before enabling the next one
-				collision_checked_local[submodel] = true;
+				mc.collision_checked[submodel] = true;
 			}
 
-			// Clear the override before subsequent model_collide calls
-			mc.collision_checked_override = nullptr;
+			// Clear collision_checked before subsequent model_collide calls so it auto-inits fresh
+			mc.collision_checked.clear();
 		}
 
 		// Now complete base model collision checks that do not take into account rotating submodels.
