@@ -865,6 +865,10 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
 		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);
 		formula = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
+		if (*formula < 0) {
+			sink.set_error("Failed to allocate SEXP nodes for default event formula");
+			return;
+		}
 	}
 
 	// Construct the event
@@ -1384,12 +1388,18 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 	if (new_ani) {
-		strcpy_s(s.ani_filename, new_ani[0] ? new_ani : "<default>");
-		changed = true;
+		const char *effective_ani = new_ani[0] ? new_ani : "<default>";
+		if (strcmp(s.ani_filename, effective_ani) != 0) {
+			strcpy_s(s.ani_filename, effective_ani);
+			changed = true;
+		}
 	}
 	if (new_wave) {
-		strcpy_s(s.wave_filename, new_wave[0] ? new_wave : "none");
-		changed = true;
+		const char *effective_wave = new_wave[0] ? new_wave : "none";
+		if (strcmp(s.wave_filename, effective_wave) != 0) {
+			strcpy_s(s.wave_filename, effective_wave);
+			changed = true;
+		}
 	}
 
 	if (changed) {
@@ -1590,6 +1600,10 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	if (!formula.has_value()) {
 		// Build default SEXP formula: (true) — matching FRED2 editor pattern
 		formula = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+		if (*formula < 0) {
+			sink.set_error("Failed to allocate SEXP node for default goal formula");
+			return;
+		}
 	}
 
 	// Construct the goal
