@@ -3810,11 +3810,6 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		int parent = Sexp_nodes[n].parent;
 		int target_rest = Sexp_nodes[n].rest;
 
-		// Determine which chain the node is in before modifying links
-		bool entry_is_first = false;
-		if (parent >= 0)
-			find_chain_start(parent, n, entry_is_first);
-
 		if (shrink) {
 			// Shrink mode: link the predecessor directly to the next sibling,
 			// shifting subsequent arguments up by one position.
@@ -3827,47 +3822,11 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			splice_replace_node(parent, n, replacement);
 		}
 
-		// Find and detach trailing contiguous placeholders from the sibling
-		// chain.  We detach but do NOT free yet, so we can roll back if the
-		// syntax check fails.
-		int first_trailing = -1;
-		int prev_before_run = -1;
-
-		if (parent >= 0) {
-			int chain_start = entry_is_first ? Sexp_nodes[parent].first : Sexp_nodes[parent].rest;
-
-			int cur = chain_start;
-			int prev = -1;
-			while (cur >= 0) {
-				if (is_placeholder_node(cur)) {
-					if (first_trailing < 0) {
-						first_trailing = cur;
-						prev_before_run = prev;
-					}
-				} else {
-					first_trailing = -1;
-					prev_before_run = -1;
-				}
-				prev = cur;
-				cur = Sexp_nodes[cur].rest;
-			}
-
-			// Detach the trailing run (but keep the nodes intact for rollback)
-			if (first_trailing >= 0)
-				set_chain_link(parent, prev_before_run, entry_is_first, -1);
-		}
-
 		// Syntax check for mission-attached trees (Case C).
-		// The tree is now in its final shape (placeholder inserted,
-		// trailing placeholders detached).
 		if (is_attached) {
 			int bad_node = -1;
 			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 			if (syntax_result != SEXP_CHECK_NO_ERROR) {
-				// Rollback: reattach trailing placeholder run
-				if (first_trailing >= 0)
-					set_chain_link(parent, prev_before_run, entry_is_first, first_trailing);
-
 				// Rollback: restore the original node into the chain
 				splice_replace_node(parent, shrink ? target_rest : replacement, n);
 				Sexp_nodes[n].rest = target_rest;
@@ -3889,19 +3848,6 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		Sexp_nodes[n].rest = -1;
 		Sexp_nodes[n].parent = -1;
 		freed_count = free_sexp2(n);
-
-		// Free trailing placeholders that were detached above
-		if (first_trailing >= 0) {
-			int cur = first_trailing;
-			while (cur >= 0) {
-				int next = Sexp_nodes[cur].rest;
-				Sexp_nodes[cur].rest = -1;
-				Sexp_nodes[cur].parent = -1;
-				freed_count += free_sexp2(cur);
-				cur = next;
-			}
-			replacement = -1;
-		}
 	}
 
 	// Mark the proper sexp root dirty
