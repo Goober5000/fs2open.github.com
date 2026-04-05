@@ -76,11 +76,16 @@ bool check_int_range(int input, int min, int max, const char *param_name, McpErr
 int check_lookup(const char *input, std::function<int(const char*)> lookup_fn, const char *param_name, McpErrorSink &sink);
 int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, const char *param_name, McpErrorSink &sink);
 
-// Checks the given name against all entity types (ships, wings, waypoints, jump nodes, etc.)
-// for conflicts.  The exclude parameters prevent matching against the entity being renamed.
+// Checks the given name against all object types (ships, wings, waypoints, jump nodes, etc.)
+// for conflicts.  The exclude parameters prevent matching against the object being renamed.
 // Returns true if the name is valid, or false with an error message.
-bool check_name_conflict(const char *entity_type, const char *name, McpErrorSink &sink,
+bool check_object_rename(const char *object_type, const char *name, McpErrorSink &sink,
 	int exclude_ship = -1, int exclude_wing = -1, int exclude_waypoint_list = -1, int exclude_jump_node = -1);
+
+// Validates a rename: checks length, non-empty, and duplicate via name_exists callback.
+// Returns true if valid, false with error via sink if not.
+bool check_general_rename(const char *new_name, const char *current_name,
+	std::function<bool(const char*)> name_exists, const char *entity_label, McpErrorSink &sink);
 
 bool validate(std::function<const char *()> error_msg_fn, McpErrorSink &sink);
 bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink);
