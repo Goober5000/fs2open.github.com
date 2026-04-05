@@ -1,4 +1,4 @@
-"""Manual validation tests for delete_sexp_node (all plan cases)."""
+"""Manual validation tests for detach_sexp_node."""
 import json, urllib.request, sys
 
 url = "http://127.0.0.1:8080/mcp"
@@ -54,22 +54,29 @@ def check(label, ok, detail=""):
     else:
         failed += 1
 
+# Helper: get the node index from a detached_node response (object or int)
+def get_detached_node_id(d):
+    dn = d.get("detached_node")
+    if isinstance(dn, dict):
+        return dn.get("node")
+    return dn
+
 # Setup
-call("new_mission", {"mission_name": "delete_sexp_test", "mission_title": "Test"})
+call("new_mission", {"mission_name": "detach_sexp_test", "mission_title": "Test"})
 
 # =====================================================================
-print("\n=== Test 1: Delete free-standing root (Case B) ===")
+print("\n=== Test 1: Detach+delete free-standing root (Case B) ===")
 r = call("text_to_sexp", {"text": "( when ( true ) ( do-nothing ) )"})
 node = tool_data(r)["node"]
-r = call("delete_sexp_node", {"node": node})
+r = call("detach_sexp_node", {"node": node, "delete": True})
 d = tool_data(r)
 check("Free-standing root freed, no replacement",
-      not is_error(r) and d.get("deleted_node") == node and d.get("replacement_node") is None,
+      not is_error(r) and d.get("detached_node") == node
+      and d.get("deleted") is True and d.get("replacement_node") is None,
       json.dumps(d))
 
 # =====================================================================
-print("\n=== Test 2: Delete embedded node in free-standing tree (Case D) ===")
-# Use create_sexp_node which sets proper parent pointers
+print("\n=== Test 2: Detach embedded node (default: preserved) ===")
 r = call("create_sexp_node", {
     "operator": "+",
     "operator_arguments": [
@@ -81,62 +88,72 @@ r = call("create_sexp_node", {
 root = tool_data(r)["node"]
 r = call("walk_sexp_tree", {"node": root})
 nodes = tool_data(r)["nodes"]
-# Delete "2" (middle arg) -- placeholder should stay since "3" follows
 two_node = None
 for n in nodes:
     if n.get("value") == "2":
         two_node = n["node"]
         break
-r = call("delete_sexp_node", {"node": two_node})
+r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
 repl_val = d.get("replacement_node", {}).get("value", "") if d.get("replacement_node") else ""
-check("Embedded node replaced with placeholder",
-      not is_error(r) and d.get("deleted_node") == two_node and repl_val == "<placeholder>",
-      f"replacement={repl_val}")
+dn = d.get("detached_node", {})
+check("Embedded node detached and preserved with placeholder",
+      not is_error(r) and isinstance(dn, dict) and dn.get("node") == two_node
+      and d.get("deleted") is False and repl_val == "<placeholder>",
+      f"detached={dn}, replacement={repl_val}")
+# Verify detached node is still accessible
+r = call("get_sexp_node", {"node": two_node})
+check("Detached node still accessible via get_sexp_node",
+      not is_error(r),
+      tool_text(r)[:80])
 # Clean up
-call("delete_sexp_node", {"node": root})
+call("detach_sexp_node", {"node": root, "delete": True})
+call("detach_sexp_node", {"node": two_node, "delete": True})
 
 # =====================================================================
-print("\n=== Test 3: Delete root of event formula (Case A, OPR_NULL) ===")
-r = call("create_event", {"name": "test_evt_delete"})
+print("\n=== Test 3: Detach root of event formula (Case A, OPR_NULL) ===")
+r = call("create_event", {"name": "test_evt_detach"})
 d = tool_data(r)
 evt_formula = d.get("formula")
-r = call("delete_sexp_node", {"node": evt_formula})
+r = call("detach_sexp_node", {"node": evt_formula})
 d = tool_data(r)
 repl = d.get("replacement_node", {})
 repl_val = repl.get("value", "") if repl else ""
+dn = d.get("detached_node", {})
 check("Event formula replaced with do-nothing",
-      not is_error(r) and d.get("deleted_node") == evt_formula and repl_val == "do-nothing",
+      not is_error(r) and isinstance(dn, dict) and dn.get("node") == evt_formula and repl_val == "do-nothing",
       f"replacement={repl_val}")
 # Verify event updated
-r = call("get_event", {"name": "test_evt_delete"})
+r = call("get_event", {"name": "test_evt_detach"})
 evt_d = tool_data(r)
 new_formula = evt_d.get("formula")
 check("Event formula points to replacement node",
       new_formula == repl.get("node"),
       f"formula={new_formula}, repl_node={repl.get('node')}")
-call("delete_event", {"name": "test_evt_delete"})
+# Clean up detached node
+call("detach_sexp_node", {"node": evt_formula, "delete": True})
+call("delete_event", {"name": "test_evt_detach"})
 
 # =====================================================================
-print("\n=== Test 4: Delete root of goal formula (Case A, OPR_BOOL) ===")
-# Default goal formula is Locked_sexp_true which can't be deleted,
-# so create a non-locked boolean formula first
+print("\n=== Test 4: Detach root of goal formula (Case A, OPR_BOOL) ===")
 r = call("create_sexp_node", {"operator": "not", "operator_arguments": [{"type": "boolean", "value": "true"}]})
 custom_formula = tool_data(r)["node"]
-r = call("create_goal", {"name": "test_goal_delete", "formula": custom_formula})
+r = call("create_goal", {"name": "test_goal_detach", "formula": custom_formula})
 d = tool_data(r)
 goal_formula = d.get("formula")
-r = call("delete_sexp_node", {"node": goal_formula})
+r = call("detach_sexp_node", {"node": goal_formula})
 d = tool_data(r)
 repl = d.get("replacement_node", {})
 repl_val = repl.get("value", "") if repl else ""
+dn = d.get("detached_node", {})
 check("Goal formula replaced with true",
-      not is_error(r) and d.get("deleted_node") == goal_formula and repl_val == "true",
+      not is_error(r) and isinstance(dn, dict) and dn.get("node") == goal_formula and repl_val == "true",
       f"replacement={repl_val}")
-call("delete_goal", {"name": "test_goal_delete"})
+call("detach_sexp_node", {"node": goal_formula, "delete": True})
+call("delete_goal", {"name": "test_goal_detach"})
 
 # =====================================================================
-print("\n=== Test 5: Delete embedded node in event formula (Case C) ===")
+print("\n=== Test 5: Detach embedded node in event formula (Case C) ===")
 r = call("create_event", {"name": "test_evt_embed"})
 d = tool_data(r)
 evt_formula = d.get("formula")
@@ -149,7 +166,7 @@ for n in nodes:
         true_node = n["node"]
         break
 if true_node is not None:
-    r = call("delete_sexp_node", {"node": true_node})
+    r = call("detach_sexp_node", {"node": true_node})
     if is_error(r):
         err_text = tool_text(r)
         check("Embedded delete rolled back on syntax error",
@@ -191,7 +208,7 @@ for nd in nodes:
     if nd.get("value") == "3":
         three_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": three_node})
+r = call("detach_sexp_node", {"node": three_node})
 d = tool_data(r)
 repl = d.get("replacement_node")
 check("Last arg deleted, placeholder inserted",
@@ -202,7 +219,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 2 <placeholder>",
       remaining == ["+", "1", "2", "<placeholder>"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 9: Trailing placeholder cleanup — middle arg with trailing placeholders ===")
@@ -224,7 +241,7 @@ for nd in nodes:
     if nd.get("value") == "2":
         two_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": two_node})
+r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
 repl = d.get("replacement_node")
 check("Middle arg deleted, placeholder kept (non-placeholder follows)",
@@ -236,7 +253,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 <placeholder> 3",
       "+" in remaining and "1" in remaining and "<placeholder>" in remaining and "3" in remaining,
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 10: Delete all args — placeholders preserved ===")
@@ -259,14 +276,14 @@ for nd in nodes:
     elif nd.get("value") == "2":
         two_node = nd["node"]
 # Delete "2" first
-r = call("delete_sexp_node", {"node": two_node})
+r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
 repl = d.get("replacement_node")
 check("Second arg replaced with placeholder",
       not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
       f"replacement={repl}")
 # Now delete "1"
-r = call("delete_sexp_node", {"node": one_node})
+r = call("detach_sexp_node", {"node": one_node})
 d = tool_data(r)
 repl = d.get("replacement_node")
 check("First arg replaced with placeholder",
@@ -278,7 +295,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + <placeholder> <placeholder>",
       remaining == ["+", "<placeholder>", "<placeholder>"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 11: Shrink — remove middle arg, siblings shift up ===")
@@ -299,7 +316,7 @@ for nd in nodes:
     if nd.get("value") == "2":
         two_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": two_node, "shrink": True})
+r = call("detach_sexp_node", {"node": two_node, "shrink": True})
 d = tool_data(r)
 check("Shrink middle arg, no placeholder",
       not is_error(r) and d.get("replacement_node") is None,
@@ -309,7 +326,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 3 (no placeholder)",
       remaining == ["+", "1", "3"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 12: Shrink — remove last arg ===")
@@ -330,7 +347,7 @@ for nd in nodes:
     if nd.get("value") == "3":
         three_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": three_node, "shrink": True})
+r = call("detach_sexp_node", {"node": three_node, "shrink": True})
 d = tool_data(r)
 check("Shrink last arg",
       not is_error(r),
@@ -340,7 +357,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 2",
       remaining == ["+", "1", "2"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 13: Shrink — remove first arg ===")
@@ -361,7 +378,7 @@ for nd in nodes:
     if nd.get("value") == "1":
         one_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": one_node, "shrink": True})
+r = call("detach_sexp_node", {"node": one_node, "shrink": True})
 d = tool_data(r)
 check("Shrink first arg",
       not is_error(r),
@@ -371,7 +388,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 2 3",
       remaining == ["+", "2", "3"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 14: Shrink — placeholder sibling preserved ===")
@@ -393,7 +410,7 @@ for nd in nodes:
     if nd.get("value") == "2":
         two_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": two_node, "shrink": True})
+r = call("detach_sexp_node", {"node": two_node, "shrink": True})
 d = tool_data(r)
 check("Shrink removes node, no replacement",
       not is_error(r) and d.get("replacement_node") is None,
@@ -403,7 +420,7 @@ remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 <placeholder>",
       remaining == ["+", "1", "<placeholder>"],
       str(remaining))
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
 print("\n=== Test 15: Shrink=false is same as default (placeholder) ===")
@@ -423,32 +440,73 @@ for nd in nodes:
     if nd.get("value") == "2":
         two_node = nd["node"]
         break
-r = call("delete_sexp_node", {"node": two_node, "shrink": False})
+r = call("detach_sexp_node", {"node": two_node, "shrink": False})
 d = tool_data(r)
 repl = d.get("replacement_node")
 check("shrink=false inserts placeholder",
       not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
       f"replacement={repl}")
-call("delete_sexp_node", {"node": plus_node})
+call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
-print("\n=== Test 6: Delete Locked_sexp_true (rejection) ===")
-# Default goal formula is Locked_sexp_true
+print("\n=== Test 6: Detach Locked_sexp_true (rejection) ===")
 r = call("create_goal", {"name": "test_locked"})
 d = tool_data(r)
 locked_formula = d.get("formula")
-r = call("delete_sexp_node", {"node": locked_formula})
+r = call("detach_sexp_node", {"node": locked_formula})
 check("Locked_sexp_true rejected",
       is_error(r) and "locked singleton" in tool_text(r).lower(),
       tool_text(r)[:120])
 call("delete_goal", {"name": "test_locked"})
 
 # =====================================================================
-print("\n=== Test 7: Delete SEXP_NOT_USED node (rejection) ===")
-r = call("delete_sexp_node", {"node": 99999})
+print("\n=== Test 7: Detach SEXP_NOT_USED node (rejection) ===")
+r = call("detach_sexp_node", {"node": 99999})
 check("Out-of-range node rejected",
       is_error(r),
       tool_text(r)[:120])
+
+# =====================================================================
+print("\n=== Test 16: Detach free-standing root without delete (preserved) ===")
+r = call("create_sexp_node", {
+    "operator": "+",
+    "operator_arguments": [
+        {"type": "number", "value": "1"},
+        {"type": "number", "value": "2"}
+    ]
+})
+plus_node = tool_data(r)["node"]
+r = call("detach_sexp_node", {"node": plus_node})
+d = tool_data(r)
+dn = d.get("detached_node", {})
+check("Free-standing root preserved (not freed)",
+      not is_error(r) and isinstance(dn, dict) and dn.get("node") == plus_node
+      and d.get("deleted") is False and d.get("freed_count") == 0,
+      f"detached_node={dn}, deleted={d.get('deleted')}")
+# Verify node is still accessible
+r = call("get_sexp_node", {"node": plus_node})
+check("Preserved root still accessible",
+      not is_error(r),
+      tool_text(r)[:80])
+# Clean up
+call("detach_sexp_node", {"node": plus_node, "delete": True})
+
+# =====================================================================
+print("\n=== Test 17: Detach+delete free-standing root (freed) ===")
+r = call("create_sexp_node", {
+    "operator": "+",
+    "operator_arguments": [
+        {"type": "number", "value": "1"},
+        {"type": "number", "value": "2"}
+    ]
+})
+plus_node = tool_data(r)["node"]
+r = call("detach_sexp_node", {"node": plus_node, "delete": True})
+d = tool_data(r)
+check("Free-standing root freed",
+      not is_error(r) and d.get("detached_node") == plus_node
+      and d.get("deleted") is True and d.get("freed_count") > 0,
+      f"detached_node={d.get('detached_node')}, deleted={d.get('deleted')}, freed={d.get('freed_count')}")
 
 # =====================================================================
 print(f"\n{'='*50}")
