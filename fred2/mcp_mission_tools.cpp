@@ -3750,6 +3750,8 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 	auto node = get_required_integer(input, "node", sink);
 	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink))
 		return;
+	auto shrink_opt = get_optional_bool(input, "shrink", sink);
+	bool shrink = shrink_opt.has_value() && *shrink_opt;
 
 	int n = *node;
 
@@ -3802,27 +3804,37 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		freed_count = free_sexp2(n);
 
 	} else {
-		// Cases C & D: Embedded node -- splice a placeholder into the parent's link chain.
+		// Cases C & D: Embedded node -- splice a replacement into the parent's link chain.
 		// The node's sibling chain is reachable from parent.first or parent.rest,
 		// depending on how the tree was built (text_to_sexp vs create_sexp_node).
 		int parent = Sexp_nodes[n].parent;
 		int target_rest = Sexp_nodes[n].rest;
 
-		replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
-		Sexp_nodes[replacement].parent = parent;
+		// Determine which chain the node is in before modifying links
+		bool entry_is_first = false;
+		if (parent >= 0)
+			find_chain_start(parent, n, entry_is_first);
 
-		// Splice the replacement into the parent's link chain
-		splice_replace_node(parent, n, replacement);
+		if (shrink) {
+			// Shrink mode: link the predecessor directly to the next sibling,
+			// shifting subsequent arguments up by one position.
+			replacement = -1;
+			splice_replace_node(parent, n, target_rest);
+		} else {
+			// Default mode: insert a placeholder to preserve argument positions.
+			replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
+			Sexp_nodes[replacement].parent = parent;
+			splice_replace_node(parent, n, replacement);
+		}
 
 		// Find and detach trailing contiguous placeholders from the sibling
 		// chain.  We detach but do NOT free yet, so we can roll back if the
 		// syntax check fails.
 		int first_trailing = -1;
 		int prev_before_run = -1;
-		bool entry_is_first = false;
 
 		if (parent >= 0) {
-			int chain_start = find_chain_start(parent, replacement, entry_is_first);
+			int chain_start = entry_is_first ? Sexp_nodes[parent].first : Sexp_nodes[parent].rest;
 
 			int cur = chain_start;
 			int prev = -1;
@@ -3857,13 +3869,15 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 					set_chain_link(parent, prev_before_run, entry_is_first, first_trailing);
 
 				// Rollback: restore the original node into the chain
-				splice_replace_node(parent, replacement, n);
+				splice_replace_node(parent, shrink ? target_rest : replacement, n);
 				Sexp_nodes[n].rest = target_rest;
 
-				// Free the placeholder (detach from chain first)
-				Sexp_nodes[replacement].rest = -1;
-				Sexp_nodes[replacement].parent = -1;
-				free_sexp2(replacement);
+				// Free the placeholder if one was allocated
+				if (replacement >= 0) {
+					Sexp_nodes[replacement].rest = -1;
+					Sexp_nodes[replacement].parent = -1;
+					free_sexp2(replacement);
+				}
 
 				sink.set_error("Deletion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
@@ -5693,16 +5707,21 @@ void mcp_register_mission_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "node", "Node index of the SEXP node to delete");
+		add_bool_prop(props, "shrink",
+			"If true, remove the node and shift subsequent siblings up by one "
+			"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "delete_sexp_node",
 			"Delete a SEXP node from its tree. If the node is the root of a "
 			"mission-attached formula, it is replaced with an appropriate default "
 			"(do-nothing for action formulas, true for boolean formulas). If the node "
-			"is embedded within a tree, it is replaced with a <placeholder>. "
-			"Free-standing root nodes are simply freed. For mission-attached trees, a "
-			"syntax check is performed after replacement; the operation is rolled back "
-			"if the check fails. Locked singleton nodes (true/false) cannot be deleted.",
+			"is embedded within a tree, it is replaced with a " PLACEHOLDER_STRING " unless "
+			"'shrink' is true, in which case subsequent siblings shift up by one "
+			"position. Free-standing root nodes are simply freed. For mission-attached "
+			"trees, a syntax check is performed after modification; the operation is "
+			"rolled back if the check fails. Locked singleton nodes (true/false) "
+			"cannot be deleted.",
 			props, req);
 	}
 
