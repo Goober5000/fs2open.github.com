@@ -120,6 +120,25 @@ static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErr
 	return true;
 }
 
+// Returns true if deletion should proceed, false if blocked by references.
+// Handles the common pattern: check SEXP refs unless force is set, report error if found.
+static bool check_and_report_sexp_refs(sexp_ref_type ref_type, const char *entity_label,
+	const char *name, std::optional<bool> force, McpErrorSink &sink)
+{
+	if (force.has_value() && *force)
+		return true;
+
+	int node;
+	auto ref = query_referenced_in_sexp(ref_type, name, node);
+	if (ref.second != sexp_src::NONE) {
+		SCP_string desc = sexp_src_to_description(ref.first, ref.second);
+		sink.set_error("%s '%s' is referenced in %s. Use force=true to delete anyway "
+			"(references will be invalidated).", entity_label, name, desc.c_str());
+		return false;
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Dialog conflict guards
 // ---------------------------------------------------------------------------
@@ -642,17 +661,8 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
 
-	// Check for SEXP references unless force is set
-	if (!force.has_value() || !*force) {
-		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Messages[idx].name, node);
-		if (ref.second != sexp_src::NONE) {
-			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
-			sink.set_error("Message '%s' is referenced in %s. Use force=true to delete anyway "
-				"(references will be invalidated).", name, desc.c_str());
-			return;
-		}
-	}
+	if (!check_and_report_sexp_refs(sexp_ref_type::NON_OBJECT, "Message", Messages[idx].name, force, sink))
+		return;
 
 	// Free allocated strings
 	if (Messages[idx].avi_info.name)
@@ -1122,17 +1132,8 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
 
-	// Check for SEXP references unless force is set
-	if (!force.has_value() || !*force) {
-		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Mission_events[idx].name.c_str(), node);
-		if (ref.second != sexp_src::NONE) {
-			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
-			sink.set_error("Event '%s' is referenced in %s. Use force=true to delete anyway "
-				"(references will be invalidated).", name, desc.c_str());
-			return;
-		}
-	}
+	if (!check_and_report_sexp_refs(sexp_ref_type::NON_OBJECT, "Event", Mission_events[idx].name.c_str(), force, sink))
+		return;
 
 	// Invalidate SEXP references
 	SCP_string buf = SCP_string("<") + Mission_events[idx].name + ">";
@@ -1834,17 +1835,8 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
 
-	// Check for SEXP references unless force is set
-	if (!force.has_value() || !*force) {
-		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, Mission_goals[idx].name.c_str(), node);
-		if (ref.second != sexp_src::NONE) {
-			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
-			sink.set_error("Goal '%s' is referenced in %s. Use force=true to delete anyway "
-				"(references will be invalidated).", name, desc.c_str());
-			return;
-		}
-	}
+	if (!check_and_report_sexp_refs(sexp_ref_type::NON_OBJECT, "Goal", Mission_goals[idx].name.c_str(), force, sink))
+		return;
 
 	// Invalidate SEXP references
 	SCP_string buf = SCP_string("<") + Mission_goals[idx].name + ">";
@@ -2602,17 +2594,8 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
 
-	// Check for SEXP references unless force is set
-	if (!force.has_value() || !*force) {
-		int node;
-		auto ref = query_referenced_in_sexp(sexp_ref_type::NON_OBJECT, name, node);
-		if (ref.second != sexp_src::NONE) {
-			SCP_string desc = sexp_src_to_description(ref.first, ref.second);
-			sink.set_error("Jump node '%s' is referenced in %s. Use force=true to delete anyway "
-				"(references will be invalidated).", name, desc.c_str());
-			return;
-		}
-	}
+	if (!check_and_report_sexp_refs(sexp_ref_type::NON_OBJECT, "Jump node", name, force, sink))
+		return;
 
 	// Invalidate SEXP references
 	char buf[NAME_LENGTH + 4];
