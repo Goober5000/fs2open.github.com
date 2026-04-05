@@ -257,13 +257,29 @@ int check_lookup(const char *input, const SCP_vector<const char*> &lookup_vec, c
 	return result;
 }
 
-bool check_name_conflict(const char *entity_type, const char *name, McpErrorSink &sink,
+bool check_object_rename(const char *object_type, const char *name, McpErrorSink &sink,
 	int exclude_ship, int exclude_wing, int exclude_waypoint_list, int exclude_jump_node)
 {
-	SCP_string conflict = check_name_conflict(entity_type, name, exclude_ship, exclude_wing,
+	SCP_string conflict = check_name_conflict(object_type, name, exclude_ship, exclude_wing,
 		exclude_waypoint_list, exclude_jump_node);
 	if (!conflict.empty()) {
 		sink.set_error("%s", conflict.c_str());
+		return false;
+	}
+	return true;
+}
+
+bool check_general_rename(const char *new_name, const char *current_name,
+	std::function<bool(const char*)> name_exists, const char *entity_label, McpErrorSink &sink)
+{
+	if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink))
+		return false;
+	if (!new_name[0]) {
+		sink.set_error("%s name cannot be blank", entity_label);
+		return false;
+	}
+	if (stricmp(current_name, new_name) != 0 && name_exists(new_name)) {
+		sink.set_error("%s '%s' already exists", entity_label, new_name);
 		return false;
 	}
 	return true;
