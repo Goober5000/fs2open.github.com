@@ -3779,11 +3779,71 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 				Sexp_nodes[prev].rest = replacement;
 		}
 
-		// Syntax check for mission-attached trees (Case C)
+		// Find and detach trailing contiguous placeholders from the sibling
+		// chain.  We detach but do NOT free yet, so we can roll back if the
+		// syntax check fails.
+		int first_trailing = -1;
+		int prev_before_run = -1;
+		bool entry_is_first = false;
+
+		if (parent >= 0) {
+			// Determine which chain (parent.first or parent.rest) the
+			// replacement lives in.
+			int chain_start = Sexp_nodes[parent].first;
+			entry_is_first = true;
+			bool found = false;
+			for (int c = chain_start; c >= 0; c = Sexp_nodes[c].rest) {
+				if (c == replacement) { found = true; break; }
+			}
+			if (!found) {
+				chain_start = Sexp_nodes[parent].rest;
+				entry_is_first = false;
+			}
+
+			int cur = chain_start;
+			int prev = -1;
+			while (cur >= 0) {
+				if (is_placeholder_node(cur)) {
+					if (first_trailing < 0) {
+						first_trailing = cur;
+						prev_before_run = prev;
+					}
+				} else {
+					first_trailing = -1;
+					prev_before_run = -1;
+				}
+				prev = cur;
+				cur = Sexp_nodes[cur].rest;
+			}
+
+			// Detach the trailing run (but keep the nodes intact for rollback)
+			if (first_trailing >= 0) {
+				if (prev_before_run >= 0)
+					Sexp_nodes[prev_before_run].rest = -1;
+				else if (entry_is_first)
+					Sexp_nodes[parent].first = -1;
+				else
+					Sexp_nodes[parent].rest = -1;
+			}
+		}
+
+		// Syntax check for mission-attached trees (Case C).
+		// The tree is now in its final shape (placeholder inserted,
+		// trailing placeholders detached).
 		if (is_attached) {
 			int bad_node = -1;
 			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 			if (syntax_result != SEXP_CHECK_NO_ERROR) {
+				// Rollback: reattach trailing placeholder run
+				if (first_trailing >= 0) {
+					if (prev_before_run >= 0)
+						Sexp_nodes[prev_before_run].rest = first_trailing;
+					else if (entry_is_first)
+						Sexp_nodes[parent].first = first_trailing;
+					else
+						Sexp_nodes[parent].rest = first_trailing;
+				}
+
 				// Rollback: restore the original node into the chain
 				if (parent >= 0 && Sexp_nodes[parent].first == replacement) {
 					Sexp_nodes[parent].first = n;
@@ -3814,74 +3874,22 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			}
 		}
 
-		// Detach and free the target subtree
+		// Commit: detach and free the target subtree
 		Sexp_nodes[n].rest = -1;
 		Sexp_nodes[n].parent = -1;
 		freed_count = free_sexp2(n);
 
-		// Clean up trailing contiguous placeholders in the sibling chain.
-		// Find the chain entry point (parent.first or parent.rest) that
-		// contains the replacement, then scan for trailing placeholders.
-		if (parent >= 0) {
-			int chain_start;
-			bool entry_is_first;
-			if (Sexp_nodes[parent].first == replacement) {
-				chain_start = Sexp_nodes[parent].first;
-				entry_is_first = true;
-			} else {
-				// Find which chain the replacement is in
-				chain_start = Sexp_nodes[parent].first;
-				entry_is_first = true;
-				bool found = false;
-				for (int c = chain_start; c >= 0; c = Sexp_nodes[c].rest) {
-					if (c == replacement) { found = true; break; }
-				}
-				if (!found) {
-					chain_start = Sexp_nodes[parent].rest;
-					entry_is_first = false;
-				}
-			}
-
-			int first_trailing = -1;
-			int prev_before_run = -1;
-			int cur = chain_start;
-			int prev = -1;
+		// Free trailing placeholders that were detached above
+		if (first_trailing >= 0) {
+			int cur = first_trailing;
 			while (cur >= 0) {
-				if (is_placeholder_node(cur)) {
-					if (first_trailing < 0) {
-						first_trailing = cur;
-						prev_before_run = prev;
-					}
-				} else {
-					first_trailing = -1;
-					prev_before_run = -1;
-				}
-				prev = cur;
-				cur = Sexp_nodes[cur].rest;
+				int next = Sexp_nodes[cur].rest;
+				Sexp_nodes[cur].rest = -1;
+				Sexp_nodes[cur].parent = -1;
+				freed_count += free_sexp2(cur);
+				cur = next;
 			}
-
-			// If a trailing run exists, detach and free all nodes in it
-			if (first_trailing >= 0) {
-				if (prev_before_run >= 0)
-					Sexp_nodes[prev_before_run].rest = -1;
-				else if (entry_is_first)
-					Sexp_nodes[parent].first = -1;
-				else
-					Sexp_nodes[parent].rest = -1;
-
-				cur = first_trailing;
-				while (cur >= 0) {
-					int next = Sexp_nodes[cur].rest;
-					Sexp_nodes[cur].rest = -1;
-					Sexp_nodes[cur].parent = -1;
-					freed_count += free_sexp2(cur);
-					cur = next;
-				}
-
-				// The replacement was part of the trailing run and has been
-				// freed, so clear it to avoid returning a stale node
-				replacement = -1;
-			}
+			replacement = -1;
 		}
 	}
 
