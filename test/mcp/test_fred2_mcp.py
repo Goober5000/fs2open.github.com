@@ -564,14 +564,6 @@ def make_phase2_tests(suite, client):
         d = tool_data(r)
         assert_has_key(d, "name")
 
-    def test_list_sexp_argument_values():
-        # Use the first argument type name discovered from get_sexp_argument_type
-        name = ctx.get("sexp_arg_type_name")
-        if not name:
-            raise SkipTest("No sexp argument types discovered yet")
-        r = client.call_tool("list_sexp_argument_values", {"name": name})
-        assert_success(r)
-
     def test_get_sexp_argument_type_list():
         r = client.call_tool("get_sexp_argument_type")
         assert_success(r)
@@ -586,6 +578,14 @@ def make_phase2_tests(suite, client):
         if not name:
             raise SkipTest("No sexp argument types available")
         r = client.call_tool("get_sexp_argument_type", {"name": name})
+        assert_success(r)
+
+    def test_list_sexp_argument_values():
+        # Use the first argument type name discovered from get_sexp_argument_type_list
+        name = ctx.get("sexp_arg_type_name")
+        if not name:
+            raise SkipTest("No sexp argument types discovered yet")
+        r = client.call_tool("list_sexp_argument_values", {"name": name})
         assert_success(r)
 
     def test_get_sexp_return_type_list():
@@ -810,14 +810,14 @@ def make_phase3_tests(suite, client):
         import os
         save_path = os.path.join(paths[0], "_mcp_test_save.fs2")
         ctx["test_save_path"] = save_path
-        r = client.call_tool("save_mission", {"filename": save_path})
+        r = client.call_tool("save_mission", {"filepath": save_path})
         assert_success(r)
 
     def test_load_mission():
         save_path = ctx.get("test_save_path")
         if not save_path:
             raise SkipTest("No saved mission path from previous test")
-        r = client.call_tool("load_mission", {"filename": save_path})
+        r = client.call_tool("load_mission", {"filepath": save_path})
         assert_success(r)
         # Verify mission info reflects the loaded file
         mi = client.call_tool("get_mission_info")
@@ -915,12 +915,12 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        # Verify empty
-        r = client.call_tool("list_messages", {"source": "mission"})
-        assert_success(r)
-        d = tool_data(r)
-        assert_is_list(d)
-        assert_equal(len(d), 0, "messages should be empty after cleanup")
+            # Verify empty
+            r = client.call_tool("list_messages", {"source": "mission"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_is_list(d)
+            assert_equal(len(d), 0, "messages should be empty after cleanup")
 
     # ---- Events ----
 
@@ -986,10 +986,10 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        r = client.call_tool("list_events")
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(len(d), 0, "events should be empty")
+            r = client.call_tool("list_events")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(len(d), 0, "events should be empty")
 
     # ---- Goals ----
 
@@ -1052,10 +1052,10 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        r = client.call_tool("list_goals")
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(len(d), 0, "goals should be empty")
+            r = client.call_tool("list_goals")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(len(d), 0, "goals should be empty")
 
     # ---- Command Briefing Stages ----
 
@@ -1289,10 +1289,10 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        r = client.call_tool("list_jump_nodes")
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(len(d), 0, "jump nodes should be empty")
+            r = client.call_tool("list_jump_nodes")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(len(d), 0, "jump nodes should be empty")
 
     # ---- Waypoint Lists + Waypoints ----
 
@@ -1392,10 +1392,10 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        r = client.call_tool("list_waypoint_lists")
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(len(d), 0, "waypoint lists should be empty")
+            r = client.call_tool("list_waypoint_lists")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(len(d), 0, "waypoint lists should be empty")
 
     # ---- SEXP Variables ----
 
@@ -1455,10 +1455,10 @@ def make_phase4_tests(suite, client):
                 except Exception:
                     pass
 
-        r = client.call_tool("list_sexp_variables")
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(len(d), 0, "sexp variables should be empty")
+            r = client.call_tool("list_sexp_variables")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(len(d), 0, "sexp variables should be empty")
 
     # Register CRUD tests
     suite.add("phase4_messages_crud", test_messages_crud, phase=4)
@@ -1647,8 +1647,11 @@ def make_phase5_tests(suite, client):
 def make_phase6_tests(suite, client):
 
     def test_unknown_tool():
-        r = client.call_tool("nonexistent_tool_xyz")
-        assert_error(r)
+        try:
+            r = client.call_tool("nonexistent_tool_xyz")
+            assert_error(r)
+        except MCPError:
+            pass  # JSON-RPC level error is also acceptable
 
     def test_get_message_missing_param():
         r = client.call_tool("get_message", {})
@@ -1848,18 +1851,20 @@ def make_phase7_tests(suite, client):
 # ---------------------------------------------------------------------------
 
 def wait_for_server(client, max_attempts=10, delay=2.0):
-    """Wait for FRED2 MCP server to become available."""
+    """Wait for FRED2 MCP server to become available.
+
+    Uses a lightweight HTTP probe rather than the full initialize handshake,
+    so that phase 0's test_initialize performs the single spec-required
+    initialize call.
+    """
     for attempt in range(max_attempts):
         try:
-            resp = client.rpc("initialize", {
-                "protocolVersion": "2025-06-18",
-                "capabilities": {},
-                "clientInfo": {"name": "mcp-test-probe", "version": "1.0"}
-            })
-            if "result" in resp:
-                # Send initialized notification
-                client.notify("notifications/initialized")
-                return True
+            # Use a simple HTTP GET to the server root to check liveness.
+            # The MCP server returns an HTML status page for non-POST requests.
+            probe = urllib.request.Request(client.url, method="GET")
+            with urllib.request.urlopen(probe, timeout=client.timeout) as resp:
+                resp.read()
+            return True
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             if attempt < max_attempts - 1:
                 print(f"  Waiting for FRED2 MCP server (attempt {attempt + 1}/{max_attempts})...")
