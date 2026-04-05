@@ -3604,10 +3604,13 @@ static bool is_sexp_attached_to_mission(int node)
 		}
 	}
 
-	// Ship arrival/departure cues (parse objects)
-	for (const auto &po : Parse_objects) {
-		if (po.arrival_cue == node || po.departure_cue == node || po.ai_goals == node)
-			return true;
+	// Ship arrival/departure cues
+	for (auto objp: list_range(&obj_used_list)) {
+		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
+			auto shipp = &Ships[objp->instance];
+			if (shipp->arrival_cue == node || shipp->departure_cue == node)
+				return true;
+		}
 	}
 
 	// Wing arrival/departure cues
