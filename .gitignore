@@ -67,6 +67,9 @@ packages/
 #Test files
 *.testsettings
 
+# Python cache
+*.pyc
+
 #===========
 
 #########################
