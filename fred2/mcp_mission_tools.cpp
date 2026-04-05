@@ -903,7 +903,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (!formula.has_value()) {
 		// Build default SEXP formula: (when (true) (do-nothing))
 		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
-		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);
+		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);	// note - this is a list, so we do need an allocation here
 		int when_node = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
 		if (do_nothing < 0 || true_node < 0 || when_node < 0) {
 			// Clean up any nodes that were successfully allocated
@@ -1645,12 +1645,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	}
 
 	if (!formula.has_value()) {
-		// Build default SEXP formula: (true) — matching FRED2 editor pattern
-		formula = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
-		if (*formula < 0) {
-			sink.set_error("Failed to allocate SEXP node for default goal formula");
-			return;
-		}
+		formula = Locked_sexp_true;
 	}
 
 	// Construct the goal
@@ -3571,70 +3566,123 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
-// SEXP tree freeing
+// SEXP node deletion
 // ---------------------------------------------------------------------------
 
-static bool is_sexp_attached_to_mission(int node)
+// Swap all mission entity formula references from old_root to new_root.
+static void replace_formula_root_references(int old_root, int new_root)
 {
-	// Mission cutscenes
-	for (const auto &cs : The_mission.cutscenes) {
-		if (cs.formula == node)
-			return true;
+	for (auto &cs : The_mission.cutscenes) {
+		if (cs.formula == old_root) cs.formula = new_root;
 	}
-
-	// Fiction viewer stages
-	for (const auto &stage : Fiction_viewer_stages) {
-		if (stage.formula == node)
-			return true;
+	for (auto &stage : Fiction_viewer_stages) {
+		if (stage.formula == old_root) stage.formula = new_root;
 	}
-
-	// Briefing stages (per team)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
-			if (Briefings[t].stages[s].formula == node)
-				return true;
+			if (Briefings[t].stages[s].formula == old_root)
+				Briefings[t].stages[s].formula = new_root;
 		}
 	}
-
-	// Debriefing stages (per team)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
-			if (Debriefings[t].stages[s].formula == node)
-				return true;
+			if (Debriefings[t].stages[s].formula == old_root)
+				Debriefings[t].stages[s].formula = new_root;
 		}
 	}
-
-	// Ship arrival/departure cues
-	for (auto objp: list_range(&obj_used_list)) {
+	for (auto objp : list_range(&obj_used_list)) {
 		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
 			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == node || shipp->departure_cue == node)
-				return true;
+			if (shipp->arrival_cue == old_root) shipp->arrival_cue = new_root;
+			if (shipp->departure_cue == old_root) shipp->departure_cue = new_root;
+		}
+	}
+	for (int i = 0; i < Num_wings; i++) {
+		if (Wings[i].arrival_cue == old_root) Wings[i].arrival_cue = new_root;
+		if (Wings[i].departure_cue == old_root) Wings[i].departure_cue = new_root;
+	}
+	for (auto &evt : Mission_events) {
+		if (evt.formula == old_root) evt.formula = new_root;
+	}
+	for (auto &goal : Mission_goals) {
+		if (goal.formula == old_root) goal.formula = new_root;
+	}
+}
+
+struct FormulaRootInfo {
+	int root;              // root of the tree (walked up via parent chain)
+	bool attached;         // root is a mission formula
+	sexp_opr_t opr_type;  // OPR_NULL (events) or OPR_BOOL (all others); only meaningful if attached
+};
+
+// Walk up from any node to find its tree root, then check if that root is
+// attached to a mission entity and determine the expected return type.
+static FormulaRootInfo find_formula_root_and_type(int node)
+{
+	// Walk to root
+	int root = find_sexp_root(node);
+
+	// Check against all mission entities
+
+	// Mission cutscenes (OPR_BOOL)
+	for (const auto &cs : The_mission.cutscenes) {
+		if (cs.formula == root)
+			return { root, true, OPR_BOOL };
+	}
+
+	// Fiction viewer stages (OPR_BOOL)
+	for (const auto &stage : Fiction_viewer_stages) {
+		if (stage.formula == root)
+			return { root, true, OPR_BOOL };
+	}
+
+	// Briefing stages (OPR_BOOL)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Briefings[t].num_stages; s++) {
+			if (Briefings[t].stages[s].formula == root)
+				return { root, true, OPR_BOOL };
 		}
 	}
 
-	// Wing arrival/departure cues
+	// Debriefing stages (OPR_BOOL)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Debriefings[t].num_stages; s++) {
+			if (Debriefings[t].stages[s].formula == root)
+				return { root, true, OPR_BOOL };
+		}
+	}
+
+	// Ship arrival/departure cues (OPR_BOOL)
+	for (auto objp : list_range(&obj_used_list)) {
+		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
+			auto shipp = &Ships[objp->instance];
+			if (shipp->arrival_cue == root || shipp->departure_cue == root)
+				return { root, true, OPR_BOOL };
+		}
+	}
+
+	// Wing arrival/departure cues (OPR_BOOL)
 	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == node || Wings[i].departure_cue == node)
-			return true;
+		if (Wings[i].arrival_cue == root || Wings[i].departure_cue == root)
+			return { root, true, OPR_BOOL };
 	}
 
-	// Events
+	// Events (OPR_NULL)
 	for (const auto &evt : Mission_events) {
-		if (evt.formula == node)
-			return true;
+		if (evt.formula == root)
+			return { root, true, OPR_NULL };
 	}
 
-	// Goals
+	// Goals (OPR_BOOL)
 	for (const auto &goal : Mission_goals) {
-		if (goal.formula == node)
-			return true;
+		if (goal.formula == root)
+			return { root, true, OPR_BOOL };
 	}
 
-	return false;
+	return { root, false, OPR_NULL };
 }
 
-static void handle_free_sexp(json_t *input, McpToolRequest *req)
+static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
@@ -3650,20 +3698,115 @@ static void handle_free_sexp(json_t *input, McpToolRequest *req)
 	}
 
 	if (n == Locked_sexp_true || n == Locked_sexp_false) {
-		sink.set_error("Node %d is a locked singleton (%s) and cannot be freed", n, Sexp_nodes[n].text);
+		sink.set_error("Node %d is a locked singleton (%s) and cannot be deleted", n, Sexp_nodes[n].text);
 		return;
 	}
 
-	if (is_sexp_attached_to_mission(n)) {
-		sink.set_error("Node %d is attached to a mission entity (event, goal, briefing, etc.) and cannot be freed directly", n);
-		return;
+	// Determine context: walk to tree root and check mission attachment
+	FormulaRootInfo info = find_formula_root_and_type(n);
+	bool is_root = (n == info.root);
+	bool is_attached = info.attached;
+
+	int replacement = -1;
+	int freed_count = 0;
+
+	if (is_root && is_attached) {
+		// Case A: Root of a mission-attached formula -- replace with default
+		if (info.opr_type == OPR_NULL) {
+			replacement = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+		} else {
+			replacement = Locked_sexp_true;
+		}
+
+		// Swap all entity references to the replacement
+		replace_formula_root_references(n, replacement);
+
+		// Syntax check the replacement
+		int bad_node = -1;
+		int syntax_result = check_sexp_syntax(replacement, static_cast<int>(info.opr_type), 1, &bad_node);
+		if (syntax_result != SEXP_CHECK_NO_ERROR) {
+			// Rollback
+			replace_formula_root_references(replacement, n);
+			free_sexp2(replacement);
+			sink.set_error("Deletion would cause syntax error: %s (error code %d, bad node %d)",
+				sexp_error_message(syntax_result), syntax_result, bad_node);
+			return;
+		}
+
+		// Free the old tree
+		freed_count = free_sexp2(n);
+
+	} else if (is_root) {
+		// Case B: Root of a free-standing tree -- just free it
+		freed_count = free_sexp2(n);
+
+	} else {
+		// Cases C & D: Embedded node -- splice a placeholder into the parent's link chain
+		int parent = Sexp_nodes[n].parent;
+		int target_rest = Sexp_nodes[n].rest;
+
+		replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
+		Sexp_nodes[replacement].parent = parent;
+
+		// Find the predecessor link and redirect it to the replacement
+		if (parent >= 0 && Sexp_nodes[parent].first == n) {
+			Sexp_nodes[parent].first = replacement;
+		} else {
+			int prev = (parent >= 0) ? Sexp_nodes[parent].first : -1;
+			while (prev >= 0 && Sexp_nodes[prev].rest != n)
+				prev = Sexp_nodes[prev].rest;
+			if (prev >= 0)
+				Sexp_nodes[prev].rest = replacement;
+		}
+
+		// Syntax check for mission-attached trees (Case C)
+		if (is_attached) {
+			int bad_node = -1;
+			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+			if (syntax_result != SEXP_CHECK_NO_ERROR) {
+				// Rollback: restore the original node into the chain
+				if (parent >= 0 && Sexp_nodes[parent].first == replacement) {
+					Sexp_nodes[parent].first = n;
+				} else {
+					int prev = (parent >= 0) ? Sexp_nodes[parent].first : -1;
+					while (prev >= 0 && Sexp_nodes[prev].rest != replacement)
+						prev = Sexp_nodes[prev].rest;
+					if (prev >= 0)
+						Sexp_nodes[prev].rest = n;
+				}
+				Sexp_nodes[n].rest = target_rest;
+
+				// Free the placeholder (detach from chain first)
+				Sexp_nodes[replacement].rest = -1;
+				Sexp_nodes[replacement].parent = -1;
+				free_sexp2(replacement);
+
+				sink.set_error("Deletion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+				return;
+			}
+		}
+
+		// Detach and free the target subtree
+		Sexp_nodes[n].rest = -1;
+		Sexp_nodes[n].parent = -1;
+		freed_count = free_sexp2(n);
 	}
 
-	int freed_count = free_sexp2(n);
+	// Mark the proper sexp root dirty
+	if (is_root && is_attached)
+		mcp_sexp_forest_mark_dirty({ replacement });
+	else
+		mcp_sexp_forest_mark_dirty({ info.root });
 
+	// Build response
 	json_t *result = json_object();
-	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "deleted_node", json_integer(n));
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
+	if (replacement >= 0)
+		json_object_set_new(result, "replacement_node", build_sexp_node_json(replacement));
+	else
+		json_object_set_new(result, "replacement_node", json_null());
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
 }
@@ -4359,7 +4502,7 @@ static const char *mission_tool_names[] = {
 	"get_sexp_node",
 	"walk_sexp_tree",
 	"text_to_sexp",
-	"free_sexp",
+	"delete_sexp_node",
 	"create_sexp_node",
 	"list_sexp_variables",
 	"get_sexp_variable",
@@ -5449,16 +5592,20 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
-	// free_sexp
+	// delete_sexp_node
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "node", "Root node index of the SEXP tree to free");
+		add_integer_prop(props, "node", "Node index of the SEXP node to delete");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "free_sexp",
-			"Free a SEXP node tree. Recursively frees the entire tree rooted at the "
-			"given node. Refuses to free locked singleton nodes or nodes attached to "
-			"mission entities (events, goals, briefings, arrival/departure cues, etc.).",
+		register_tool(tools, "delete_sexp_node",
+			"Delete a SEXP node from its tree. If the node is the root of a "
+			"mission-attached formula, it is replaced with an appropriate default "
+			"(do-nothing for action formulas, true for boolean formulas). If the node "
+			"is embedded within a tree, it is replaced with a <placeholder>. "
+			"Free-standing root nodes are simply freed. For mission-attached trees, a "
+			"syntax check is performed after replacement; the operation is rolled back "
+			"if the check fails. Locked singleton nodes (true/false) cannot be deleted.",
 			props, req);
 	}
 
@@ -5722,8 +5869,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_walk_sexp_tree(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
 		handle_text_to_sexp(input_json, req);
-	} else if (strcmp(tool_name, "free_sexp") == 0) {
-		handle_free_sexp(input_json, req);
+	} else if (strcmp(tool_name, "delete_sexp_node") == 0) {
+		handle_delete_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "create_sexp_node") == 0) {
 		handle_create_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "list_sexp_variables") == 0) {
