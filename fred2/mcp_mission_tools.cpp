@@ -3743,7 +3743,7 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	return { root, false, OPR_NULL };
 }
 
-static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
+static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
@@ -3752,6 +3752,8 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	auto shrink_opt = get_optional_bool(input, "shrink", sink);
 	bool shrink = shrink_opt.has_value() && *shrink_opt;
+	auto delete_opt = get_optional_bool(input, "delete", sink);
+	bool do_delete = delete_opt.has_value() && *delete_opt;
 
 	int n = *node;
 
@@ -3761,7 +3763,7 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 	}
 
 	if (n == Locked_sexp_true || n == Locked_sexp_false) {
-		sink.set_error("Node %d is a locked singleton (%s) and cannot be deleted", n, Sexp_nodes[n].text);
+		sink.set_error("Node %d is a locked singleton (%s) and cannot be detached", n, Sexp_nodes[n].text);
 		return;
 	}
 
@@ -3791,17 +3793,25 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			// Rollback
 			replace_formula_root_references(replacement, n);
 			free_sexp2(replacement);
-			sink.set_error("Deletion would cause syntax error: %s (error code %d, bad node %d)",
+			sink.set_error("Detachment would cause syntax error: %s (error code %d, bad node %d)",
 				sexp_error_message(syntax_result), syntax_result, bad_node);
 			return;
 		}
 
-		// Free the old tree
-		freed_count = free_sexp2(n);
+		// Detach the old tree and optionally free it
+		if (do_delete) {
+			freed_count = free_sexp2(n);
+		} else {
+			Sexp_nodes[n].parent = -1;
+		}
 
 	} else if (is_root) {
-		// Case B: Root of a free-standing tree -- just free it
-		freed_count = free_sexp2(n);
+		// Case B: Root of a free-standing tree
+		if (do_delete) {
+			freed_count = free_sexp2(n);
+		} else {
+			Sexp_nodes[n].parent = -1;
+		}
 
 	} else {
 		// Cases C & D: Embedded node -- splice a replacement into the parent's link chain.
@@ -3833,7 +3843,7 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 
 				// Free the placeholder if one was allocated
 				if (replacement >= 0) {
-					Sexp_nodes[replacement].rest = -1;
+					Sexp_nodes[replacement].rest = -1;	// don't walk into the live tree
 					Sexp_nodes[replacement].parent = -1;
 					free_sexp2(replacement);
 				}
@@ -3844,10 +3854,11 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			}
 		}
 
-		// Commit: detach and free the target subtree
-		Sexp_nodes[n].rest = -1;
+		// Commit: detach and optionally free the target subtree
+		Sexp_nodes[n].rest = -1;	// don't walk into the live tree
 		Sexp_nodes[n].parent = -1;
-		freed_count = free_sexp2(n);
+		if (do_delete)
+			freed_count = free_sexp2(n);
 	}
 
 	// Mark the proper sexp root dirty
@@ -3856,9 +3867,17 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 	else
 		mcp_sexp_forest_mark_dirty({ info.root });
 
+	// If preserved, the detached node is the root of a new free-standing tree
+	if (!do_delete)
+		mcp_sexp_forest_mark_dirty({ n });
+
 	// Build response
 	json_t *result = json_object();
-	json_object_set_new(result, "deleted_node", json_integer(n));
+	if (do_delete)
+		json_object_set_new(result, "detached_node", json_integer(n));
+	else
+		json_object_set_new(result, "detached_node", build_sexp_node_json(n));
+	json_object_set_new(result, "deleted", do_delete ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0)
 		json_object_set_new(result, "replacement_node", build_sexp_node_json(replacement));
@@ -4559,7 +4578,7 @@ static const char *mission_tool_names[] = {
 	"get_sexp_node",
 	"walk_sexp_tree",
 	"text_to_sexp",
-	"delete_sexp_node",
+	"detach_sexp_node",
 	"create_sexp_node",
 	"list_sexp_variables",
 	"get_sexp_variable",
@@ -5649,25 +5668,29 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
-	// delete_sexp_node
+	// detach_sexp_node
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "node", "Node index of the SEXP node to delete");
+		add_integer_prop(props, "node", "Node index of the SEXP node to detach");
 		add_bool_prop(props, "shrink",
 			"If true, remove the node and shift subsequent siblings up by one "
 			"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
+		add_bool_prop(props, "delete",
+			"If true, free the detached node and its subtree. If false (the default), "
+			"the detached node is preserved and returned in the response.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "delete_sexp_node",
-			"Delete a SEXP node from its tree. If the node is the root of a "
+		register_tool(tools, "detach_sexp_node",
+			"Detach a SEXP node from its tree. If the node is the root of a "
 			"mission-attached formula, it is replaced with an appropriate default "
 			"(do-nothing for action formulas, true for boolean formulas). If the node "
 			"is embedded within a tree, it is replaced with a " PLACEHOLDER_STRING " unless "
 			"'shrink' is true, in which case subsequent siblings shift up by one "
-			"position. Free-standing root nodes are simply freed. For mission-attached "
-			"trees, a syntax check is performed after modification; the operation is "
-			"rolled back if the check fails. Locked singleton nodes (true/false) "
-			"cannot be deleted.",
+			"position. Free-standing root nodes are simply disconnected. By default, "
+			"the detached node is preserved and returned; set 'delete' to true to free "
+			"it. For mission-attached trees, a syntax check is performed after "
+			"modification; the operation is rolled back if the check fails. Locked "
+			"singleton nodes (true/false) cannot be detached.",
 			props, req);
 	}
 
@@ -5931,8 +5954,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_walk_sexp_tree(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
 		handle_text_to_sexp(input_json, req);
-	} else if (strcmp(tool_name, "delete_sexp_node") == 0) {
-		handle_delete_sexp_node(input_json, req);
+	} else if (strcmp(tool_name, "detach_sexp_node") == 0) {
+		handle_detach_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "create_sexp_node") == 0) {
 		handle_create_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "list_sexp_variables") == 0) {
