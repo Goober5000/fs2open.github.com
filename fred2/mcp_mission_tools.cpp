@@ -560,17 +560,9 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	}
 
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
-		if (!new_name[0]) {
-			sink.set_error("A message name cannot be blank!");
-			return;
-		}
-
-		// Check for duplicate if the name is actually different
-		if ((stricmp(Messages[idx].name, new_name) != 0) && (find_item_with_string(Messages, &MMessage::name, new_name) >= 0)) {
-			sink.set_error("A message with name '%s' already exists", new_name);
-			return;
-		}
+		if (!check_general_rename(new_name, Messages[idx].name,
+			[](const char *n) { return find_item_with_string(Messages, &MMessage::name, n) >= 0; },
+			"Message", sink)) return;
 	}
 
 	bool changed = false;
@@ -972,16 +964,9 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	// Validate new_name
 	auto new_name      = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
-		if (!new_name[0]) {
-			sink.set_error("An event name cannot be blank!");
-			return;
-		}
-		if (stricmp(evt.name.c_str(), new_name) != 0 &&
-			find_item_with_string(Mission_events, &mission_event::name, new_name) >= 0) {
-			sink.set_error("An event with name '%s' already exists", new_name);
-			return;
-		}
+		if (!check_general_rename(new_name, evt.name.c_str(),
+			[](const char *n) { return find_item_with_string(Mission_events, &mission_event::name, n) >= 0; },
+			"Event", sink)) return;
 	}
 
 	// Extract optional fields
@@ -1715,16 +1700,9 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Validate new_name
 	auto new_name = get_optional_string(input, "new_name", sink, false);
 	if (new_name) {
-		if (!check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
-		if (!new_name[0]) {
-			sink.set_error("A goal name cannot be blank!");
-			return;
-		}
-		if (stricmp(goal.name.c_str(), new_name) != 0 &&
-			find_item_with_string(Mission_goals, &mission_goal::name, new_name) >= 0) {
-			sink.set_error("A goal with name '%s' already exists", new_name);
-			return;
-		}
+		if (!check_general_rename(new_name, goal.name.c_str(),
+			[](const char *n) { return find_item_with_string(Mission_goals, &mission_goal::name, n) >= 0; },
+			"Goal", sink)) return;
 	}
 
 	// Extract optional fields
@@ -2432,8 +2410,8 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
-	// Validate name against all entity types
-	if (!check_name_conflict("jump node", name, sink)) return;
+	// Validate name against all object types
+	if (!check_object_rename("jump node", name, sink)) return;
 
 	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
 	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", sink)) return;
@@ -2507,7 +2485,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 
 	// Rename (with SEXP reference update)
 	if (new_name && stricmp(jn.GetName(), new_name) != 0) {
-		if (!check_name_conflict("jump node", new_name, sink, -1, -1, -1, index)) return;
+		if (!check_object_rename("jump node", new_name, sink, -1, -1, -1, index)) return;
 		update_sexp_references(jn.GetName(), new_name, OPF_JUMP_NODE_NAME);
 		jn.SetName(new_name);
 		changed = true;
@@ -2797,8 +2775,8 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
-	// Validate name against all entity types
-	if (!check_name_conflict("waypoint path", name, sink)) return;
+	// Validate name against all object types
+	if (!check_object_rename("waypoint path", name, sink)) return;
 
 	// Validate insert index
 	int target_index;
@@ -2862,7 +2840,7 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 
 	// Rename (with SEXP and AI goal reference updates)
 	if (new_name && stricmp(wl.get_name(), new_name) != 0) {
-		if (!check_name_conflict("waypoint path", new_name, sink, -1, -1, index)) return;
+		if (!check_object_rename("waypoint path", new_name, sink, -1, -1, index)) return;
 
 		const char *old_name = wl.get_name();
 
