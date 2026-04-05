@@ -3577,6 +3577,59 @@ static bool is_placeholder_node(int node)
 		&& !stricmp(Sexp_nodes[node].text, PLACEHOLDER_STRING);
 }
 
+// Replace one node with another in the parent's link structure.
+// Checks parent.first, parent.rest, and walks both rest chains to find
+// a predecessor whose rest == old_node.
+static void splice_replace_node(int parent, int old_node, int new_node)
+{
+	if (parent < 0)
+		return;
+
+	if (Sexp_nodes[parent].first == old_node) {
+		Sexp_nodes[parent].first = new_node;
+	} else if (Sexp_nodes[parent].rest == old_node) {
+		Sexp_nodes[parent].rest = new_node;
+	} else {
+		int prev = Sexp_nodes[parent].first;
+		while (prev >= 0 && Sexp_nodes[prev].rest != old_node)
+			prev = Sexp_nodes[prev].rest;
+		if (prev < 0) {
+			prev = Sexp_nodes[parent].rest;
+			while (prev >= 0 && Sexp_nodes[prev].rest != old_node)
+				prev = Sexp_nodes[prev].rest;
+		}
+		if (prev >= 0)
+			Sexp_nodes[prev].rest = new_node;
+	}
+}
+
+// Determine which chain (parent.first or parent.rest) contains the
+// given node, and return the chain's starting node.
+static int find_chain_start(int parent, int node, bool &entry_is_first)
+{
+	int chain_start = Sexp_nodes[parent].first;
+	entry_is_first = true;
+	for (int c = chain_start; c >= 0; c = Sexp_nodes[c].rest) {
+		if (c == node)
+			return chain_start;
+	}
+	entry_is_first = false;
+	return Sexp_nodes[parent].rest;
+}
+
+// Set the link that points to the start of a sibling chain segment.
+// prev_before is the node just before the segment (-1 means the segment
+// starts at the chain entry point, determined by entry_is_first).
+static void set_chain_link(int parent, int prev_before, bool entry_is_first, int value)
+{
+	if (prev_before >= 0)
+		Sexp_nodes[prev_before].rest = value;
+	else if (entry_is_first)
+		Sexp_nodes[parent].first = value;
+	else
+		Sexp_nodes[parent].rest = value;
+}
+
 // Swap all mission entity formula references from old_root to new_root.
 static void replace_formula_root_references(int old_root, int new_root)
 {
@@ -3758,26 +3811,8 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
 		Sexp_nodes[replacement].parent = parent;
 
-		// Find the predecessor link and redirect it to the replacement.
-		// Check both parent.first and parent.rest as chain entry points.
-		if (parent >= 0 && Sexp_nodes[parent].first == n) {
-			Sexp_nodes[parent].first = replacement;
-		} else if (parent >= 0 && Sexp_nodes[parent].rest == n) {
-			Sexp_nodes[parent].rest = replacement;
-		} else {
-			// Walk the chain reachable from parent.first
-			int prev = (parent >= 0) ? Sexp_nodes[parent].first : -1;
-			while (prev >= 0 && Sexp_nodes[prev].rest != n)
-				prev = Sexp_nodes[prev].rest;
-			if (prev < 0) {
-				// Walk the chain reachable from parent.rest
-				prev = (parent >= 0) ? Sexp_nodes[parent].rest : -1;
-				while (prev >= 0 && Sexp_nodes[prev].rest != n)
-					prev = Sexp_nodes[prev].rest;
-			}
-			if (prev >= 0)
-				Sexp_nodes[prev].rest = replacement;
-		}
+		// Splice the replacement into the parent's link chain
+		splice_replace_node(parent, n, replacement);
 
 		// Find and detach trailing contiguous placeholders from the sibling
 		// chain.  We detach but do NOT free yet, so we can roll back if the
@@ -3787,18 +3822,7 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 		bool entry_is_first = false;
 
 		if (parent >= 0) {
-			// Determine which chain (parent.first or parent.rest) the
-			// replacement lives in.
-			int chain_start = Sexp_nodes[parent].first;
-			entry_is_first = true;
-			bool found = false;
-			for (int c = chain_start; c >= 0; c = Sexp_nodes[c].rest) {
-				if (c == replacement) { found = true; break; }
-			}
-			if (!found) {
-				chain_start = Sexp_nodes[parent].rest;
-				entry_is_first = false;
-			}
+			int chain_start = find_chain_start(parent, replacement, entry_is_first);
 
 			int cur = chain_start;
 			int prev = -1;
@@ -3817,14 +3841,8 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			}
 
 			// Detach the trailing run (but keep the nodes intact for rollback)
-			if (first_trailing >= 0) {
-				if (prev_before_run >= 0)
-					Sexp_nodes[prev_before_run].rest = -1;
-				else if (entry_is_first)
-					Sexp_nodes[parent].first = -1;
-				else
-					Sexp_nodes[parent].rest = -1;
-			}
+			if (first_trailing >= 0)
+				set_chain_link(parent, prev_before_run, entry_is_first, -1);
 		}
 
 		// Syntax check for mission-attached trees (Case C).
@@ -3835,32 +3853,11 @@ static void handle_delete_sexp_node(json_t *input, McpToolRequest *req)
 			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 			if (syntax_result != SEXP_CHECK_NO_ERROR) {
 				// Rollback: reattach trailing placeholder run
-				if (first_trailing >= 0) {
-					if (prev_before_run >= 0)
-						Sexp_nodes[prev_before_run].rest = first_trailing;
-					else if (entry_is_first)
-						Sexp_nodes[parent].first = first_trailing;
-					else
-						Sexp_nodes[parent].rest = first_trailing;
-				}
+				if (first_trailing >= 0)
+					set_chain_link(parent, prev_before_run, entry_is_first, first_trailing);
 
 				// Rollback: restore the original node into the chain
-				if (parent >= 0 && Sexp_nodes[parent].first == replacement) {
-					Sexp_nodes[parent].first = n;
-				} else if (parent >= 0 && Sexp_nodes[parent].rest == replacement) {
-					Sexp_nodes[parent].rest = n;
-				} else {
-					int prev = (parent >= 0) ? Sexp_nodes[parent].first : -1;
-					while (prev >= 0 && Sexp_nodes[prev].rest != replacement)
-						prev = Sexp_nodes[prev].rest;
-					if (prev < 0) {
-						prev = (parent >= 0) ? Sexp_nodes[parent].rest : -1;
-						while (prev >= 0 && Sexp_nodes[prev].rest != replacement)
-							prev = Sexp_nodes[prev].rest;
-					}
-					if (prev >= 0)
-						Sexp_nodes[prev].rest = n;
-				}
+				splice_replace_node(parent, replacement, n);
 				Sexp_nodes[n].rest = target_rest;
 
 				// Free the placeholder (detach from chain first)
