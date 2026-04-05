@@ -1517,11 +1517,11 @@ def make_phase5_tests(suite, client):
         elif isinstance(d, dict) and "nodes" in d:
             assert_true(len(d["nodes"]) > 0, "walk should return nodes")
 
-    def test_free_sexp_simple():
+    def test_delete_sexp_node_simple():
         node = ctx.get("sexp_simple_node")
         if node is None:
             raise SkipTest("No sexp node")
-        r = client.call_tool("free_sexp", {"node": node})
+        r = client.call_tool("delete_sexp_node", {"node": node})
         assert_success(r)
         ctx.pop("sexp_simple_node", None)
 
@@ -1550,11 +1550,11 @@ def make_phase5_tests(suite, client):
         text = tool_text(r).lower()
         assert_in("when", text)
 
-    def test_free_sexp_complex():
+    def test_delete_sexp_node_complex():
         node = ctx.get("sexp_complex_node")
         if node is None:
             raise SkipTest("No complex sexp node")
-        r = client.call_tool("free_sexp", {"node": node})
+        r = client.call_tool("delete_sexp_node", {"node": node})
         assert_success(r)
         ctx.pop("sexp_complex_node", None)
 
@@ -1582,11 +1582,11 @@ def make_phase5_tests(suite, client):
         text = tool_text(r).lower()
         assert_in("do-nothing", text)
 
-    def test_free_sexp_created():
+    def test_delete_sexp_node_created():
         node = ctx.get("sexp_created_node")
         if node is None:
             raise SkipTest("No created sexp node")
-        r = client.call_tool("free_sexp", {"node": node})
+        r = client.call_tool("delete_sexp_node", {"node": node})
         assert_success(r)
         ctx.pop("sexp_created_node", None)
 
@@ -1610,11 +1610,11 @@ def make_phase5_tests(suite, client):
         r = client.call_tool("sexp_to_text", {"node": node})
         assert_success(r)
 
-    def test_free_sexp_args():
+    def test_delete_sexp_node_args():
         node = ctx.get("sexp_args_node")
         if node is None:
             raise SkipTest("No sexp args node")
-        r = client.call_tool("free_sexp", {"node": node})
+        r = client.call_tool("delete_sexp_node", {"node": node})
         assert_success(r)
         ctx.pop("sexp_args_node", None)
 
@@ -1623,18 +1623,18 @@ def make_phase5_tests(suite, client):
         ("sexp_to_text_simple", test_sexp_to_text_simple),
         ("get_sexp_node_simple", test_get_sexp_node_simple),
         ("walk_sexp_tree_simple", test_walk_sexp_tree_simple),
-        ("free_sexp_simple", test_free_sexp_simple),
+        ("delete_sexp_node_simple", test_delete_sexp_node_simple),
         ("text_to_sexp_complex", test_text_to_sexp_complex),
         ("walk_sexp_tree_depth", test_walk_sexp_tree_depth),
         ("sexp_to_text_complex", test_sexp_to_text_complex),
-        ("free_sexp_complex", test_free_sexp_complex),
+        ("delete_sexp_node_complex", test_delete_sexp_node_complex),
         ("create_sexp_node_simple", test_create_sexp_node_simple),
         ("get_created_sexp_node", test_get_created_sexp_node),
         ("sexp_to_text_created", test_sexp_to_text_created),
-        ("free_sexp_created", test_free_sexp_created),
+        ("delete_sexp_node_created", test_delete_sexp_node_created),
         ("create_sexp_node_with_args", test_create_sexp_node_with_args),
         ("sexp_to_text_args", test_sexp_to_text_args),
-        ("free_sexp_args", test_free_sexp_args),
+        ("delete_sexp_node_args", test_delete_sexp_node_args),
     ]
     for name, func in tests:
         suite.add(f"phase5_{name}", func, phase=5)
@@ -1715,8 +1715,8 @@ def make_phase6_tests(suite, client):
         })
         assert_error(r)
 
-    def test_free_sexp_invalid_node():
-        r = client.call_tool("free_sexp", {"node": -999})
+    def test_delete_sexp_node_invalid():
+        r = client.call_tool("delete_sexp_node", {"node": -999})
         assert_error(r)
 
     def test_swap_messages_out_of_range():
@@ -1809,7 +1809,7 @@ def make_phase6_tests(suite, client):
         ("text_to_sexp_invalid", test_text_to_sexp_invalid),
         ("create_sexp_node_invalid_operator", test_create_sexp_node_invalid_operator),
         ("create_sexp_node_wrong_arg_type", test_create_sexp_node_wrong_arg_type),
-        ("free_sexp_invalid_node", test_free_sexp_invalid_node),
+        ("delete_sexp_node_invalid", test_delete_sexp_node_invalid),
         ("swap_messages_out_of_range", test_swap_messages_out_of_range),
         ("move_event_out_of_range", test_move_event_out_of_range),
         ("get_sexp_operator_nonexistent", test_get_sexp_operator_nonexistent),
