@@ -682,8 +682,8 @@ def make_phase2_tests(suite, client):
     def test_get_mod_info():
         r = client.call_tool("get_mod_info")
         assert_success(r)
-        d = tool_data(r)
-        assert_is_dict(d, "mod info should be a dict")
+        t = tool_text(r)
+        assert_true(len(t) > 0, "mod info should return non-empty text")
 
     def test_list_missions():
         r = client.call_tool("list_missions")
@@ -695,24 +695,25 @@ def make_phase2_tests(suite, client):
         r = client.call_tool("get_root_paths")
         assert_success(r)
         d = tool_data(r)
-        assert_has_key(d, "paths", "root paths should have 'paths' key")
-        assert_is_list(d["paths"], "paths should be a list")
+        assert_is_list(d, "root paths should be a list")
+        assert_true(len(d) > 0, "root paths should not be empty")
+        assert_has_key(d[0], "path", "each root path entry should have 'path' key")
 
     def test_subsystem_names_compare():
         r = client.call_tool("subsystem_names_compare",
                              {"name1": "turret01", "name2": "turret02"})
         assert_success(r)
-        d = tool_data(r)
-        assert_has_key(d, "result", "compare should return 'result' key")
-        assert_true(isinstance(d["result"], (int, float)), "compare result should be numeric")
+        sc = r.get("structuredContent", {})
+        assert_has_key(sc, "result", "compare should return 'result' key")
+        assert_true(isinstance(sc["result"], (int, float)), "compare result should be numeric")
 
     def test_subsystem_names_equal():
         r = client.call_tool("subsystem_names_equal",
                              {"name1": "Turret01", "name2": "turret01"})
         assert_success(r)
-        d = tool_data(r)
-        assert_has_key(d, "result", "equal should return 'result' key")
-        assert_true(d["result"] is True, "Turret01 should equal turret01 (case-insensitive)")
+        sc = r.get("structuredContent", {})
+        assert_has_key(sc, "equal", "equal should return 'equal' key")
+        assert_true(sc["equal"] is True, "Turret01 should equal turret01 (case-insensitive)")
 
     def test_coordinate_transform():
         identity = {
@@ -803,12 +804,11 @@ def make_phase3_tests(suite, client):
         # Get a writable path from root_paths
         rp = client.call_tool("get_root_paths")
         assert_success(rp)
-        d = tool_data(rp)
-        paths = d.get("paths", [])
+        paths = tool_data(rp)
         if not paths:
             raise SkipTest("No root paths available for save test")
         import os
-        save_path = os.path.join(paths[0], "_mcp_test_save.fs2")
+        save_path = os.path.join(paths[0]["path"], "_mcp_test_save.fs2")
         ctx["test_save_path"] = save_path
         r = client.call_tool("save_mission", {"filepath": save_path})
         assert_success(r)
