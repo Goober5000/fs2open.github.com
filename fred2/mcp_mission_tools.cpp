@@ -3705,11 +3705,19 @@ static void replace_formula_root_references(int old_root, int new_root)
 	}
 }
 
-struct FormulaRootInfo {
-	int root;              // root of the tree (walked up via parent chain)
-	bool attached;         // root is a mission formula
-	sexp_opr_t opr_type;  // OPR_NULL (events) or OPR_BOOL (all others); only meaningful if attached
+enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
+struct FormulaRootInfo
+{
+	int root;                                       // root of the tree (walked up via parent chain)
+	bool attached;                                  // root is a mission formula
+	sexp_opr_t opr_type;                            // OPR_NULL (events) or OPR_BOOL (all others); only meaningful if attached
+	const char *attached_type;					    // if attached, the entity type that holds the formula
+	std::variant<const char *, int> attached_id;    // if attached, the entity name or index that holds the formula
+	entity_specific_tag attached_tag;               // if attached, additional relevant information about the formula holder
 };
+#if (MAX_TVT_TEAMS) != 2
+#error FormulaRootInfo must be updated with another way to distinguish teams!
+#endif
 
 // Walk up from any node to find its tree root, then check if that root is
 // attached to a mission entity and determine the expected return type.
@@ -3726,22 +3734,22 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	// Check against all mission entities
 
 	// Mission cutscenes (OPR_BOOL)
-	for (const auto &cs : The_mission.cutscenes) {
-		if (cs.formula == root || cs.formula == unwrapped)
-			return { root, true, OPR_BOOL };
+	for (int i = 0; i < (int)The_mission.cutscenes.size(); i++) {
+		if (The_mission.cutscenes[i].formula == root || The_mission.cutscenes[i].formula == unwrapped)
+			return { root, true, OPR_BOOL, "cutscene", i + 1, entity_specific_tag::NONE };
 	}
 
 	// Fiction viewer stages (OPR_BOOL)
-	for (const auto &stage : Fiction_viewer_stages) {
-		if (stage.formula == root || stage.formula == unwrapped)
-			return { root, true, OPR_BOOL };
+	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++) {
+		if (Fiction_viewer_stages[i].formula == root || Fiction_viewer_stages[i].formula == unwrapped)
+			return { root, true, OPR_BOOL, "fiction_viewer_stage", i + 1, entity_specific_tag::NONE };
 	}
 
 	// Briefing stages (OPR_BOOL)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
 			if (Briefings[t].stages[s].formula == root || Briefings[t].stages[s].formula == unwrapped)
-				return { root, true, OPR_BOOL };
+				return { root, true, OPR_BOOL, "briefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -3749,7 +3757,7 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
 			if (Debriefings[t].stages[s].formula == root || Debriefings[t].stages[s].formula == unwrapped)
-				return { root, true, OPR_BOOL };
+				return { root, true, OPR_BOOL, "debriefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -3757,32 +3765,85 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	for (auto objp : list_range(&obj_used_list)) {
 		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
 			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == root || shipp->arrival_cue == unwrapped
-				|| shipp->departure_cue == root || shipp->departure_cue == unwrapped)
-				return { root, true, OPR_BOOL };
+			if (shipp->arrival_cue == root || shipp->arrival_cue == unwrapped)
+				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::ARRIVAL_CUE };
+			if (shipp->departure_cue == root || shipp->departure_cue == unwrapped)
+				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::DEPARTURE_CUE };
 		}
 	}
 
 	// Wing arrival/departure cues (OPR_BOOL)
 	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == root || Wings[i].arrival_cue == unwrapped
-			|| Wings[i].departure_cue == root || Wings[i].departure_cue == unwrapped)
-			return { root, true, OPR_BOOL };
+		if (Wings[i].arrival_cue == root || Wings[i].arrival_cue == unwrapped)
+			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::ARRIVAL_CUE };
+		if (Wings[i].departure_cue == root || Wings[i].departure_cue == unwrapped)
+			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::DEPARTURE_CUE };
 	}
 
 	// Events (OPR_NULL)
 	for (const auto &evt : Mission_events) {
 		if (evt.formula == root || evt.formula == unwrapped)
-			return { root, true, OPR_NULL };
+			return { root, true, OPR_NULL, "event", evt.name.c_str(), entity_specific_tag::NONE };
 	}
 
 	// Goals (OPR_BOOL)
 	for (const auto &goal : Mission_goals) {
 		if (goal.formula == root || goal.formula == unwrapped)
-			return { root, true, OPR_BOOL };
+			return { root, true, OPR_BOOL, "goal", goal.name.c_str(), entity_specific_tag::NONE };
 	}
 
-	return { root, false, OPR_NULL };
+	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
+}
+
+static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
+	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink))
+		return;
+
+	int n = *node;
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
+		sink.set_error("Node %d is not in use", n);
+		return;
+	}
+
+	FormulaRootInfo info = find_formula_root_and_type(n);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "root", json_integer(info.root));
+	json_object_set_new(result, "attached", info.attached ? json_true() : json_false());
+
+	if (info.attached) {
+		json_object_set_new(result, "return_type",
+			json_string(get_opr_type_name(info.opr_type)));
+		json_object_set_new(result, "entity_type", json_string(info.attached_type));
+
+		if (std::holds_alternative<const char *>(info.attached_id))
+			json_object_set_new(result, "entity_id",
+				json_string(std::get<const char *>(info.attached_id)));
+		else
+			json_object_set_new(result, "entity_id",
+				json_integer(std::get<int>(info.attached_id)));
+
+		if (info.attached_tag != entity_specific_tag::NONE) {
+			const char *tag_str = nullptr;
+			switch (info.attached_tag) {
+				case entity_specific_tag::ARRIVAL_CUE:   tag_str = "arrival_cue"; break;
+				case entity_specific_tag::DEPARTURE_CUE: tag_str = "departure_cue"; break;
+				case entity_specific_tag::TEAM_1:        tag_str = "Team 1"; break;
+				case entity_specific_tag::TEAM_2:        tag_str = "Team 2"; break;
+				default: break;
+			}
+			if (tag_str)
+				json_object_set_new(result, "entity_tag", json_string(tag_str));
+		}
+	}
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
 }
 
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
@@ -4634,6 +4695,7 @@ static const char *mission_tool_names[] = {
 	"swap_waypoints",
 	"sexp_to_text",
 	"get_sexp_node",
+	"get_sexp_formula_info",
 	"walk_sexp_tree",
 	"text_to_sexp",
 	"detach_sexp_node",
@@ -5697,6 +5759,20 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// get_sexp_formula_info
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Node index of the SEXP node to query");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "get_sexp_formula_info",
+			"Get information about which mission entity (if any) owns the formula "
+			"tree containing the given SEXP node. Returns the tree root, whether it "
+			"is attached to a mission entity, and if so, the entity type, identifier, "
+			"and expected return type.",
+			props, req);
+	}
+
 	// walk_sexp_tree
 	{
 		json_t *props = json_object();
@@ -6010,6 +6086,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_sexp_to_text(input_json, req);
 	} else if (strcmp(tool_name, "get_sexp_node") == 0) {
 		handle_get_sexp_node(input_json, req);
+	} else if (strcmp(tool_name, "get_sexp_formula_info") == 0) {
+		handle_get_sexp_formula_info(input_json, req);
 	} else if (strcmp(tool_name, "walk_sexp_tree") == 0) {
 		handle_walk_sexp_tree(input_json, req);
 	} else if (strcmp(tool_name, "text_to_sexp") == 0) {
