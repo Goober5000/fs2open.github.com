@@ -217,7 +217,7 @@ check("Last arg deleted, placeholder inserted",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 2 <placeholder>",
-      remaining == ["", "+", "1", "2", "<placeholder>"],
+      remaining == ["+", "1", "2", "<placeholder>"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
@@ -293,7 +293,7 @@ check("First arg replaced with placeholder",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + <placeholder> <placeholder>",
-      remaining == ["", "+", "<placeholder>", "<placeholder>"],
+      remaining == ["+", "<placeholder>", "<placeholder>"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
@@ -324,7 +324,7 @@ check("Shrink middle arg, no placeholder",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 3 (no placeholder)",
-      remaining == ["", "+", "1", "3"],
+      remaining == ["+", "1", "3"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
@@ -355,7 +355,7 @@ check("Shrink last arg",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 2",
-      remaining == ["", "+", "1", "2"],
+      remaining == ["+", "1", "2"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
@@ -386,7 +386,7 @@ check("Shrink first arg",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 2 3",
-      remaining == ["", "+", "2", "3"],
+      remaining == ["+", "2", "3"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
@@ -418,7 +418,7 @@ check("Shrink removes node, no replacement",
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 <placeholder>",
-      remaining == ["", "+", "1", "<placeholder>"],
+      remaining == ["+", "1", "<placeholder>"],
       str(remaining))
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
