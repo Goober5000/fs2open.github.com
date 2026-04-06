@@ -63,6 +63,32 @@ static json_t *build_syntax_error_json(int node)
 }
 
 // ---------------------------------------------------------------------------
+// SEXP list wrapping/unwrapping for MCP client representation
+// ---------------------------------------------------------------------------
+
+// If node is a SEXP_LIST wrapping an operator, return the operator inside.
+// Otherwise return the node itself.
+static int unwrap_sexp_list(int node)
+{
+	if (node >= 0
+		&& Sexp_nodes[node].type == SEXP_LIST
+		&& Sexp_nodes[node].subtype == SEXP_ATOM_LIST
+		&& Sexp_nodes[node].first >= 0)
+		return Sexp_nodes[node].first;
+	return node;
+}
+
+// If node is a bare operator atom, wrap it in a SEXP_LIST. Otherwise return as-is.
+static int wrap_sexp_in_list(int node)
+{
+	if (node >= 0
+		&& Sexp_nodes[node].type == SEXP_ATOM
+		&& Sexp_nodes[node].subtype == SEXP_ATOM_OPERATOR)
+		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, node, -1);
+	return node;
+}
+
+// ---------------------------------------------------------------------------
 // SEXP formula validation
 // ---------------------------------------------------------------------------
 
@@ -71,6 +97,9 @@ static bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErr
 	// Range check
 	if (!check_int_range(node, 0, Num_sexp_nodes - 1, "formula", sink))
 		return false;
+
+	// Accept list-wrapped expressions (unwrap to the operator inside)
+	node = unwrap_sexp_list(node);
 
 	// Check node is in use
 	if (Sexp_nodes[node].type == SEXP_NOT_USED) {
@@ -756,7 +785,7 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(evt_index + 1));
-	json_object_set_new(obj, "formula", json_integer(evt.formula));
+	json_object_set_new(obj, "formula", json_integer(wrap_sexp_in_list(evt.formula)));
 
 	bool is_chained = (evt.chain_delay >= 0);
 	json_object_set_new(obj, "is_chained", json_boolean(is_chained));
@@ -1547,7 +1576,7 @@ static json_t *build_goal_json(const mission_goal &goal, int index, bool include
 	json_object_set_new(obj, "name", json_string(goal.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
-	json_object_set_new(obj, "formula", json_integer(goal.formula));
+	json_object_set_new(obj, "formula", json_integer(wrap_sexp_in_list(goal.formula)));
 
 	if (include_details) {
 		json_object_set_new(obj, "is_valid", json_boolean(!(goal.type & INVALID_GOAL)));
@@ -1874,7 +1903,7 @@ static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage
 	set_optional_string(obj, "ui_name", stage.ui_name, true);
 	set_optional_filename(obj, "background_640", stage.background[0]);
 	set_optional_filename(obj, "background_1024", stage.background[1]);
-	json_object_set_new(obj, "formula", json_integer(stage.formula));
+	json_object_set_new(obj, "formula", json_integer(wrap_sexp_in_list(stage.formula)));
 	return obj;
 }
 
@@ -2119,7 +2148,7 @@ static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
 	set_optional_filename(obj, "voice_filename", stage.voice);
 	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
-	json_object_set_new(obj, "formula", json_integer(stage.formula));
+	json_object_set_new(obj, "formula", json_integer(wrap_sexp_in_list(stage.formula)));
 	return obj;
 }
 
@@ -3329,8 +3358,9 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	// Unwrap list wrapper to avoid double-parenthesized output
 	SCP_string text;
-	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
+	convert_sexp_to_string(text, unwrap_sexp_list(n), SEXP_SAVE_MODE);
 
 	json_t *result = json_object();
 	json_object_set_new(result, "node", json_integer(n));
@@ -3546,17 +3576,20 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	// Run syntax check
-	json_t *result = json_object();
-	json_object_set_new(result, "node", json_integer(n));
-
+	// Run syntax check on the operator node
 	json_t *syntax_err = build_syntax_error_json(n);
-	if (syntax_err)
-		json_object_set_new(result, "syntax_error", syntax_err);
 
 	// Round-trip the text for verification
 	SCP_string round_tripped;
 	convert_sexp_to_string(round_tripped, n, SEXP_SAVE_MODE);
+
+	// Wrap the result in a SEXP_LIST for consistent client representation
+	n = wrap_sexp_in_list(n);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	if (syntax_err)
+		json_object_set_new(result, "syntax_error", syntax_err);
 	json_object_set_new(result, "parsed_text", json_string(round_tripped.c_str()));
 
 	req->result_json = make_json_tool_result(result);
@@ -3631,42 +3664,44 @@ static void set_chain_link(int parent, int prev_before, bool entry_is_first, int
 }
 
 // Swap all mission entity formula references from old_root to new_root.
+// Also matches unwrapped form of old_root in case it's an ephemeral list wrapper.
 static void replace_formula_root_references(int old_root, int new_root)
 {
+	int old_unwrapped = unwrap_sexp_list(old_root);
 	for (auto &cs : The_mission.cutscenes) {
-		if (cs.formula == old_root) cs.formula = new_root;
+		if (cs.formula == old_root || cs.formula == old_unwrapped) cs.formula = new_root;
 	}
 	for (auto &stage : Fiction_viewer_stages) {
-		if (stage.formula == old_root) stage.formula = new_root;
+		if (stage.formula == old_root || stage.formula == old_unwrapped) stage.formula = new_root;
 	}
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
-			if (Briefings[t].stages[s].formula == old_root)
+			if (Briefings[t].stages[s].formula == old_root || Briefings[t].stages[s].formula == old_unwrapped)
 				Briefings[t].stages[s].formula = new_root;
 		}
 	}
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
-			if (Debriefings[t].stages[s].formula == old_root)
+			if (Debriefings[t].stages[s].formula == old_root || Debriefings[t].stages[s].formula == old_unwrapped)
 				Debriefings[t].stages[s].formula = new_root;
 		}
 	}
 	for (auto objp : list_range(&obj_used_list)) {
 		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
 			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == old_root) shipp->arrival_cue = new_root;
-			if (shipp->departure_cue == old_root) shipp->departure_cue = new_root;
+			if (shipp->arrival_cue == old_root || shipp->arrival_cue == old_unwrapped) shipp->arrival_cue = new_root;
+			if (shipp->departure_cue == old_root || shipp->departure_cue == old_unwrapped) shipp->departure_cue = new_root;
 		}
 	}
 	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == old_root) Wings[i].arrival_cue = new_root;
-		if (Wings[i].departure_cue == old_root) Wings[i].departure_cue = new_root;
+		if (Wings[i].arrival_cue == old_root || Wings[i].arrival_cue == old_unwrapped) Wings[i].arrival_cue = new_root;
+		if (Wings[i].departure_cue == old_root || Wings[i].departure_cue == old_unwrapped) Wings[i].departure_cue = new_root;
 	}
 	for (auto &evt : Mission_events) {
-		if (evt.formula == old_root) evt.formula = new_root;
+		if (evt.formula == old_root || evt.formula == old_unwrapped) evt.formula = new_root;
 	}
 	for (auto &goal : Mission_goals) {
-		if (goal.formula == old_root) goal.formula = new_root;
+		if (goal.formula == old_root || goal.formula == old_unwrapped) goal.formula = new_root;
 	}
 }
 
@@ -3683,24 +3718,29 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	// Walk to root
 	int root = find_sexp_root(node);
 
+	// Mission entities store bare operator indices, but the root might be an
+	// ephemeral list wrapper (from wrap_sexp_in_list in a build_*_json call).
+	// Check both the root and its unwrapped form against entity formulas.
+	int unwrapped = unwrap_sexp_list(root);
+
 	// Check against all mission entities
 
 	// Mission cutscenes (OPR_BOOL)
 	for (const auto &cs : The_mission.cutscenes) {
-		if (cs.formula == root)
+		if (cs.formula == root || cs.formula == unwrapped)
 			return { root, true, OPR_BOOL };
 	}
 
 	// Fiction viewer stages (OPR_BOOL)
 	for (const auto &stage : Fiction_viewer_stages) {
-		if (stage.formula == root)
+		if (stage.formula == root || stage.formula == unwrapped)
 			return { root, true, OPR_BOOL };
 	}
 
 	// Briefing stages (OPR_BOOL)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
-			if (Briefings[t].stages[s].formula == root)
+			if (Briefings[t].stages[s].formula == root || Briefings[t].stages[s].formula == unwrapped)
 				return { root, true, OPR_BOOL };
 		}
 	}
@@ -3708,7 +3748,7 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	// Debriefing stages (OPR_BOOL)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
-			if (Debriefings[t].stages[s].formula == root)
+			if (Debriefings[t].stages[s].formula == root || Debriefings[t].stages[s].formula == unwrapped)
 				return { root, true, OPR_BOOL };
 		}
 	}
@@ -3717,26 +3757,28 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	for (auto objp : list_range(&obj_used_list)) {
 		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
 			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == root || shipp->departure_cue == root)
+			if (shipp->arrival_cue == root || shipp->arrival_cue == unwrapped
+				|| shipp->departure_cue == root || shipp->departure_cue == unwrapped)
 				return { root, true, OPR_BOOL };
 		}
 	}
 
 	// Wing arrival/departure cues (OPR_BOOL)
 	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == root || Wings[i].departure_cue == root)
+		if (Wings[i].arrival_cue == root || Wings[i].arrival_cue == unwrapped
+			|| Wings[i].departure_cue == root || Wings[i].departure_cue == unwrapped)
 			return { root, true, OPR_BOOL };
 	}
 
 	// Events (OPR_NULL)
 	for (const auto &evt : Mission_events) {
-		if (evt.formula == root)
+		if (evt.formula == root || evt.formula == unwrapped)
 			return { root, true, OPR_NULL };
 	}
 
 	// Goals (OPR_BOOL)
 	for (const auto &goal : Mission_goals) {
-		if (goal.formula == root)
+		if (goal.formula == root || goal.formula == unwrapped)
 			return { root, true, OPR_BOOL };
 	}
 
@@ -3762,10 +3804,20 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	if (n == Locked_sexp_true || n == Locked_sexp_false) {
-		sink.set_error("Node %d is a locked singleton (%s) and cannot be detached", n, Sexp_nodes[n].text);
+	int n_unwrapped = unwrap_sexp_list(n);
+	if (n_unwrapped == Locked_sexp_true || n_unwrapped == Locked_sexp_false) {
+		sink.set_error("Node %d is a list containing a locked singleton (%s) and cannot be detached",
+			n, Sexp_nodes[n_unwrapped].text);
 		return;
 	}
+
+	// If the client targeted an operator atom inside a list wrapper, target the
+	// wrapper instead so the entire sub-expression is detached as a unit.
+	if (Sexp_nodes[n].parent >= 0
+		&& Sexp_nodes[Sexp_nodes[n].parent].type == SEXP_LIST
+		&& Sexp_nodes[Sexp_nodes[n].parent].subtype == SEXP_ATOM_LIST
+		&& Sexp_nodes[Sexp_nodes[n].parent].first == n)
+		n = Sexp_nodes[n].parent;
 
 	// Determine context: walk to tree root and check mission attachment
 	FormulaRootInfo info = find_formula_root_and_type(n);
@@ -3873,10 +3925,13 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 
 	// Build response
 	json_t *result = json_object();
-	if (do_delete)
+	if (do_delete) {
 		json_object_set_new(result, "detached_node", json_integer(n));
-	else
-		json_object_set_new(result, "detached_node", build_sexp_node_json(n));
+	} else {
+		// Ensure the preserved node is list-wrapped for consistent client representation
+		int wrapped = wrap_sexp_in_list(n);
+		json_object_set_new(result, "detached_node", build_sexp_node_json(wrapped));
+	}
 	json_object_set_new(result, "deleted", do_delete ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0)
@@ -4154,6 +4209,9 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		sprintf(wmsg, "Operator '%s' expects at least %d argument(s), but none were provided", op_name, Operators[op_idx].min);
 		json_array_append_new(warnings, json_string(wmsg.c_str()));
 	}
+
+	// Wrap the result in a SEXP_LIST for consistent client representation
+	op_node = wrap_sexp_in_list(op_node);
 
 	mcp_sexp_forest_mark_dirty({ op_node });
 
@@ -5661,10 +5719,12 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
 		register_tool(tools, "text_to_sexp",
-			"Parse SEXP text into a node tree. Returns the root node index of the "
-			"newly allocated tree. The caller is responsible for attaching the tree "
-			"to an event or goal formula, or freeing it. Also returns the round-tripped "
-			"text, any parsing errors encountered, and the first (if any) syntax error.",
+			"Parse SEXP text into a node tree. Returns the root node "
+			"index of the newly allocated tree (following Lisp conventions, the root "
+			"is always a list node containing the operator and its arguments). The "
+			"caller is responsible for attaching the tree to an event or goal formula, "
+			"or deleting it. Also returns the round-tripped text, any parsing errors "
+			"encountered, and the first (if any) syntax error.",
 			props, req);
 	}
 
@@ -5723,7 +5783,7 @@ void mcp_register_mission_tools(json_t *tools)
 		json_array_append_new(req, json_string("operator"));
 		register_tool(tools, "create_sexp_node",
 			"Create a SEXP expression node with an operator and optional arguments. "
-			"Returns the root operator node, suitable for assigning as an event or "
+			"Returns a root node, suitable for assigning as an event or "
 			"goal formula. Does not enforce argument count or check syntax.",
 			props, req);
 	}
