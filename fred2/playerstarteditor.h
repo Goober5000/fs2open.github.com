@@ -71,6 +71,9 @@ protected:
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
 
+public:
+	virtual BOOL DestroyWindow();
+
 private:
 	// if we've finished initializing the dialog
 	int dlg_inited;
@@ -111,3 +114,5 @@ private:
 	void UpdateQuantityVariable(CComboBox *variable_list, int pool_value);
 
 };
+
+extern player_start_editor *Player_start_editor_dlg;

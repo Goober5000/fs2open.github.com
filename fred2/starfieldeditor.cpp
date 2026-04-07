@@ -15,6 +15,8 @@
 #include "starfield/starfield.h"
 #include "FREDDoc.h"
 
+starfield_editor *Starfield_editor_dlg = nullptr;
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
@@ -65,8 +67,16 @@ void starfield_editor::OnCancel()
 	CDialog::OnCancel();
 }
 
-BOOL starfield_editor::OnInitDialog() 
+BOOL starfield_editor::DestroyWindow()
 {
+	Starfield_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
+BOOL starfield_editor::OnInitDialog()
+{
+	Starfield_editor_dlg = this;
+
 	char buf[40];
 	CDialog::OnInitDialog();
 	theApp.init_window(&Starfield_wnd_data, this);
