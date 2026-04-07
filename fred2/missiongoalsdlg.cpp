@@ -57,6 +57,12 @@ CMissionGoalsDlg::CMissionGoalsDlg(CWnd* pParent /*=NULL*/)
 	select_sexp_node = -1;
 }
 
+BOOL CMissionGoalsDlg::DestroyWindow()
+{
+	Goal_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
 BOOL CMissionGoalsDlg::OnInitDialog()
 {
 	int i, adjust = 0;
