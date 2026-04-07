@@ -56,11 +56,15 @@ protected:
 	afx_msg void OnClose();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
+public:
+	virtual BOOL DestroyWindow();
 private:
 	int m_num_reinforcements;
 	reinforcements m_reinforcements[MAX_REINFORCEMENTS];
 	int cur;
 };
+
+extern reinforcement_editor_dlg *Reinforcement_editor_dlg;
 
 /////////////////////////////////////////////////////////////////////////////
 // reinforcement_select dialog

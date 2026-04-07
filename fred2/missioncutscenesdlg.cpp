@@ -58,6 +58,12 @@ CMissionCutscenesDlg::CMissionCutscenesDlg(CWnd* pParent /*=NULL*/)
 	select_sexp_node = -1;
 }
 
+BOOL CMissionCutscenesDlg::DestroyWindow()
+{
+	Cutscene_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
 BOOL CMissionCutscenesDlg::OnInitDialog()
 {
 	CDialog::OnInitDialog();  // let the base class do the default work

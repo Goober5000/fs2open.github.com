@@ -27,6 +27,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+CMissionNotesDlg *Mission_notes_dlg = nullptr;
+
 #define NO_SQUAD				"<none>"
 
 // module globals to hold button information
@@ -377,8 +379,16 @@ void CMissionNotesDlg::OnCancel()
 	CDialog::OnCancel();
 }
 
-BOOL CMissionNotesDlg::OnInitDialog() 
+BOOL CMissionNotesDlg::DestroyWindow()
 {
+	Mission_notes_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
+BOOL CMissionNotesDlg::OnInitDialog()
+{
+	Mission_notes_dlg = this;
+
 	int i, box_index = 0, mission_command_persona_box_index = -1;
 	CComboBox *box;
 	CEdit *edit;

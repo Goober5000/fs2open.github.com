@@ -21,6 +21,8 @@
 
 #define ID_WING_DATA 9000
 
+reinforcement_editor_dlg *Reinforcement_editor_dlg = nullptr;
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
@@ -62,8 +64,16 @@ END_MESSAGE_MAP()
 /////////////////////////////////////////////////////////////////////////////
 // reinforcement_editor_dlg message handlers
 
-BOOL reinforcement_editor_dlg::OnInitDialog() 
+BOOL reinforcement_editor_dlg::DestroyWindow()
 {
+	Reinforcement_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
+BOOL reinforcement_editor_dlg::OnInitDialog()
+{
+	Reinforcement_editor_dlg = this;
+
 	int i;
 	CListBox	*box;
 

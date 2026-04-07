@@ -34,6 +34,7 @@ public:
 	void create_tree();
 	CMissionCutscenesDlg(CWnd* pParent = NULL); // standard constructor
 	BOOL OnInitDialog();
+	virtual BOOL DestroyWindow();
 	int handler(int code, int goal);
 	void insert_handler(int old, int node);
 	int select_sexp_node;
