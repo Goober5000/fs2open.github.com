@@ -17,6 +17,8 @@
 #include "render/3d.h"
 #include "object/object.h"
 
+CGrid *Grid_dlg = nullptr;
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
@@ -113,6 +115,8 @@ void CGrid::OnGridYzPlane() {
 }
 
 BOOL CGrid::OnInitDialog() {
+	Grid_dlg = this;
+
 	CDialog::OnInitDialog();
 
 	CSpinButtonCtrl* pSpin = (CSpinButtonCtrl*) GetDlgItem(IDC_SPIN_GRID_SIZE);
@@ -148,7 +152,7 @@ void CGrid::OnVScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar) {
 }
 
 BOOL CGrid::DestroyWindow() {
-	// TODO: Add your specialized code here and/or call the base class
+	Grid_dlg = nullptr;
 
 	UpdateData(TRUE);
 
