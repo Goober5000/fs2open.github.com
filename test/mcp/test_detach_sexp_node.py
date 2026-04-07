@@ -169,8 +169,10 @@ if true_node is not None:
     r = call("detach_sexp_node", {"node": true_node})
     if is_error(r):
         err_text = tool_text(r)
-        check("Embedded delete rolled back on syntax error",
-              "syntax error" in err_text.lower(),
+        # The parser uses Locked_sexp_true (shared singleton), so detaching it
+        # is rejected as a locked singleton rather than a syntax error rollback.
+        check("Embedded detach rejected (locked singleton or syntax error)",
+              "locked singleton" in err_text.lower() or "syntax error" in err_text.lower(),
               err_text[:150])
         # Verify formula is unchanged
         r = call("get_event", {"name": "test_evt_embed"})
