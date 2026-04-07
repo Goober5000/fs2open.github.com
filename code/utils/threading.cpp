@@ -194,7 +194,7 @@ namespace threading {
 	}
 
 	void spin_down_wait_complete() {
-		//Technically, spindowns should only occur when the actual code is confirmed to be complete. So busy-waiting here is not an issue.
+		//Technically, spindowns should only occur when the actual code is confirmed to be complete. So we shouldn't be waiting for long here
 		{
 			std::unique_lock<std::mutex> lk(wait_for_spindown_task_mutex);
 			wait_for_spindown_tasks.wait(lk, []() { return wait_for_spindown_tasks_counter >= num_threads; });
