@@ -123,4 +123,7 @@ private:
 	CView*	m_pGView;   //!< Reference to parent window
 
 };
+
+extern CGrid *Grid_dlg;
+
 #endif // _GRID_H
