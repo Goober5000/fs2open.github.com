@@ -19,6 +19,10 @@
 #include "ShipClassEditorDlg.h"
 #include "MissionNotesDlg.h"
 #include "Grid.h"
+#include "AsteroidEditorDlg.h"
+#include "ReinforcementEditorDlg.h"
+#include "StarfieldEditor.h"
+#include "PlayerStartEditor.h"
 
 #include "species_defs/species_defs.h"
 #include "iff_defs/iff_defs.h"
@@ -124,6 +128,13 @@ const McpEditorInfo g_editor_info[] =
 	{ (CWnd**)&Cutscene_editor_dlg, "cutscene",         "Cutscene Editor",         false },
 	{ (CWnd**)&Cmd_brief_dlg,       "command briefing", "Command Briefing Editor", false },
 	{ (CWnd**)&Fiction_viewer_dlg,  "fiction viewer",   "Fiction Viewer Editor",   false },
+
+	{ (CWnd**)&Mission_notes_dlg,        "mission notes",    "Mission Notes",            false },
+	{ (CWnd**)&Grid_dlg,                 "grid",             "Grid Control",             false },
+	{ (CWnd**)&Asteroid_editor_dlg,      "asteroid",         "Asteroid Editor",          false },
+	{ (CWnd**)&Reinforcement_editor_dlg, "reinforcement",    "Reinforcement Editor",     false },
+	{ (CWnd**)&Starfield_editor_dlg,     "starfield",        "Starfield Editor",         false },
+	{ (CWnd**)&Player_start_editor_dlg,  "player start",     "Player Start Editor",      false },
 };
 const size_t g_editor_info_count = sizeof(g_editor_info) / sizeof(McpEditorInfo);
 

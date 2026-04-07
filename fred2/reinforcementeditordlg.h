@@ -56,10 +56,14 @@ protected:
 	afx_msg void OnClose();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
+public:
+	virtual BOOL DestroyWindow();
 private:
 	SCP_vector<reinforcements> m_reinforcements;
 	int cur;
 };
+
+extern reinforcement_editor_dlg *Reinforcement_editor_dlg;
 
 /////////////////////////////////////////////////////////////////////////////
 // reinforcement_select dialog

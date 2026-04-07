@@ -25,6 +25,8 @@
 static char THIS_FILE[] = __FILE__;
 #endif
 
+asteroid_editor *Asteroid_editor_dlg = nullptr;
+
 #define ID_FIELD_MENU 9000
 
 
@@ -337,8 +339,16 @@ void asteroid_editor::OnOK()
 	FREDDoc_ptr->autosave("asteroid field editor");
 }
 
-BOOL asteroid_editor::OnInitDialog() 
+BOOL asteroid_editor::DestroyWindow()
 {
+	Asteroid_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
+BOOL asteroid_editor::OnInitDialog()
+{
+	Asteroid_editor_dlg = this;
+
 	cur_field = 0;
 
 	CDialog::OnInitDialog();

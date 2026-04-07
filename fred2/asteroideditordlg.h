@@ -93,4 +93,9 @@ protected:
 	afx_msg void OnBnClickedSelectAsteroid();
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
+
+public:
+	virtual BOOL DestroyWindow();
 };
+
+extern asteroid_editor *Asteroid_editor_dlg;

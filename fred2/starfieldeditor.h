@@ -46,4 +46,9 @@ protected:
 	afx_msg void OnHScroll(UINT nSBCode, UINT nPos, CScrollBar* pScrollBar);
 	//}}AFX_MSG
 	DECLARE_MESSAGE_MAP()
+
+public:
+	virtual BOOL DestroyWindow();
 };
+
+extern starfield_editor *Starfield_editor_dlg;
