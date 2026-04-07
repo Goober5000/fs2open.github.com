@@ -19,6 +19,8 @@
 #include "weapon/weapon.h"
 #include "checkboxlistdlg.h"
 
+player_start_editor *Player_start_editor_dlg = nullptr;
+
 #ifdef _DEBUG
 #undef THIS_FILE
 static char THIS_FILE[] = __FILE__;
@@ -87,8 +89,16 @@ END_MESSAGE_MAP()
 // player_start_editor message handlers
 
 
-BOOL player_start_editor::OnInitDialog() 
+BOOL player_start_editor::DestroyWindow()
 {
+	Player_start_editor_dlg = nullptr;
+	return CDialog::DestroyWindow();
+}
+
+BOOL player_start_editor::OnInitDialog()
+{
+	Player_start_editor_dlg = this;
+
 	int i, j;
 	int idx;
 

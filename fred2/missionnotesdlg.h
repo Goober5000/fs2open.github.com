@@ -109,4 +109,7 @@ protected:
 	DECLARE_MESSAGE_MAP()
 public:
 	afx_msg void OnEnChangeLoadingScreen641();
+	virtual BOOL DestroyWindow();
 };
+
+extern CMissionNotesDlg *Mission_notes_dlg;
