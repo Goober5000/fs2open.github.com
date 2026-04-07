@@ -3655,46 +3655,6 @@ static void set_chain_link(int parent, int prev_before, bool entry_is_first, int
 		Sexp_nodes[parent].rest = value;
 }
 
-// Swap all mission entity formula references from old_root to new_root.
-static void replace_formula_root_references(int old_root, int new_root)
-{
-	for (auto &cs : The_mission.cutscenes) {
-		if (cs.formula == old_root) cs.formula = new_root;
-	}
-	for (auto &stage : Fiction_viewer_stages) {
-		if (stage.formula == old_root) stage.formula = new_root;
-	}
-	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
-		for (int s = 0; s < Briefings[t].num_stages; s++) {
-			if (Briefings[t].stages[s].formula == old_root)
-				Briefings[t].stages[s].formula = new_root;
-		}
-	}
-	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
-		for (int s = 0; s < Debriefings[t].num_stages; s++) {
-			if (Debriefings[t].stages[s].formula == old_root)
-				Debriefings[t].stages[s].formula = new_root;
-		}
-	}
-	for (auto objp : list_range(&obj_used_list)) {
-		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
-			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == old_root) shipp->arrival_cue = new_root;
-			if (shipp->departure_cue == old_root) shipp->departure_cue = new_root;
-		}
-	}
-	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == old_root) Wings[i].arrival_cue = new_root;
-		if (Wings[i].departure_cue == old_root) Wings[i].departure_cue = new_root;
-	}
-	for (auto &evt : Mission_events) {
-		if (evt.formula == old_root) evt.formula = new_root;
-	}
-	for (auto &goal : Mission_goals) {
-		if (goal.formula == old_root) goal.formula = new_root;
-	}
-}
-
 enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
 struct FormulaRootInfo
 {
@@ -3709,6 +3669,53 @@ struct FormulaRootInfo
 #error FormulaRootInfo must be updated with another way to distinguish teams!
 #endif
 
+// Set a mission entity formula to new_root, using the entity identification
+// from a previously computed FormulaRootInfo.
+static void set_formula(const FormulaRootInfo &info, int new_root)
+{
+	Assertion(info.attached, "set_formula called on unattached formula!");
+
+	const char *type = info.attached_type;
+	int index = std::holds_alternative<int>(info.attached_id) ? std::get<int>(info.attached_id) : -1;
+	const char *name = std::holds_alternative<const char *>(info.attached_id) ? std::get<const char *>(info.attached_id) : nullptr;
+
+	if (!strcmp(type, "cutscene")) {
+		The_mission.cutscenes[index].formula = new_root;
+	} else if (!strcmp(type, "fiction_viewer_stage")) {
+		Fiction_viewer_stages[index].formula = new_root;
+	} else if (!strcmp(type, "briefing_stage")) {
+		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
+		Briefings[t].stages[index].formula = new_root;
+	} else if (!strcmp(type, "debriefing_stage")) {
+		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
+		Debriefings[t].stages[index].formula = new_root;
+	} else if (!strcmp(type, "ship")) {
+		int ship_idx = ship_name_lookup(name);
+		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
+		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
+			Ships[ship_idx].arrival_cue = new_root;
+		else
+			Ships[ship_idx].departure_cue = new_root;
+	} else if (!strcmp(type, "wing")) {
+		int wing_idx = wing_name_lookup(name);
+		Assertion(wing_idx >= 0, "set_formula: wing '%s' not found!", name);
+		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
+			Wings[wing_idx].arrival_cue = new_root;
+		else
+			Wings[wing_idx].departure_cue = new_root;
+	} else if (!strcmp(type, "event")) {
+		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, name);
+		Assertion(evt_idx >= 0, "set_formula: event '%s' not found!", name);
+		Mission_events[evt_idx].formula = new_root;
+	} else if (!strcmp(type, "goal")) {
+		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+		Assertion(goal_idx >= 0, "set_formula: goal '%s' not found!", name);
+		Mission_goals[goal_idx].formula = new_root;
+	} else {
+		Assertion(0, "set_formula: unknown entity type '%s'!", type);
+	}
+}
+
 // Walk up from any node to find its tree root, then check if that root is
 // attached to a mission entity and determine the expected return type.
 static FormulaRootInfo find_formula_root_and_type(int node)
@@ -3721,20 +3728,20 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	// Mission cutscenes (OPR_BOOL)
 	for (int i = 0; i < (int)The_mission.cutscenes.size(); i++) {
 		if (The_mission.cutscenes[i].formula == root)
-			return { root, true, OPR_BOOL, "cutscene", i + 1, entity_specific_tag::NONE };
+			return { root, true, OPR_BOOL, "cutscene", i, entity_specific_tag::NONE };
 	}
 
 	// Fiction viewer stages (OPR_BOOL)
 	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++) {
 		if (Fiction_viewer_stages[i].formula == root)
-			return { root, true, OPR_BOOL, "fiction_viewer_stage", i + 1, entity_specific_tag::NONE };
+			return { root, true, OPR_BOOL, "fiction_viewer_stage", i, entity_specific_tag::NONE };
 	}
 
 	// Briefing stages (OPR_BOOL)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
 			if (Briefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "briefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+				return { root, true, OPR_BOOL, "briefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -3742,7 +3749,7 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
 			if (Debriefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "debriefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+				return { root, true, OPR_BOOL, "debriefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -3850,6 +3857,11 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 		return;
 	}
 
+	if (n == Locked_sexp_true || n == Locked_sexp_false) {
+		sink.set_error("An explicit true or false cannot be detached!");
+		return;
+	}
+
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
 	if (SEXP_NODE_TYPE(n) == SEXP_ATOM
@@ -3859,13 +3871,6 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 		&& Sexp_nodes[Sexp_nodes[n].parent].subtype == SEXP_ATOM_LIST
 		&& Sexp_nodes[Sexp_nodes[n].parent].first == n)
 		n = Sexp_nodes[n].parent;
-
-	// this comes after smart retargeting, because in top-level trees, smart-retargeting is a no-op,
-	// whereas in sub-trees, the detach operation must be able to detach the wrapped locked boolean
-	if (n == Locked_sexp_true || n == Locked_sexp_false) {
-		sink.set_error("Node %d is a locked singleton (%s) and cannot be detached", n, Sexp_nodes[n].text);
-		return;
-	}
 
 	// Determine context: walk to tree root and check mission attachment
 	FormulaRootInfo info = find_formula_root_and_type(n);
@@ -3887,34 +3892,39 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 			replacement = Locked_sexp_true;
 		}
 
-		// Swap all entity references to the replacement
-		replace_formula_root_references(n, replacement);
+		// Set the entity formula to the replacement
+		set_formula(info, replacement);
 
 		// Syntax check the replacement
 		int bad_node = -1;
 		int syntax_result = check_sexp_syntax(replacement, static_cast<int>(info.opr_type), 1, &bad_node);
 		if (syntax_result != SEXP_CHECK_NO_ERROR) {
 			// Rollback
-			replace_formula_root_references(replacement, n);
-			free_sexp2(replacement);
+			set_formula(info, n);
+			if (replacement != Locked_sexp_true && replacement != Locked_sexp_false)
+				free_sexp2(replacement);
 			sink.set_error("Detachment would cause syntax error: %s (error code %d, bad node %d)",
 				sexp_error_message(syntax_result), syntax_result, bad_node);
 			return;
 		}
 
 		// Detach the old tree and optionally free it
-		if (do_delete) {
-			freed_count = free_sexp2(n);
-		} else {
-			Sexp_nodes[n].parent = -1;
+		if (n != Locked_sexp_true && n != Locked_sexp_false) {
+			if (do_delete) {
+				freed_count = free_sexp2(n);
+			} else {
+				Sexp_nodes[n].parent = -1;
+			}
 		}
 
 	} else if (is_root) {
 		// Case B: Root of a free-standing tree
-		if (do_delete) {
-			freed_count = free_sexp2(n);
-		} else {
-			Sexp_nodes[n].parent = -1;
+		if (n != Locked_sexp_true && n != Locked_sexp_false) {
+			if (do_delete) {
+				freed_count = free_sexp2(n);
+			} else {
+				Sexp_nodes[n].parent = -1;
+			}
 		}
 
 	} else {
@@ -3952,7 +3962,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 					free_sexp2(replacement);
 				}
 
-				sink.set_error("Deletion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+				sink.set_error("Detachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
 				return;
 			}
@@ -3972,19 +3982,27 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 		mcp_sexp_forest_mark_dirty({ info.root });
 
 	// If preserved, the detached node is the root of a new free-standing tree
-	if (!do_delete)
+	if (!do_delete) {
+		// but if the new free-standing tree is wrapped, unwrap it
+		if (n != *node) {
+			free_one_sexp(n);
+			n = *node;
+			Sexp_nodes[n].parent = -1;
+		}
 		mcp_sexp_forest_mark_dirty({ n });
+	}
 
 	// Build response
 	json_t *result = json_object();
-	if (do_delete)
-		json_object_set_new(result, "detached_node", json_integer(n));
-	else
-		json_object_set_new(result, "detached_node", build_sexp_node_json(n));
+	json_object_set_new(result, "detached_node", json_integer(n));
+	if (!do_delete)
+		json_object_set_new(result, "detached_node_data", build_sexp_node_json(n));
 	json_object_set_new(result, "deleted", do_delete ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
-	if (replacement >= 0)
-		json_object_set_new(result, "replacement_node", build_sexp_node_json(replacement));
+	if (replacement >= 0) {
+		json_object_set_new(result, "replacement_node", json_integer(replacement));
+		json_object_set_new(result, "replacement_node_data", build_sexp_node_json(replacement));
+	}
 	else
 		json_object_set_new(result, "replacement_node", json_null());
 	req->result_json = make_json_tool_result(result);
@@ -5768,7 +5786,7 @@ void mcp_register_mission_tools(json_t *tools)
 		register_tool(tools, "walk_sexp_tree",
 			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
 			"of node descriptors with kind, value, value_type, child/sibling indices, "
-			"and walk_first/walk_rest indices into the array for easy traversal."
+			"and walk_first/walk_rest indices into the array for easy traversal. "
 			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
 			"operators deeper in the tree are wrapped in list nodes.",
 			props, req);

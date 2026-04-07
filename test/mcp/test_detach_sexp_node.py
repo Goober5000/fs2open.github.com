@@ -54,12 +54,18 @@ def check(label, ok, detail=""):
     else:
         failed += 1
 
-# Helper: get the node index from a detached_node response (object or int)
-def get_detached_node_id(d):
-    dn = d.get("detached_node")
-    if isinstance(dn, dict):
-        return dn.get("node")
-    return dn
+# Helpers for the new response format:
+# - detached_node: always an int (node index)
+# - detached_node_data: full node object (when not deleted)
+# - replacement_node: int or null
+# - replacement_node_data: full node object (when replacement exists)
+def get_detached_data(d):
+    """Get the detached node data object, or None."""
+    return d.get("detached_node_data")
+
+def get_replacement_data(d):
+    """Get the replacement node data object, or None."""
+    return d.get("replacement_node_data")
 
 # Setup
 call("new_mission", {"mission_name": "detach_sexp_test", "mission_title": "Test"})
@@ -95,12 +101,13 @@ for n in nodes:
         break
 r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
-repl_val = d.get("replacement_node", {}).get("value", "") if d.get("replacement_node") else ""
-dn = d.get("detached_node", {})
+repl_data = get_replacement_data(d)
+repl_val = repl_data.get("value", "") if repl_data else ""
+dn_data = get_detached_data(d)
 check("Embedded node detached and preserved with placeholder",
-      not is_error(r) and isinstance(dn, dict) and dn.get("node") == two_node
+      not is_error(r) and dn_data is not None and dn_data.get("node") == two_node
       and d.get("deleted") is False and repl_val == "<placeholder>",
-      f"detached={dn}, replacement={repl_val}")
+      f"detached={dn_data}, replacement={repl_val}")
 # Verify detached node is still accessible
 r = call("get_sexp_node", {"node": two_node})
 check("Detached node still accessible via get_sexp_node",
@@ -117,19 +124,19 @@ d = tool_data(r)
 evt_formula = d.get("formula")
 r = call("detach_sexp_node", {"node": evt_formula})
 d = tool_data(r)
-repl = d.get("replacement_node", {})
-repl_val = repl.get("value", "") if repl else ""
-dn = d.get("detached_node", {})
+repl_data = get_replacement_data(d)
+repl_val = repl_data.get("value", "") if repl_data else ""
+dn_data = get_detached_data(d)
 check("Event formula replaced with do-nothing",
-      not is_error(r) and isinstance(dn, dict) and dn.get("node") == evt_formula and repl_val == "do-nothing",
+      not is_error(r) and dn_data is not None and dn_data.get("node") == evt_formula and repl_val == "do-nothing",
       f"replacement={repl_val}")
 # Verify event updated
 r = call("get_event", {"name": "test_evt_detach"})
 evt_d = tool_data(r)
 new_formula = evt_d.get("formula")
 check("Event formula points to replacement node",
-      new_formula == repl.get("node"),
-      f"formula={new_formula}, repl_node={repl.get('node')}")
+      new_formula == d.get("replacement_node"),
+      f"formula={new_formula}, repl_node={d.get('replacement_node')}")
 # Clean up detached node
 call("detach_sexp_node", {"node": evt_formula, "delete": True})
 call("delete_event", {"name": "test_evt_detach"})
@@ -143,11 +150,11 @@ d = tool_data(r)
 goal_formula = d.get("formula")
 r = call("detach_sexp_node", {"node": goal_formula})
 d = tool_data(r)
-repl = d.get("replacement_node", {})
-repl_val = repl.get("value", "") if repl else ""
-dn = d.get("detached_node", {})
+repl_data = get_replacement_data(d)
+repl_val = repl_data.get("value", "") if repl_data else ""
+dn_data = get_detached_data(d)
 check("Goal formula replaced with true",
-      not is_error(r) and isinstance(dn, dict) and dn.get("node") == goal_formula and repl_val == "true",
+      not is_error(r) and dn_data is not None and dn_data.get("node") == goal_formula and repl_val == "true",
       f"replacement={repl_val}")
 call("detach_sexp_node", {"node": goal_formula, "delete": True})
 call("delete_goal", {"name": "test_goal_detach"})
@@ -170,9 +177,10 @@ if true_node is not None:
     if is_error(r):
         err_text = tool_text(r)
         # The parser uses Locked_sexp_true (shared singleton), so detaching it
-        # is rejected as a locked singleton rather than a syntax error rollback.
+        # is rejected as a locked singleton.
         check("Embedded detach rejected (locked singleton or syntax error)",
-              "locked singleton" in err_text.lower() or "syntax error" in err_text.lower(),
+              "locked singleton" in err_text.lower() or "true or false" in err_text.lower()
+              or "syntax error" in err_text.lower(),
               err_text[:150])
         # Verify formula is unchanged
         r = call("get_event", {"name": "test_evt_embed"})
@@ -182,7 +190,8 @@ if true_node is not None:
               f"formula={evt_d.get('formula')}, expected={evt_formula}")
     else:
         d = tool_data(r)
-        repl_val = d.get("replacement_node", {}).get("value", "") if d.get("replacement_node") else ""
+        repl_data = get_replacement_data(d)
+        repl_val = repl_data.get("value", "") if repl_data else ""
         check("Embedded node replaced with placeholder (syntax check passed)",
               repl_val == "<placeholder>",
               f"replacement={repl_val}")
@@ -212,10 +221,10 @@ for nd in nodes:
         break
 r = call("detach_sexp_node", {"node": three_node})
 d = tool_data(r)
-repl = d.get("replacement_node")
+repl_data = get_replacement_data(d)
 check("Last arg deleted, placeholder inserted",
-      not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
-      f"replacement={repl}")
+      not is_error(r) and repl_data is not None and repl_data.get("value") == "<placeholder>",
+      f"replacement={repl_data}")
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
 check("Tree has + 1 2 <placeholder>",
@@ -245,10 +254,10 @@ for nd in nodes:
         break
 r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
-repl = d.get("replacement_node")
+repl_data = get_replacement_data(d)
 check("Middle arg deleted, placeholder kept (non-placeholder follows)",
-      not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
-      f"replacement={repl}")
+      not is_error(r) and repl_data is not None and repl_data.get("value") == "<placeholder>",
+      f"replacement={repl_data}")
 # Verify tree has placeholder in the middle
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
@@ -280,17 +289,17 @@ for nd in nodes:
 # Delete "2" first
 r = call("detach_sexp_node", {"node": two_node})
 d = tool_data(r)
-repl = d.get("replacement_node")
+repl_data = get_replacement_data(d)
 check("Second arg replaced with placeholder",
-      not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
-      f"replacement={repl}")
+      not is_error(r) and repl_data is not None and repl_data.get("value") == "<placeholder>",
+      f"replacement={repl_data}")
 # Now delete "1"
 r = call("detach_sexp_node", {"node": one_node})
 d = tool_data(r)
-repl = d.get("replacement_node")
+repl_data = get_replacement_data(d)
 check("First arg replaced with placeholder",
-      not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
-      f"replacement={repl}")
+      not is_error(r) and repl_data is not None and repl_data.get("value") == "<placeholder>",
+      f"replacement={repl_data}")
 # Verify both are placeholders
 r = call("walk_sexp_tree", {"node": plus_node})
 remaining = [n["value"] for n in tool_data(r)["nodes"]]
@@ -444,10 +453,10 @@ for nd in nodes:
         break
 r = call("detach_sexp_node", {"node": two_node, "shrink": False})
 d = tool_data(r)
-repl = d.get("replacement_node")
+repl_data = get_replacement_data(d)
 check("shrink=false inserts placeholder",
-      not is_error(r) and repl is not None and repl.get("value") == "<placeholder>",
-      f"replacement={repl}")
+      not is_error(r) and repl_data is not None and repl_data.get("value") == "<placeholder>",
+      f"replacement={repl_data}")
 call("detach_sexp_node", {"node": plus_node, "delete": True})
 
 # =====================================================================
@@ -457,7 +466,8 @@ d = tool_data(r)
 locked_formula = d.get("formula")
 r = call("detach_sexp_node", {"node": locked_formula})
 check("Locked_sexp_true rejected",
-      is_error(r) and "locked singleton" in tool_text(r).lower(),
+      is_error(r) and ("true or false" in tool_text(r).lower()
+      or "locked singleton" in tool_text(r).lower()),
       tool_text(r)[:120])
 call("delete_goal", {"name": "test_locked"})
 
@@ -480,11 +490,11 @@ r = call("create_sexp_node", {
 plus_node = tool_data(r)["node"]
 r = call("detach_sexp_node", {"node": plus_node})
 d = tool_data(r)
-dn = d.get("detached_node", {})
+dn_data = get_detached_data(d)
 check("Free-standing root preserved (not freed)",
-      not is_error(r) and isinstance(dn, dict) and dn.get("node") == plus_node
+      not is_error(r) and dn_data is not None and dn_data.get("node") == plus_node
       and d.get("deleted") is False and d.get("freed_count") == 0,
-      f"detached_node={dn}, deleted={d.get('deleted')}")
+      f"detached_node_data={dn_data}, deleted={d.get('deleted')}")
 # Verify node is still accessible
 r = call("get_sexp_node", {"node": plus_node})
 check("Preserved root still accessible",
