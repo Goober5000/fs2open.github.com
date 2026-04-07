@@ -37,6 +37,8 @@
 
 #define PLACEHOLDER_STRING "<placeholder>"
 
+static int parse_sexp_text(const char* text);
+
 // ---------------------------------------------------------------------------
 // SEXP syntax checking helper
 // ---------------------------------------------------------------------------
@@ -901,19 +903,14 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	}
 
 	if (!formula.has_value()) {
-		// Build default SEXP formula: (when (true) (do-nothing))
-		int do_nothing = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
-		int true_node = alloc_sexp("true", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, do_nothing);	// note - this is a list, so we do need an allocation here
-		int when_node = alloc_sexp("when", SEXP_LIST, SEXP_ATOM_OPERATOR, true_node, -1);
-		if (do_nothing < 0 || true_node < 0 || when_node < 0) {
-			// Clean up any nodes that were successfully allocated
-			if (when_node >= 0) free_sexp2(when_node);
-			else if (true_node >= 0) free_sexp2(true_node);
-			else if (do_nothing >= 0) free_sexp2(do_nothing);
-			sink.set_error("Failed to allocate SEXP nodes for default event formula");
+		// Use the parser so the default formula has the same node structure
+		// as any formula created via text_to_sexp or loaded from a mission file
+		int default_formula = parse_sexp_text("( when ( true ) ( do-nothing ) )");
+		if (default_formula < 0) {
+			sink.set_error("Failed to create default event formula");
 			return;
 		}
-		formula = when_node;
+		formula = default_formula;
 	}
 
 	// Construct the event
@@ -3491,6 +3488,34 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 // SEXP text parsing
 // ---------------------------------------------------------------------------
 
+// Parse SEXP text and return the root node index, or -1 on failure.
+// Saves and restores the global parse state so it can be called from anywhere.
+static int parse_sexp_text(const char *text)
+{
+	pause_parse();
+
+	SCP_string buf(text);
+	Mp = buf.data();
+	strcpy_s(Current_filename, "mcp_parse_sexp");
+
+	Parse_collect_errors = true;
+	Parse_errors.clear();
+
+	int n = get_sexp_main();
+
+	Parse_collect_errors = false;
+	unpause_parse();
+
+	if (!Parse_errors.empty()) {
+		if (n >= 0)
+			free_sexp2(n);
+		Parse_errors.clear();
+		return -1;
+	}
+
+	return n;
+}
+
 static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -3806,7 +3831,7 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
+static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
@@ -3825,6 +3850,18 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	// If the client targeted an operator atom inside a list wrapper,
+	// retarget to the wrapper so the entire sub-expression is detached.
+	if (SEXP_NODE_TYPE(n) == SEXP_ATOM
+		&& Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR
+		&& Sexp_nodes[n].parent >= 0
+		&& SEXP_NODE_TYPE(Sexp_nodes[n].parent) == SEXP_LIST
+		&& Sexp_nodes[Sexp_nodes[n].parent].subtype == SEXP_ATOM_LIST
+		&& Sexp_nodes[Sexp_nodes[n].parent].first == n)
+		n = Sexp_nodes[n].parent;
+
+	// this comes after smart retargeting, because in top-level trees, smart-retargeting is a no-op,
+	// whereas in sub-trees, the detach operation must be able to detach the wrapped locked boolean
 	if (n == Locked_sexp_true || n == Locked_sexp_false) {
 		sink.set_error("Node %d is a locked singleton (%s) and cannot be detached", n, Sexp_nodes[n].text);
 		return;
@@ -3841,7 +3878,11 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	if (is_root && is_attached) {
 		// Case A: Root of a mission-attached formula -- replace with default
 		if (info.opr_type == OPR_NULL) {
-			replacement = alloc_sexp("do-nothing", SEXP_LIST, SEXP_ATOM_OPERATOR, -1, -1);
+			replacement = parse_sexp_text("( do-nothing )");
+			if (replacement < 0) {
+				sink.set_error("Failed to create replacement formula");
+				return;
+			}
 		} else {
 			replacement = Locked_sexp_true;
 		}
@@ -5726,8 +5767,10 @@ void mcp_register_mission_tools(json_t *tools)
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "walk_sexp_tree",
 			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
-			"of node descriptors with kind, value, value type, child/sibling indices, "
-			"and walk_first/walk_rest indices into the array for easy traversal.",
+			"of node descriptors with kind, value, value_type, child/sibling indices, "
+			"and walk_first/walk_rest indices into the array for easy traversal."
+			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
+			"operators deeper in the tree are wrapped in list nodes.",
 			props, req);
 	}
 
@@ -5739,9 +5782,11 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
 		register_tool(tools, "text_to_sexp",
-			"Parse SEXP text into a node tree. Returns the root node index of the "
-			"newly allocated tree. The caller is responsible for attaching the tree "
-			"to an event or goal formula, or freeing it. Also returns the round-tripped "
+			"Parse SEXP text into a node tree. Returns the index of the root node. "
+			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
+			"operators deeper in the tree are wrapped in list nodes. The caller is "
+			"responsible for attaching the tree to a mission entity's formula, attaching the tree to "
+			"another tree, or deleting the tree. Also returns the round-tripped "
 			"text, any parsing errors encountered, and the first (if any) syntax error.",
 			props, req);
 	}
@@ -5759,16 +5804,14 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "detach_sexp_node",
-			"Detach a SEXP node from its tree. If the node is the root of a "
-			"mission-attached formula, it is replaced with an appropriate default "
-			"(do-nothing for action formulas, true for boolean formulas). If the node "
-			"is embedded within a tree, it is replaced with a " PLACEHOLDER_STRING " unless "
-			"'shrink' is true, in which case subsequent siblings shift up by one "
-			"position. Free-standing root nodes are simply disconnected. By default, "
-			"the detached node is preserved and returned; set 'delete' to true to free "
-			"it. For mission-attached trees, a syntax check is performed after "
-			"modification; the operation is rolled back if the check fails. Locked "
-			"singleton nodes (true/false) cannot be detached.",
+			"Detach a SEXP node from its tree. If the node is the root of a mission entity's "
+			"formula, it is replaced with an appropriate default (e.g. do-nothing for action "
+			"formulas, true for boolean formulas). If the node is embedded within a tree, it "
+			"is replaced with " PLACEHOLDER_STRING ", unless 'shrink' is true, in which case "
+			"subsequent siblings shift up by one position. By default, the detached node is "
+			"preserved and returned; set 'delete' to true to free it. For mission-attached trees, "
+			"a syntax check is performed after modification; if the check fails, the operation "
+			"is rolled back.",
 			props, req);
 	}
 
@@ -5801,8 +5844,8 @@ void mcp_register_mission_tools(json_t *tools)
 		json_array_append_new(req, json_string("operator"));
 		register_tool(tools, "create_sexp_node",
 			"Create a SEXP expression node with an operator and optional arguments. "
-			"Returns the root operator node, suitable for assigning as an event or "
-			"goal formula. Does not enforce argument count or check syntax.",
+			"Returns the root operator node, suitable for assigning as a mission entity's "
+			"formula. Does not enforce argument count or check syntax.",
 			props, req);
 	}
 
