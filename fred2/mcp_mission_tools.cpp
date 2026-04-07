@@ -5785,8 +5785,9 @@ void mcp_register_mission_tools(json_t *tools)
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "walk_sexp_tree",
 			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
-			"of node descriptors with kind, value, value_type, child/sibling indices, "
-			"and walk_first/walk_rest indices into the array for easy traversal. "
+			"of node descriptors with kind, value, value_type, role "
+			"(operator/argument/list_wrapper), child/sibling indices, and "
+			"walk_first/walk_rest indices into the array for easy traversal. "
 			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
 			"operators deeper in the tree are wrapped in list nodes.",
 			props, req);
@@ -5822,14 +5823,20 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "detach_sexp_node",
-			"Detach a SEXP node from its tree. If the node is the root of a mission entity's "
-			"formula, it is replaced with an appropriate default (e.g. do-nothing for action "
-			"formulas, true for boolean formulas). If the node is embedded within a tree, it "
-			"is replaced with " PLACEHOLDER_STRING ", unless 'shrink' is true, in which case "
-			"subsequent siblings shift up by one position. By default, the detached node is "
-			"preserved and returned; set 'delete' to true to free it. For mission-attached trees, "
-			"a syntax check is performed after modification; if the check fails, the operation "
-			"is rolled back.",
+			"Detach a SEXP node from its tree. If the target is an operator inside "
+			"a list wrapper, the wrapper is automatically detached as well. If the "
+			"node is the root of a mission entity's formula, it is replaced with an "
+			"appropriate default (e.g. do-nothing for action formulas, true for boolean "
+			"formulas). If the node is embedded within a tree, it is replaced with "
+			PLACEHOLDER_STRING ", unless 'shrink' is true, in which case subsequent "
+			"siblings shift up by one position. By default, the detached node is "
+			"preserved and returned; set 'delete' to true to free it. The response "
+			"includes detached_node (int index), detached_node_data (full node object when "
+			"the node was not deleted), replacement_node (int or null), and replacement_node_data "
+			"(full node object when a replacement was inserted). For mission-attached "
+			"trees, a syntax check is performed after modification; if the check fails, "
+			"the operation is rolled back. Locked singleton nodes (true/false) cannot "
+			"be detached.",
 			props, req);
 	}
 
