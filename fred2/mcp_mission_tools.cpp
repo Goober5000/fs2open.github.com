@@ -3602,29 +3602,23 @@ static bool is_placeholder_node(int node)
 		&& !stricmp(Sexp_nodes[node].text, PLACEHOLDER_STRING);
 }
 
-// Replace one node with another in the parent's link structure.
-// Checks parent.first, parent.rest, and walks both rest chains to find
-// a predecessor whose rest == old_node.
-static void splice_replace_node(int parent, int old_node, int new_node)
+// Replace one node with another in the tree's link structure.
+// Uses find_sexp_list and find_sexp_antecedent to locate the node
+// that references old_node, even when parent == -1.
+static void splice_replace_node(int old_node, int new_node)
 {
-	if (parent < 0)
+	// Check if old_node is the first child of a list wrapper
+	int ref = find_sexp_list(old_node);
+	if (ref >= 0) {
+		Sexp_nodes[ref].first = new_node;
 		return;
+	}
 
-	if (Sexp_nodes[parent].first == old_node) {
-		Sexp_nodes[parent].first = new_node;
-	} else if (Sexp_nodes[parent].rest == old_node) {
-		Sexp_nodes[parent].rest = new_node;
-	} else {
-		int prev = Sexp_nodes[parent].first;
-		while (prev >= 0 && Sexp_nodes[prev].rest != old_node)
-			prev = Sexp_nodes[prev].rest;
-		if (prev < 0) {
-			prev = Sexp_nodes[parent].rest;
-			while (prev >= 0 && Sexp_nodes[prev].rest != old_node)
-				prev = Sexp_nodes[prev].rest;
-		}
-		if (prev >= 0)
-			Sexp_nodes[prev].rest = new_node;
+	// Check if old_node is in a rest chain
+	ref = find_sexp_antecedent(old_node);
+	if (ref >= 0) {
+		Sexp_nodes[ref].rest = new_node;
+		return;
 	}
 }
 
@@ -3864,13 +3858,11 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
-	if (SEXP_NODE_TYPE(n) == SEXP_ATOM
-		&& Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR
-		&& Sexp_nodes[n].parent >= 0
-		&& SEXP_NODE_TYPE(Sexp_nodes[n].parent) == SEXP_LIST
-		&& Sexp_nodes[Sexp_nodes[n].parent].subtype == SEXP_ATOM_LIST
-		&& Sexp_nodes[Sexp_nodes[n].parent].first == n)
-		n = Sexp_nodes[n].parent;
+	if (SEXP_NODE_TYPE(n) == SEXP_ATOM && Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR) {
+		int list = find_sexp_list(n);
+		if (list >= 0)
+			n = list;
+	}
 
 	// Determine context: walk to tree root and check mission attachment
 	FormulaRootInfo info = find_formula_root_and_type(n);
@@ -3928,22 +3920,19 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 		}
 
 	} else {
-		// Cases C & D: Embedded node -- splice a replacement into the parent's link chain.
-		// The node's sibling chain is reachable from parent.first or parent.rest,
-		// depending on how the tree was built (text_to_sexp vs create_sexp_node).
-		int parent = Sexp_nodes[n].parent;
+		// Cases C & D: Embedded node -- splice a replacement into the link chain.
 		int target_rest = Sexp_nodes[n].rest;
 
 		if (shrink) {
 			// Shrink mode: link the predecessor directly to the next sibling,
 			// shifting subsequent arguments up by one position.
 			replacement = -1;
-			splice_replace_node(parent, n, target_rest);
+			splice_replace_node(n, target_rest);
 		} else {
 			// Default mode: insert a placeholder to preserve argument positions.
 			replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
-			Sexp_nodes[replacement].parent = parent;
-			splice_replace_node(parent, n, replacement);
+			Sexp_nodes[replacement].parent = Sexp_nodes[n].parent;
+			splice_replace_node(n, replacement);
 		}
 
 		// Syntax check for mission-attached trees (Case C).
@@ -3952,7 +3941,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 			if (syntax_result != SEXP_CHECK_NO_ERROR) {
 				// Rollback: restore the original node into the chain
-				splice_replace_node(parent, shrink ? target_rest : replacement, n);
+				splice_replace_node(shrink ? target_rest : replacement, n);
 				Sexp_nodes[n].rest = target_rest;
 
 				// Free the placeholder if one was allocated
