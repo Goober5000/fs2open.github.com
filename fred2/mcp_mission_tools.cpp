@@ -3871,12 +3871,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
-		return;
+		return nullptr;
 	}
 
 	if (n == Locked_sexp_true || n == Locked_sexp_false) {
 		sink.set_error("An explicit true or false cannot be detached!");
-		return;
+		return nullptr;
 	}
 
 	// If the client targeted an operator atom inside a list wrapper,
@@ -3901,7 +3901,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			replacement = parse_sexp_text("( do-nothing )");
 			if (replacement < 0) {
 				sink.set_error("Failed to create replacement formula");
-				return;
+				return nullptr;
 			}
 		} else {
 			replacement = Locked_sexp_true;
@@ -3920,7 +3920,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 				free_sexp2(replacement);
 			sink.set_error("Detachment would cause syntax error: %s (error code %d, bad node %d)",
 				sexp_error_message(syntax_result), syntax_result, bad_node);
-			return;
+			return nullptr;
 		}
 
 		// Detach the old tree and optionally free it
@@ -3976,7 +3976,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 
 				sink.set_error("Detachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-				return;
+				return nullptr;
 			}
 		}
 
@@ -4112,7 +4112,8 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 
 	if (!stricmp(type_str, "node")) {
 		char *endptr;
-		long idx = strtol(value_str, &endptr, 10);
+		long idx_long = strtol(value_str, &endptr, 10);
+		int idx = static_cast<int>(idx_long);
 		if (*endptr != '\0' || endptr == value_str) {
 			sink.set_error("Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value_str);
 			return -1;
@@ -4122,15 +4123,19 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 			return alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
 		}
 		if (idx < 0 || idx >= Num_sexp_nodes) {
-			sink.set_error("Node argument %d: node index %ld is out of range (0-%d)", arg_index, idx, Num_sexp_nodes - 1);
+			sink.set_error("Node argument %d: node index %d is out of range (0-%d)", arg_index, idx, Num_sexp_nodes - 1);
 			return -1;
 		}
-		if (Sexp_nodes[(int)idx].type == SEXP_NOT_USED) {
-			sink.set_error("Node argument %d: node %ld is not in use", arg_index, idx);
+		if (Sexp_nodes[idx].type == SEXP_NOT_USED) {
+			sink.set_error("Node argument %d: node %d is not in use", arg_index, idx);
+			return -1;
+		}
+		if (find_sexp_root(idx) != idx) {
+			sink.set_error("Node argument %d: node %d is not the root of its own tree", arg_index, idx);
 			return -1;
 		}
 		// Always wrap in SEXP_LIST to avoid corrupting existing tree linkage
-		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, (int)idx, next);
+		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, idx, next);
 	}
 
 	// Should not reach here if type was validated
@@ -4275,13 +4280,26 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 
 		// there might have been an error in the argument loop
 		if (sink.has_error()) {
-			// Free any nodes we've already allocated
+			// Before freeing, sever first pointers on node-type wrappers so
+			// free_sexp2 doesn't recurse into referenced existing trees
+			int walk = (result.arg_node != -1) ? result.arg_node : next;
+			while (walk != -1) {
+				if (Sexp_nodes[walk].subtype == SEXP_ATOM_LIST
+					&& Sexp_nodes[walk].first != Locked_sexp_true
+					&& Sexp_nodes[walk].first != Locked_sexp_false
+				)
+					Sexp_nodes[walk].first = -1;
+				walk = Sexp_nodes[walk].rest;
+			}
+
+			// Free the argument chain and operator
 			if (result.arg_node != -1)			// frees the arg and anything linked after it in the chain
 				free_sexp2(result.arg_node);
 			else if (next != -1)				// arg was never created, so just free the chain
 				free_sexp2(next);
 			if (!op_is_locked)
 				free_sexp2(op_node);
+
 			if (warnings) json_decref(warnings);
 			return;
 		}
