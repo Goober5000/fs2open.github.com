@@ -3340,7 +3340,7 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 // SEXP node navigation
 // ---------------------------------------------------------------------------
 
-static const char *get_sexp_kind_name(int n)
+static const char *get_sexp_kind(int n)
 {
 	switch (SEXP_NODE_TYPE(n)) {
 		case SEXP_LIST: return "list";
@@ -3349,7 +3349,18 @@ static const char *get_sexp_kind_name(int n)
 	}
 }
 
-static const char *get_sexp_value_type_name(int n)
+static const char *get_sexp_role(int n)
+{
+	// role: high-level classification of what this node represents
+	if (SEXP_NODE_TYPE(n) == SEXP_LIST)
+		return "list_wrapper";
+	else if (Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR)
+		return "operator";
+	else
+		return "argument";
+}
+
+static const char *get_sexp_value_type(int n)
 {
 	int kind = SEXP_NODE_TYPE(n);
 	if (kind != SEXP_ATOM && kind != SEXP_LIST)
@@ -3373,8 +3384,9 @@ static json_t *build_sexp_node_json(int n)
 	json_object_set_new(obj, "node", json_integer(n));
 	json_object_set_new(obj, "value", json_string(Sexp_nodes[n].text));
 
-	json_object_set_new(obj, "kind", json_string(get_sexp_kind_name(n)));
-	const char *node_type = get_sexp_value_type_name(n);
+	json_object_set_new(obj, "kind", json_string(get_sexp_kind(n)));
+	json_object_set_new(obj, "role", json_string(get_sexp_role(n)));
+	const char *node_type = get_sexp_value_type(n);
 	json_object_set_new(obj, "value_type", node_type ? json_string(node_type) : json_null());
 
 	json_object_set_new(obj, "node_parent", json_integer(Sexp_nodes[n].parent));
