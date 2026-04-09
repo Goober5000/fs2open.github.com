@@ -3976,11 +3976,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 			freed_count = free_sexp2(n);
 	}
 
-	// Mark the proper sexp root dirty
-	if (is_root && is_attached)
-		mcp_sexp_forest_mark_dirty({ replacement });
-	else
-		mcp_sexp_forest_mark_dirty({ info.root });
+	mcp_sexp_forest_mark_dirty({ info.root });
 
 	// If preserved, the detached node is the root of a new free-standing tree
 	if (!do_delete) {
@@ -4016,6 +4012,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 
 static const SCP_vector<const char *> sexp_role_values = { "list_wrapper", "operator", "argument" };
 static const SCP_vector<const char *> sexp_arg_type_values = { "number", "string", "boolean", "node" };
+static const SCP_vector<const char *> sexp_mutatable_arg_type_values = { "number", "string", "boolean" };
 
 // Check if an MCP argument type is compatible with the expected OPF type at a
 // given operator argument position.
@@ -4141,7 +4138,7 @@ static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_typ
 {
 	auto type_str = get_required_string(input, "argument_type", sink, true);
 	if (!type_str) return {};
-	if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) return {};
+	if (!check_string_enum(type_str, allow_node_type ? sexp_arg_type_values : sexp_mutatable_arg_type_values, "argument_type", sink)) return {};
 
 	auto value_str = get_required_string(input, "argument_value", sink, true);
 	if (!value_str) return {};
@@ -4152,11 +4149,6 @@ static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_typ
 		|| (!stricmp(type_str, "string") && !stricmp(value_str, PLACEHOLDER_STRING))
 	)
 		do_type_checking = false;
-
-	if (!allow_node_type && !stricmp(type_str, "node")) {
-		sink.set_error("Creating an argument node with the 'node' type is not supported.  Just use the referenced node directly as your argument.");
-		return {};
-	}
 
 	int arg_node = create_sexp_arg_node(type_str, value_str, next, arg_index, sink);
 	if (arg_node < 0 && !sink.has_error())
@@ -4316,6 +4308,140 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	if (warnings)
 		json_object_set_new(result_obj, "warnings", warnings);
 	req->result_json = make_json_tool_result(result_obj);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// update_sexp_node handler (run on main thread)
+// ---------------------------------------------------------------------------
+
+static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	auto node = get_required_integer(input, "node", sink);
+	if (!node) return;
+	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
+
+	int n = *node;
+	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+		sink.set_error("Node %d is not in use", n);
+		return;
+	}
+
+	if (n == Locked_sexp_true || n == Locked_sexp_false) {
+		sink.set_error("A locked boolean operator cannot be updated directly.  Instead, update the list wrapper node that contains it,"
+			" or attach a new boolean in its place.");
+		return;
+	}
+
+	const char *role = get_sexp_role(n);
+	bool is_boolean_wrapper = false;
+
+	if (!stricmp(role, "list_wrapper")) {
+		// Special case: boolean wrappers can be toggled
+		int first = Sexp_nodes[n].first;
+		if (first == Locked_sexp_true || first == Locked_sexp_false) {
+			is_boolean_wrapper = true;
+		} else {
+			sink.set_error("Updating a list_wrapper node is not supported");
+			return;
+		}
+	}
+
+	// Save original state for rollback
+	char saved_text[TOKEN_LENGTH];
+	int saved_type = Sexp_nodes[n].type;
+	int saved_subtype = Sexp_nodes[n].subtype;
+	int saved_first = Sexp_nodes[n].first;
+	strcpy_s(saved_text, Sexp_nodes[n].text);
+
+	if (!stricmp(role, "operator")) {
+		// --- Operator update ---
+		auto op_name = get_required_string(input, "operator_name", sink, true);
+		if (!op_name) return;
+		if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator_name", sink)) return;
+
+		int op_idx = get_operator_index(op_name);
+		if (op_idx < 0) {
+			sink.set_error("Unknown SEXP operator: '%s'", op_name);
+			return;
+		}
+
+		strcpy_s(Sexp_nodes[n].text, op_name);
+	} else {
+		// --- Argument update (atom or boolean wrapper) ---
+		auto type_str = get_required_string(input, "argument_type", sink, true);
+		if (!type_str) return;
+		if (!check_string_enum(type_str, sexp_mutatable_arg_type_values, "argument_type", sink)) return;
+
+		auto value_str = get_required_string(input, "argument_value", sink, true);
+		if (!value_str) return;
+
+		if (!stricmp(type_str, "boolean")) {
+			if (!is_boolean_wrapper) {
+				sink.set_error("Cannot change a non-boolean argument to boolean");
+				return;
+			}
+
+			if (!stricmp(value_str, "true"))
+				Sexp_nodes[n].first = Locked_sexp_true;
+			else if (!stricmp(value_str, "false"))
+				Sexp_nodes[n].first = Locked_sexp_false;
+			else {
+				sink.set_error("Boolean value must be \"true\" or \"false\", got \"%s\"", value_str);
+				return;
+			}
+		} else {
+			// number or string
+			if (is_boolean_wrapper) {
+				sink.set_error("Cannot change a boolean argument to %s", type_str);
+				return;
+			}
+
+			int new_subtype = !stricmp(type_str, "number") ? SEXP_ATOM_NUMBER : SEXP_ATOM_STRING;
+
+			if (value_str[0] == '@') {
+				const char *var_name = value_str + 1;
+				int var_idx = get_index_sexp_variable_name(var_name);
+				if (var_idx < 0) {
+					sink.set_error("Unknown SEXP variable '%s'", var_name);
+					return;
+				}
+				Sexp_nodes[n].type = SEXP_ATOM | SEXP_FLAG_VARIABLE;
+				Sexp_nodes[n].subtype = new_subtype;
+				strcpy_s(Sexp_nodes[n].text, Sexp_variables[var_idx].variable_name);
+			} else {
+				if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return;
+				Sexp_nodes[n].type = SEXP_ATOM;
+				Sexp_nodes[n].subtype = new_subtype;
+				strcpy_s(Sexp_nodes[n].text, value_str);
+			}
+		}
+	}
+
+	// Syntax check for mission-attached formulas
+	auto info = find_formula_root_and_type(n);
+	if (info.attached) {
+		int bad_node = -1;
+		int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+		if (syntax_result != SEXP_CHECK_NO_ERROR) {
+			// Rollback
+			strcpy_s(Sexp_nodes[n].text, saved_text);
+			Sexp_nodes[n].type = saved_type;
+			Sexp_nodes[n].subtype = saved_subtype;
+			Sexp_nodes[n].first = saved_first;
+
+			sink.set_error("Update would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+				info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+			return;
+		}
+	}
+
+	mcp_sexp_forest_mark_dirty({ info.root });
+
+	req->result_json = make_json_tool_result(build_sexp_node_json(n));
 	req->success = true;
 }
 
@@ -4736,6 +4862,7 @@ static const char *mission_tool_names[] = {
 	"text_to_sexp",
 	"detach_sexp_node",
 	"create_sexp_node",
+	"update_sexp_node",
 	"list_sexp_variables",
 	"get_sexp_variable",
 	"create_sexp_variable",
@@ -5909,13 +6036,12 @@ void mcp_register_mission_tools(json_t *tools)
 		add_string_enum_prop(props, "argument_type",
 			"Argument type for standalone argument creation. "
 			"Required when role is 'argument'.",
-			sexp_arg_type_values);
+			sexp_mutatable_arg_type_values);
 		add_string_prop(props, "argument_value",
 			"Argument value for standalone argument creation. "
 			"For number/string: literal value (prefix with @ for SEXP variable). "
 			"For boolean: \"true\" or \"false\". "
-			"Required when role is 'argument'. Creating a 'node' argument directly "
-			"is not supported, as a 'node' argument is simply a reference to another node.");
+			"Required when role is 'argument'.");
 
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("role"));
@@ -5924,6 +6050,33 @@ void mcp_register_mission_tools(json_t *tools)
 			"with optional arguments, suitable for assigning as a mission entity's "
 			"formula. When role is 'argument', creates a standalone argument node "
 			"(number, string, or boolean). Does not enforce argument count or check syntax.",
+			props, req);
+	}
+
+	// update_sexp_node
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "node", "Node index of the SEXP node to update");
+		add_string_prop(props, "operator_name",
+			"New operator name. Required when updating an operator node.");
+		add_string_enum_prop(props, "argument_type",
+			"New argument type. Required when updating an argument node. "
+			"Boolean is only valid for boolean wrapper nodes.",
+			sexp_mutatable_arg_type_values);
+		add_string_prop(props, "argument_value",
+			"New argument value. For number/string: literal value (prefix with @ "
+			"for SEXP variable). For boolean: \"true\" or \"false\". "
+			"Required when updating an argument node.");
+
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("node"));
+		register_tool(tools, "update_sexp_node",
+			"Update a SEXP node in place. Operators can be changed to other operators; "
+			"arguments can be changed to other argument types (number/string) or between "
+			"literal and variable. Boolean arguments can be toggled between true and false. "
+			"Node reference wrappers and non-boolean list wrappers cannot be updated with "
+			"this tool. If the node belongs to a mission formula and the change would cause "
+			"a syntax error, the edit is rolled back.",
 			props, req);
 	}
 
@@ -6159,6 +6312,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_detach_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "create_sexp_node") == 0) {
 		handle_create_sexp_node(input_json, req);
+	} else if (strcmp(tool_name, "update_sexp_node") == 0) {
+		handle_update_sexp_node(input_json, req);
 	} else if (strcmp(tool_name, "list_sexp_variables") == 0) {
 		handle_list_sexp_variables(input_json, req);
 	} else if (strcmp(tool_name, "get_sexp_variable") == 0) {
