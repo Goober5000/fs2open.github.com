@@ -4067,11 +4067,11 @@ static bool is_arg_type_compatible(int opf, const char *arg_type, bool is_variab
 // Parse and allocate a single argument node.  Returns the allocated node index,
 // or -1 on error (with an error message via sink).  `next` is the rest pointer
 // for the new node (building the chain right-to-left).
-static int create_sexp_arg_node(const char *type_str, const char *value, int next, int arg_index, McpErrorSink &sink)
+static int create_sexp_arg_node(const char *type_str, const char *value_str, int next, int arg_index, McpErrorSink &sink)
 {
 	// Variable handling for number/string types
-	if ((!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value[0] == '@') {
-		const char *var_name = value + 1;
+	if ((!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value_str[0] == '@') {
+		const char *var_name = value_str + 1;
 		int var_idx = get_index_sexp_variable_name(var_name);
 		if (var_idx < 0) {
 			sink.set_error("Unknown SEXP variable '%s' in argument %d", var_name, arg_index);
@@ -4083,21 +4083,21 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 	}
 
 	if (!stricmp(type_str, "number")) {
-		return alloc_sexp(value, SEXP_ATOM, SEXP_ATOM_NUMBER, -1, next);
+		return alloc_sexp(value_str, SEXP_ATOM, SEXP_ATOM_NUMBER, -1, next);
 	}
 
 	if (!stricmp(type_str, "string")) {
-		return alloc_sexp(value, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
+		return alloc_sexp(value_str, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
 	}
 
 	if (!stricmp(type_str, "boolean")) {
 		int locked_node;
-		if (!stricmp(value, "true"))
+		if (!stricmp(value_str, "true"))
 			locked_node = Locked_sexp_true;
-		else if (!stricmp(value, "false"))
+		else if (!stricmp(value_str, "false"))
 			locked_node = Locked_sexp_false;
 		else {
-			sink.set_error("Boolean argument %d must be \"true\" or \"false\", got \"%s\"", arg_index, value);
+			sink.set_error("Boolean argument %d must be \"true\" or \"false\", got \"%s\"", arg_index, value_str);
 			return -1;
 		}
 		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, locked_node, next);
@@ -4105,9 +4105,9 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 
 	if (!stricmp(type_str, "node")) {
 		char *endptr;
-		long idx = strtol(value, &endptr, 10);
-		if (*endptr != '\0' || endptr == value) {
-			sink.set_error("Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value);
+		long idx = strtol(value_str, &endptr, 10);
+		if (*endptr != '\0' || endptr == value_str) {
+			sink.set_error("Node argument %d: value must be an integer node index, got \"%s\"", arg_index, value_str);
 			return -1;
 		}
 		// -1 is a placeholder meaning "empty slot, to be filled later"
@@ -4131,6 +4131,40 @@ static int create_sexp_arg_node(const char *type_str, const char *value, int nex
 	return -1;
 }
 
+struct create_arg_result {
+	int arg_node = -1;
+	bool do_type_checking = false;
+	const char *type_str = nullptr;
+	const char *value_str = nullptr;
+};
+static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_type, int next, int arg_index, McpErrorSink &sink)
+{
+	auto type_str = get_required_string(input, "argument_type", sink, true);
+	if (!type_str) return {};
+	if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) return {};
+
+	auto value_str = get_required_string(input, "argument_value", sink, true);
+	if (!value_str) return {};
+
+	bool do_type_checking = true;
+	// A node value of -1 is a placeholder that bypasses type checking
+	if (   (!stricmp(type_str, "node")   && !strcmp(value_str, "-1"))
+		|| (!stricmp(type_str, "string") && !stricmp(value_str, PLACEHOLDER_STRING))
+	)
+		do_type_checking = false;
+
+	if (!allow_node_type && !stricmp(type_str, "node")) {
+		sink.set_error("Creating an argument node with the 'node' type is not supported.  Just use the referenced node directly as your argument.");
+		return {};
+	}
+
+	int arg_node = create_sexp_arg_node(type_str, value_str, next, arg_index, sink);
+	if (arg_node < 0 && !sink.has_error())
+		sink.set_error("Unable to create SEXP node!");
+
+	return { arg_node, do_type_checking, type_str, value_str };
+}
+
 static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -4145,26 +4179,16 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	create_arg_result result;
+
 	// --- argument role: create a standalone argument node ---
 	if (!stricmp(role, "argument")) {
-		auto type_str = get_required_string(input, "argument_type", sink, true);
-		if (!type_str) return;
-		if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) return;
+		result = create_sexp_arg_node(input, false, -1, 0, sink);
+		if (sink.has_error()) return;
 
-		if (!stricmp(type_str, "node")) {
-			sink.set_error("Creating an argument node with the 'node' type is not supported.  Just use the referenced node directly as your argument.");
-			return;
-		}
+		mcp_sexp_forest_mark_dirty({ result.arg_node });
 
-		auto value = get_required_string(input, "argument_value", sink, true);
-		if (!value) return;
-
-		int node = create_sexp_arg_node(type_str, value, -1, 0, sink);
-		if (node < 0) return;
-
-		mcp_sexp_forest_mark_dirty({ node });
-
-		req->result_json = make_json_tool_result(build_sexp_node_json(node));
+		req->result_json = make_json_tool_result(build_sexp_node_json(result.arg_node));
 		req->success = true;
 		return;
 	}
@@ -4197,45 +4221,19 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		int next = -1;
 		for (int i = (int)num_args - 1; i >= 0; i--) {
 			json_t *arg = json_array_get(args, i);
+
 			if (!json_is_object(arg)) {
+				result = {};
 				sink.set_error("Argument %d is not an object", i);
-				// Free any nodes we've already allocated
-				if (next != -1)
-					free_sexp2(next);
-				if (!op_is_locked)
-					free_sexp2(op_node);
-				if (warnings) json_decref(warnings);
-				return;
+				break;
+			} else {
+				result = create_sexp_arg_node(arg, true, next, i, sink);
+				if (sink.has_error()) break;
 			}
-
-			const char *type_str = json_string_value(json_object_get(arg, "argument_type"));
-			const char *value = json_string_value(json_object_get(arg, "argument_value"));
-			if (!type_str || !value) {
-				sink.set_error("Argument %d: 'argument_type' and 'argument_value' are required", i);
-				if (next != -1)
-					free_sexp2(next);
-				if (!op_is_locked)
-					free_sexp2(op_node);
-				if (warnings) json_decref(warnings);
-				return;
-			}
-
-			if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) {
-				if (next != -1)
-					free_sexp2(next);
-				if (!op_is_locked)
-					free_sexp2(op_node);
-				if (warnings) json_decref(warnings);
-				return;
-			}
-
-			// A node value of -1 is a placeholder that bypasses type checking
-			bool is_placeholder = (!stricmp(type_str, "node") && !strcmp(value, "-1"))
-				|| (!stricmp(type_str, "string") && !stricmp(value, PLACEHOLDER_STRING));
 
 			// Type-check this argument against the operator's expected type
 			int expected_opf = query_operator_argument_type(op_idx, i);
-			if (is_placeholder) {
+			if (!result.do_type_checking) {
 				// Placeholder nodes skip type checking entirely
 			} else if (expected_opf == OPF_NONE) {
 				// Argument index exceeds operator's expected count; warn but allow
@@ -4244,14 +4242,14 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				sprintf(wmsg, "Argument %d exceeds expected argument count for '%s'; type not checked", i, op_name);
 				json_array_append_new(warnings, json_string(wmsg.c_str()));
 			} else {
-				bool is_variable = (!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value[0] == '@';
+				bool is_variable = (!stricmp(result.type_str, "number") || !stricmp(result.type_str, "string")) && result.value_str[0] == '@';
 				int node_opr = -1;
 
-				if (!stricmp(type_str, "node")) {
+				if (!stricmp(result.type_str, "node")) {
 					// Determine the referenced operator's return type
 					char *endptr;
-					long node_idx = strtol(value, &endptr, 10);
-					if (*endptr == '\0' && endptr != value && node_idx >= 0 && node_idx < Num_sexp_nodes) {
+					long node_idx = strtol(result.value_str, &endptr, 10);
+					if (*endptr == '\0' && endptr != result.value_str && node_idx >= 0 && node_idx < Num_sexp_nodes) {
 						int ref_node = (int)node_idx;
 						// If this is a list wrapper, the operator is the first child
 						if (Sexp_nodes[ref_node].subtype == SEXP_ATOM_LIST && Sexp_nodes[ref_node].first >= 0)
@@ -4262,29 +4260,28 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 					}
 				}
 
-				if (!is_arg_type_compatible(expected_opf, type_str, is_variable, node_opr)) {
+				if (!is_arg_type_compatible(expected_opf, result.type_str, is_variable, node_opr)) {
 					sink.set_error("Argument %d: type '%s' is not compatible with expected type '%s' for operator '%s'",
-						i, type_str, opf_to_string(expected_opf), op_name);
-					if (next != -1)
-						free_sexp2(next);
-					if (!op_is_locked)
-						free_sexp2(op_node);
-					if (warnings) json_decref(warnings);
-					return;
+						i, result.type_str, opf_to_string(expected_opf), op_name);
+					break;
 				}
 			}
 
-			int arg_node = create_sexp_arg_node(type_str, value, next, i, sink);
-			if (arg_node < 0) {
-				// Error already set by create_sexp_arg_node
-				if (next != -1)
-					free_sexp2(next);
-				if (!op_is_locked)
-					free_sexp2(op_node);
-				if (warnings) json_decref(warnings);
-				return;
-			}
-			next = arg_node;
+			// creating this argument succeeded
+			next = result.arg_node;
+		}
+
+		// there might have been an error in the argument loop
+		if (sink.has_error()) {
+			// Free any nodes we've already allocated
+			if (result.arg_node != -1)			// frees the arg and anything linked after it in the chain
+				free_sexp2(result.arg_node);
+			else if (next != -1)				// arg was never created, so just free the chain
+				free_sexp2(next);
+			if (!op_is_locked)
+				free_sexp2(op_node);
+			if (warnings) json_decref(warnings);
+			return;
 		}
 
 		// Warn if fewer arguments than the operator expects
