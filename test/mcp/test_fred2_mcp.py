@@ -1405,7 +1405,7 @@ def make_phase4_tests(suite, client):
             r = client.call_tool("create_sexp_variable", {
                 "name": "test_var_a",
                 "default_value": "0",
-                "type": "number"
+                "variable_type": "number"
             })
             assert_success(r)
             created.append("test_var_a")
@@ -1413,7 +1413,7 @@ def make_phase4_tests(suite, client):
             r = client.call_tool("create_sexp_variable", {
                 "name": "test_var_b",
                 "default_value": "hello",
-                "type": "string"
+                "variable_type": "string"
             })
             assert_success(r)
             created.append("test_var_b")
@@ -1560,7 +1560,7 @@ def make_phase5_tests(suite, client):
 
     def test_create_sexp_node_simple():
         # Use do-nothing (not true/false which are locked singletons)
-        r = client.call_tool("create_sexp_node", {"operator": "do-nothing"})
+        r = client.call_tool("create_sexp_node", {"role": "operator", "operator_name": "do-nothing"})
         assert_success(r)
         d = tool_data(r)
         assert_has_key(d, "node")
@@ -1592,10 +1592,11 @@ def make_phase5_tests(suite, client):
 
     def test_create_sexp_node_with_args():
         r = client.call_tool("create_sexp_node", {
-            "operator": "+",
+            "role": "operator",
+            "operator_name": "+",
             "operator_arguments": [
-                {"type": "number", "value": "1"},
-                {"type": "number", "value": "2"}
+                {"argument_type": "number", "argument_value": "1"},
+                {"argument_type": "number", "argument_value": "2"}
             ]
         })
         assert_success(r)
@@ -1618,6 +1619,139 @@ def make_phase5_tests(suite, client):
         assert_success(r)
         ctx.pop("sexp_args_node", None)
 
+    def test_create_sexp_node_with_node_arg():
+        """Create a tree that composes sub-expressions via 'node' arguments."""
+        # Create a sub-expression: (+ 1 2)
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "number", "argument_value": "1"},
+                {"argument_type": "number", "argument_value": "2"}
+            ]
+        })
+        assert_success(r)
+        sub_node = tool_data(r)["node"]
+        ctx["sexp_sub_node"] = sub_node
+
+        # Compose into: (> (+ 1 2) 0)
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": ">",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": str(sub_node)},
+                {"argument_type": "number", "argument_value": "0"}
+            ]
+        })
+        assert_success(r)
+        d = tool_data(r)
+        assert_has_key(d, "node")
+        ctx["sexp_composed_node"] = d["node"]
+
+    def test_sexp_to_text_composed():
+        node = ctx.get("sexp_composed_node")
+        if node is None:
+            raise SkipTest("No composed sexp node")
+        r = client.call_tool("sexp_to_text", {"node": node})
+        assert_success(r)
+
+    def test_detach_sexp_node_composed():
+        node = ctx.get("sexp_composed_node")
+        if node is None:
+            raise SkipTest("No composed sexp node")
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
+        assert_success(r)
+        ctx.pop("sexp_composed_node", None)
+        ctx.pop("sexp_sub_node", None)
+
+    def test_create_sexp_node_non_root_rejected():
+        """Node args that reference non-root nodes must be rejected."""
+        # Create a tree: (+ 1 2) -- the "1" argument is not a root
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "number", "argument_value": "1"},
+                {"argument_type": "number", "argument_value": "2"}
+            ]
+        })
+        assert_success(r)
+        op_node = tool_data(r)["node"]
+        ctx["sexp_nonroot_tree"] = op_node
+
+        # Walk the tree to find a non-root argument node
+        r = client.call_tool("walk_sexp_tree", {"node": op_node})
+        assert_success(r)
+        d = tool_data(r)
+        nodes = d["nodes"] if isinstance(d, dict) and "nodes" in d else d
+        non_root = None
+        for n in nodes:
+            if n.get("role") == "argument":
+                non_root = n["node"]
+                break
+        assert_true(non_root is not None, "Should have found an argument node")
+
+        # Try to use the non-root node as a node argument -- should fail
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": ">",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": str(non_root)},
+                {"argument_type": "number", "argument_value": "0"}
+            ]
+        })
+        assert_error(r)
+        assert_in("not the root of its own tree", tool_text(r))
+
+    def test_cleanup_nonroot_tree():
+        node = ctx.get("sexp_nonroot_tree")
+        if node is None:
+            raise SkipTest("No nonroot tree")
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
+        assert_success(r)
+        ctx.pop("sexp_nonroot_tree", None)
+
+    def test_create_sexp_node_type_error_preserves_referenced_tree():
+        """When a type error rolls back create_sexp_node, referenced node trees survive."""
+        # Create a sub-expression: (+ 1 2) -- returns number
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "number", "argument_value": "1"},
+                {"argument_type": "number", "argument_value": "2"}
+            ]
+        })
+        assert_success(r)
+        sub_node = tool_data(r)["node"]
+        ctx["sexp_preserved_node"] = sub_node
+
+        # Try to use it in an incompatible position: is-destroyed expects a ship
+        # name (string), not a number-returning sub-expression
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "is-destroyed",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": str(sub_node)}
+            ]
+        })
+        assert_error(r)
+
+        # The referenced sub-expression must still be intact
+        r = client.call_tool("get_sexp_node", {"node": sub_node})
+        assert_success(r)
+        d = tool_data(r)
+        assert_equal(d.get("role"), "operator", "referenced node role")
+        assert_equal(d.get("value"), "+", "referenced node value")
+
+    def test_cleanup_preserved_tree():
+        node = ctx.get("sexp_preserved_node")
+        if node is None:
+            raise SkipTest("No preserved tree")
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
+        assert_success(r)
+        ctx.pop("sexp_preserved_node", None)
+
     tests = [
         ("text_to_sexp_simple", test_text_to_sexp_simple),
         ("sexp_to_text_simple", test_sexp_to_text_simple),
@@ -1635,6 +1769,13 @@ def make_phase5_tests(suite, client):
         ("create_sexp_node_with_args", test_create_sexp_node_with_args),
         ("sexp_to_text_args", test_sexp_to_text_args),
         ("detach_sexp_node_args", test_detach_sexp_node_args),
+        ("create_sexp_node_with_node_arg", test_create_sexp_node_with_node_arg),
+        ("sexp_to_text_composed", test_sexp_to_text_composed),
+        ("detach_sexp_node_composed", test_detach_sexp_node_composed),
+        ("create_sexp_node_non_root_rejected", test_create_sexp_node_non_root_rejected),
+        ("cleanup_nonroot_tree", test_cleanup_nonroot_tree),
+        ("create_sexp_node_type_error_preserves_referenced_tree", test_create_sexp_node_type_error_preserves_referenced_tree),
+        ("cleanup_preserved_tree", test_cleanup_preserved_tree),
     ]
     for name, func in tests:
         suite.add(f"phase5_{name}", func, phase=5)
@@ -1702,15 +1843,17 @@ def make_phase6_tests(suite, client):
 
     def test_create_sexp_node_invalid_operator():
         r = client.call_tool("create_sexp_node", {
-            "operator": "not_a_real_operator_xyz"
+            "role": "operator",
+            "operator_name": "not_a_real_operator_xyz"
         })
         assert_error(r)
 
     def test_create_sexp_node_wrong_arg_type():
         r = client.call_tool("create_sexp_node", {
-            "operator": "+",
+            "role": "operator",
+            "operator_name": "+",
             "operator_arguments": [
-                {"type": "string", "value": "not_a_number"}
+                {"argument_type": "string", "argument_value": "not_a_number"}
             ]
         })
         assert_error(r)
