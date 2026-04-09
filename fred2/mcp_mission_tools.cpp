@@ -3844,6 +3844,8 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpErrorSink &sink);
+
 static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 {
 	McpErrorSink sink(req);
@@ -3856,7 +3858,16 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 	auto delete_opt = get_optional_bool(input, "delete", sink);
 	bool do_delete = delete_opt.has_value() && *delete_opt;
 
-	int n = *node;
+	auto result_json = handle_detach_sexp_node(*node, shrink, do_delete, sink);
+	if (sink.has_error()) return;
+
+	req->result_json = result_json;
+	req->success = true;
+}
+
+static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpErrorSink &sink)
+{
+	int original_n = n;
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
@@ -3981,9 +3992,9 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 	// If preserved, the detached node is the root of a new free-standing tree
 	if (!do_delete) {
 		// but if the new free-standing tree is wrapped, unwrap it
-		if (n != *node) {
+		if (n != original_n) {
 			free_one_sexp(n);
-			n = *node;
+			n = original_n;
 			Sexp_nodes[n].parent = -1;
 		}
 		mcp_sexp_forest_mark_dirty({ n });
@@ -4002,8 +4013,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 	}
 	else
 		json_object_set_new(result, "replacement_node", json_null());
-	req->result_json = make_json_tool_result(result);
-	req->success = true;
+	return make_json_tool_result(result);
 }
 
 // ---------------------------------------------------------------------------
