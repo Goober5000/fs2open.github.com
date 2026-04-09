@@ -3685,35 +3685,35 @@ static void set_formula(const FormulaRootInfo &info, int new_root)
 	int index = std::holds_alternative<int>(info.attached_id) ? std::get<int>(info.attached_id) : -1;
 	const char *name = std::holds_alternative<const char *>(info.attached_id) ? std::get<const char *>(info.attached_id) : nullptr;
 
-	if (!strcmp(type, "cutscene")) {
+	if (!stricmp(type, "cutscene")) {
 		The_mission.cutscenes[index].formula = new_root;
-	} else if (!strcmp(type, "fiction_viewer_stage")) {
+	} else if (!stricmp(type, "fiction_viewer_stage")) {
 		Fiction_viewer_stages[index].formula = new_root;
-	} else if (!strcmp(type, "briefing_stage")) {
+	} else if (!stricmp(type, "briefing_stage")) {
 		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
 		Briefings[t].stages[index].formula = new_root;
-	} else if (!strcmp(type, "debriefing_stage")) {
+	} else if (!stricmp(type, "debriefing_stage")) {
 		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
 		Debriefings[t].stages[index].formula = new_root;
-	} else if (!strcmp(type, "ship")) {
+	} else if (!stricmp(type, "ship")) {
 		int ship_idx = ship_name_lookup(name);
 		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
 		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
 			Ships[ship_idx].arrival_cue = new_root;
 		else
 			Ships[ship_idx].departure_cue = new_root;
-	} else if (!strcmp(type, "wing")) {
+	} else if (!stricmp(type, "wing")) {
 		int wing_idx = wing_name_lookup(name);
 		Assertion(wing_idx >= 0, "set_formula: wing '%s' not found!", name);
 		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
 			Wings[wing_idx].arrival_cue = new_root;
 		else
 			Wings[wing_idx].departure_cue = new_root;
-	} else if (!strcmp(type, "event")) {
+	} else if (!stricmp(type, "event")) {
 		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, name);
 		Assertion(evt_idx >= 0, "set_formula: event '%s' not found!", name);
 		Mission_events[evt_idx].formula = new_root;
-	} else if (!strcmp(type, "goal")) {
+	} else if (!stricmp(type, "goal")) {
 		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
 		Assertion(goal_idx >= 0, "set_formula: goal '%s' not found!", name);
 		Mission_goals[goal_idx].formula = new_root;
