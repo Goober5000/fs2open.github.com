@@ -3413,7 +3413,7 @@ static void handle_get_sexp_node(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
 		return;
 	}
@@ -3431,7 +3431,7 @@ static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int dep
 {
 	if (n < 0 || n >= Num_sexp_nodes || (int)entries.size() >= MAX_SEXP_WALK_NODES)
 		return;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
+	if (Sexp_nodes[n].type == SEXP_NOT_USED)
 		return;
 	if (max_depth >= 0 && depth > max_depth)
 		return;
@@ -3450,7 +3450,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
 		return;
 	}
@@ -4325,7 +4325,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink)) return;
 
 	int n = *node;
-	if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED) {
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
 		return;
 	}
