@@ -4014,6 +4014,7 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 // create_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
+static const SCP_vector<const char *> sexp_role_values = { "list_wrapper", "operator", "argument" };
 static const SCP_vector<const char *> sexp_arg_type_values = { "number", "string", "boolean", "node" };
 
 // Check if an MCP argument type is compatible with the expected OPF type at a
@@ -4135,9 +4136,43 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto op_name = get_required_string(input, "operator", sink, true);
+	auto role = get_required_string(input, "role", sink, true);
+	if (!role) return;
+	if (!check_string_enum(role, sexp_role_values, "role", sink)) return;
+
+	if (!stricmp(role, "list_wrapper")) {
+		sink.set_error("Creating a node with the 'list_wrapper' role is not supported");
+		return;
+	}
+
+	// --- argument role: create a standalone argument node ---
+	if (!stricmp(role, "argument")) {
+		auto type_str = get_required_string(input, "argument_type", sink, true);
+		if (!type_str) return;
+		if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) return;
+
+		if (!stricmp(type_str, "node")) {
+			sink.set_error("Creating an argument node with the 'node' type is not supported.  Just use the referenced node directly as your argument.");
+			return;
+		}
+
+		auto value = get_required_string(input, "argument_value", sink, true);
+		if (!value) return;
+
+		int node = create_sexp_arg_node(type_str, value, -1, 0, sink);
+		if (node < 0) return;
+
+		mcp_sexp_forest_mark_dirty({ node });
+
+		req->result_json = make_json_tool_result(build_sexp_node_json(node));
+		req->success = true;
+		return;
+	}
+
+	// --- operator role: create an operator with arguments ---
+	auto op_name = get_required_string(input, "operator_name", sink, true);
 	if (!op_name) return;
-	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator", sink)) return;
+	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator_name", sink)) return;
 
 	// Validate operator name
 	int op_idx = get_operator_index(op_name);
@@ -4173,10 +4208,10 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				return;
 			}
 
-			const char *type_str = json_string_value(json_object_get(arg, "type"));
-			const char *value = json_string_value(json_object_get(arg, "value"));
+			const char *type_str = json_string_value(json_object_get(arg, "argument_type"));
+			const char *value = json_string_value(json_object_get(arg, "argument_value"));
 			if (!type_str || !value) {
-				sink.set_error("Argument %d: 'type' and 'value' are required", i);
+				sink.set_error("Argument %d: 'argument_type' and 'argument_value' are required", i);
 				if (next != -1)
 					free_sexp2(next);
 				if (!op_is_locked)
@@ -4185,7 +4220,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				return;
 			}
 
-			if (!check_string_enum(type_str, sexp_arg_type_values, "type", sink)) {
+			if (!check_string_enum(type_str, sexp_arg_type_values, "argument_type", sink)) {
 				if (next != -1)
 					free_sexp2(next);
 				if (!op_is_locked)
@@ -4298,9 +4333,9 @@ static json_t *build_sexp_variable_json(int index)
 	json_object_set_new(obj, "default_value", json_string(Sexp_variables[index].text));
 
 	if (Sexp_variables[index].type & SEXP_VARIABLE_NUMBER)
-		json_object_set_new(obj, "type", json_string("number"));
+		json_object_set_new(obj, "variable_type", json_string("number"));
 	else
-		json_object_set_new(obj, "type", json_string("string"));
+		json_object_set_new(obj, "variable_type", json_string("string"));
 
 	json_object_set_new(obj, "flags",
 		flags_to_json_array(Sexp_variables[index].type, sexp_var_flag_entries, sexp_var_flag_entries_count));
@@ -4445,9 +4480,9 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	if (!default_value) return;
 	if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 
-	auto type_str = get_required_string(input, "type", sink, true);
+	auto type_str = get_required_string(input, "variable_type", sink, true);
 	if (!type_str) return;
-	if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
+	if (!check_string_enum(type_str, sexp_var_type_values, "variable_type", sink)) return;
 
 	int type_bits;
 	if (!stricmp(type_str, "number")) {
@@ -4511,7 +4546,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	// Extract optional fields
 	auto new_name = get_optional_string(input, "new_name", sink, true);
 	auto default_value = get_optional_string(input, "default_value", sink, false);
-	auto type_str = get_optional_string(input, "type", sink, true);
+	auto type_str = get_optional_string(input, "variable_type", sink, true);
 	if (sink.has_error()) return;
 
 	if (new_name) {
@@ -4523,7 +4558,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	int type_bits;
 	if (type_str) {
-		if (!check_string_enum(type_str, sexp_var_type_values, "type", sink)) return;
+		if (!check_string_enum(type_str, sexp_var_type_values, "variable_type", sink)) return;
 		type_bits = !stricmp(type_str, "number") ? SEXP_VARIABLE_NUMBER : SEXP_VARIABLE_STRING;
 	} else {
 		type_bits = old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING);
@@ -5844,14 +5879,21 @@ void mcp_register_mission_tools(json_t *tools)
 	// create_sexp_node
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "operator",
-			"Name of the SEXP operator (e.g. \"when\", \"is-destroyed-delay\")");
+		add_string_enum_prop(props, "role",
+			"Role of the node to create. 'operator' creates an operator node "
+			"(requires the 'operator_name' parameter). 'argument' creates a standalone "
+			"argument node (requires 'argument_type' and 'argument_value' parameters). "
+			"The 'list_wrapper' role is not supported.",
+			sexp_role_values);
+		add_string_prop(props, "operator_name",
+			"Name of the SEXP operator (e.g. \"when\", \"is-destroyed-delay\"). "
+			"Required when role is 'operator'.");
 
 		json_t *arg_props = json_object();
-		add_string_enum_prop(arg_props, "type",
+		add_string_enum_prop(arg_props, "argument_type",
 			"Argument type",
 			sexp_arg_type_values);
-		add_string_prop(arg_props, "value",
+		add_string_prop(arg_props, "argument_value",
 			"Argument value. For number/string: literal value (prefix with @ "
 			"for SEXP variable). For boolean: \"true\" or \"false\". "
 			"For node: a node index, or \"-1\" as a placeholder. "
@@ -5859,19 +5901,32 @@ void mcp_register_mission_tools(json_t *tools)
 			" bypasses type checking, serves as a placeholder, and can be "
 			"used in any argument position as an empty slot to fill later.");
 		json_t *arg_req = json_array();
-		json_array_append_new(arg_req, json_string("type"));
-		json_array_append_new(arg_req, json_string("value"));
+		json_array_append_new(arg_req, json_string("argument_type"));
+		json_array_append_new(arg_req, json_string("argument_value"));
 		add_object_array_prop(props, "operator_arguments",
-			"List of arguments for the operator. Each argument has a 'type' "
-			"(number, string, boolean, node) and a 'value'.",
+			"List of arguments for the operator. Each argument has an 'argument_type' "
+			"(number, string, boolean, node) and an 'argument_value'. "
+			"Only used when role is 'operator'.",
 			arg_props, arg_req);
 
+		add_string_enum_prop(props, "argument_type",
+			"Argument type for standalone argument creation. "
+			"Required when role is 'argument'.",
+			sexp_arg_type_values);
+		add_string_prop(props, "argument_value",
+			"Argument value for standalone argument creation. "
+			"For number/string: literal value (prefix with @ for SEXP variable). "
+			"For boolean: \"true\" or \"false\". "
+			"Required when role is 'argument'. Creating a 'node' argument directly "
+			"is not supported, as a 'node' argument is simply a reference to another node.");
+
 		json_t *req = json_array();
-		json_array_append_new(req, json_string("operator"));
+		json_array_append_new(req, json_string("role"));
 		register_tool(tools, "create_sexp_node",
-			"Create a SEXP expression node with an operator and optional arguments. "
-			"Returns the root operator node, suitable for assigning as a mission entity's "
-			"formula. Does not enforce argument count or check syntax.",
+			"Create a SEXP node. When role is 'operator', creates an operator node "
+			"with optional arguments, suitable for assigning as a mission entity's "
+			"formula. When role is 'argument', creates a standalone argument node "
+			"(number, string, or boolean). Does not enforce argument count or check syntax.",
 			props, req);
 	}
 
@@ -5895,7 +5950,7 @@ void mcp_register_mission_tools(json_t *tools)
 			"Unique variable name. Cannot contain spaces or the characters @, (, ).");
 		add_string_prop(props, "default_value",
 			"Default value for the variable. Must be a valid integer for number type.");
-		add_string_enum_prop(props, "type",
+		add_string_enum_prop(props, "variable_type",
 			"Data type of the variable",
 			sexp_var_type_values);
 		add_string_array_prop(props, "flags",
@@ -5905,7 +5960,7 @@ void mcp_register_mission_tools(json_t *tools)
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("default_value"));
-		json_array_append_new(req, json_string("type"));
+		json_array_append_new(req, json_string("variable_type"));
 		register_tool(tools, "create_sexp_variable",
 			"Create a new SEXP variable. Variables are automatically kept in sorted alphabetical order.",
 			props, req);
@@ -5921,7 +5976,7 @@ void mcp_register_mission_tools(json_t *tools)
 			"New name for the variable. All SEXP node references will be updated automatically.");
 		add_string_prop(props, "default_value",
 			"New default value. Must be a valid integer for number type.");
-		add_string_enum_prop(props, "type",
+		add_string_enum_prop(props, "variable_type",
 			"New data type. Changing type may invalidate existing SEXP references.",
 			sexp_var_type_values);
 		add_string_array_prop(props, "flags",
