@@ -1673,7 +1673,7 @@ static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index + 1));
-	json_object_set_new(obj, "story_filename", json_string(stage.story_filename));
+	set_optional_filename(obj, "story_filename", stage.story_filename);
 	set_optional_filename(obj, "font_filename", stage.font_filename);
 	set_optional_filename(obj, "voice_filename", stage.voice_filename);
 	set_optional_string(obj, "ui_name", stage.ui_name, true);
@@ -2150,7 +2150,7 @@ static json_t *build_jump_node_json(const CJumpNode &jn, int index, bool include
 			json_object_set_new(obj, "color", build_color_json(jn.GetColor(), true));
 		if (jn.IsSpecialModel()) {
 			const char *model_filename = model_get(jn.GetModelNumber())->filename;
-			json_object_set_new(obj, "model_filename", json_string(model_filename));
+			set_optional_filename(obj, "model_filename", model_filename);
 		}
 		json_object_set_new(obj, "hidden", json_boolean(jn.IsHidden()));
 		json_object_set_new(obj, "radius", json_real(jn.GetRadius()));
@@ -2204,7 +2204,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 	auto display_name = get_optional_string(input, "display_name", sink, false);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_string(input, "model_filename", sink, false);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, false);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -2264,7 +2264,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	auto new_pos      = get_optional_vec3d(input, "position", sink);
 	auto display_name = get_optional_string(input, "display_name", sink, false);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_string(input, "model_filename", sink, false);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, false);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	if (sink.has_error()) return;
