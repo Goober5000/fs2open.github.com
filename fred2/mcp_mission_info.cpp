@@ -2,6 +2,7 @@
 #include "mcp_mission_info.h"
 #include "mcp_json.h"
 #include "mcpserver.h"
+#include "mcp_app.h"
 #include "mcp_mission_tools.h"
 #include "freddoc.h"
 #include "mainfrm.h"
@@ -54,19 +55,7 @@ static bool find_mission_flag_by_name(const char *name, Mission::Mission_Flags &
 
 static bool validate_dialog_for_mission_info(SCP_string &error_msg)
 {
-	for (size_t i = 0; i < g_editor_info_count; ++i) {
-		auto &info = g_editor_info[i];
-		if (info.editor_key && !stricmp("mission notes", info.editor_key)) {
-			auto wnd = info.getCWndPtr();
-			if (wnd && wnd->IsWindowVisible()) {
-				sprintf(error_msg, "Cannot update mission info while the %s dialog is open. "
-					"Close it first, or use get_ui_status to check which editors are open.", info.editor_name);
-				return false;
-			}
-			return true;
-		}
-	}
-	return true;
+	return validate_single_dialog("mission information", "mission notes", error_msg);
 }
 
 // ---------------------------------------------------------------------------
