@@ -89,8 +89,10 @@ def main():
 
     rc = suite.summary()
     if not ok:
-        # Critical failure: ensure non-zero exit
-        sys.exit(2 if rc == 0 else rc)
+        # Critical failure: exit code 2 distinguishes "couldn't even bring the
+        # environment up" from "one test broke" (exit 1).  Documented at the
+        # top of this file.
+        sys.exit(2)
     sys.exit(rc)
 
 
