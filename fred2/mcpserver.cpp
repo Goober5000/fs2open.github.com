@@ -1,6 +1,7 @@
 #include "stdafx.h"
 #include "mcpserver.h"
 #include "mcp_json.h"
+#include "mcp_app.h"
 #include "mcp_reference_tools.h"
 #include "mcp_mission_tools.h"
 #include "mongoose.h"
@@ -108,46 +109,8 @@ static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_strin
 	json_t *result = json_object();
 	json_t *tools = json_array();
 
-	// Tool: get_server_info
-	register_tool(tools, "get_server_info",
-		"Returns information about the running FRED2 instance, including whether Unicode is supported, and the currently loaded mission and active mod if applicable",
-		nullptr);
-
-	// Tool: load_mission
-	register_tool_with_required_string(tools, "load_mission",
-		"Load a mission file into FRED2",
-		"filepath", "Absolute path to the mission file (.fs2 extension)");
-
-	// Tool: save_mission
-	register_tool_with_required_string(tools, "save_mission",
-		"Save the current mission in standard (.fs2) format",
-		"filepath", "Absolute path to save the mission file to");
-
-	// Tool: new_mission
-	register_tool(tools, "new_mission",
-		"Create a new empty mission, replacing any currently loaded mission",
-		nullptr);
-
-	// Tool: get_ui_status
-	register_tool(tools, "get_ui_status",
-		"Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open",
-		nullptr);
-
-	// Tool: get_timeout
-	register_tool(tools, "get_timeout",
-		"Returns the current timeout (in seconds) for MCP operations that run on the FRED2 UI thread",
-		nullptr);
-
-	// Tool: set_timeout
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "seconds", "Timeout in seconds (1-300)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("seconds"));
-		register_tool(tools, "set_timeout",
-			"Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10.",
-			props, req);
-	}
+	// App-level tools (server info, UI status, timeout, mission lifecycle)
+	mcp_register_app_tools(tools);
 
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
@@ -159,9 +122,6 @@ static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_strin
 
 	return result;
 }
-
-// Timeout for PostMessage + WaitForSingleObject, in milliseconds
-static std::atomic<DWORD> mcp_tool_timeout_ms{10000};  // default 10 seconds
 
 // Clean up a heap-allocated McpToolRequest (event handle, json, struct)
 static void mcp_cleanup_request(McpToolRequest *req)
@@ -178,7 +138,7 @@ static void mcp_cleanup_request(McpToolRequest *req)
 // Handles timeout and reference-counted cleanup in both the normal and timeout paths.
 static json_t *mcp_wait_for_result(McpToolRequest *req)
 {
-	DWORD timeout_ms = mcp_tool_timeout_ms.load(std::memory_order_relaxed);
+	DWORD timeout_ms = mcp_get_tool_timeout_ms();
 	DWORD wait_result = WaitForSingleObject(req->completion_event, timeout_ms);
 
 	if (wait_result == WAIT_OBJECT_0) {
@@ -311,69 +271,16 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		return nullptr;
 	}
 
-	if (strcmp(tool_name, "get_timeout") == 0) {
-		DWORD seconds = mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000;
-		json_t *result = make_tool_result(false, "timeout (seconds): %u", seconds);
-
-		json_t *sc = json_object();
-		json_object_set_new(sc, "seconds", json_integer(seconds));
-		json_object_set_new(result, "structuredContent", sc);
-		return result;
-	}
-
-	if (strcmp(tool_name, "set_timeout") == 0) {
-		json_t *arguments = json_object_get(params, "arguments");
-		json_t *err = nullptr;
-		McpErrorSink sink(&err);
-		auto seconds = get_required_integer(arguments, "seconds", sink);
-		if (!seconds.has_value())
-			return err;
-		if (!check_int_range(*seconds, 1, 300, "seconds", sink))
-			return err;
-
-		mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
-		json_t *result = make_tool_result(false, "timeout (seconds): %d", *seconds);
-
-		json_t *sc = json_object();
-		json_object_set_new(sc, "seconds", json_integer(*seconds));
-		json_object_set_new(result, "structuredContent", sc);
-		return result;
+	// Try app-level tools (timeout/server info/UI status/mission lifecycle)
+	{
+		json_t *app_result = mcp_route_app_tool(tool_name, params);
+		if (app_result)
+			return app_result;
 	}
 
 	// All tools below require FRED2 to be fully initialized
 	if (!mcp_fred_ready.load())
 		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
-
-	if (strcmp(tool_name, "get_server_info") == 0) {
-		return mcp_execute_on_main_thread(McpToolId::GET_SERVER_INFO, "");
-	}
-
-	if (strcmp(tool_name, "load_mission") == 0 ||
-		strcmp(tool_name, "save_mission") == 0)
-	{
-		// Extract filepath from arguments
-		json_t *arguments = json_object_get(params, "arguments");
-		json_t *err = nullptr;
-		McpErrorSink sink(&err);
-		const char *filepath = get_required_string(arguments, "filepath", sink, true);
-		if (!filepath) return err;
-
-		McpToolId tool;
-		if (strcmp(tool_name, "load_mission") == 0)
-			tool = McpToolId::LOAD_MISSION;
-		else
-			tool = McpToolId::SAVE_MISSION;
-
-		return mcp_execute_on_main_thread(tool, filepath);
-	}
-
-	if (strcmp(tool_name, "new_mission") == 0) {
-		return mcp_execute_on_main_thread(McpToolId::NEW_MISSION, "");
-	}
-
-	if (strcmp(tool_name, "get_ui_status") == 0) {
-		return mcp_execute_on_main_thread(McpToolId::GET_UI_STATUS, "");
-	}
 
 	// Try mission CRUD tools (marshaled to main thread)
 	{
