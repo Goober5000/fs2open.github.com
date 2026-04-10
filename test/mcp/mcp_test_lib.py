@@ -293,14 +293,22 @@ def wait_for_server(client, max_attempts=10, delay=2.0):
     """Wait for FRED2 MCP server to become available.
 
     Uses a lightweight HTTP probe rather than the full initialize handshake,
-    so that the dedicated connectivity test can perform the single
-    spec-required initialize call.
+    so the dedicated connectivity test can perform the single spec-required
+    initialize call.  We deliberately treat *any* HTTP response -- including
+    non-2xx like 405 Method Not Allowed -- as proof the server is alive.
+    Without the explicit HTTPError catch, urlopen would raise it and the
+    URLError clause below would treat the server as unreachable, since
+    HTTPError is a subclass of URLError.
     """
     for attempt in range(max_attempts):
         try:
             probe = urllib.request.Request(client.url, method="GET")
             with urllib.request.urlopen(probe, timeout=client.timeout) as resp:
                 resp.read()
+            return True
+        except urllib.error.HTTPError:
+            # Server responded with an HTTP error code -- it's alive, just
+            # doesn't like bare GETs.  That's fine; we only need reachability.
             return True
         except (urllib.error.URLError, ConnectionError, OSError) as e:
             if attempt < max_attempts - 1:
@@ -407,7 +415,7 @@ def run_module_standalone(register_fn, description,
     ok = suite.run()
     rc = suite.summary()
     if not ok:
-        # Critical failure: ensure non-zero exit even if summary returns 0
-        # for some edge case (it shouldn't).
-        sys.exit(2 if rc == 0 else rc)
+        # Critical failure: exit 2 to distinguish from a non-critical failure
+        # (exit 1).  See exit-code contract in test_fred2_mcp.py's docstring.
+        sys.exit(2)
     sys.exit(rc)

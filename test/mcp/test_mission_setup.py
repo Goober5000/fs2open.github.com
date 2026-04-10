@@ -40,15 +40,30 @@ def register(suite, client):
         save_path = ctx.get("test_save_path")
         if not save_path:
             raise SkipTest("No saved mission path from previous test")
-        r = client.call_tool("load_mission", {"filepath": save_path})
-        assert_success(r)
-        # Verify mission info reflects the loaded file
-        mi = client.call_tool("get_mission_info")
-        assert_success(mi)
-        # Clean up: create a new mission so subsequent tests start fresh.
-        # This is the contract that lets test_crud, test_sexp_*, and the
-        # rest of the suite assume an empty mission state.
-        client.call_tool("new_mission")
+        try:
+            r = client.call_tool("load_mission", {"filepath": save_path})
+            assert_success(r)
+            # Verify mission info reflects the loaded file
+            mi = client.call_tool("get_mission_info")
+            assert_success(mi)
+        finally:
+            # Delete the scratch file written by test_save_mission so we don't
+            # leave a stray _mcp_test_save.fs2 in the user's mission directory.
+            # Wrapped in try/except so a missing/locked file never masks the
+            # actual load_mission assertion.
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+            # Clean up: create a new mission so subsequent tests start fresh.
+            # This is the contract that lets test_crud, test_sexp_*, and the
+            # rest of the suite assume an empty mission state.  Wrapped in
+            # try/except so a new_mission failure inside the finally cannot
+            # mask the original load_mission assertion.
+            try:
+                client.call_tool("new_mission")
+            except Exception:
+                pass
 
     def test_get_mission_info_new():
         r = client.call_tool("get_mission_info")
