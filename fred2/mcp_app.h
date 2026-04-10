@@ -25,4 +25,13 @@ void mcp_handle_app_tool(const char *tool_name, json_t *input_json, McpToolReque
 // Used by mcpserver.cpp's wait logic.
 DWORD mcp_get_tool_timeout_ms();
 
+// Returns false (with error_msg) if the specified modeless editor dialog
+// (identified by its editor_key in g_editor_info) is currently visible.
+// Used by validate_dialog_for_* helpers in the various tool units.
+bool validate_single_dialog(const char *items_to_modify, const char *dialog_key, SCP_string &error_msg);
+
+// Returns false (with error_msg) if any editor dialog is open.
+// Used by LOAD_MISSION / SAVE_MISSION / NEW_MISSION to prevent data loss.
+bool validate_no_dialogs_open(SCP_string &error_msg);
+
 #endif // _MCP_APP_H
