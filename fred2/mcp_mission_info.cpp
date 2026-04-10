@@ -204,6 +204,16 @@ json_t *build_mission_info_json()
 }
 
 // ---------------------------------------------------------------------------
+// handle_get_mission_info
+// ---------------------------------------------------------------------------
+
+static void handle_get_mission_info(json_t * /*input*/, McpToolRequest *req)
+{
+	req->result_json = make_json_tool_result(build_mission_info_json());
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // handle_update_mission_info
 // ---------------------------------------------------------------------------
 
@@ -550,6 +560,13 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 
 void mcp_register_mission_info_tools(json_t *tools)
 {
+	// get_mission_info
+	register_tool(tools, "get_mission_info",
+		"Returns metadata about the currently loaded mission (filename, title, author, notes, "
+		"game_type, mission flags, support ship settings, command persona, sound environment, "
+		"custom data/strings, AI profile, and other Mission Specs fields).",
+		nullptr);
+
 	// update_mission_info
 	{
 		json_t *props = json_object();
@@ -670,6 +687,10 @@ void mcp_register_mission_info_tools(json_t *tools)
 
 bool mcp_handle_mission_info_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
 {
+	if (strcmp(tool_name, "get_mission_info") == 0) {
+		handle_get_mission_info(input_json, req);
+		return true;
+	}
 	if (strcmp(tool_name, "update_mission_info") == 0) {
 		handle_update_mission_info(input_json, req);
 		return true;

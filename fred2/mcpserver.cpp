@@ -128,11 +128,6 @@ static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_strin
 		"Create a new empty mission, replacing any currently loaded mission",
 		nullptr);
 
-	// Tool: get_mission_info
-	register_tool(tools, "get_mission_info",
-		"Returns metadata about the currently loaded mission (filename, title, author, notes, etc.)",
-		nullptr);
-
 	// Tool: get_ui_status
 	register_tool(tools, "get_ui_status",
 		"Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open",
@@ -374,10 +369,6 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 
 	if (strcmp(tool_name, "new_mission") == 0) {
 		return mcp_execute_on_main_thread(McpToolId::NEW_MISSION, "");
-	}
-
-	if (strcmp(tool_name, "get_mission_info") == 0) {
-		return mcp_execute_on_main_thread(McpToolId::GET_MISSION_INFO, "");
 	}
 
 	if (strcmp(tool_name, "get_ui_status") == 0) {
