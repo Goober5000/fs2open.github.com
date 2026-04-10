@@ -777,6 +777,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			return nullptr;
 		}
 
+		// no rollback: it's a modification
+		if (std::holds_alternative<int>(info.attached_id))
+			mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+		else
+			mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+
 		// Detach the old tree and optionally free it
 		if (n != Locked_sexp_true && n != Locked_sexp_false) {
 			if (do_delete) {
@@ -794,6 +800,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			} else {
 				Sexp_nodes[n].parent = -1;
 			}
+		}
+
+		// we may not have actually done anything
+		if (!do_delete && n == original_n) {
+			sink.set_error("Node %d is already the root of a detached tree; there is nothing to do. Pass delete=true to free it, or pass an inner node to detach a sub-tree.", n);
+			return nullptr;
 		}
 
 	} else {
@@ -841,6 +853,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
 				return nullptr;
 			}
+
+			// no rollback: it's a modification
+			if (std::holds_alternative<int>(info.attached_id))
+				mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+			else
+				mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
 		}
 
 		// Commit: detach and optionally free the target subtree
@@ -850,13 +868,16 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			freed_count = free_sexp2(n);
 	}
 
-	mcp_sexp_forest_mark_dirty({ info.root });
+	mcp_sexp_forest_mark_dirty({ info.root });			// mark the tree dirty
+	if (is_root && is_attached)
+		mcp_sexp_forest_mark_dirty({ replacement });	// for case A, the new tree needs to be marked dirty as well
 
 	// If preserved, the detached node is the root of a new free-standing tree
 	if (!do_delete) {
 		// but if the new free-standing tree is wrapped, unwrap it
 		if (n != original_n) {
 			free_one_sexp(n);
+			freed_count++;
 			Sexp_nodes[original_n].parent = -1;
 			// Reparent siblings in original_n's rest chain: alloc_sexp had
 			// set them to parent = wrapper, which we just freed.  Point them
@@ -1342,6 +1363,12 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 				info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
 			return;
 		}
+
+		// no rollback: it's a modification
+		if (std::holds_alternative<int>(info.attached_id))
+			mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+		else
+			mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
 	}
 
 	mcp_sexp_forest_mark_dirty({ info.root });

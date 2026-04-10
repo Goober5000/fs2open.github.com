@@ -3,6 +3,7 @@
 
 #include <jansson.h>
 #include <windows.h>
+#include "globalincs/pstypes.h"
 
 struct McpToolRequest;
 

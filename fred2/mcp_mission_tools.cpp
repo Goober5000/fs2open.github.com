@@ -3,6 +3,7 @@
 #include "mcp_mission_info.h"
 #include "mcp_sexp.h"
 #include "mcpserver.h"
+#include "mcp_app.h"
 #include "mcp_json.h"
 #include "mcp_array_utils.h"
 #include "mcp_sexp_forest.h"
