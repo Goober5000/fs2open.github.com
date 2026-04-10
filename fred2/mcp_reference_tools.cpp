@@ -32,6 +32,10 @@
 #include "graphics/software/FSFont.h"
 #include "scripting/doc_json.h"
 #include "scripting/scripting.h"
+#include "ai/ai_profiles.h"
+#include "sound/ds.h"
+#include "mission/missionparse.h"
+#include "gamesnd/eventmusic.h"
 
 
 // ---------------------------------------------------------------------------
@@ -661,6 +665,52 @@ void mcp_register_reference_tools(json_t *tools)
 		"List all fonts loaded from fonts.tbl and modular font tables (*-fnt.tbm). "
 		"Returns each font's name, filename, and type (volition_font or truetype). "
 		"Font names are used in fiction viewer stages and other UI references.",
+		json_object());
+
+	// list_ai_profiles
+	register_tool(tools, "list_ai_profiles",
+		"List all AI profiles defined in ai_profiles.tbl. "
+		"AI profiles control AI behavior parameters for the mission. "
+		"Returns each profile's name and whether it is the default.",
+		json_object());
+
+	// list_sound_environment_presets
+	register_tool(tools, "list_sound_environment_presets",
+		"List all sound environment presets available for mission audio. "
+		"These are EAX/EFX reverb environments (e.g. Generic, Hangar, Underwater). "
+		"Returns each environment's name.",
+		json_object());
+
+	// list_soundtracks
+	register_tool(tools, "list_soundtracks",
+		"List all event music soundtracks defined in music.tbl. "
+		"Soundtracks control the in-mission music (battle, arrival, victory cues, etc.). "
+		"Returns each soundtrack's name.",
+		json_object());
+
+	// list_menu_music
+	register_tool(tools, "list_menu_music",
+		"List all menu/briefing music tracks defined in music.tbl. "
+		"These are spooled music entries used for briefing, debriefing, and fiction viewer screens. "
+		"Returns each track's name.",
+		json_object());
+
+	// list_mission_flags
+	register_tool(tools, "list_mission_flags",
+		"List all mission flags that can be set in Mission Specs. "
+		"Returns each flag's name (as used in the mission file) and description.",
+		json_object());
+
+	// list_ship_flags
+	register_tool(tools, "list_ship_flags",
+		"List all ship flags that can be set in the mission file. "
+		"Returns each flag's name (as used in the mission file) and description.",
+		json_object());
+
+	// list_wing_flags
+	register_tool(tools, "list_wing_flags",
+		"List all wing flags that can be set in the mission file. "
+		"Returns each flag's name (as used in the mission file) and description.",
 		json_object());
 
 	// list_scripting_elements
@@ -2669,6 +2719,51 @@ static json_t *handle_list_fonts()
 	return make_json_tool_result(arr);
 }
 
+static json_t *handle_list_ai_profiles()
+{
+	json_t *arr = json_array();
+	for (int i = 0; i < Num_ai_profiles; i++) {
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(Ai_profiles[i].profile_name));
+		if (i == Default_ai_profile)
+			json_object_set_new(item, "is_default", json_true());
+		json_array_append_new(arr, item);
+	}
+	return make_json_tool_result(arr);
+}
+
+// Shared handler for name-list tools.  GetName extracts a const char* from
+// each element; it handles both char[] members (which decay) and SCP_string
+// members (via .c_str()) transparently.
+template <typename Container, typename GetName>
+static json_t *handle_list_names(const Container &items, GetName get_name)
+{
+	json_t *arr = json_array();
+	for (const auto &item : items) {
+		json_array_append_new(arr, json_string(get_name(item)));
+	}
+	return make_json_tool_result(arr);
+}
+
+// Shared handler for flag-listing tools.  The flags[] and descs[] arrays are
+// parallel — same length, same order, same enum values.
+template <typename FlagEnum>
+static json_t *handle_list_flags(const flag_def_list_new<FlagEnum> *flags,
+	const parse_object_flag_description<FlagEnum> *descs, size_t count)
+{
+	json_t *arr = json_array();
+	for (size_t i = 0; i < count; i++) {
+		if (!flags[i].in_use)
+			continue;
+
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_string(flags[i].name));
+		json_object_set_new(item, "description", json_string(descs[i].flag_desc));
+		json_array_append_new(arr, item);
+	}
+	return make_json_tool_result(arr);
+}
+
 // ---------------------------------------------------------------------------
 // Scripting API documentation
 // ---------------------------------------------------------------------------
@@ -3252,6 +3347,20 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_talking_heads();
 	if (strcmp(tool_name, "list_fonts") == 0)
 		return handle_list_fonts();
+	if (strcmp(tool_name, "list_ai_profiles") == 0)
+		return handle_list_ai_profiles();
+	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
+		return handle_list_names(EFX_presets, [](const auto &e) { return e.name.c_str(); });
+	if (strcmp(tool_name, "list_soundtracks") == 0)
+		return handle_list_names(Soundtracks, [](const auto &e) -> const char* { return e.name; });
+	if (strcmp(tool_name, "list_menu_music") == 0)
+		return handle_list_names(Spooled_music, [](const auto &e) -> const char* { return e.name; });
+	if (strcmp(tool_name, "list_mission_flags") == 0)
+		return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
+	if (strcmp(tool_name, "list_ship_flags") == 0)
+		return handle_list_flags(Parse_object_flags, Parse_object_flag_descriptions, Num_parse_object_flags);
+	if (strcmp(tool_name, "list_wing_flags") == 0)
+		return handle_list_flags(Parse_wing_flags, Parse_wing_flag_descriptions, Num_parse_wing_flags);
 	if (strcmp(tool_name, "list_scripting_elements") == 0)
 		return handle_list_scripting_elements(arguments);
 	if (strcmp(tool_name, "get_scripting_element") == 0)
