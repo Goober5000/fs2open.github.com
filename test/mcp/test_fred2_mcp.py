@@ -1858,6 +1858,26 @@ def make_phase6_tests(suite, client):
         })
         assert_error(r)
 
+    def test_create_sexp_node_invalid_number_value():
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "number", "argument_value": "abc"}
+            ]
+        })
+        assert_error(r)
+        assert_in("not a valid number", tool_text(r))
+
+    def test_create_sexp_node_argument_invalid_number():
+        r = client.call_tool("create_sexp_node", {
+            "role": "argument",
+            "argument_type": "number",
+            "argument_value": "not_numeric"
+        })
+        assert_error(r)
+        assert_in("not a valid number", tool_text(r))
+
     def test_detach_sexp_node_invalid():
         r = client.call_tool("detach_sexp_node", {"node": -999})
         assert_error(r)
@@ -1952,6 +1972,8 @@ def make_phase6_tests(suite, client):
         ("text_to_sexp_invalid", test_text_to_sexp_invalid),
         ("create_sexp_node_invalid_operator", test_create_sexp_node_invalid_operator),
         ("create_sexp_node_wrong_arg_type", test_create_sexp_node_wrong_arg_type),
+        ("create_sexp_node_invalid_number_value", test_create_sexp_node_invalid_number_value),
+        ("create_sexp_node_argument_invalid_number", test_create_sexp_node_argument_invalid_number),
         ("detach_sexp_node_invalid", test_detach_sexp_node_invalid),
         ("swap_messages_out_of_range", test_swap_messages_out_of_range),
         ("move_event_out_of_range", test_move_event_out_of_range),
