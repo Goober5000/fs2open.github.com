@@ -2,6 +2,7 @@
 #include "mcp_sexp.h"
 #include "mcp_json.h"
 #include "mcpserver.h"
+#include "mcp_app.h"
 #include "mcp_mission_tools.h"
 #include "mcp_sexp_forest.h"
 #include "mcp_reference_tools.h"
@@ -514,33 +515,6 @@ static void splice_replace_node(int old_node, int new_node)
 	}
 }
 
-// Determine which chain (parent.first or parent.rest) contains the
-// given node, and return the chain's starting node.
-static int find_chain_start(int parent, int node, bool &entry_is_first)
-{
-	int chain_start = Sexp_nodes[parent].first;
-	entry_is_first = true;
-	for (int c = chain_start; c >= 0; c = Sexp_nodes[c].rest) {
-		if (c == node)
-			return chain_start;
-	}
-	entry_is_first = false;
-	return Sexp_nodes[parent].rest;
-}
-
-// Set the link that points to the start of a sibling chain segment.
-// prev_before is the node just before the segment (-1 means the segment
-// starts at the chain entry point, determined by entry_is_first).
-static void set_chain_link(int parent, int prev_before, bool entry_is_first, int value)
-{
-	if (prev_before >= 0)
-		Sexp_nodes[prev_before].rest = value;
-	else if (entry_is_first)
-		Sexp_nodes[parent].first = value;
-	else
-		Sexp_nodes[parent].rest = value;
-}
-
 enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
 struct FormulaRootInfo
 {
@@ -916,7 +890,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 
 static const SCP_vector<const char *> sexp_role_values = { "list_wrapper", "operator", "argument" };
 static const SCP_vector<const char *> sexp_arg_type_values = { "number", "string", "boolean", "node" };
-static const SCP_vector<const char *> sexp_mutatable_arg_type_values = { "number", "string", "boolean" };
+static const SCP_vector<const char *> sexp_mutable_arg_type_values = { "number", "string", "boolean" };
 
 // Check if an MCP argument type is compatible with the expected OPF type at a
 // given operator argument position.
@@ -1051,7 +1025,7 @@ static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_typ
 {
 	auto type_str = get_required_string(input, "argument_type", sink, true);
 	if (!type_str) return {};
-	if (!check_string_enum(type_str, allow_node_type ? sexp_arg_type_values : sexp_mutatable_arg_type_values, "argument_type", sink)) return {};
+	if (!check_string_enum(type_str, allow_node_type ? sexp_arg_type_values : sexp_mutable_arg_type_values, "argument_type", sink)) return {};
 
 	auto value_str = get_required_string(input, "argument_value", sink, true);
 	if (!value_str) return {};
@@ -1301,7 +1275,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		// --- Argument update (atom or boolean wrapper) ---
 		auto type_str = get_required_string(input, "argument_type", sink, true);
 		if (!type_str) return;
-		if (!check_string_enum(type_str, sexp_mutatable_arg_type_values, "argument_type", sink)) return;
+		if (!check_string_enum(type_str, sexp_mutable_arg_type_values, "argument_type", sink)) return;
 
 		auto value_str = get_required_string(input, "argument_value", sink, true);
 		if (!value_str) return;
@@ -1871,7 +1845,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "argument_type",
 			"Argument type for standalone argument creation. "
 			"Required when role is 'argument'.",
-			sexp_mutatable_arg_type_values);
+			sexp_mutable_arg_type_values);
 		add_string_prop(props, "argument_value",
 			"Argument value for standalone argument creation. "
 			"For number/string: literal value (prefix with @ for SEXP variable). "
@@ -1897,7 +1871,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "argument_type",
 			"New argument type. Required when updating an argument node. "
 			"Boolean is only valid for boolean wrapper nodes.",
-			sexp_mutatable_arg_type_values);
+			sexp_mutable_arg_type_values);
 		add_string_prop(props, "argument_value",
 			"New argument value. For number/string: literal value (prefix with @ "
 			"for SEXP variable). For boolean: \"true\" or \"false\". "
