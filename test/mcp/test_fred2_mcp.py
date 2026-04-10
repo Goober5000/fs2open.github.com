@@ -1752,6 +1752,200 @@ def make_phase5_tests(suite, client):
         assert_success(r)
         ctx.pop("sexp_preserved_node", None)
 
+    def test_detach_shrink_rollback_restores_last_sibling():
+        """Bug regression: shrink-mode rollback fails when target_rest == -1.
+
+        When detach_sexp_node is called with shrink=true on the last sibling of
+        an attached formula's operator, removing that sibling violates the
+        operator's min argument count, the syntax check fails, and the function
+        is supposed to roll back. In the buggy version the rollback uses
+        splice_replace_node(target_rest, n) where target_rest is -1 -- a no-op
+        -- so the predecessor's rest pointer is left at -1 and the original
+        last sibling is permanently orphaned even though the API returns an
+        error claiming a clean rollback.
+        """
+        # Default event formula is `(when (true) (do-nothing))`. `when` requires
+        # at least 2 args (cond + 1 action), so removing `do-nothing` violates min.
+        r = client.call_tool("create_event", {"name": "test_shrink_rollback"})
+        assert_success(r)
+        evt_d = tool_data(r)
+        formula_root = evt_d.get("formula")
+        assert_true(formula_root is not None and formula_root >= 0,
+                    f"event should have a formula root, got {formula_root}")
+
+        try:
+            # Locate the do-nothing operator atom (the last argument of `when`).
+            r = client.call_tool("walk_sexp_tree", {"node": formula_root})
+            assert_success(r)
+            nodes = tool_data(r).get("nodes", [])
+            do_nothing = None
+            for n in nodes:
+                if n.get("value") == "do-nothing" and n.get("role") == "operator":
+                    do_nothing = n["node"]
+                    break
+            assert_true(do_nothing is not None,
+                        f"could not find do-nothing operator in default event formula; "
+                        f"walked {[(n.get('value'), n.get('role')) for n in nodes]}")
+
+            # Shrink-detach the last action. The retarget logic moves to its
+            # enclosing list wrapper, whose .rest is -1, exercising the bug path.
+            # The syntax check on `when` should fail and the operation should
+            # roll back, leaving the formula tree exactly as it was.
+            r = client.call_tool("detach_sexp_node",
+                                 {"node": do_nothing, "shrink": True})
+            assert_error(r)
+
+            # The rollback must have restored do-nothing in the formula tree.
+            # In the buggy version, do-nothing is orphaned and walk_sexp_tree
+            # cannot reach it from the formula root.
+            r = client.call_tool("walk_sexp_tree", {"node": formula_root})
+            assert_success(r)
+            nodes = tool_data(r).get("nodes", [])
+            values = [n.get("value") for n in nodes]
+            assert_in("do-nothing", values,
+                      f"shrink-mode rollback failed to restore do-nothing in the "
+                      f"event formula; reachable nodes after failed detach = {values}")
+        finally:
+            client.call_tool("delete_event",
+                             {"name": "test_shrink_rollback", "force": True})
+
+    def test_detach_unwrap_preserves_child_parent_pointers():
+        """Bug regression: unwrapping after detach leaves children with stale parents.
+
+        When the user passes an operator atom to detach_sexp_node, the handler
+        retargets to the enclosing list wrapper, processes the detach, and then
+        (on the !do_delete path) frees the wrapper and resets ONLY the operator
+        atom's parent pointer back to -1. But for any wrapper allocated by the
+        SEXP parser, alloc_sexp set the entire rest chain's parent fields to
+        the wrapper, so the operator atom's siblings (its arguments) all still
+        point at the now-freed wrapper slot. The detached free-standing subtree
+        is then internally inconsistent.
+
+        This only manifests when the operator actually has an enclosing wrapper,
+        which in parser-produced trees happens for *nested* sub-expressions,
+        not top-level operators. So the test nests `when` inside `and`.
+        """
+        r = client.call_tool("text_to_sexp", {
+            "text": "( and ( when ( true ) ( do-nothing ) ) ( true ) )"
+        })
+        assert_success(r)
+        formula_root = tool_data(r)["node"]
+
+        when_op = None
+        detached_root = None
+        try:
+            # Find the nested `when` operator atom. It sits inside a list
+            # wrapper that was allocated via alloc_sexp with first=when_op,
+            # so true_arg and do-nothing_arg have parent = that wrapper.
+            r = client.call_tool("walk_sexp_tree", {"node": formula_root})
+            assert_success(r)
+            nodes = tool_data(r).get("nodes", [])
+            for n in nodes:
+                if n.get("value") == "when" and n.get("role") == "operator":
+                    when_op = n["node"]
+                    break
+            assert_true(when_op is not None,
+                        "could not find nested `when` operator")
+
+            # Detach the `when` atom (preserve, not delete). The handler
+            # retargets to the enclosing wrapper, splices it out of `and`'s
+            # rest chain, then unwraps back to the operator atom.
+            r = client.call_tool("detach_sexp_node", {"node": when_op})
+            assert_success(r)
+            d = tool_data(r)
+            detached_root = d.get("detached_node")
+            assert_equal(detached_root, when_op,
+                         "preserved detach should report the operator atom index")
+
+            # Walk the new free-standing subtree and check a sibling's parent.
+            # The proper parent is detached_root (the new root after unwrap).
+            # In the buggy version, parent still points at the freed wrapper.
+            r = client.call_tool("walk_sexp_tree", {"node": detached_root})
+            assert_success(r)
+            nodes = tool_data(r).get("nodes", [])
+            sibling = None
+            for n in nodes:
+                if n["node"] != detached_root and n.get("role") == "list_wrapper":
+                    sibling = n
+                    break
+            assert_true(sibling is not None,
+                        f"could not find a sibling list_wrapper under {detached_root}; "
+                        f"walked {[(n['node'], n.get('role')) for n in nodes]}")
+
+            parent = sibling.get("node_parent")
+            assert_equal(parent, detached_root,
+                         f"sibling node {sibling['node']} should have parent="
+                         f"{detached_root} (the new root after unwrap); got "
+                         f"parent={parent}, which points to a freed wrapper slot")
+        finally:
+            # Clean up both the residual `and` tree and the detached `when`.
+            if detached_root is not None:
+                client.call_tool("detach_sexp_node",
+                                 {"node": detached_root, "delete": True})
+            client.call_tool("detach_sexp_node",
+                             {"node": formula_root, "delete": True})
+
+    def test_detach_reports_consistent_node_when_retargeted():
+        """Bug regression: detached_node response differs between delete=true and delete=false.
+
+        When the user passes an operator atom that gets retargeted to its
+        enclosing wrapper, the !do_delete path reverts `n` back to the
+        original operator atom before building the response, so the user
+        sees the index they passed in. The do_delete path skips that revert,
+        so the response reports the (now-freed) wrapper index instead -- a
+        different number than the user's input.
+
+        As with the parent-pointer test, the retargeting only fires when the
+        operator actually has an enclosing wrapper, which means the target
+        `when` must be a nested sub-expression.
+        """
+        def build_and_find_nested_when():
+            r = client.call_tool("text_to_sexp", {
+                "text": "( and ( when ( true ) ( do-nothing ) ) ( true ) )"
+            })
+            assert_success(r)
+            root = tool_data(r)["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            for n in tool_data(r).get("nodes", []):
+                if n.get("value") == "when" and n.get("role") == "operator":
+                    return root, n["node"]
+            raise AssertionError("could not find nested `when` operator")
+
+        # delete=false case: report the operator atom index via the unwrap path.
+        root_preserved, when_op_preserved = build_and_find_nested_when()
+        detached_preserved = None
+        try:
+            r = client.call_tool("detach_sexp_node",
+                                 {"node": when_op_preserved, "delete": False})
+            assert_success(r)
+            preserved_reported = tool_data(r).get("detached_node")
+            detached_preserved = preserved_reported
+        finally:
+            if detached_preserved is not None:
+                client.call_tool("detach_sexp_node",
+                                 {"node": detached_preserved, "delete": True})
+            client.call_tool("detach_sexp_node",
+                             {"node": root_preserved, "delete": True})
+
+        # delete=true case: should report the same operator atom index.
+        root_deleted, when_op_deleted = build_and_find_nested_when()
+        try:
+            r = client.call_tool("detach_sexp_node",
+                                 {"node": when_op_deleted, "delete": True})
+            assert_success(r)
+            deleted_reported = tool_data(r).get("detached_node")
+        finally:
+            client.call_tool("detach_sexp_node",
+                             {"node": root_deleted, "delete": True})
+
+        # Both calls passed an operator atom; both should report it back.
+        assert_equal(preserved_reported, when_op_preserved,
+                     "delete=false should report the operator atom index")
+        assert_equal(deleted_reported, when_op_deleted,
+                     "delete=true should report the operator atom index "
+                     "(buggy version reports the wrapper index instead)")
+
     tests = [
         ("text_to_sexp_simple", test_text_to_sexp_simple),
         ("sexp_to_text_simple", test_sexp_to_text_simple),
@@ -1776,6 +1970,9 @@ def make_phase5_tests(suite, client):
         ("cleanup_nonroot_tree", test_cleanup_nonroot_tree),
         ("create_sexp_node_type_error_preserves_referenced_tree", test_create_sexp_node_type_error_preserves_referenced_tree),
         ("cleanup_preserved_tree", test_cleanup_preserved_tree),
+        ("detach_shrink_rollback_restores_last_sibling", test_detach_shrink_rollback_restores_last_sibling),
+        ("detach_unwrap_preserves_child_parent_pointers", test_detach_unwrap_preserves_child_parent_pointers),
+        ("detach_reports_consistent_node_when_retargeted", test_detach_reports_consistent_node_when_retargeted),
     ]
     for name, func in tests:
         suite.add(f"phase5_{name}", func, phase=5)
