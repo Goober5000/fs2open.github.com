@@ -3946,6 +3946,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 		// Cases C & D: Embedded node -- splice a replacement into the link chain.
 		int target_rest = Sexp_nodes[n].rest;
 
+		// Locate the predecessor before splicing so we can reliably restore
+		// it on rollback.  splice_replace_node can't find the old position if
+		// the forward splice replaced n with -1 (shrink mode, last sibling).
+		int pred_list = find_sexp_list(n);                                      // wrapper whose .first == n
+		int pred_ante = (pred_list < 0) ? find_sexp_antecedent(n) : -1;         // sibling whose .rest == n
+
 		if (shrink) {
 			// Shrink mode: link the predecessor directly to the next sibling,
 			// shifting subsequent arguments up by one position.
@@ -3963,9 +3969,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			int bad_node = -1;
 			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 			if (syntax_result != SEXP_CHECK_NO_ERROR) {
-				// Rollback: restore the original node into the chain
-				splice_replace_node(shrink ? target_rest : replacement, n);
-				Sexp_nodes[n].rest = target_rest;
+				// Rollback via the saved predecessor.  n.rest was never
+				// modified by the forward splice, so it's already target_rest.
+				if (pred_list >= 0)
+					Sexp_nodes[pred_list].first = n;
+				else if (pred_ante >= 0)
+					Sexp_nodes[pred_ante].rest = n;
 
 				// Free the placeholder if one was allocated
 				if (replacement >= 0) {
@@ -3994,17 +4003,22 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 		// but if the new free-standing tree is wrapped, unwrap it
 		if (n != original_n) {
 			free_one_sexp(n);
-			n = original_n;
-			Sexp_nodes[n].parent = -1;
+			Sexp_nodes[original_n].parent = -1;
+			// Reparent siblings in original_n's rest chain: alloc_sexp had
+			// set them to parent = wrapper, which we just freed.  Point them
+			// at the operator atom (the new root of the detached subtree).
+			for (int sib = Sexp_nodes[original_n].rest; sib != -1; sib = Sexp_nodes[sib].rest)
+				Sexp_nodes[sib].parent = original_n;
 		}
-		mcp_sexp_forest_mark_dirty({ n });
+		mcp_sexp_forest_mark_dirty({ original_n });
 	}
 
-	// Build response
+	// Build response.  Always report the node the user passed in, regardless
+	// of whether we retargeted internally to a list wrapper.
 	json_t *result = json_object();
-	json_object_set_new(result, "detached_node", json_integer(n));
+	json_object_set_new(result, "detached_node", json_integer(original_n));
 	if (!do_delete)
-		json_object_set_new(result, "detached_node_data", build_sexp_node_json(n));
+		json_object_set_new(result, "detached_node_data", build_sexp_node_json(original_n));
 	json_object_set_new(result, "deleted", do_delete ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0) {
