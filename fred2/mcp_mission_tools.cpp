@@ -4090,6 +4090,10 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 	}
 
 	if (!stricmp(type_str, "number")) {
+		if (!can_construe_as_integer(value_str)) {
+			sink.set_error("Argument %d: value \"%s\" is not a valid number", arg_index, value_str);
+			return -1;
+		}
 		return alloc_sexp(value_str, SEXP_ATOM, SEXP_ATOM_NUMBER, -1, next);
 	}
 
@@ -4157,6 +4161,7 @@ static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_typ
 
 	auto value_str = get_required_string(input, "argument_value", sink, true);
 	if (!value_str) return {};
+	if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return {};
 
 	bool do_type_checking = true;
 	// A node value of -1 is a placeholder that bypasses type checking
@@ -4406,6 +4411,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 
 		auto value_str = get_required_string(input, "argument_value", sink, true);
 		if (!value_str) return;
+		if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return;
 
 		if (!stricmp(type_str, "boolean")) {
 			if (!is_boolean_wrapper) {
@@ -4441,7 +4447,10 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 				Sexp_nodes[n].subtype = new_subtype;
 				strcpy_s(Sexp_nodes[n].text, Sexp_variables[var_idx].variable_name);
 			} else {
-				if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return;
+				if (new_subtype == SEXP_ATOM_NUMBER && !can_construe_as_integer(value_str)) {
+					sink.set_error("Value \"%s\" is not a valid number", value_str);
+					return;
+				}
 				Sexp_nodes[n].type = SEXP_ATOM;
 				Sexp_nodes[n].subtype = new_subtype;
 				strcpy_s(Sexp_nodes[n].text, value_str);
