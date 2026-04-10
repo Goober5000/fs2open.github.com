@@ -30,7 +30,6 @@
 
 #include "mcpserver.h"
 #include "mcp_mission_tools.h"
-#include "mcp_mission_info.h"
 #include "mcp_sexp_forest.h"
 #include "mod_table/mod_table.h"
 #include "management.h"
@@ -941,13 +940,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 			json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
 
 			req->result_json = make_json_tool_result(info);
-			req->success = true;
-		}
-		break;
-
-	case McpToolId::GET_MISSION_INFO:
-		{
-			req->result_json = make_json_tool_result(build_mission_info_json());
 			req->success = true;
 		}
 		break;
