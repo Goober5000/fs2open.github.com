@@ -174,6 +174,44 @@ static void handle_get_ui_status(McpToolRequest *req)
 	req->result_message = std::move(buf);
 }
 
+bool validate_single_dialog(const char *items_to_modify, const char *dialog_key, SCP_string &error_msg)
+{
+	for (size_t i = 0; i < g_editor_info_count; ++i) {
+		auto &info = g_editor_info[i];
+		if (dialog_key && info.editor_key && !stricmp(dialog_key, info.editor_key)) {
+			auto wnd = info.getCWndPtr();
+			if (wnd && wnd->IsWindowVisible()) {
+				sprintf(error_msg, "Cannot work with %s while the %s is open. "
+					"Close it first, or use get_ui_status to check which editors are open.", items_to_modify, info.editor_name);
+				return false;
+			}
+			return true;
+		}
+	}
+	Assertion(false, "dialog key '%s' not found!", dialog_key ? dialog_key : "<nullptr>");
+	return false;
+}
+
+bool validate_no_dialogs_open(SCP_string &error_msg)
+{
+	SCP_string open_list;
+	for (size_t i = 0; i < g_editor_info_count; ++i) {
+		auto &info = g_editor_info[i];
+		auto wnd = info.getCWndPtr();
+		if (wnd && wnd->IsWindowVisible()) {
+			if (!open_list.empty())
+				open_list += ", ";
+			open_list += info.editor_name;
+		}
+	}
+	if (!open_list.empty()) {
+		sprintf(error_msg, "Cannot perform this operation while editor dialogs are open: %s. "
+			"Close them first, or use get_ui_status to check which editors are open.", open_list.c_str());
+		return false;
+	}
+	return true;
+}
+
 // ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
