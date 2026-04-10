@@ -29,14 +29,12 @@
 #include "prop/prop.h"
 
 #include "mcpserver.h"
+#include "mcp_app.h"
 #include "mcp_mission_tools.h"
 #include "mcp_sexp_forest.h"
-#include "mod_table/mod_table.h"
 #include "management.h"
 #include "ship/ship.h"
 #include "fredrender.h"
-#include "mission/missionparse.h"
-#include "missioneditor/missionsave.h"
 #include "eventeditor.h"
 #include "missiongoalsdlg.h"
 #include "missioncutscenesdlg.h"
@@ -749,115 +747,11 @@ bool url_launch(const char *url)
 // MCP tool call handler — runs on the main MFC thread
 // ---------------------------------------------------------------------------
 
-// Sets Mission_filename (without extension) and returns a pointer to the
-// extension within pathname (including the dot), or "" if there is none.
-static const char *set_mission_filename_from_path(const char *pathname)
-{
-	auto sep_ch = strrchr(pathname, '\\');
-	if (!sep_ch)
-		sep_ch = strrchr(pathname, '/');
-	auto filename = (sep_ch != nullptr) ? (sep_ch + 1) : pathname;
-	auto len = strlen(filename);
-
-	// drop extension
-	auto ext_ch = strrchr(filename, '.');
-	if (ext_ch != nullptr)
-		len = ext_ch - filename;
-	if (len >= 80)
-		len = 79;
-	strncpy(Mission_filename, filename, len);
-	Mission_filename[len] = 0;
-
-	return (ext_ch != nullptr) ? ext_ch : "";
-}
-
-static void mcp_handle_load_mission(McpToolRequest *req)
-{
-	clean_up_selections();
-	auto ext = set_mission_filename_from_path(req->filepath);
-
-	if (FREDDoc_ptr->load_mission(req->filepath)) {
-		CString title;
-		title.Format("%s%s", Mission_filename, ext);
-		FREDDoc_ptr->autosave("nothing");
-		FREDDoc_ptr->SetTitle((LPCTSTR)title);
-		FREDDoc_ptr->SetModifiedFlag(FALSE);
-		Undo_count = 0;
-		if (Fred_view_wnd)
-			Fred_view_wnd->Invalidate();
-		req->success = true;
-		sprintf(req->result_message,
-			"Mission loaded successfully: %s", Mission_filename);
-	} else {
-		Mission_filename[0] = '\0';
-		req->success = false;
-		sprintf(req->result_message,
-			"Failed to load mission: %s", req->filepath);
-	}
-}
-
-static void mcp_handle_save_mission(McpToolRequest *req, MissionFormat format)
-{
-	auto ext = set_mission_filename_from_path(req->filepath);
-
-	Fred_mission_save save;
-	save.set_save_format(format);
-	save.set_always_save_display_names(Always_save_display_names);
-	save.set_view_pos(view_pos);
-	save.set_view_orient(view_orient);
-	save.set_fred_alt_names(Fred_alt_names);
-	save.set_fred_callsigns(Fred_callsigns);
-
-	if (save.save_mission_file(req->filepath) == 0) {
-		CString title;
-		title.Format("%s%s", Mission_filename, ext);
-		FREDDoc_ptr->SetTitle((LPCTSTR)title);
-		FREDDoc_ptr->SetModifiedFlag(FALSE);
-		req->success = true;
-		sprintf(req->result_message,
-			"Mission saved successfully: %s", req->filepath);
-	} else {
-		req->success = false;
-		sprintf(req->result_message,
-			"Failed to save mission: %s", req->filepath);
-	}
-}
-
 LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 {
 	auto *req = reinterpret_cast<McpToolRequest*>(lParam);
 
 	switch (req->tool) {
-	case McpToolId::LOAD_MISSION:
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			mcp_handle_load_mission(req);
-		}
-		break;
-
-	case McpToolId::SAVE_MISSION:
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			mcp_handle_save_mission(req, MissionFormat::STANDARD);
-		}
-		break;
-
-	case McpToolId::NEW_MISSION:
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			create_new_mission();
-			if (Fred_view_wnd)
-				Fred_view_wnd->Invalidate();
-			FREDDoc_ptr->SetTitle("Untitled");
-			FREDDoc_ptr->SetModifiedFlag(FALSE);
-			req->success = true;
-			req->result_message = "New empty mission created";
-		}
-		break;
-
 	case McpToolId::LOAD_SHIP_MODEL:
 		{
 			// req->filepath is repurposed to hold the ship class name
@@ -920,62 +814,8 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		}
 		break;
 
-	case McpToolId::GET_SERVER_INFO:
-		{
-			json_t *info = json_object();
-			json_object_set_new(info, "status", json_string("running"));
-			json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state."));
-
-			// Mission context (if loaded)
-			if (Mission_filename[0] != '\0') {
-				SCP_string full_name;
-				sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-				json_object_set_new(info, "mission_filename", json_string(full_name.c_str()));
-				json_object_set_new(info, "mission_title", json_string(The_mission.name));
-			}
-
-			// Mod context (if available)
-			set_optional_string(info, "mod_title", Mod_title.c_str(), true);
-			set_optional_string(info, "mod_version", Mod_version.c_str(), true);
-			json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
-
-			req->result_json = make_json_tool_result(info);
-			req->success = true;
-		}
-		break;
-
-	case McpToolId::GET_UI_STATUS:
-		{
-			SCP_string buf;
-
-			// Check if a modal dialog is blocking the main window
-			bool modal_active = !IsWindowEnabled();
-			sprintf_concat(buf, "modal_dialog_active: %s\n", modal_active ? "true" : "false");
-
-			if (!modal_active) {
-				buf += "open_editors:";
-
-				bool any_open = false;
-				for (auto &info : g_editor_info) {
-					auto wnd = info.getCWndPtr();
-					if (wnd && wnd->IsWindowVisible()) {
-						sprintf_concat(buf, " %s,", info.editor_name);
-						any_open = true;
-					}
-				}
-
-				if (!any_open) {
-					sprintf_concat(buf, " none");
-				} else {
-					// Remove trailing comma
-					if (!buf.empty() && buf.back() == ',')
-						buf.pop_back();
-				}
-			}
-
-			req->success = true;
-			req->result_message = std::move(buf);
-		}
+	case McpToolId::APP_TOOL:
+		mcp_handle_app_tool(req->filepath, req->input_json, req);
 		break;
 
 	case McpToolId::MISSION_TOOL:
