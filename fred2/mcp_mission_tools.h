@@ -6,6 +6,9 @@
 
 struct McpToolRequest;
 
+// Sets the mission as modified and autosaves it.
+void mark_modified(const char *fmt, ...);
+
 // Append mission CRUD tool schemas to the tools array used by tools/list.
 void mcp_register_mission_tools(json_t *tools);
 
