@@ -34,6 +34,40 @@ DWORD mcp_get_tool_timeout_ms()
 // Main-thread helpers (moved from mainfrm.cpp)
 // ---------------------------------------------------------------------------
 
+static void handle_get_server_info(McpToolRequest *req)
+{
+	json_t *info = json_object();
+	json_object_set_new(info, "status", json_string("running"));
+	json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state."));
+
+	// Mission context (if loaded)
+	if (Mission_filename[0] != '\0') {
+		SCP_string full_name;
+		sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
+		json_object_set_new(info, "mission_filename", json_string(full_name.c_str()));
+		json_object_set_new(info, "mission_title", json_string(The_mission.name));
+	}
+
+	// Mod context (if available)
+	set_optional_string(info, "mod_title", Mod_title.c_str(), true);
+	set_optional_string(info, "mod_version", Mod_version.c_str(), true);
+	json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
+
+	req->result_json = make_json_tool_result(info);
+	req->success = true;
+}
+
+static void handle_new_mission(McpToolRequest *req)
+{
+	create_new_mission();
+	if (Fred_view_wnd)
+		Fred_view_wnd->Invalidate();
+	FREDDoc_ptr->SetTitle("Untitled");
+	FREDDoc_ptr->SetModifiedFlag(FALSE);
+	req->success = true;
+	req->result_message = "New empty mission created";
+}
+
 static const char *set_mission_filename_from_path(const char *pathname)
 {
 	auto sep_ch = strrchr(pathname, '\\');
@@ -106,40 +140,6 @@ static void handle_save_mission(McpToolRequest *req, MissionFormat format)
 	}
 }
 
-static void handle_new_mission(McpToolRequest *req)
-{
-	create_new_mission();
-	if (Fred_view_wnd)
-		Fred_view_wnd->Invalidate();
-	FREDDoc_ptr->SetTitle("Untitled");
-	FREDDoc_ptr->SetModifiedFlag(FALSE);
-	req->success = true;
-	req->result_message = "New empty mission created";
-}
-
-static void handle_get_server_info(McpToolRequest *req)
-{
-	json_t *info = json_object();
-	json_object_set_new(info, "status", json_string("running"));
-	json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state."));
-
-	// Mission context (if loaded)
-	if (Mission_filename[0] != '\0') {
-		SCP_string full_name;
-		sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-		json_object_set_new(info, "mission_filename", json_string(full_name.c_str()));
-		json_object_set_new(info, "mission_title", json_string(The_mission.name));
-	}
-
-	// Mod context (if available)
-	set_optional_string(info, "mod_title", Mod_title.c_str(), true);
-	set_optional_string(info, "mod_version", Mod_version.c_str(), true);
-	json_object_set_new(info, "supports_unicode", json_boolean(Unicode_text_mode));
-
-	req->result_json = make_json_tool_result(info);
-	req->success = true;
-}
-
 static void handle_get_ui_status(McpToolRequest *req)
 {
 	SCP_string buf;
@@ -185,6 +185,11 @@ void mcp_register_app_tools(json_t *tools)
 		"Returns information about the running FRED2 instance, including whether Unicode is supported, and the currently loaded mission and active mod if applicable",
 		nullptr);
 
+	// new_mission
+	register_tool(tools, "new_mission",
+		"Create a new empty mission, replacing any currently loaded mission",
+		nullptr);
+
 	// load_mission
 	register_tool_with_required_string(tools, "load_mission",
 		"Load a mission file into FRED2",
@@ -194,11 +199,6 @@ void mcp_register_app_tools(json_t *tools)
 	register_tool_with_required_string(tools, "save_mission",
 		"Save the current mission in standard (.fs2) format",
 		"filepath", "Absolute path to save the mission file to");
-
-	// new_mission
-	register_tool(tools, "new_mission",
-		"Create a new empty mission, replacing any currently loaded mission",
-		nullptr);
 
 	// get_ui_status
 	register_tool(tools, "get_ui_status",
@@ -261,10 +261,10 @@ json_t *mcp_route_app_tool(const char *tool_name, json_t *params)
 	// require FRED2 to be fully initialized.
 	bool is_app_tool =
 		strcmp(tool_name, "get_server_info") == 0 ||
-		strcmp(tool_name, "get_ui_status") == 0 ||
+		strcmp(tool_name, "new_mission") == 0 ||
 		strcmp(tool_name, "load_mission") == 0 ||
 		strcmp(tool_name, "save_mission") == 0 ||
-		strcmp(tool_name, "new_mission") == 0;
+		strcmp(tool_name, "get_ui_status") == 0;
 
 	if (!is_app_tool)
 		return nullptr;
