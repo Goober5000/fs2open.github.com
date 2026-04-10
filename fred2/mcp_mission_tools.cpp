@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "mcp_mission_tools.h"
+#include "mcp_mission_info.h"
 #include "mcpserver.h"
 #include "mcp_json.h"
 #include "mcp_array_utils.h"
@@ -348,7 +349,7 @@ static constexpr size_t sexp_var_flag_entries_count = sizeof(sexp_var_flag_entri
 // Autosave helper
 // ---------------------------------------------------------------------------
 
-static void mark_modified(const char *fmt, ...)
+void mark_modified(const char *fmt, ...)
 {
 	set_modified();
 	if (FREDDoc_ptr) {
@@ -4919,6 +4920,7 @@ static const char *mission_tool_names[] = {
 	"create_sexp_variable",
 	"update_sexp_variable",
 	"delete_sexp_variable",
+	"update_mission_info",
 	nullptr
 };
 
@@ -6206,6 +6208,8 @@ void mcp_register_mission_tools(json_t *tools)
 			"is referenced in any SEXP expressions.",
 			props, req);
 	}
+
+	mcp_register_mission_info_tools(tools);
 }
 
 // ---------------------------------------------------------------------------
@@ -6375,6 +6379,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_update_sexp_variable(input_json, req);
 	} else if (strcmp(tool_name, "delete_sexp_variable") == 0) {
 		handle_delete_sexp_variable(input_json, req);
+	} else if (mcp_handle_mission_info_tool(tool_name, input_json, req)) {
+		// handled by mission-info unit
 	} else {
 		McpErrorSink sink(req);
 		sink.set_error("Unknown mission tool: %s", tool_name);
