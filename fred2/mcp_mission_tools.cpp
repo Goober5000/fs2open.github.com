@@ -4920,6 +4920,7 @@ static const char *mission_tool_names[] = {
 	"create_sexp_variable",
 	"update_sexp_variable",
 	"delete_sexp_variable",
+	"get_mission_info",
 	"update_mission_info",
 	nullptr
 };
