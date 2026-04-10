@@ -30,22 +30,19 @@
 
 #include "mcpserver.h"
 #include "mcp_mission_tools.h"
+#include "mcp_mission_info.h"
 #include "mcp_sexp_forest.h"
 #include "mod_table/mod_table.h"
 #include "management.h"
 #include "ship/ship.h"
 #include "fredrender.h"
 #include "mission/missionparse.h"
-#include "mission/missionmessage.h"
 #include "missioneditor/missionsave.h"
 #include "eventeditor.h"
 #include "missiongoalsdlg.h"
 #include "missioncutscenesdlg.h"
 #include "cmdbrief.h"
 #include "FictionViewerDlg.h"
-#include "ai/ai.h"
-#include "ai/ai_profiles.h"
-#include "sound/ds.h"
 
 #ifdef _DEBUG
 #undef THIS_FILE
@@ -950,132 +947,7 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	case McpToolId::GET_MISSION_INFO:
 		{
-			json_t *info = json_object();
-
-			// Full filename with extension
-			if (Mission_filename[0] != '\0') {
-				SCP_string full_name;
-				sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-				json_object_set_new(info, "filename", json_string(full_name.c_str()));
-			} else {
-				json_object_set_new(info, "filename", json_string(""));
-			}
-
-			json_object_set_new(info, "title", json_string(The_mission.name));
-			json_object_set_new(info, "author", json_string(The_mission.author.c_str()));
-			json_object_set_new(info, "created", json_string(The_mission.created));
-			json_object_set_new(info, "modified", json_string(The_mission.modified));
-			json_object_set_new(info, "notes", json_string(The_mission.notes));
-			json_object_set_new(info, "mission_desc", json_string(The_mission.mission_desc));
-
-			// Game type as human-readable string
-			{
-				const char *type_str = "unknown";
-				int gt = The_mission.game_type;
-				if (gt & MISSION_TYPE_MULTI_DOGFIGHT)
-					type_str = "multiplayer dogfight";
-				else if (gt & MISSION_TYPE_MULTI_TEAMS)
-					type_str = "multiplayer team-versus-team";
-				else if (gt & MISSION_TYPE_MULTI_COOP)
-					type_str = "multiplayer co-op";
-				else if (gt & MISSION_TYPE_TRAINING)
-					type_str = "single-player training";
-				else if (gt & MISSION_TYPE_SINGLE)
-					type_str = "single-player";
-				json_object_set_new(info, "game_type", json_string(type_str));
-			}
-
-			// Respawn settings
-			json_object_set_new(info, "respawns", json_integer((int)The_mission.num_respawns));
-			json_object_set_new(info, "max_respawn_delay", json_integer(The_mission.max_respawn_delay));
-
-			// Mission flags
-			{
-				json_t *flags_obj = json_object();
-				for (size_t i = 0; i < Num_parse_mission_flags; i++) {
-					if (!Parse_mission_flags[i].in_use)
-						continue;
-					bool is_set = The_mission.flags[Parse_mission_flags[i].def];
-					json_object_set_new(flags_obj, Parse_mission_flags[i].name, json_boolean(is_set));
-				}
-				json_object_set_new(info, "mission_flags", flags_obj);
-			}
-			json_object_set_new(info, "all_teams_at_war", json_boolean(Mission_all_attack != 0));
-
-			// Support ships
-			{
-				json_t *support = json_object();
-				json_object_set_new(support, "disallowed",
-					json_boolean(The_mission.support_ships.max_support_ships == 0));
-				json_object_set_new(support, "max_hull_repair",
-					json_real(The_mission.support_ships.max_hull_repair_val));
-				json_object_set_new(support, "max_subsys_repair",
-					json_real(The_mission.support_ships.max_subsys_repair_val));
-				json_object_set_new(info, "support_ships", support);
-			}
-
-			// Contrail threshold
-			json_object_set_new(info, "contrail_threshold", json_integer(The_mission.contrail_threshold));
-
-			// Command messages
-			json_object_set_new(info, "command_sender", json_string(The_mission.command_sender));
-			if (The_mission.command_persona >= 0 && The_mission.command_persona < (int)Personas.size())
-				json_object_set_new(info, "command_persona", json_string(Personas[The_mission.command_persona].name));
-			else
-				json_object_set_new(info, "command_persona", json_null());
-
-			// Loading screens
-			set_optional_string(info, "loading_screen_640", The_mission.loading_screen[GR_640], true);
-			set_optional_string(info, "loading_screen_1024", The_mission.loading_screen[GR_1024], true);
-
-			// Squadron
-			set_optional_string(info, "squadron_name", The_mission.squad_name, true);
-			set_optional_string(info, "squadron_logo_filename", The_mission.squad_filename, true);
-
-			// AI profile
-			if (The_mission.ai_profile != nullptr)
-				json_object_set_new(info, "ai_profile", json_string(The_mission.ai_profile->profile_name));
-			else
-				json_object_set_new(info, "ai_profile", json_null());
-
-			// Sound environment
-			{
-				const sound_env &env = The_mission.sound_environment;
-				if (env.id >= 0 && env.id < (int)EFX_presets.size()) {
-					json_t *env_obj = json_object();
-					json_object_set_new(env_obj, "preset", json_string(EFX_presets[env.id].name.c_str()));
-					json_object_set_new(env_obj, "volume", json_real(env.volume));
-					json_object_set_new(env_obj, "damping", json_real(env.damping));
-					json_object_set_new(env_obj, "decay", json_real(env.decay));
-					json_object_set_new(info, "sound_environment", env_obj);
-				} else {
-					json_object_set_new(info, "sound_environment", json_null());
-				}
-			}
-
-			// Custom data
-			if (!The_mission.custom_data.empty()) {
-				json_t *data_obj = json_object();
-				for (const auto &kv : The_mission.custom_data) {
-					json_object_set_new(data_obj, kv.first.c_str(), json_string(kv.second.c_str()));
-				}
-				json_object_set_new(info, "custom_data", data_obj);
-			}
-
-			// Custom strings
-			if (!The_mission.custom_strings.empty()) {
-				json_t *strings_arr = json_array();
-				for (const auto &cs : The_mission.custom_strings) {
-					json_t *cs_obj = json_object();
-					json_object_set_new(cs_obj, "name", json_string(cs.name.c_str()));
-					json_object_set_new(cs_obj, "value", json_string(cs.value.c_str()));
-					json_object_set_new(cs_obj, "text", json_string(cs.text.c_str()));
-					json_array_append_new(strings_arr, cs_obj);
-				}
-				json_object_set_new(info, "custom_strings", strings_arr);
-			}
-
-			req->result_json = make_json_tool_result(info);
+			req->result_json = make_json_tool_result(build_mission_info_json());
 			req->success = true;
 		}
 		break;
