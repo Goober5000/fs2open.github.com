@@ -1706,6 +1706,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!validate(validate_dialog_for_fiction, sink)) return;
 
 	auto story = get_required_filename(input, "story_filename", sink, MAX_FILENAME_LEN - 1);
+	if (!story) return;
 
 	auto font  = get_optional_filename(input, "font_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto voice = get_optional_filename(input, "voice_filename", sink, true, MAX_FILENAME_LEN - 1);
@@ -2209,7 +2210,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 		jnp.SetDisplayName(display_name);
 	if (color_val.has_value())
 		jnp.SetAlphaColor(color_val->red, color_val->green, color_val->blue, color_val->alpha);
-	if (model_file)
+	if (model_file && model_file[0])
 		jnp.SetModel(model_file, show_polys.has_value() && *show_polys);
 	else if (show_polys.has_value() && *show_polys)
 		jnp.SetModel(JN_DEFAULT_MODEL, true);
@@ -2295,7 +2296,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	}
 
 	// Model
-	if (model_file) {
+	if (model_file && model_file[0]) {
 		jn.SetModel(model_file, show_polys.has_value() && *show_polys);
 		changed = true;
 	} else if (show_polys.has_value()) {
@@ -2536,6 +2537,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
 	auto name = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
+	if (!name) return;
 
 	auto points_opt = get_required_vec3d_array(input, "points", sink, 1);
 	if (!points_opt.has_value()) return;
@@ -3135,7 +3137,7 @@ static void handle_update_mission_music(json_t *input, McpToolRequest *req)
 	auto resolve_index = [&](const char *param, bool is_soundtrack)->std::optional<int> {
 		auto str = get_optional_string(input, param, sink, false);
 		if (!str) return std::nullopt;
-		if (!stricmp(str, "none") || !stricmp(str, "<none>")) return -1;
+		if (!str[0] || !stricmp(str, "none") || !stricmp(str, "<none>")) return -1;
 		return check_lookup(str, is_soundtrack ? event_music_get_soundtrack_index : static_cast<int(*)(const char*)>(event_music_get_spooled_music_index), param, sink);
 	};
 
