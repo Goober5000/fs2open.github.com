@@ -311,10 +311,9 @@ bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 
 const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len)
 {
-	const char *value = get_optional_string(input, param_name, sink, false, max_len);
+	auto value = get_optional_string(input, param_name, sink, max_len);
 	if (!value) {
-		if (!sink.has_error())
-			set_missing_param_error(sink, param_name);
+		set_missing_param_error(sink, param_name);
 		return nullptr;
 	}
 	if (!value[0] && disallow_empty) {
@@ -324,14 +323,17 @@ const char *get_required_string(json_t *input, const char *param_name, McpErrorS
 	return value;
 }
 
-const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, size_t max_len)
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len)
 {
-	const char *value = get_required_string(input, param_name, sink, false, max_len);
+	auto value = get_required_string(input, param_name, sink, false, max_len);
 	if (!value)
 		return nullptr;
 	if (!VALID_FNAME(value)) {
-		sink.set_error("Required parameter must be a valid file name: %s", param_name);
-		return nullptr;
+		if (disallow_invalid) {
+			sink.set_error("Required parameter must be a valid file name: %s", param_name);
+			return nullptr;
+		}
+		return "";
 	}
 	return value;
 }
@@ -341,8 +343,7 @@ std::optional<int> get_required_integer(json_t *input, const char *param_name, M
 	auto item = get_optional_integer(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -351,8 +352,7 @@ std::optional<double> get_required_double(json_t *input, const char *param_name,
 	auto item = get_optional_double(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -361,8 +361,7 @@ std::optional<float> get_required_float(json_t *input, const char *param_name, M
 	auto item = get_optional_float(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -371,23 +370,18 @@ std::optional<bool> get_required_bool(json_t *input, const char *param_name, Mcp
 	auto item = get_optional_bool(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
-const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty, size_t max_len)
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, size_t max_len)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_string(val)) {
 		auto str = json_string_value(val);
-		if (str[0] || !null_if_empty) {
-			if (max_len != SIZE_MAX) {
-				if (!check_string_length(str, max_len, param_name, sink)) {
-					return nullptr;
-				}
-			}
-			return str;
+		if (str) {
+			if (max_len == SIZE_MAX || check_string_length(str, max_len, param_name, sink))
+				return str;
 		}
 	} else if (val && !json_is_null(val)) {
 		sink.set_error("Parameter '%s' must be a string", param_name);
@@ -395,11 +389,17 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 	return nullptr;
 }
 
-const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid, size_t max_len)
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len)
 {
-	const char *value = get_optional_string(arguments, param_name, sink, true, max_len);
+	auto value = get_optional_string(arguments, param_name, sink, max_len);
+	if (!value)
+		return nullptr;
 	if (!VALID_FNAME(value)) {
-		return null_if_invalid ? nullptr : "";
+		if (disallow_invalid) {
+			sink.set_error("Optional parameter, if specified, must be a valid file name: %s", param_name);
+			return nullptr;
+		}
+		return "";
 	}
 	return value;
 }
@@ -711,8 +711,7 @@ std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, M
 	auto item = get_optional_vec3d(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -721,8 +720,7 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 	auto item = get_optional_matrix(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 
@@ -741,8 +739,7 @@ std::optional<color> get_required_color(json_t *input, const char *param_name, M
 	auto item = get_optional_color(input, param_name, sink);
 	if (item.has_value())
 		return *item;
-	if (!sink.has_error())
-		set_missing_param_error(sink, param_name);
+	set_missing_param_error(sink, param_name);
 	return std::nullopt;
 }
 

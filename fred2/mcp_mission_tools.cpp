@@ -200,7 +200,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	// Determine range based on "source" parameter
-	const char *source = get_optional_string(input, "source", sink, true);
+	auto source = get_optional_string(input, "source", sink);
 	if (sink.has_error()) return;
 
 	if (source && !check_string_enum(source, message_enum_values, "source", sink))
@@ -228,7 +228,7 @@ static void handle_list_messages(json_t *input, McpToolRequest *req)
 static void handle_get_message(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	// Find the message
@@ -258,10 +258,10 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	auto message = get_required_string(input, "message", sink, false, MESSAGE_LENGTH - 1);
 	if (!message) return;
 
-	auto persona_str  = get_optional_string(input, "persona", sink, false);
+	auto persona_str  = get_optional_string(input, "persona", sink);
 	auto talking_head = get_optional_filename(input, "talking_head", sink, false);
 	auto voice_file   = get_optional_filename(input, "voice_filename", sink, false);
-	auto team_str     = get_optional_string(input, "team", sink, true);
+	auto team_str     = get_optional_string(input, "team", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
@@ -342,12 +342,12 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg      = get_optional_string(input, "message", sink, false, MESSAGE_LENGTH - 1);
-	auto persona_str  = get_optional_string(input, "persona", sink, false);
+	auto new_msg      = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
+	auto persona_str  = get_optional_string(input, "persona", sink);
 	auto new_head     = get_optional_filename(input, "talking_head", sink, false);
 	auto new_voice    = get_optional_filename(input, "voice_filename", sink, false);
-	auto new_team_str = get_optional_string(input, "team", sink, true);
-	auto new_name     = get_optional_string(input, "new_name", sink, false);
+	auto new_team_str = get_optional_string(input, "team", sink);
+	auto new_name     = get_optional_string(input, "new_name", sink);
 	if (sink.has_error()) return;
 
 	std::optional<int> persona_index = std::nullopt;
@@ -610,7 +610,7 @@ static void handle_get_event(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
@@ -647,7 +647,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	auto trigger_count = get_optional_integer(input, "trigger_count", sink);
 	auto interval      = get_optional_integer(input, "interval", sink);
 
-	auto units = get_optional_string(input, "chain_and_interval_units", sink, true);
+	auto units = get_optional_string(input, "chain_and_interval_units", sink);
 	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
@@ -662,7 +662,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Team
-	auto team_str = get_optional_string(input, "team", sink, true);
+	auto team_str = get_optional_string(input, "team", sink);
 	int multi_team = -1;
 	if (team_str) {
 		if (!check_string_enum(team_str, team_enum_values, "team", sink))
@@ -670,8 +670,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		multi_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text = get_optional_string(input, "objective_text", sink, false);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
+	auto objective_text = get_optional_string(input, "objective_text", sink);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink);
 	if (sink.has_error()) return;
 
 	// Range validation
@@ -766,7 +766,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	mission_event &evt = Mission_events[idx];
 
 	// Validate new_name
-	auto new_name      = get_optional_string(input, "new_name", sink, false);
+	auto new_name      = get_optional_string(input, "new_name", sink);
 	if (new_name) {
 		if (!check_general_rename(new_name, evt.name.c_str(),
 			[](const char *n) { return find_item_with_string(Mission_events, &mission_event::name, n) >= 0; },
@@ -781,7 +781,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto trigger_count = get_optional_integer(input, "trigger_count", sink);
 	auto interval      = get_optional_integer(input, "interval", sink);
 
-	auto units = get_optional_string(input, "chain_and_interval_units", sink, true);
+	auto units = get_optional_string(input, "chain_and_interval_units", sink);
 	if (units && !check_string_enum(units, event_unit_enum_values, "chain_and_interval_units", sink))
 		return;
 
@@ -793,7 +793,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Team
-	auto team_str = get_optional_string(input, "team", sink, true);
+	auto team_str = get_optional_string(input, "team", sink);
 	std::optional<int> new_team = std::nullopt;
 	if (team_str) {
 		if (!check_string_enum(team_str, team_enum_values, "team", sink))
@@ -801,8 +801,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text     = get_optional_string(input, "objective_text", sink, false);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, false);
+	auto objective_text     = get_optional_string(input, "objective_text", sink);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink);
 	if (sink.has_error()) return;
 
 	// Range validation
@@ -1098,7 +1098,7 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto team_str = get_optional_string(input, "team", sink, true);
+	auto team_str = get_optional_string(input, "team", sink);
 	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
 
@@ -1218,7 +1218,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink, false);
+	auto new_text = get_optional_string(input, "text", sink);
 	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	if (sink.has_error()) return;
@@ -1374,7 +1374,7 @@ static void handle_get_goal(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
@@ -1404,12 +1404,12 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	auto insert_index = get_optional_integer(input, "index", sink);
 
 	// Optional parameters
-	auto type_str   = get_optional_string(input, "goal_type", sink, true);
+	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink, false);
+	auto message    = get_optional_string(input, "message", sink);
 	auto score      = get_optional_integer(input, "score", sink);
-	auto team_str   = get_optional_string(input, "team", sink, true);
+	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
 	auto no_music   = get_optional_bool(input, "no_music", sink);
 	if (sink.has_error()) return;
@@ -1453,7 +1453,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	goal.team = team;
 	goal.flags = 0;
 
-	if (message && message[0])
+	if (message)
 		goal.message = message;
 
 	if (invalid.has_value() && *invalid)
@@ -1489,7 +1489,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	mission_goal &goal = Mission_goals[idx];
 
 	// Validate new_name
-	auto new_name = get_optional_string(input, "new_name", sink, false);
+	auto new_name = get_optional_string(input, "new_name", sink);
 	if (new_name) {
 		if (!check_general_rename(new_name, goal.name.c_str(),
 			[](const char *n) { return find_item_with_string(Mission_goals, &mission_goal::name, n) >= 0; },
@@ -1497,12 +1497,12 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	}
 
 	// Extract optional fields
-	auto type_str   = get_optional_string(input, "goal_type", sink, true);
+	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink, false);
+	auto message    = get_optional_string(input, "message", sink);
 	auto score      = get_optional_integer(input, "score", sink);
-	auto team_str   = get_optional_string(input, "team", sink, true);
+	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
 	auto no_music   = get_optional_bool(input, "no_music", sink);
 	if (sink.has_error()) return;
@@ -1705,14 +1705,14 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto story = get_required_filename(input, "story_filename", sink, MAX_FILENAME_LEN - 1);
+	auto story = get_required_filename(input, "story_filename", sink, true, MAX_FILENAME_LEN - 1);
 	if (!story) return;
 
-	auto font  = get_optional_filename(input, "font_filename", sink, true, MAX_FILENAME_LEN - 1);
-	auto voice = get_optional_filename(input, "voice_filename", sink, true, MAX_FILENAME_LEN - 1);
-	auto ui    = get_optional_string(input, "ui_name", sink, true);
-	auto bg640 = get_optional_filename(input, "background_640", sink, true, MAX_FILENAME_LEN - 1);
-	auto bg1024 = get_optional_filename(input, "background_1024", sink, true, MAX_FILENAME_LEN - 1);
+	auto font  = get_optional_filename(input, "font_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto ui    = get_optional_string(input, "ui_name", sink);
+	auto bg640 = get_optional_filename(input, "background_640", sink, false, MAX_FILENAME_LEN - 1);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, false, MAX_FILENAME_LEN - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -1732,11 +1732,11 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	fiction_viewer_stage stage;
 	memset(&stage, 0, sizeof(fiction_viewer_stage));
 	strcpy_s(stage.story_filename, story);
-	if (font)  strcpy_s(stage.font_filename, font);
-	if (voice) strcpy_s(stage.voice_filename, voice);
-	if (ui)    strcpy_s(stage.ui_name, ui);
-	if (bg640) strcpy_s(stage.background[0], bg640);
-	if (bg1024) strcpy_s(stage.background[1], bg1024);
+	if (font && font[0])  strcpy_s(stage.font_filename, font);
+	if (voice && voice[0]) strcpy_s(stage.voice_filename, voice);
+	if (ui && ui[0])    strcpy_s(stage.ui_name, ui);
+	if (bg640 && bg640[0]) strcpy_s(stage.background[0], bg640);
+	if (bg1024 && bg1024[0]) strcpy_s(stage.background[1], bg1024);
 
 	if (formula.has_value()) {
 		stage.formula = *formula;
@@ -1762,10 +1762,10 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
-	auto new_story = get_optional_filename(input, "story_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_story = get_optional_filename(input, "story_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto new_font  = get_optional_filename(input, "font_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_ui    = get_optional_string(input, "ui_name", sink, false);
+	auto new_ui    = get_optional_string(input, "ui_name", sink);
 	auto new_bg640 = get_optional_filename(input, "background_640", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
@@ -1885,7 +1885,7 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto team_str = get_optional_string(input, "team", sink, true);
+	auto team_str = get_optional_string(input, "team", sink);
 	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
 
@@ -1959,7 +1959,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!text) return;
 
 	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto rec_text = get_optional_string(input, "recommendation_text", sink, false);
+	auto rec_text = get_optional_string(input, "recommendation_text", sink);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -2009,9 +2009,9 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink, false);
+	auto new_text = get_optional_string(input, "text", sink);
 	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, false);
+	auto new_rec_text = get_optional_string(input, "recommendation_text", sink);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
@@ -2156,7 +2156,7 @@ static void handle_get_jump_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int index = jumpnode_lookup(name);
@@ -2180,9 +2180,9 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
-	auto display_name = get_optional_string(input, "display_name", sink, false, NAME_LENGTH - 1);
+	auto display_name = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -2210,7 +2210,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 		jnp.SetDisplayName(display_name);
 	if (color_val.has_value())
 		jnp.SetAlphaColor(color_val->red, color_val->green, color_val->blue, color_val->alpha);
-	if (model_file && model_file[0])
+	if (model_file)
 		jnp.SetModel(model_file, show_polys.has_value() && *show_polys);
 	else if (show_polys.has_value() && *show_polys)
 		jnp.SetModel(JN_DEFAULT_MODEL, true);
@@ -2232,14 +2232,14 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	auto new_name     = get_optional_string(input, "new_name", sink, true, NAME_LENGTH - 1);
+	auto new_name     = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	auto new_pos      = get_optional_vec3d(input, "position", sink);
-	auto display_name = get_optional_string(input, "display_name", sink, false, NAME_LENGTH - 1);
+	auto display_name = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	if (sink.has_error()) return;
@@ -2273,7 +2273,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 
 	// Display name
 	if (display_name) {
-		if (display_name[0] == '\0') {
+		if (!display_name[0]) {
 			// Empty string clears display name
 			if (jn.HasDisplayName()) {
 				jn.SetDisplayName("");
@@ -2296,7 +2296,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	}
 
 	// Model
-	if (model_file && model_file[0]) {
+	if (model_file) {
 		jn.SetModel(model_file, show_polys.has_value() && *show_polys);
 		changed = true;
 	} else if (show_polys.has_value()) {
@@ -2330,7 +2330,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	// Find the jump node
@@ -2469,7 +2469,7 @@ static void handle_get_waypoint_list(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	int index = find_matching_waypoint_list_index(name);
@@ -2591,10 +2591,10 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	auto new_name = get_optional_string(input, "new_name", sink, true, NAME_LENGTH - 1);
+	auto new_name = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	// Find the waypoint list
@@ -2639,7 +2639,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	const char *name = get_required_string(input, "name", sink, false);
+	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
 	// Find the waypoint list
@@ -2755,7 +2755,7 @@ static void handle_create_waypoint(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", sink, false);
+	auto list = get_required_string(input, "list", sink, true);
 	if (!list) return;
 
 	auto pos = get_required_vec3d(input, "position", sink);
@@ -2819,7 +2819,7 @@ static void handle_update_waypoint(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", sink, false);
+	auto list = get_required_string(input, "list", sink, true);
 	if (!list) return;
 
 	auto wpt_index = get_required_integer(input, "index", sink);
@@ -2864,7 +2864,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto list = get_required_string(input, "list", sink, false);
+	auto list = get_required_string(input, "list", sink, true);
 	if (!list) return;
 
 	auto wpt_index = get_required_integer(input, "index", sink);
@@ -2954,7 +2954,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 static void do_waypoint_move(int li, int from, int to)
 {
 	auto &wl = Waypoint_lists[li];
-	const char *list_name = wl.get_name();
+	auto list_name = wl.get_name();
 	auto &wpts = wl.get_waypoints();
 
 	int lo = std::min(from, to);
@@ -3002,7 +3002,7 @@ static void do_waypoint_move(int li, int from, int to)
 static void do_waypoint_swap(int li, int a, int b)
 {
 	auto &wl = Waypoint_lists[li];
-	const char *list_name = wl.get_name();
+	auto list_name = wl.get_name();
 	auto &wpts = wl.get_waypoints();
 
 	// Step 1: Rename both SEXP refs to temp names
@@ -3055,7 +3055,7 @@ static MoveSwapConfig make_waypoint_move_swap_config(int waypoint_list_index)
 static void handle_move_waypoint(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto list = get_required_string(input, "list", sink, false);
+	auto list = get_required_string(input, "list", sink, true);
 	if (!list) return;
 
 	int li = find_matching_waypoint_list_index(list);
@@ -3071,7 +3071,7 @@ static void handle_move_waypoint(json_t *input, McpToolRequest *req)
 static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto list = get_required_string(input, "list", sink, false);
+	auto list = get_required_string(input, "list", sink, true);
 	if (!list) return;
 
 	int li = find_matching_waypoint_list_index(list);
@@ -3135,7 +3135,7 @@ static void handle_update_mission_music(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 
 	auto resolve_index = [&](const char *param, bool is_soundtrack)->std::optional<int> {
-		auto str = get_optional_string(input, param, sink, false);
+		auto str = get_optional_string(input, param, sink);
 		if (!str) return std::nullopt;
 		if (!str[0] || !stricmp(str, "none") || !stricmp(str, "<none>")) return -1;
 		return check_lookup(str, is_soundtrack ? event_music_get_soundtrack_index : static_cast<int(*)(const char*)>(event_music_get_spooled_music_index), param, sink);
@@ -3147,8 +3147,8 @@ static void handle_update_mission_music(json_t *input, McpToolRequest *req)
 	auto new_debriefing_failure = resolve_index("debriefing_failure_music", false);
 	auto new_fiction            = resolve_index("fiction_viewer_music", false);
 	auto new_event              = resolve_index("event_music", true);
-	auto new_sub_briefing       = get_optional_string(input, "substitute_briefing_music", sink, false, NAME_LENGTH - 1);
-	auto new_sub_event          = get_optional_string(input, "substitute_event_music", sink, false, NAME_LENGTH - 1);
+	auto new_sub_briefing       = get_optional_string(input, "substitute_briefing_music", sink, NAME_LENGTH - 1);
+	auto new_sub_event          = get_optional_string(input, "substitute_event_music", sink, NAME_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	bool changed = false;
