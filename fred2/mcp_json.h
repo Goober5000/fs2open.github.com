@@ -103,11 +103,11 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 
 // Extracts a required string parameter from input JSON. Returns nullptr and
 // reports an error via sink if the parameter is missing, or empty and disallowed.
-const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty);
+const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len = std::string::npos);
 
 // Extracts a required string parameter (which represents a filename) from input JSON.
 // Returns nullptr and reports an error via sink if VALID_FNAME fails.
-const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink);
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, size_t max_len = std::string::npos);
 
 // Extracts required typed parameters from input JSON.
 // Returns std::nullopt and reports an error via sink if the parameter is missing or the wrong type.
@@ -121,11 +121,11 @@ std::optional<color> get_required_color(json_t *input, const char *param_name, M
 
 // Extracts an optional string parameter from arguments JSON.
 // Returns nullptr if the parameter is missing; reports a type error via sink if present but not a string.
-const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty);
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty, size_t max_len = std::string::npos);
 
 // Extracts an optional string parameter (that represents a filename) from arguments JSON.
 // If the string doesn't satisfy VALID_FNAME, it returns null or empty, depending on null_if_invalid.
-const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid);
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid, size_t max_len = std::string::npos);
 
 // Extracts optional typed parameters from arguments JSON.
 // Returns std::nullopt if the parameter is missing; reports a type error via sink if present but the wrong type.
