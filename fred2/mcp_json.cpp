@@ -15,6 +15,10 @@ bool McpErrorSink::has_error() const
 
 void McpErrorSink::set_error(const char *fmt, ...)
 {
+	// always keep the first error
+	if (m_has_error)
+		return;
+
 	m_has_error = true;
 
 	va_list args;
@@ -378,7 +382,7 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 	if (val && json_is_string(val)) {
 		auto str = json_string_value(val);
 		if (str[0] || !null_if_empty) {
-			if (max_len != std::string::npos) {
+			if (max_len != SIZE_MAX) {
 				if (!check_string_length(str, max_len, param_name, sink)) {
 					return nullptr;
 				}
