@@ -20,6 +20,7 @@
 
 #include "globalincs/utility.h"
 
+#include "gamesnd/eventmusic.h"
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
 #include "missionui/missioncmdbrief.h"
@@ -3083,6 +3084,115 @@ static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
 
 
 // ---------------------------------------------------------------------------
+// Mission music tool handlers
+// ---------------------------------------------------------------------------
+
+static json_t *build_mission_music_json()
+{
+	json_t *m = json_object();
+
+	// Mission menu music
+	struct { const char *key; int score; } scores[] = {
+		{ "briefing_music",           SCORE_BRIEFING           },
+		{ "debriefing_success_music", SCORE_DEBRIEFING_SUCCESS },
+		{ "debriefing_average_music", SCORE_DEBRIEFING_AVERAGE },
+		{ "debriefing_failure_music", SCORE_DEBRIEFING_FAILURE },
+		{ "fiction_viewer_music",     SCORE_FICTION_VIEWER     },
+	};
+	for (auto &s : scores) {
+		int idx = Mission_music[s.score];
+		json_object_set_new(m, s.key, json_string(Spooled_music.in_bounds(idx) ? Spooled_music[idx].name : "None"));
+	}
+
+	// Event music
+	json_object_set_new(m, "event_music", json_string(Soundtracks.in_bounds(Current_soundtrack_num) ? Soundtracks[Current_soundtrack_num].name : "None"));
+
+	// Substitute music
+	struct { const char *key; const char *ref; } substitutes[] = {
+		{ "substitute_briefing_music", The_mission.substitute_briefing_music_name },
+		{ "substitute_event_music",    The_mission.substitute_event_music_name    },
+	};
+	for (auto &s : substitutes) {
+		if (s.ref[0] && stricmp(s.ref, "None") != 0)
+			json_object_set_new(m, s.key, json_string(s.ref));
+		else
+			json_object_set_new(m, s.key, json_string("None"));
+	}
+
+	return m;
+}
+
+static void handle_get_mission_music(json_t * /*input*/, McpToolRequest *req)
+{
+	req->result_json = make_json_tool_result(build_mission_music_json());
+	req->success = true;
+}
+
+static void handle_update_mission_music(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+
+	auto resolve_index = [&](const char *param, bool is_soundtrack)->std::optional<int> {
+		auto str = get_optional_string(input, param, sink, false);
+		if (!str) return std::nullopt;
+		if (!stricmp(str, "none") || !stricmp(str, "<none>")) return -1;
+		return check_lookup(str, is_soundtrack ? event_music_get_soundtrack_index : static_cast<int(*)(const char*)>(event_music_get_spooled_music_index), param, sink);
+	};
+
+	auto new_briefing           = resolve_index("briefing_music", false);
+	auto new_debriefing_success = resolve_index("debriefing_success_music", false);
+	auto new_debriefing_average = resolve_index("debriefing_average_music", false);
+	auto new_debriefing_failure = resolve_index("debriefing_failure_music", false);
+	auto new_fiction            = resolve_index("fiction_viewer_music", false);
+	auto new_event              = resolve_index("event_music", true);
+	auto new_sub_briefing       = get_optional_string(input, "substitute_briefing_music", sink, false, NAME_LENGTH - 1);
+	auto new_sub_event          = get_optional_string(input, "substitute_event_music", sink, false, NAME_LENGTH - 1);
+	if (sink.has_error()) return;
+
+	bool changed = false;
+
+	if (new_briefing.has_value() && Mission_music[SCORE_BRIEFING] != *new_briefing) {
+		Mission_music[SCORE_BRIEFING] = *new_briefing;
+		changed = true;
+	}
+	if (new_debriefing_success.has_value() && Mission_music[SCORE_DEBRIEFING_SUCCESS] != *new_debriefing_success) {
+		Mission_music[SCORE_DEBRIEFING_SUCCESS] = *new_debriefing_success;
+		changed = true;
+	}
+	if (new_debriefing_average.has_value() && Mission_music[SCORE_DEBRIEFING_AVERAGE] != *new_debriefing_average) {
+		Mission_music[SCORE_DEBRIEFING_AVERAGE] = *new_debriefing_average;
+		changed = true;
+	}
+	if (new_debriefing_failure.has_value() && Mission_music[SCORE_DEBRIEFING_FAILURE] != *new_debriefing_failure) {
+		Mission_music[SCORE_DEBRIEFING_FAILURE] = *new_debriefing_failure;
+		changed = true;
+	}
+	if (new_fiction.has_value() && Mission_music[SCORE_FICTION_VIEWER] != *new_fiction) {
+		Mission_music[SCORE_FICTION_VIEWER] = *new_fiction;
+		changed = true;
+	}
+	if (new_event.has_value() && Current_soundtrack_num != *new_event) {
+		Current_soundtrack_num = *new_event;
+		changed = true;
+	}
+	if (new_sub_briefing && strcmp(The_mission.substitute_briefing_music_name, new_sub_briefing) != 0) {
+		strcpy_s(The_mission.substitute_briefing_music_name, new_sub_briefing);
+		changed = true;
+	}
+	if (new_sub_event && strcmp(The_mission.substitute_event_music_name, new_sub_event) != 0) {
+		strcpy_s(The_mission.substitute_event_music_name, new_sub_event);
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update mission music");
+
+	req->result_json = make_json_tool_result(build_mission_music_json());
+	req->success = true;
+}
+
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -3163,6 +3273,8 @@ static const char *mission_tool_names[] = {
 	"delete_sexp_variable",
 	"get_mission_info",
 	"update_mission_info",
+	"get_mission_music",
+	"update_mission_music",
 	nullptr
 };
 
@@ -4186,6 +4298,38 @@ void mcp_register_mission_tools(json_t *tools)
 			props, req);
 	}
 
+	// get_mission_music
+	register_tool(tools, "get_mission_music",
+		"Returns all mission music assignments: event music, briefing music, debriefing music "
+		"(success/average/failure), fiction viewer music, and the substitute event/briefing music "
+		"fields used for FS1 compatibility. Each field is a music name or \"None\" if unset.",
+		nullptr);
+
+	// update_mission_music
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "event_music",
+			"Event music soundtrack name. Use list_soundtracks to see valid names. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "substitute_event_music",
+			"Alternate event music soundtrack used at mission load if available (FS1 compatibility). Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "briefing_music",
+			"Briefing music name. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "substitute_briefing_music",
+			"Alternate briefing music used at mission load if available. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "debriefing_success_music",
+			"Music for the success debriefing outcome. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "debriefing_average_music",
+			"Music for the average debriefing outcome. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "debriefing_failure_music",
+			"Music for the failure debriefing outcome. Pass an empty string or \"None\" to clear.");
+		add_string_prop(props, "fiction_viewer_music",
+			"Music played during the fiction viewer for this mission. Pass an empty string or \"None\" to clear.");
+		register_tool(tools, "update_mission_music",
+			"Update one or more mission music assignments. All parameters are optional; "
+			"only provided fields are changed. Returns the full updated music state.",
+			props);
+	}
+
 	mcp_register_sexp_tools(tools);
 
 	mcp_register_mission_info_tools(tools);
@@ -4332,6 +4476,10 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_move_waypoint(input_json, req);
 	} else if (strcmp(tool_name, "swap_waypoints") == 0) {
 		handle_swap_waypoints(input_json, req);
+	} else if (strcmp(tool_name, "get_mission_music") == 0) {
+		handle_get_mission_music(input_json, req);
+	} else if (strcmp(tool_name, "update_mission_music") == 0) {
+		handle_update_mission_music(input_json, req);
 	} else if (mcp_handle_sexp_tool(tool_name, input_json, req)) {
 		// handled by SEXP unit
 	} else if (mcp_handle_mission_info_tool(tool_name, input_json, req)) {
