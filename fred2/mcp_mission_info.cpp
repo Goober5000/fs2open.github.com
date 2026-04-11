@@ -139,12 +139,12 @@ json_t *build_mission_info_json()
 		json_object_set_new(info, "command_persona", json_null());
 
 	// Loading screens
-	set_optional_string(info, "loading_screen_640", The_mission.loading_screen[GR_640], true);
-	set_optional_string(info, "loading_screen_1024", The_mission.loading_screen[GR_1024], true);
+	set_optional_filename(info, "loading_screen_640", The_mission.loading_screen[GR_640]);
+	set_optional_filename(info, "loading_screen_1024", The_mission.loading_screen[GR_1024]);
 
 	// Squadron
 	set_optional_string(info, "squadron_name", The_mission.squad_name, true);
-	set_optional_string(info, "squadron_logo_filename", The_mission.squad_filename, true);
+	set_optional_filename(info, "squadron_logo_filename", The_mission.squad_filename);
 
 	// AI profile
 	if (The_mission.ai_profile != nullptr)
@@ -214,34 +214,24 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		return;
 
 	// --- Phase 1: extract and validate all fields (no mutations yet) ---
-	auto title             = get_optional_string(input, "title", sink, false);
+	auto title             = get_optional_string(input, "title", sink, false, NAME_LENGTH - 1);
 	auto author            = get_optional_string(input, "author", sink, false);
-	auto notes             = get_optional_string(input, "notes", sink, false);
-	auto mission_desc      = get_optional_string(input, "mission_desc", sink, false);
+	auto notes             = get_optional_string(input, "notes", sink, false, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
+	auto mission_desc      = get_optional_string(input, "mission_desc", sink, false, MISSION_DESC_LENGTH - 1);
 	auto game_type_str     = get_optional_string(input, "game_type", sink, false);
 	auto respawns_opt      = get_optional_integer(input, "respawns", sink);
 	auto max_delay_opt     = get_optional_integer(input, "max_respawn_delay", sink);
 	auto contrail_opt      = get_optional_integer(input, "contrail_threshold", sink);
 	auto all_war_opt       = get_optional_bool(input, "all_teams_at_war", sink);
-	auto command_sender    = get_optional_string(input, "command_sender", sink, false);
+	auto command_sender    = get_optional_string(input, "command_sender", sink, false, NAME_LENGTH - 1);
 	auto command_persona   = get_optional_string(input, "command_persona", sink, false);
-	auto squadron_name     = get_optional_string(input, "squadron_name", sink, false);
-	auto squadron_logo     = get_optional_string(input, "squadron_logo_filename", sink, false);
-	auto loading_640       = get_optional_string(input, "loading_screen_640", sink, false);
-	auto loading_1024      = get_optional_string(input, "loading_screen_1024", sink, false);
+	auto squadron_name     = get_optional_string(input, "squadron_name", sink, false, NAME_LENGTH - 1);
+	auto squadron_logo     = get_optional_filename(input, "squadron_logo_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto loading_640       = get_optional_filename(input, "loading_screen_640", sink, false, MAX_FILENAME_LEN - 1);
+	auto loading_1024      = get_optional_filename(input, "loading_screen_1024", sink, false, MAX_FILENAME_LEN - 1);
 	auto ai_profile_str    = get_optional_string(input, "ai_profile", sink, false);
 
 	if (sink.has_error()) return;
-
-	// Length checks for bounded char arrays
-	if (title && !check_string_length(title, NAME_LENGTH - 1, "title", sink)) return;
-	if (notes && !check_string_length(notes, NOTES_LENGTH - 2, "notes", sink)) return;  // -2 to leave room for pad_with_newline
-	if (mission_desc && !check_string_length(mission_desc, MISSION_DESC_LENGTH - 1, "mission_desc", sink)) return;
-	if (command_sender && !check_string_length(command_sender, NAME_LENGTH - 1, "command_sender", sink)) return;
-	if (squadron_name && !check_string_length(squadron_name, NAME_LENGTH - 1, "squadron_name", sink)) return;
-	if (squadron_logo && !check_string_length(squadron_logo, MAX_FILENAME_LEN - 1, "squadron_logo_filename", sink)) return;
-	if (loading_640 && !check_string_length(loading_640, MAX_FILENAME_LEN - 1, "loading_screen_640", sink)) return;
-	if (loading_1024 && !check_string_length(loading_1024, MAX_FILENAME_LEN - 1, "loading_screen_1024", sink)) return;
 
 	// Range checks (dialog DDV_MinMax bounds)
 	if (respawns_opt.has_value() && !check_int_range(*respawns_opt, 0, 99, "respawns", sink)) return;

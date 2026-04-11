@@ -251,11 +251,11 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_messages, sink)) return;
 
-	auto name    = get_required_string(input, "name", sink, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
+	auto name    = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
+	if (!name) return;
 
-	auto message = get_required_string(input, "message", sink, false);
-	if (!message || !check_string_length(message, MESSAGE_LENGTH - 1, "message", sink)) return;
+	auto message = get_required_string(input, "message", sink, false, MESSAGE_LENGTH - 1);
+	if (!message) return;
 
 	auto persona_str  = get_optional_string(input, "persona", sink, false);
 	auto talking_head = get_optional_filename(input, "talking_head", sink, false);
@@ -341,15 +341,13 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg      = get_optional_string(input, "message", sink, false);
+	auto new_msg      = get_optional_string(input, "message", sink, false, MESSAGE_LENGTH - 1);
 	auto persona_str  = get_optional_string(input, "persona", sink, false);
 	auto new_head     = get_optional_filename(input, "talking_head", sink, false);
 	auto new_voice    = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_team_str = get_optional_string(input, "team", sink, true);
 	auto new_name     = get_optional_string(input, "new_name", sink, false);
 	if (sink.has_error()) return;
-
-	if (new_msg && !check_string_length(new_msg, MESSAGE_LENGTH - 1, "message", sink)) return;
 
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
@@ -629,8 +627,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_events, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
+	auto name = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
+	if (!name) return;
 
 	// Check for duplicate name
 	if (find_item_with_string(Mission_events, &mission_event::name, name) >= 0) {
@@ -1172,14 +1170,10 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto ani = get_optional_filename(input, "animation_filename", sink, false);
-	auto wave = get_optional_filename(input, "voice_filename", sink, false);
+	auto ani = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
-
-	// Validate filename lengths
-	if (ani && !check_string_length(ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
-	if (wave && !check_string_length(wave, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	// Resolve insert position
 	int target;
@@ -1224,13 +1218,9 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", sink, false);
-	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false);
-	auto new_wave = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	if (sink.has_error()) return;
-
-	// Validate filename lengths
-	if (new_ani && !check_string_length(new_ani, MAX_FILENAME_LEN - 1, "animation_filename", sink)) return;
-	if (new_wave && !check_string_length(new_wave, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	cmd_brief_stage &s = cb->stage[*index - 1];
 	bool changed = false;
@@ -1401,8 +1391,8 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_goals, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
+	auto name = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
+	if (!name) return;
 
 	// Check for duplicate name
 	if (find_item_with_string(Mission_goals, &mission_goal::name, name) >= 0) {
@@ -1714,24 +1704,19 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto story = get_required_filename(input, "story_filename", sink);
-	if (!story || !check_string_length(story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
+	auto story = get_required_filename(input, "story_filename", sink, MAX_FILENAME_LEN - 1);
 
-	auto font  = get_optional_filename(input, "font_filename", sink, true);
-	auto voice = get_optional_filename(input, "voice_filename", sink, true);
+	auto font  = get_optional_filename(input, "font_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto voice = get_optional_filename(input, "voice_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto ui    = get_optional_string(input, "ui_name", sink, true);
-	auto bg640 = get_optional_filename(input, "background_640", sink, true);
-	auto bg1024 = get_optional_filename(input, "background_1024", sink, true);
+	auto bg640 = get_optional_filename(input, "background_640", sink, true, MAX_FILENAME_LEN - 1);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, true, MAX_FILENAME_LEN - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
-	if (font && !check_string_length(font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
-	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 	if (ui && !check_string_enum(ui, fiction_ui_name_values, "ui_name", sink)) return;
-	if (bg640 && !check_string_length(bg640, MAX_FILENAME_LEN - 1, "background_640", sink)) return;
-	if (bg1024 && !check_string_length(bg1024, MAX_FILENAME_LEN - 1, "background_1024", sink)) return;
 
 	int target;
 	if (!insert_index.has_value()) {
@@ -1775,27 +1760,22 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
-	auto new_story = get_optional_filename(input, "story_filename", sink, false);
-	auto new_font  = get_optional_filename(input, "font_filename", sink, false);
-	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_story = get_optional_filename(input, "story_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_font  = get_optional_filename(input, "font_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_ui    = get_optional_string(input, "ui_name", sink, false);
-	auto new_bg640 = get_optional_filename(input, "background_640", sink, false);
-	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false);
+	auto new_bg640 = get_optional_filename(input, "background_640", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
-	if (new_story && !check_string_length(new_story, MAX_FILENAME_LEN - 1, "story_filename", sink)) return;
-	if (new_font && !check_string_length(new_font, MAX_FILENAME_LEN - 1, "font_filename", sink)) return;
-	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 	if (new_ui) {
 		if (!new_ui[0])
 			new_ui = fiction_ui_name_values[0];
 		else if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", sink))
 			return;
 	}
-	if (new_bg640 && !check_string_length(new_bg640, MAX_FILENAME_LEN - 1, "background_640", sink)) return;
-	if (new_bg1024 && !check_string_length(new_bg1024, MAX_FILENAME_LEN - 1, "background_1024", sink)) return;
 
 	fiction_viewer_stage &s = Fiction_viewer_stages[*index - 1];
 	bool changed = false;
@@ -1976,14 +1956,12 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false);
 	if (!text) return;
 
-	auto voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto rec_text = get_optional_string(input, "recommendation_text", sink, false);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
-
-	if (voice && !check_string_length(voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	int target;
 	if (!insert_index.has_value()) {
@@ -2030,13 +2008,11 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", sink, false);
-	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, false);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
-
-	if (new_voice && !check_string_length(new_voice, MAX_FILENAME_LEN - 1, "voice_filename", sink)) return;
 
 	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;
@@ -2196,15 +2172,15 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_jump_nodes, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
+	auto name = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
+	if (!name) return;
 
 	auto pos = get_required_vec3d(input, "position", sink);
 	if (!pos.has_value()) return;
 
-	auto display_name = get_optional_string(input, "display_name", sink, false);
+	auto display_name = get_optional_string(input, "display_name", sink, false, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, false);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -2212,9 +2188,6 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 	// Validate name against all object types
 	if (!check_object_rename("jump node", name, sink)) return;
-
-	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
-	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", sink)) return;
 
 	// Validate insert index
 	int target_index;
@@ -2260,18 +2233,14 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	auto new_name     = get_optional_string(input, "new_name", sink, true);
+	auto new_name     = get_optional_string(input, "new_name", sink, true, NAME_LENGTH - 1);
 	auto new_pos      = get_optional_vec3d(input, "position", sink);
-	auto display_name = get_optional_string(input, "display_name", sink, false);
+	auto display_name = get_optional_string(input, "display_name", sink, false, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, false);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	if (sink.has_error()) return;
-
-	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
-	if (display_name && !check_string_length(display_name, NAME_LENGTH - 1, "display_name", sink)) return;
-	if (model_file && !check_string_length(model_file, MAX_FILENAME_LEN - 1, "model_filename", sink)) return;
 
 	// Find the jump node
 	int index = jumpnode_lookup(name);
@@ -2565,8 +2534,7 @@ static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_waypoint_lists, sink)) return;
 
-	auto name = get_required_string(input, "name", sink, true);
-	if (!name || !check_string_length(name, NAME_LENGTH - 1, "name", sink)) return;
+	auto name = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
 
 	auto points_opt = get_required_vec3d_array(input, "points", sink, 1);
 	if (!points_opt.has_value()) return;
@@ -2623,10 +2591,8 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 	const char *name = get_required_string(input, "name", sink, false);
 	if (!name) return;
 
-	auto new_name = get_optional_string(input, "new_name", sink, true);
+	auto new_name = get_optional_string(input, "new_name", sink, true, NAME_LENGTH - 1);
 	if (sink.has_error()) return;
-
-	if (new_name && !check_string_length(new_name, NAME_LENGTH - 1, "new_name", sink)) return;
 
 	// Find the waypoint list
 	int index = find_matching_waypoint_list_index(name);
