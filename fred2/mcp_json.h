@@ -101,13 +101,17 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 	return true;
 }
 
-// Extracts a required string parameter from input JSON. Returns nullptr and
-// reports an error via sink if the parameter is missing, or empty and disallowed.
+// Extracts a required string parameter from input JSON.
+// Returns nullptr and reports an error via sink if the parameter is missing, has the wrong type,
+// exceeds max_len, or (with disallow_empty=true) is the empty string.  Returns a non-null string
+// otherwise.
 const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len = SIZE_MAX);
 
 // Extracts a required string parameter (which represents a filename) from input JSON.
-// Returns nullptr and reports an error via sink if VALID_FNAME fails.
-const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, size_t max_len = SIZE_MAX);
+// Returns nullptr and reports an error via sink if the parameter is missing, has the wrong type,
+// or exceeds max_len. Returns an empty string if VALID_FNAME (empty, "none", or "<none>") is
+// false. Returns a non-null filename otherwise.
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = SIZE_MAX);
 
 // Extracts required typed parameters from input JSON.
 // Returns std::nullopt and reports an error via sink if the parameter is missing or the wrong type.
@@ -120,12 +124,15 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 std::optional<color> get_required_color(json_t *input, const char *param_name, McpErrorSink &sink);
 
 // Extracts an optional string parameter from arguments JSON.
-// Returns nullptr if the parameter is missing; reports a type error via sink if present but not a string.
-const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty, size_t max_len = SIZE_MAX);
+// Returns nullptr if the parameter is missing; returns nullptr and reports an error via sink if
+// it is JSON null, the wrong type, or exceeds max_len. Returns a non-null string otherwise.
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, size_t max_len = SIZE_MAX);
 
-// Extracts an optional string parameter (that represents a filename) from arguments JSON.
-// If the string doesn't satisfy VALID_FNAME, it returns null or empty, depending on null_if_invalid.
-const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid, size_t max_len = SIZE_MAX);
+// Extracts an optional string parameter (which represents a filename) from input JSON.
+// Returns nullptr if the parameter is missing; returns nullptr and reports an error via sink if
+// it is JSON null, the wrong type, or exceeds max_len. Returns an empty string if VALID_FNAME
+// (empty, "none", or "<none>") is false. Returns a non-null filename otherwise.
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = SIZE_MAX);
 
 // Extracts optional typed parameters from arguments JSON.
 // Returns std::nullopt if the parameter is missing; reports a type error via sink if present but the wrong type.

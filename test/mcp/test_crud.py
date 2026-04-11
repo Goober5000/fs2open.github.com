@@ -33,9 +33,12 @@ def register(suite, client):
     def test_messages_crud():
         created = []
         try:
-            # Create A
+            # Create A (with filename fields, to test preservation across update)
             r = client.call_tool("create_message", {
-                "name": "Test Message A", "message": "Hello world"
+                "name": "Test Message A",
+                "message": "Hello world",
+                "talking_head": "test_head.ani",
+                "voice_filename": "test_voice.wav",
             })
             assert_success(r)
             created.append("Test Message A")
@@ -76,6 +79,15 @@ def register(suite, client):
             assert_success(r)
             d = tool_data(r)
             assert_equal(d.get("message"), "Updated hello", "updated message text")
+
+            # Filename preservation: filenames set at create should survive an
+            # update that doesn't mention them.  Catches the silent-clobber bug
+            # where get_optional_filename(..., null_if_invalid=false) returns ""
+            # for missing params and lets the handler overwrite the stored value.
+            assert_equal(d.get("talking_head"), "test_head.ani",
+                "talking_head should be preserved across update")
+            assert_equal(d.get("voice_filename"), "test_voice.wav",
+                "voice_filename should be preserved across update")
 
             # Swap
             r = client.call_tool("swap_messages", {"index_a": 1, "index_b": 2})
@@ -246,7 +258,9 @@ def register(suite, client):
     def test_cmd_brief_stages_crud():
         try:
             r = client.call_tool("create_cmd_brief_stage", {
-                "text": "Stage 1: Approach the target"
+                "text": "Stage 1: Approach the target",
+                "animation_filename": "test_anim.ani",
+                "voice_filename": "test_voice.wav",
             })
             assert_success(r)
 
@@ -276,6 +290,12 @@ def register(suite, client):
             d = tool_data(r)
             assert_in("Updated", d.get("text", ""), "updated stage text")
 
+            # Filename preservation across update
+            assert_equal(d.get("animation_filename"), "test_anim.ani",
+                "animation_filename should be preserved across update")
+            assert_equal(d.get("voice_filename"), "test_voice.wav",
+                "voice_filename should be preserved across update")
+
             r = client.call_tool("swap_cmd_brief_stages", {"index_a": 1, "index_b": 2})
             assert_success(r)
 
@@ -298,7 +318,11 @@ def register(suite, client):
     def test_fiction_viewer_stages_crud():
         try:
             r = client.call_tool("create_fiction_viewer_stage", {
-                "story_filename": "test_story_a.txt"
+                "story_filename": "test_story_a.txt",
+                "font_filename": "test_font.fnt",
+                "voice_filename": "test_voice.wav",
+                "background_640": "test_bg640.pcx",
+                "background_1024": "test_bg1024.pcx",
             })
             assert_success(r)
 
@@ -320,6 +344,20 @@ def register(suite, client):
                 "index": 1, "story_filename": "test_story_updated.txt"
             })
             assert_success(r)
+
+            # Filename preservation: the four optional filenames should
+            # survive an update that only touches story_filename.
+            r = client.call_tool("get_fiction_viewer_stage", {"index": 1})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("font_filename"), "test_font.fnt",
+                "font_filename should be preserved across update")
+            assert_equal(d.get("voice_filename"), "test_voice.wav",
+                "voice_filename should be preserved across update")
+            assert_equal(d.get("background_640"), "test_bg640.pcx",
+                "background_640 should be preserved across update")
+            assert_equal(d.get("background_1024"), "test_bg1024.pcx",
+                "background_1024 should be preserved across update")
 
             r = client.call_tool("swap_fiction_viewer_stages", {"index_a": 1, "index_b": 2})
             assert_success(r)
@@ -343,7 +381,8 @@ def register(suite, client):
     def test_debriefing_stages_crud():
         try:
             r = client.call_tool("create_debriefing_stage", {
-                "text": "Debrief stage 1: Mission success"
+                "text": "Debrief stage 1: Mission success",
+                "voice_filename": "test_debrief.wav",
             })
             assert_success(r)
 
@@ -375,6 +414,19 @@ def register(suite, client):
             d = tool_data(r)
             assert_equal(d.get("recommendation_text"), "Updated recommendation")
 
+            # Filename preservation: update stage 1's text without mentioning
+            # voice_filename, and verify voice_filename survives.
+            r = client.call_tool("update_debriefing_stage", {
+                "index": 1,
+                "text": "Debrief stage 1: Mission success (updated)"
+            })
+            assert_success(r)
+            r = client.call_tool("get_debriefing_stage", {"index": 1})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("voice_filename"), "test_debrief.wav",
+                "voice_filename should be preserved across update")
+
             r = client.call_tool("swap_debriefing_stages", {"index_a": 1, "index_b": 2})
             assert_success(r)
 
@@ -397,6 +449,11 @@ def register(suite, client):
     def test_jump_nodes_crud():
         created = []
         try:
+            # Note: no model_filename preservation test for jump nodes — passing
+            # a real model file at create would trigger model_load() and require
+            # the file to actually exist on disk.  The create/update handlers
+            # already guard against empty model_filename via "if (model_file &&
+            # model_file[0])" so the immediate-load regression is covered there.
             r = client.call_tool("create_jump_node", {
                 "name": "Test Node A",
                 "position": {"x": 0, "y": 0, "z": 0}
@@ -607,6 +664,68 @@ def register(suite, client):
             d = tool_data(r)
             assert_equal(len(d), 0, "sexp variables should be empty")
 
+    # ----- Mission Info filename preservation -----
+
+    def test_mission_info_filename_preservation():
+        # Snapshot what we'll restore at cleanup time
+        r = client.call_tool("get_mission_info")
+        assert_success(r)
+        original = tool_data(r)
+        original_title = original.get("title", "")
+
+        try:
+            # Set the three filename fields plus a non-filename field
+            r = client.call_tool("update_mission_info", {
+                "title": "Filename Preservation Test",
+                "loading_screen_640": "test_640.pcx",
+                "loading_screen_1024": "test_1024.pcx",
+                "squadron_logo_filename": "test_logo.pcx",
+            })
+            assert_success(r)
+
+            r = client.call_tool("get_mission_info")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("loading_screen_640"), "test_640.pcx",
+                "loading_screen_640 should be set after update")
+            assert_equal(d.get("loading_screen_1024"), "test_1024.pcx",
+                "loading_screen_1024 should be set after update")
+            assert_equal(d.get("squadron_logo_filename"), "test_logo.pcx",
+                "squadron_logo_filename should be set after update")
+
+            # Now update only a non-filename field — the three filenames must
+            # survive.  Catches the silent-clobber bug where a missing
+            # filename param gets normalized to "" and overwrites the stored
+            # value.
+            r = client.call_tool("update_mission_info", {
+                "title": "Filename Preservation Test 2",
+            })
+            assert_success(r)
+
+            r = client.call_tool("get_mission_info")
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("title"), "Filename Preservation Test 2",
+                "title should reflect the second update")
+            assert_equal(d.get("loading_screen_640"), "test_640.pcx",
+                "loading_screen_640 should be preserved across update")
+            assert_equal(d.get("loading_screen_1024"), "test_1024.pcx",
+                "loading_screen_1024 should be preserved across update")
+            assert_equal(d.get("squadron_logo_filename"), "test_logo.pcx",
+                "squadron_logo_filename should be preserved across update")
+
+        finally:
+            # Restore: clear the filename fields and the title
+            try:
+                client.call_tool("update_mission_info", {
+                    "title": original_title,
+                    "loading_screen_640": "",
+                    "loading_screen_1024": "",
+                    "squadron_logo_filename": "",
+                })
+            except Exception:
+                pass
+
     suite.add("crud_messages", test_messages_crud)
     suite.add("crud_events", test_events_crud)
     suite.add("crud_goals", test_goals_crud)
@@ -616,6 +735,7 @@ def register(suite, client):
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
     suite.add("crud_sexp_variables", test_sexp_variables_crud)
+    suite.add("crud_mission_info_filename_preservation", test_mission_info_filename_preservation)
 
 
 if __name__ == "__main__":
