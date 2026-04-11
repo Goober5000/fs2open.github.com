@@ -256,7 +256,7 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 	{
 		json_t *err = nullptr;
 		McpErrorSink sink(&err);
-		tool_name = get_optional_string(params, "name", sink, true);
+		tool_name = get_optional_string(params, "name", sink);
 		if (err) {
 			error_code = -32602;
 			error_msg = "Invalid params";

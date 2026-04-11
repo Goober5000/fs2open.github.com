@@ -316,7 +316,7 @@ json_t *mcp_route_app_tool(const char *tool_name, json_t *params)
 	if (strcmp(tool_name, "load_mission") == 0 || strcmp(tool_name, "save_mission") == 0) {
 		json_t *err = nullptr;
 		McpErrorSink sink(&err);
-		const char *filepath = get_required_string(arguments, "filepath", sink, true);
+		auto filepath = get_required_string(arguments, "filepath", sink, true);
 		if (!filepath) return err;
 
 		// Build an input_json carrying the filepath so the main-thread

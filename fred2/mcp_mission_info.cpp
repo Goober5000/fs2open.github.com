@@ -214,22 +214,22 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		return;
 
 	// --- Phase 1: extract and validate all fields (no mutations yet) ---
-	auto title             = get_optional_string(input, "title", sink, false, NAME_LENGTH - 1);
-	auto author            = get_optional_string(input, "author", sink, false);
-	auto notes             = get_optional_string(input, "notes", sink, false, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
-	auto mission_desc      = get_optional_string(input, "mission_desc", sink, false, MISSION_DESC_LENGTH - 1);
-	auto game_type_str     = get_optional_string(input, "game_type", sink, false);
+	auto title             = get_optional_string(input, "title", sink, NAME_LENGTH - 1);
+	auto author            = get_optional_string(input, "author", sink);
+	auto notes             = get_optional_string(input, "notes", sink, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
+	auto mission_desc      = get_optional_string(input, "mission_desc", sink, MISSION_DESC_LENGTH - 1);
+	auto game_type_str     = get_optional_string(input, "game_type", sink);
 	auto respawns_opt      = get_optional_integer(input, "respawns", sink);
 	auto max_delay_opt     = get_optional_integer(input, "max_respawn_delay", sink);
 	auto contrail_opt      = get_optional_integer(input, "contrail_threshold", sink);
 	auto all_war_opt       = get_optional_bool(input, "all_teams_at_war", sink);
-	auto command_sender    = get_optional_string(input, "command_sender", sink, false, NAME_LENGTH - 1);
-	auto command_persona   = get_optional_string(input, "command_persona", sink, false);
-	auto squadron_name     = get_optional_string(input, "squadron_name", sink, false, NAME_LENGTH - 1);
+	auto command_sender    = get_optional_string(input, "command_sender", sink, NAME_LENGTH - 1);
+	auto command_persona   = get_optional_string(input, "command_persona", sink);
+	auto squadron_name     = get_optional_string(input, "squadron_name", sink, NAME_LENGTH - 1);
 	auto squadron_logo     = get_optional_filename(input, "squadron_logo_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto loading_640       = get_optional_filename(input, "loading_screen_640", sink, false, MAX_FILENAME_LEN - 1);
 	auto loading_1024      = get_optional_filename(input, "loading_screen_1024", sink, false, MAX_FILENAME_LEN - 1);
-	auto ai_profile_str    = get_optional_string(input, "ai_profile", sink, false);
+	auto ai_profile_str    = get_optional_string(input, "ai_profile", sink);
 
 	if (sink.has_error()) return;
 
@@ -253,7 +253,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		if (new_ai_profile < 0) return;
 	}
 
-	// command_persona: empty string/null → -1 (clear), else lookup
+	// command_persona: empty string → -1 (clear), else lookup
 	std::optional<int> new_cmd_persona;
 	if (command_persona) {
 		if (!command_persona[0]) {
@@ -323,7 +323,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		if (json_is_null(env_in)) {
 			pending_env.id = -1;
 		} else if (json_is_object(env_in)) {
-			auto preset = get_optional_string(env_in, "preset", sink, false);
+			auto preset = get_optional_string(env_in, "preset", sink);
 			auto volume = get_optional_float(env_in, "volume", sink);
 			auto damping = get_optional_float(env_in, "damping", sink);
 			auto decay = get_optional_float(env_in, "decay", sink);

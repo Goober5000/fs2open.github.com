@@ -413,7 +413,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
-	const char *text = get_required_string(input, "text", sink, true);
+	auto text = get_required_string(input, "text", sink, true);
 	if (!text)
 		return;
 
@@ -1256,7 +1256,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	const char *role = get_sexp_role(n);
+	auto role = get_sexp_role(n);
 	bool is_boolean_wrapper = false;
 
 	if (!stricmp(role, "list_wrapper")) {
@@ -1594,9 +1594,9 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	int old_type = Sexp_variables[idx].type;
 
 	// Extract optional fields
-	auto new_name = get_optional_string(input, "new_name", sink, true);
-	auto default_value = get_optional_string(input, "default_value", sink, false, TOKEN_LENGTH - 1);
-	auto type_str = get_optional_string(input, "variable_type", sink, true);
+	auto new_name = get_optional_string(input, "new_name", sink);
+	auto default_value = get_optional_string(input, "default_value", sink, TOKEN_LENGTH - 1);
+	auto type_str = get_optional_string(input, "variable_type", sink);
 	if (sink.has_error()) return;
 
 	if (new_name) {
