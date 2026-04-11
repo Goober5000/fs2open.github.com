@@ -305,9 +305,9 @@ bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 	return true;
 }
 
-const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty)
+const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len)
 {
-	const char *value = get_optional_string(input, param_name, sink, false);
+	const char *value = get_optional_string(input, param_name, sink, false, max_len);
 	if (!value) {
 		if (!sink.has_error())
 			set_missing_param_error(sink, param_name);
@@ -320,9 +320,9 @@ const char *get_required_string(json_t *input, const char *param_name, McpErrorS
 	return value;
 }
 
-const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink)
+const char *get_required_filename(json_t *input, const char *param_name, McpErrorSink &sink, size_t max_len)
 {
-	const char *value = get_required_string(input, param_name, sink, false);
+	const char *value = get_required_string(input, param_name, sink, false, max_len);
 	if (!value)
 		return nullptr;
 	if (!VALID_FNAME(value)) {
@@ -372,12 +372,17 @@ std::optional<bool> get_required_bool(json_t *input, const char *param_name, Mcp
 	return std::nullopt;
 }
 
-const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty)
+const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_empty, size_t max_len)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_string(val)) {
 		auto str = json_string_value(val);
 		if (str[0] || !null_if_empty) {
+			if (max_len != std::string::npos) {
+				if (!check_string_length(str, max_len, param_name, sink)) {
+					return nullptr;
+				}
+			}
 			return str;
 		}
 	} else if (val && !json_is_null(val)) {
@@ -386,9 +391,9 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 	return nullptr;
 }
 
-const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid)
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool null_if_invalid, size_t max_len)
 {
-	const char *value = get_optional_string(arguments, param_name, sink, true);
+	const char *value = get_optional_string(arguments, param_name, sink, true, max_len);
 	if (!VALID_FNAME(value)) {
 		return null_if_invalid ? nullptr : "";
 	}
