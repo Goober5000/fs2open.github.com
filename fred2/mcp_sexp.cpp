@@ -1048,9 +1048,8 @@ static create_arg_result create_sexp_arg_node(json_t *input, bool allow_node_typ
 	if (!type_str) return {};
 	if (!check_string_enum(type_str, allow_node_type ? sexp_arg_type_values : sexp_mutable_arg_type_values, "argument_type", sink)) return {};
 
-	auto value_str = get_required_string(input, "argument_value", sink, true);
+	auto value_str = get_required_string(input, "argument_value", sink, true, TOKEN_LENGTH - 1);
 	if (!value_str) return {};
-	if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return {};
 
 	bool do_type_checking = true;
 	// A node value of -1 is a placeholder that bypasses type checking
@@ -1095,9 +1094,8 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	}
 
 	// --- operator role: create an operator with arguments ---
-	auto op_name = get_required_string(input, "operator_name", sink, true);
+	auto op_name = get_required_string(input, "operator_name", sink, true, TOKEN_LENGTH - 1);
 	if (!op_name) return;
-	if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator_name", sink)) return;
 
 	// Validate operator name
 	int op_idx = get_operator_index(op_name);
@@ -1281,9 +1279,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 
 	if (!stricmp(role, "operator")) {
 		// --- Operator update ---
-		auto op_name = get_required_string(input, "operator_name", sink, true);
+		auto op_name = get_required_string(input, "operator_name", sink, true, TOKEN_LENGTH - 1);
 		if (!op_name) return;
-		if (!check_string_length(op_name, TOKEN_LENGTH - 1, "operator_name", sink)) return;
 
 		int op_idx = get_operator_index(op_name);
 		if (op_idx < 0) {
@@ -1298,9 +1295,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		if (!type_str) return;
 		if (!check_string_enum(type_str, sexp_mutable_arg_type_values, "argument_type", sink)) return;
 
-		auto value_str = get_required_string(input, "argument_value", sink, true);
+		auto value_str = get_required_string(input, "argument_value", sink, true, TOKEN_LENGTH - 1);
 		if (!value_str) return;
-		if (!check_string_length(value_str, TOKEN_LENGTH - 1, "argument_value", sink)) return;
 
 		if (!stricmp(type_str, "boolean")) {
 			if (!is_boolean_wrapper) {
@@ -1531,9 +1527,8 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	if (!name) return;
 	if (!validate_sexp_variable_name(name, sink)) return;
 
-	auto default_value = get_required_string(input, "default_value", sink, false);
+	auto default_value = get_required_string(input, "default_value", sink, false, TOKEN_LENGTH - 1);
 	if (!default_value) return;
-	if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 
 	auto type_str = get_required_string(input, "variable_type", sink, true);
 	if (!type_str) return;
@@ -1600,15 +1595,12 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto new_name = get_optional_string(input, "new_name", sink, true);
-	auto default_value = get_optional_string(input, "default_value", sink, false);
+	auto default_value = get_optional_string(input, "default_value", sink, false, TOKEN_LENGTH - 1);
 	auto type_str = get_optional_string(input, "variable_type", sink, true);
 	if (sink.has_error()) return;
 
 	if (new_name) {
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
-	}
-	if (default_value) {
-		if (!check_string_length(default_value, TOKEN_LENGTH - 1, "default_value", sink)) return;
 	}
 
 	int type_bits;
