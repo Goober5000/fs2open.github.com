@@ -289,7 +289,7 @@ static SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 	const char *search, size_t max_name_length = 0)
 {
 	SCP_vector<std::pair<size_t, size_t>> matches;
-	bool has_search = search && search[0] != '\0';
+	bool has_search = search && search[0];
 
 	if (has_search) {
 		SCP_string search_str(search);
@@ -327,7 +327,7 @@ static SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 	size_t count, const char *search, GetCost get_cost)
 {
 	SCP_vector<std::pair<size_t, size_t>> matches;
-	bool has_search = search && search[0] != '\0';
+	bool has_search = search && search[0];
 
 	if (has_search) {
 		for (size_t i = 0; i < count; i++) {
@@ -833,7 +833,7 @@ static json_t *handle_get_ship_type(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int idx = ship_type_name_lookup(name);
@@ -868,8 +868,8 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 	McpErrorSink sink(&err);
 
 	// Optional filters
-	const char *filter_species = get_optional_string(arguments, "species", sink, true);
-	const char *filter_type    = get_optional_string(arguments, "ship_type", sink, true);
+	auto filter_species = get_optional_string(arguments, "species", sink);
+	auto filter_type    = get_optional_string(arguments, "ship_type", sink);
 	if (err) return err;
 
 	int filter_species_idx = -1;
@@ -961,7 +961,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int idx = ship_info_lookup(name);
@@ -1075,7 +1075,7 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *st = get_optional_string(arguments, "subtype", sink, true);
+	auto st = get_optional_string(arguments, "subtype", sink);
 	if (st) {
 		if (!check_string_enum(st, subtype_enum_values, "subtype", sink))
 			return err;
@@ -1114,7 +1114,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int idx = weapon_info_lookup(name);
@@ -1252,7 +1252,7 @@ static json_t *handle_get_iff(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int idx = iff_lookup(name);
@@ -1307,7 +1307,7 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int idx = intel_info_lookup(name);
@@ -1418,9 +1418,9 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_category    = get_optional_string(arguments, "category", sink, true);
-	const char *filter_subcategory = get_optional_string(arguments, "subcategory", sink, true);
-	const char *filter_search      = get_optional_string(arguments, "search", sink, true);
+	auto filter_category    = get_optional_string(arguments, "category", sink);
+	auto filter_subcategory = get_optional_string(arguments, "subcategory", sink);
+	auto filter_search      = get_optional_string(arguments, "search", sink);
 	if (err) return err;
 
 	// Subcategory requires category (names can appear in multiple categories)
@@ -1626,7 +1626,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	// Find operator by name
@@ -1769,8 +1769,8 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_category = get_optional_string(arguments, "category", sink, true);
-	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	auto filter_category = get_optional_string(arguments, "category", sink);
+	auto filter_search = get_optional_string(arguments, "search", sink);
 	if (err) return err;
 
 	json_t *notes = load_reference_notes();
@@ -1785,12 +1785,12 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	size_t index;
 	json_t *entry;
 	json_array_foreach(notes, index, entry) {
-		if (filter_category && filter_category[0] != '\0') {
-			const char *cat = json_string_value(json_object_get(entry, "category"));
+		if (filter_category && filter_category[0]) {
+			auto cat = json_string_value(json_object_get(entry, "category"));
 			if (!cat || stricmp(filter_category, cat) != 0)
 				continue;
 		}
-		const char *topic = json_string_value(json_object_get(entry, "topic"));
+		auto topic = json_string_value(json_object_get(entry, "topic"));
 		candidates.emplace_back(index, topic);
 	}
 
@@ -1814,7 +1814,7 @@ static json_t *handle_get_reference_note(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *topic = get_required_string(arguments, "topic", sink, true);
+	auto topic = get_required_string(arguments, "topic", sink, true);
 	if (!topic) return err;
 
 	json_t *notes = load_reference_notes();
@@ -2058,11 +2058,11 @@ static json_t *handle_get_sexp_argument_type(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *name = get_optional_string(arguments, "name", sink, true);
+	auto name = get_optional_string(arguments, "name", sink);
 	if (err) return err;
 
 	// List all types if no name given
-	if (!name || name[0] == '\0') {
+	if (!name) {
 		json_t *arr = json_array();
 		for (const opf_type_info *t = Opf_type_info; t->name; t++) {
 			json_t *item = json_object();
@@ -2143,11 +2143,11 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *name = get_optional_string(arguments, "name", sink, true);
+	auto name = get_optional_string(arguments, "name", sink);
 	if (err) return err;
 
 	// List all types if no name given
-	if (!name || name[0] == '\0') {
+	if (!name) {
 		json_t *arr = json_array();
 		for (const opr_type_info *t = Opr_type_info; t->name; t++) {
 			json_t *item = json_object();
@@ -2187,7 +2187,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);
@@ -2490,9 +2490,9 @@ static json_t *handle_subsystem_names_compare(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name1 = get_required_string(arguments, "name1", sink, false);
+	auto name1 = get_required_string(arguments, "name1", sink, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", sink, false);
+	auto name2 = get_required_string(arguments, "name2", sink, false);
 	if (!name2) return err;
 
 	int cmp = subsystem_stricmp(name1, name2);
@@ -2510,9 +2510,9 @@ static json_t *handle_subsystem_names_equal(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name1 = get_required_string(arguments, "name1", sink, false);
+	auto name1 = get_required_string(arguments, "name1", sink, false);
 	if (!name1) return err;
-	const char *name2 = get_required_string(arguments, "name2", sink, false);
+	auto name2 = get_required_string(arguments, "name2", sink, false);
 	if (!name2) return err;
 
 	bool equal = subsystem_stricmp(name1, name2) == 0;
@@ -2538,7 +2538,7 @@ static json_t *handle_coordinate_transform(json_t *arguments)
 	McpErrorSink sink(&err);
 
 	// Required: mode
-	const char *mode_str = get_required_string(arguments, "mode", sink, true);
+	auto mode_str = get_required_string(arguments, "mode", sink, true);
 	if (!mode_str) return err;
 	static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
 	if (!check_string_enum(mode_str, mode_values, "mode", sink)) return err;
@@ -2800,8 +2800,8 @@ static json_t *handle_list_scripting_elements(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_type = get_optional_string(arguments, "element_type", sink, true);
-	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	auto filter_type = get_optional_string(arguments, "element_type", sink);
+	auto filter_search = get_optional_string(arguments, "search", sink);
 	if (err) return err;
 
 	json_t *elements = json_object_get(doc, "elements");
@@ -2879,7 +2879,7 @@ static json_t *handle_get_scripting_element(json_t *arguments)
 
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, false);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name)
 		return err;
 
@@ -2890,7 +2890,7 @@ static json_t *handle_get_scripting_element(json_t *arguments)
 		const char *el_name = json_string_value(json_object_get(el, "name"));
 		const char *el_short = json_string_value(json_object_get(el, "shortName"));
 
-		if ((el_name && stricmp(name, el_name) == 0) || (el_short && el_short[0] && stricmp(name, el_short) == 0))
+		if ((el_name && !stricmp(name, el_name)) || (el_short && el_short[0] && !stricmp(name, el_short)))
 			return make_json_tool_result(json_incref(el));
 	}
 
@@ -2904,8 +2904,8 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_search = get_optional_string(arguments, "search", sink, true);
-	const char *filter_child_type = get_optional_string(arguments, "child_type", sink, true);
+	auto filter_search = get_optional_string(arguments, "search", sink);
+	auto filter_child_type = get_optional_string(arguments, "child_type", sink);
 	if (err) return err;
 
 	if ((!filter_search || !filter_search[0]) && (!filter_child_type || !filter_child_type[0]))
@@ -2913,7 +2913,7 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 
 	json_t *elements = json_object_get(doc, "elements");
 
-	bool has_search = filter_search && filter_search[0] != '\0';
+	bool has_search = filter_search && filter_search[0];
 	SCP_string search_str;
 	size_t max_name_length = 0;
 
@@ -3015,8 +3015,8 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_name = get_optional_string(arguments, "name", sink, true);
-	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	auto filter_name = get_optional_string(arguments, "name", sink);
+	auto filter_search = get_optional_string(arguments, "search", sink);
 	auto filter_overridable = get_optional_bool(arguments, "overridable", sink);
 	if (err) return err;
 
@@ -3084,11 +3084,11 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 
-	const char *filter_search = get_optional_string(arguments, "search", sink, true);
+	auto filter_search = get_optional_string(arguments, "search", sink);
 	if (err) return err;
 
 	json_t *enums = json_object_get(doc, "enums");
-	bool has_search = filter_search && filter_search[0] != '\0';
+	bool has_search = filter_search && filter_search[0];
 
 	if (has_search) {
 		SCP_string search_str(filter_search);
@@ -3149,7 +3149,7 @@ static json_t *handle_get_scripting_misc(json_t *arguments)
 
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *section = get_required_string(arguments, "section", sink, true);
+	auto section = get_required_string(arguments, "section", sink, true);
 	if (!section)
 		return err;
 
@@ -3249,7 +3249,7 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	const char *name = get_required_string(arguments, "name", sink, true);
+	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name)
 		return err;
 
