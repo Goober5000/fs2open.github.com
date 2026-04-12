@@ -906,6 +906,501 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 }
 
 // ---------------------------------------------------------------------------
+// attach_sexp_node handler (run on main thread)
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> attach_position_values = { "replace", "before", "after" };
+
+// Entity-type values that can hold formulas.  Matches the entities scanned
+// by find_formula_root_and_type.
+static const SCP_vector<const char *> attach_entity_type_values = {
+	"cutscene", "fiction_viewer_stage", "briefing_stage", "debriefing_stage",
+	"ship", "wing", "event", "goal"
+};
+static const SCP_vector<const char *> attach_entity_tag_values = {
+	"arrival_cue", "departure_cue", "team_1", "team_2"
+};
+
+// Build a FormulaRootInfo from user-supplied entity coordinates.
+// Returns the current formula root index via out_current_root, or -1 on error.
+static FormulaRootInfo build_formula_root_info_for_entity(
+	const char *entity_type, const char *entity_id, const char *entity_tag,
+	int &out_current_root, McpErrorSink &sink)
+{
+	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
+	out_current_root = -1;
+
+	if (!stricmp(entity_type, "cutscene")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
+			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = The_mission.cutscenes[idx].formula;
+	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
+			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = Fiction_viewer_stages[idx].formula;
+	} else if (!stricmp(entity_type, "briefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = 0;
+		if (entity_tag && !stricmp(entity_tag, "team_2"))
+			t = 1;
+		if (idx < 0 || idx >= Briefings[t].num_stages) {
+			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2;
+		out_current_root = Briefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "debriefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = 0;
+		if (entity_tag && !stricmp(entity_tag, "team_2"))
+			t = 1;
+		if (idx < 0 || idx >= Debriefings[t].num_stages) {
+			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2;
+		out_current_root = Debriefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "ship")) {
+		int ship_idx = ship_name_lookup(entity_id);
+		if (ship_idx < 0) {
+			set_not_found_error(sink, "Ship", entity_id);
+			return info;
+		}
+		info.attached_id = Ships[ship_idx].ship_name;
+		if (entity_tag && !stricmp(entity_tag, "departure_cue")) {
+			info.attached_tag = entity_specific_tag::DEPARTURE_CUE;
+			out_current_root = Ships[ship_idx].departure_cue;
+		} else {
+			info.attached_tag = entity_specific_tag::ARRIVAL_CUE;
+			out_current_root = Ships[ship_idx].arrival_cue;
+		}
+	} else if (!stricmp(entity_type, "wing")) {
+		int wing_idx = wing_name_lookup(entity_id);
+		if (wing_idx < 0) {
+			set_not_found_error(sink, "Wing", entity_id);
+			return info;
+		}
+		info.attached_id = Wings[wing_idx].name;
+		if (entity_tag && !stricmp(entity_tag, "departure_cue")) {
+			info.attached_tag = entity_specific_tag::DEPARTURE_CUE;
+			out_current_root = Wings[wing_idx].departure_cue;
+		} else {
+			info.attached_tag = entity_specific_tag::ARRIVAL_CUE;
+			out_current_root = Wings[wing_idx].arrival_cue;
+		}
+	} else if (!stricmp(entity_type, "event")) {
+		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, entity_id);
+		if (evt_idx < 0) {
+			set_not_found_error(sink, "Event", entity_id);
+			return info;
+		}
+		info.opr_type = OPR_NULL;
+		info.attached_id = Mission_events[evt_idx].name.c_str();
+		out_current_root = Mission_events[evt_idx].formula;
+	} else if (!stricmp(entity_type, "goal")) {
+		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, entity_id);
+		if (goal_idx < 0) {
+			set_not_found_error(sink, "Goal", entity_id);
+			return info;
+		}
+		info.attached_id = Mission_goals[goal_idx].name.c_str();
+		out_current_root = Mission_goals[goal_idx].formula;
+	} else {
+		sink.set_error("Unknown entity type '%s'", entity_type);
+		return info;
+	}
+
+	info.root = out_current_root;
+	return info;
+}
+
+static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	// --- Parse parameters ---
+	auto source_opt = get_required_integer(input, "source_node", sink);
+	if (!source_opt.has_value()) return;
+	int source = *source_opt;
+	if (!check_int_range(source, 0, Num_sexp_nodes - 1, "source_node", sink))
+		return;
+
+	auto target_opt = get_optional_integer(input, "target_node", sink);
+	auto entity_type = get_optional_string(input, "target_entity_type", sink);
+	auto entity_id = get_optional_string(input, "target_entity_id", sink);
+	auto entity_tag = get_optional_string(input, "entity_tag", sink);
+	auto position_str = get_optional_string(input, "position", sink);
+	auto delete_displaced_opt = get_optional_bool(input, "delete_displaced", sink);
+	if (sink.has_error()) return;
+
+	bool delete_displaced = delete_displaced_opt.has_value() && *delete_displaced_opt;
+
+	// Determine position enum
+	int position = 0;  // 0=replace, 1=before, 2=after
+	if (position_str) {
+		if (!check_string_enum(position_str, attach_position_values, "position", sink))
+			return;
+		if (!stricmp(position_str, "before")) position = 1;
+		else if (!stricmp(position_str, "after")) position = 2;
+	}
+
+	// Exactly one of target_node / target_entity_type must be set
+	bool have_target_node = target_opt.has_value();
+	bool have_entity = (entity_type != nullptr);
+	if (have_target_node == have_entity) {
+		sink.set_error("Exactly one of 'target_node' or 'target_entity_type' must be provided");
+		return;
+	}
+	if (have_entity && !entity_id) {
+		sink.set_error("'target_entity_id' is required when 'target_entity_type' is provided");
+		return;
+	}
+	if (have_entity && entity_type) {
+		if (!check_string_enum(entity_type, attach_entity_type_values, "target_entity_type", sink))
+			return;
+	}
+	if (entity_tag) {
+		if (!check_string_enum(entity_tag, attach_entity_tag_values, "entity_tag", sink))
+			return;
+	}
+
+	// --- Validate source ---
+	if (Sexp_nodes[source].type == SEXP_NOT_USED) {
+		sink.set_error("Source node %d is not in use", source);
+		return;
+	}
+	if (source == Locked_sexp_true || source == Locked_sexp_false) {
+		sink.set_error("Locked singleton nodes (true/false) cannot be used as a source for attach");
+		return;
+	}
+	if (find_sexp_root(source) != source) {
+		sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
+		return;
+	}
+	{
+		FormulaRootInfo src_info = find_formula_root_and_type(source);
+		if (src_info.attached) {
+			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
+				source, src_info.attached_type);
+			return;
+		}
+	}
+
+	int original_source = source;
+	int displaced = -1;
+	int freed_count = 0;
+	const char *result_position = nullptr;
+
+	if (have_entity) {
+		// ---------------------------------------------------------------
+		// Case A': Entity formula mode
+		// ---------------------------------------------------------------
+		result_position = "entity_formula";
+
+		int current_root = -1;
+		FormulaRootInfo info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag, current_root, sink);
+		if (sink.has_error()) return;
+
+		// Validate source against entity's expected return type
+		if (!check_sexp_formula(source, info.opr_type, sink))
+			return;
+
+		displaced = current_root;
+
+		// Commit: set the entity formula to source
+		set_formula(info, source);
+
+		// Syntax check (defensive, should not fail since check_sexp_formula passed)
+		int bad_node = -1;
+		int syntax_result = check_sexp_syntax(source, static_cast<int>(info.opr_type), 1, &bad_node);
+		if (syntax_result != SEXP_CHECK_NO_ERROR) {
+			// Rollback
+			set_formula(info, current_root);
+			sink.set_error("Attachment would cause syntax error: %s (error code %d, bad node %d)",
+				sexp_error_message(syntax_result), syntax_result, bad_node);
+			return;
+		}
+
+		// Handle the displaced formula
+		if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
+			if (delete_displaced) {
+				freed_count = free_sexp2(displaced);
+			} else {
+				Sexp_nodes[displaced].parent = -1;
+			}
+		}
+
+		// mark_modified
+		if (std::holds_alternative<int>(info.attached_id))
+			mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+		else
+			mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+
+		mcp_sexp_forest_mark_dirty({ source, displaced });
+
+	} else {
+		// ---------------------------------------------------------------
+		// Node-relative mode
+		// ---------------------------------------------------------------
+		int target = *target_opt;
+		if (!check_int_range(target, 0, Num_sexp_nodes - 1, "target_node", sink))
+			return;
+		if (Sexp_nodes[target].type == SEXP_NOT_USED) {
+			sink.set_error("Target node %d is not in use", target);
+			return;
+		}
+		if (target == source) {
+			sink.set_error("Source and target cannot be the same node (%d)", source);
+			return;
+		}
+
+		// Retarget: if target is an operator atom inside a list wrapper,
+		// operate on the wrapper instead.
+		int original_target = target;
+		if (SEXP_NODE_TYPE(target) == SEXP_ATOM && Sexp_nodes[target].subtype == SEXP_ATOM_OPERATOR) {
+			int list = find_sexp_list(target);
+			if (list >= 0)
+				target = list;
+		}
+
+		// Determine context
+		FormulaRootInfo info = find_formula_root_and_type(target);
+		bool is_root = (target == info.root);
+		bool is_attached = info.attached;
+
+		if (is_root && !is_attached) {
+			// Case B': free-standing root — nothing to attach to
+			sink.set_error("Target node %d is a free-standing root; to attach source as a formula, "
+				"use target_entity_type/target_entity_id. To replace content inside a tree, "
+				"target an embedded node.", target);
+			return;
+		}
+
+		if (is_root && is_attached && position != 0) {
+			// Case A' via target_node with insert mode — formula roots have no sibling chain
+			sink.set_error("Cannot insert before/after a formula root. Use position='replace' to replace the formula.");
+			return;
+		}
+
+		if (!is_root && position != 0) {
+			// Insert modes: target must be embedded (already guaranteed by !is_root).
+			// But also reject if the retargeted target happens to be the root.
+			// (This shouldn't happen since we already checked is_root above.)
+		}
+
+		if (position == 0) {
+			// -------------------------------------------------------
+			// Replace mode
+			// -------------------------------------------------------
+			result_position = "replace";
+
+			if (is_root && is_attached) {
+				// Replacing a formula root via target_node: delegate to entity logic.
+				// Validate source against entity's expected return type.
+				if (!check_sexp_formula(source, info.opr_type, sink))
+					return;
+
+				displaced = info.root;
+				set_formula(info, source);
+
+				int bad_node = -1;
+				int syntax_result = check_sexp_syntax(source, static_cast<int>(info.opr_type), 1, &bad_node);
+				if (syntax_result != SEXP_CHECK_NO_ERROR) {
+					set_formula(info, displaced);
+					sink.set_error("Attachment would cause syntax error: %s (error code %d, bad node %d)",
+						sexp_error_message(syntax_result), syntax_result, bad_node);
+					return;
+				}
+
+				if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
+					if (delete_displaced)
+						freed_count = free_sexp2(displaced);
+					else
+						Sexp_nodes[displaced].parent = -1;
+				}
+
+				if (std::holds_alternative<int>(info.attached_id))
+					mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+				else
+					mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+
+				mcp_sexp_forest_mark_dirty({ source, displaced });
+
+			} else {
+				// Embedded replace (Cases C'/D')
+				int pred_list = find_sexp_list(target);
+				int pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
+
+				int target_parent = Sexp_nodes[target].parent;
+				int target_rest = Sexp_nodes[target].rest;
+
+				// Splice source into target's position
+				Sexp_nodes[source].parent = target_parent;
+				Sexp_nodes[source].rest = target_rest;
+				splice_replace_node(target, source);
+
+				// Detach the displaced target
+				Sexp_nodes[target].rest = -1;
+				Sexp_nodes[target].parent = -1;
+				displaced = target;
+
+				// Syntax check for attached trees (Case C')
+				if (is_attached) {
+					int bad_node = -1;
+					int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+					if (syntax_result != SEXP_CHECK_NO_ERROR) {
+						// Rollback: restore target to its original position
+						Sexp_nodes[target].rest = target_rest;
+						Sexp_nodes[target].parent = target_parent;
+						if (pred_list >= 0)
+							Sexp_nodes[pred_list].first = target;
+						else if (pred_ante >= 0)
+							Sexp_nodes[pred_ante].rest = target;
+						// Reset source back to free-standing
+						Sexp_nodes[source].rest = -1;
+						Sexp_nodes[source].parent = -1;
+
+						sink.set_error("Attachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+							info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+						return;
+					}
+
+					if (std::holds_alternative<int>(info.attached_id))
+						mark_modified("MCP: attach SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
+					else
+						mark_modified("MCP: attach SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+				}
+
+				// Handle displaced subtree
+				if (delete_displaced && displaced != Locked_sexp_true && displaced != Locked_sexp_false)
+					freed_count = free_sexp2(displaced);
+
+				mcp_sexp_forest_mark_dirty({ info.root });
+				if (!delete_displaced && displaced >= 0)
+					mcp_sexp_forest_mark_dirty({ displaced });
+			}
+
+		} else if (position == 1) {
+			// -------------------------------------------------------
+			// Insert before
+			// -------------------------------------------------------
+			result_position = "before";
+
+			if (is_root) {
+				sink.set_error("Cannot insert before a tree root; use position='replace', or target an embedded node.");
+				return;
+			}
+
+			int pred_list = find_sexp_list(target);
+			int pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
+
+			Sexp_nodes[source].parent = Sexp_nodes[target].parent;
+			Sexp_nodes[source].rest = target;
+
+			if (pred_list >= 0)
+				Sexp_nodes[pred_list].first = source;
+			else if (pred_ante >= 0)
+				Sexp_nodes[pred_ante].rest = source;
+
+			if (is_attached) {
+				int bad_node = -1;
+				int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+				if (syntax_result != SEXP_CHECK_NO_ERROR) {
+					// Rollback
+					if (pred_list >= 0)
+						Sexp_nodes[pred_list].first = target;
+					else if (pred_ante >= 0)
+						Sexp_nodes[pred_ante].rest = target;
+					Sexp_nodes[source].rest = -1;
+					Sexp_nodes[source].parent = -1;
+
+					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+					return;
+				}
+
+				if (std::holds_alternative<int>(info.attached_id))
+					mark_modified("MCP: insert SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
+				else
+					mark_modified("MCP: insert SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+			}
+
+			mcp_sexp_forest_mark_dirty({ info.root });
+
+		} else {
+			// -------------------------------------------------------
+			// Insert after
+			// -------------------------------------------------------
+			result_position = "after";
+
+			if (is_root) {
+				sink.set_error("Cannot insert after a tree root; use position='replace', or target an embedded node.");
+				return;
+			}
+
+			int old_target_rest = Sexp_nodes[target].rest;
+
+			Sexp_nodes[source].parent = Sexp_nodes[target].parent;
+			Sexp_nodes[source].rest = old_target_rest;
+			Sexp_nodes[target].rest = source;
+
+			if (is_attached) {
+				int bad_node = -1;
+				int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+				if (syntax_result != SEXP_CHECK_NO_ERROR) {
+					// Rollback
+					Sexp_nodes[target].rest = old_target_rest;
+					Sexp_nodes[source].rest = -1;
+					Sexp_nodes[source].parent = -1;
+
+					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+					return;
+				}
+
+				if (std::holds_alternative<int>(info.attached_id))
+					mark_modified("MCP: insert SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
+				else
+					mark_modified("MCP: insert SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+			}
+
+			mcp_sexp_forest_mark_dirty({ info.root });
+		}
+	}
+
+	// Build response
+	json_t *result = json_object();
+	json_object_set_new(result, "source_node", json_integer(original_source));
+	json_object_set_new(result, "source_node_data", build_sexp_node_json(original_source));
+	json_object_set_new(result, "position", json_string(result_position));
+
+	if (displaced >= 0) {
+		json_object_set_new(result, "displaced_node", json_integer(displaced));
+		if (!delete_displaced && displaced != Locked_sexp_true && displaced != Locked_sexp_false)
+			json_object_set_new(result, "displaced_node_data", build_sexp_node_json(displaced));
+	} else {
+		json_object_set_new(result, "displaced_node", json_null());
+	}
+
+	json_object_set_new(result, "deleted_displaced", delete_displaced && displaced >= 0 ? json_true() : json_false());
+	json_object_set_new(result, "freed_count", json_integer(freed_count));
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // create_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
@@ -1828,6 +2323,56 @@ void mcp_register_sexp_tools(json_t *tools)
 			props, req);
 	}
 
+	// attach_sexp_node
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "source_node",
+			"Node index of the free-standing root to attach. Must have parent == -1 "
+			"and not be attached to any mission entity.");
+		add_integer_prop(props, "target_node",
+			"Node index of an existing tree node to position the source relative to. "
+			"Mutually exclusive with target_entity_type. If the target is an operator "
+			"inside a list wrapper, the wrapper is automatically targeted instead.");
+		add_string_enum_prop(props, "target_entity_type",
+			"Entity type whose formula the source will become. Mutually exclusive with "
+			"target_node. Requires target_entity_id.",
+			attach_entity_type_values);
+		add_string_prop(props, "target_entity_id",
+			"Entity name or index. Required when target_entity_type is set. "
+			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
+			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 0-based stage index.");
+		add_string_enum_prop(props, "entity_tag",
+			"Disambiguation tag for entities that have multiple formula slots. "
+			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
+			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
+			attach_entity_tag_values);
+		add_string_enum_prop(props, "position",
+			"How to position the source relative to the target node. "
+			"'replace' (default) replaces the target; 'before' inserts before the target; "
+			"'after' inserts after the target. Only used with target_node.",
+			attach_position_values);
+		add_bool_prop(props, "delete_displaced",
+			"If true, free the displaced subtree when replacing. If false (the default), "
+			"the displaced subtree is preserved as a free-standing root and returned in "
+			"the response. Only meaningful for replace mode and entity mode.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("source_node"));
+		register_tool(tools, "attach_sexp_node",
+			"Attach a free-standing SEXP subtree to a position in another tree or as a "
+			"mission entity's formula. The source must be a free-standing root (parent == -1, "
+			"not attached to any entity); use detach_sexp_node first if needed. "
+			"In node-relative mode (target_node), position can be 'replace' (default, swaps "
+			"the target with the source), 'before' (inserts source before target), or 'after' "
+			"(inserts source after target). In entity mode (target_entity_type + target_entity_id), "
+			"the source replaces the entity's current formula. For mission-attached trees, a "
+			"syntax check is performed after modification; if the check fails, the operation "
+			"is rolled back. The response includes source_node (int), source_node_data (full "
+			"node object), position (string), displaced_node (int or null), "
+			"displaced_node_data (full node object when preserved), deleted_displaced (bool), "
+			"and freed_count (int).",
+			props, req);
+	}
+
 	// create_sexp_node
 	{
 		json_t *props = json_object();
@@ -2013,6 +2558,10 @@ bool mcp_handle_sexp_tool(const char *tool_name, json_t *input_json, McpToolRequ
 	}
 	if (strcmp(tool_name, "detach_sexp_node") == 0) {
 		handle_detach_sexp_node(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "attach_sexp_node") == 0) {
+		handle_attach_sexp_node(input_json, req);
 		return true;
 	}
 	if (strcmp(tool_name, "create_sexp_node") == 0) {
