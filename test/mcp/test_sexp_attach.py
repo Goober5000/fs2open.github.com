@@ -292,11 +292,8 @@ def register(suite, client):
         # Create a debriefing stage on the default team (team 1).
         r = client.call_tool("create_debriefing_stage", {"text": "attach debrief test"})
         assert_success(r)
-        # Build a (true) formula as the source.
-        r = client.call_tool("create_sexp_node", {
-            "role": "operator",
-            "operator_name": "true",
-        })
+        # Build a (not (true)) formula — avoids the Locked_sexp_true singleton.
+        r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
         assert_success(r)
         src = tool_data(r)["node"]
         # Attach to the debriefing stage (team_1 is the default).
@@ -316,11 +313,8 @@ def register(suite, client):
         # Create a debriefing stage on team 2.
         r = client.call_tool("create_debriefing_stage", {"text": "attach debrief t2", "team": "Team 2"})
         assert_success(r)
-        # Build a (true) formula.
-        r = client.call_tool("create_sexp_node", {
-            "role": "operator",
-            "operator_name": "true",
-        })
+        # Build a (not (true)) formula — avoids the Locked_sexp_true singleton.
+        r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
         assert_success(r)
         src = tool_data(r)["node"]
         # Attach via entity_tag="team_2".
@@ -339,11 +333,8 @@ def register(suite, client):
         # Create a fiction viewer stage.
         r = client.call_tool("create_fiction_viewer_stage", {"story_filename": "test_attach.txt"})
         assert_success(r)
-        # Build a (true) formula.
-        r = client.call_tool("create_sexp_node", {
-            "role": "operator",
-            "operator_name": "true",
-        })
+        # Build a (not (true)) formula — avoids the Locked_sexp_true singleton.
+        r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
         assert_success(r)
         src = tool_data(r)["node"]
         # Attach to the fiction viewer stage.
@@ -560,7 +551,9 @@ def register(suite, client):
         client.call_tool("delete_event", {"name": "attach_rollback_test"})
 
     def test_attach_subtree_source():
-        # Build (+ 3 4) as source subtree.
+        # Build (+ 3 4) as source subtree.  create_sexp_node returns the
+        # operator atom; the handler auto-wraps it in a list node when
+        # splicing into a rest chain, preserving the argument chain.
         r = client.call_tool("create_sexp_node", {
             "role": "operator",
             "operator_name": "+",
@@ -597,7 +590,8 @@ def register(suite, client):
             "target_node": two_node,
         })
         assert_success(r)
-        # Walk and verify: * 1 + 3 4.
+        # Walk and verify: * 1 (+ 3 4) — the auto-created list wrapper has an
+        # empty value, so filter it out.
         r = client.call_tool("walk_sexp_tree", {"node": root})
         assert_success(r)
         vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
@@ -874,31 +868,27 @@ def register(suite, client):
         r = client.call_tool("create_event", {"name": "attach_ins_evt"})
         assert_success(r)
         evt_formula = tool_data(r).get("formula")
-        # Walk to find the do-nothing wrapper node (the list node whose first
-        # child is the do-nothing operator).
+        # Walk to find the do-nothing operator in the event formula.
         r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
         assert_success(r)
-        nodes = tool_data(r)["nodes"]
-        donothing_wrapper = None
-        for n in nodes:
+        donothing_op = None
+        for n in tool_data(r)["nodes"]:
             if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                # The wrapper is the list node that contains this operator.
-                # walk_sexp_tree returns the operator; find_sexp_list retargets
-                # automatically in the handler, so we can target the operator directly.
-                donothing_wrapper = n["node"]
+                donothing_op = n["node"]
                 break
-        assert_true(donothing_wrapper is not None, "could not find do-nothing operator")
-        # Build a second (do-nothing) subtree.
+        assert_true(donothing_op is not None, "could not find do-nothing operator")
+        # Build a second do-nothing operator.  The handler auto-wraps operator
+        # atoms in list wrappers when inserting into rest chains.
         r = client.call_tool("create_sexp_node", {
             "role": "operator",
             "operator_name": "do-nothing",
         })
         assert_success(r)
         src = tool_data(r)["node"]
-        # Insert before the existing do-nothing wrapper.
+        # Insert before the existing do-nothing.
         r = client.call_tool("attach_sexp_node", {
             "source_node": src,
-            "target_node": donothing_wrapper,
+            "target_node": donothing_op,
             "position": "before",
         })
         assert_success(r)
