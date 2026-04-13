@@ -567,7 +567,7 @@ struct FormulaRootInfo
 		if (std::holds_alternative<const char*>(attached_id)) {
 			str += std::get<const char*>(attached_id);
 		} else {
-			str += std::get<int>(attached_id);
+			str += std::to_string(std::get<int>(attached_id));
 		}
 		switch (attached_tag) {
 		case entity_specific_tag::ARRIVAL_CUE:
