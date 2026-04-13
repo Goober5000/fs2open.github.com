@@ -516,6 +516,31 @@ static void splice_replace_node(int old_node, int new_node)
 }
 
 enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
+static entity_specific_tag enum_from_tag(const char *str)
+{
+	if (!stricmp(str, "none")) return entity_specific_tag::NONE;
+	if (!stricmp(str, "team_1")) return entity_specific_tag::TEAM_1;
+	if (!stricmp(str, "team_2")) return entity_specific_tag::TEAM_2;
+	if (!stricmp(str, "arrival_cue")) return entity_specific_tag::ARRIVAL_CUE;
+	if (!stricmp(str, "departure_cue")) return entity_specific_tag::DEPARTURE_CUE;
+	Warning(LOCATION, "Invalid tag string %s");
+	return entity_specific_tag::NONE;
+}
+static const char *enum_to_tag(entity_specific_tag tag)
+{
+	switch (tag)
+	{
+		case entity_specific_tag::TEAM_1: return "team_1";
+		case entity_specific_tag::TEAM_2: return "team_2";
+		case entity_specific_tag::ARRIVAL_CUE: return "arrival_cue";
+		case entity_specific_tag::DEPARTURE_CUE: return "departure_cue";
+		default: return "none";
+	}
+}
+#if (MAX_TVT_TEAMS) != 2
+#error FormulaRootInfo must be updated with another way to distinguish teams!
+#endif
+
 struct FormulaRootInfo
 {
 	int root;                                       // root of the tree (walked up via parent chain)
@@ -524,10 +549,43 @@ struct FormulaRootInfo
 	const char *attached_type;					    // if attached, the entity type that holds the formula
 	std::variant<const char *, int> attached_id;    // if attached, the entity name or index that holds the formula
 	entity_specific_tag attached_tag;               // if attached, additional relevant information about the formula holder
+
+	static bool valid_tag(const char *entity_type, entity_specific_tag tag) {
+		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing")) {
+			return tag == entity_specific_tag::ARRIVAL_CUE || tag == entity_specific_tag::DEPARTURE_CUE;
+		}
+		if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage")) {
+			return tag == entity_specific_tag::TEAM_1 || tag == entity_specific_tag::TEAM_2;
+		}
+		return tag == entity_specific_tag::NONE;
+	}
+
+	SCP_string to_string() const
+	{
+		SCP_string str(attached_type);
+		str += " ";
+		if (std::holds_alternative<const char*>(attached_id)) {
+			str += std::get<const char*>(attached_id);
+		} else {
+			str += std::get<int>(attached_id);
+		}
+		switch (attached_tag) {
+		case entity_specific_tag::ARRIVAL_CUE:
+		case entity_specific_tag::DEPARTURE_CUE:
+			str = " for " + str;
+			str = enum_to_tag(attached_tag) + str;
+			break;
+		case entity_specific_tag::TEAM_1:
+		case entity_specific_tag::TEAM_2:
+			str += ", ";
+			str += enum_to_tag(attached_tag);
+			break;
+		default:
+			break;
+		}
+		return str;
+	}
 };
-#if (MAX_TVT_TEAMS) != 2
-#error FormulaRootInfo must be updated with another way to distinguish teams!
-#endif
 
 // Set a mission entity formula to new_root, using the entity identification
 // from a previously computed FormulaRootInfo.
@@ -680,18 +738,8 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 			json_object_set_new(result, "entity_id",
 				json_integer(std::get<int>(info.attached_id)));
 
-		if (info.attached_tag != entity_specific_tag::NONE) {
-			const char *tag_str = nullptr;
-			switch (info.attached_tag) {
-				case entity_specific_tag::ARRIVAL_CUE:   tag_str = "arrival_cue"; break;
-				case entity_specific_tag::DEPARTURE_CUE: tag_str = "departure_cue"; break;
-				case entity_specific_tag::TEAM_1:        tag_str = "Team 1"; break;
-				case entity_specific_tag::TEAM_2:        tag_str = "Team 2"; break;
-				default: break;
-			}
-			if (tag_str)
-				json_object_set_new(result, "entity_tag", json_string(tag_str));
-		}
+		if (info.attached_tag != entity_specific_tag::NONE)
+			json_object_set_new(result, "entity_tag", json_string(enum_to_tag(info.attached_tag)));
 	}
 
 	req->result_json = make_json_tool_result(result);
@@ -778,10 +826,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 		}
 
 		// no rollback: it's a modification
-		if (std::holds_alternative<int>(info.attached_id))
-			mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-		else
-			mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 		// Detach the old tree and optionally free it
 		if (n != Locked_sexp_true && n != Locked_sexp_false) {
@@ -855,10 +900,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete, McpEr
 			}
 
 			// no rollback: it's a modification
-			if (std::holds_alternative<int>(info.attached_id))
-				mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-			else
-				mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+			mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 		}
 
 		// Commit: detach and optionally free the target subtree
@@ -930,6 +972,20 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
 	out_current_root = -1;
 
+	// Convert entity_tag string to enum and apply defaults for entities that
+	// have multiple formula slots
+	entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
+	if (tag == entity_specific_tag::NONE) {
+		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing"))
+			tag = entity_specific_tag::ARRIVAL_CUE;
+		else if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage"))
+			tag = entity_specific_tag::TEAM_1;
+	}
+	if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
+		sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
+		return info;
+	}
+
 	if (!stricmp(entity_type, "cutscene")) {
 		int idx = atoi(entity_id);
 		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
@@ -948,27 +1004,23 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 		out_current_root = Fiction_viewer_stages[idx].formula;
 	} else if (!stricmp(entity_type, "briefing_stage")) {
 		int idx = atoi(entity_id);
-		int t = 0;
-		if (entity_tag && !stricmp(entity_tag, "team_2"))
-			t = 1;
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
 		if (idx < 0 || idx >= Briefings[t].num_stages) {
 			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
 			return info;
 		}
 		info.attached_id = idx;
-		info.attached_tag = (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2;
+		info.attached_tag = tag;
 		out_current_root = Briefings[t].stages[idx].formula;
 	} else if (!stricmp(entity_type, "debriefing_stage")) {
 		int idx = atoi(entity_id);
-		int t = 0;
-		if (entity_tag && !stricmp(entity_tag, "team_2"))
-			t = 1;
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
 		if (idx < 0 || idx >= Debriefings[t].num_stages) {
 			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
 			return info;
 		}
 		info.attached_id = idx;
-		info.attached_tag = (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2;
+		info.attached_tag = tag;
 		out_current_root = Debriefings[t].stages[idx].formula;
 	} else if (!stricmp(entity_type, "ship")) {
 		int ship_idx = ship_name_lookup(entity_id);
@@ -977,13 +1029,11 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 			return info;
 		}
 		info.attached_id = Ships[ship_idx].ship_name;
-		if (entity_tag && !stricmp(entity_tag, "departure_cue")) {
-			info.attached_tag = entity_specific_tag::DEPARTURE_CUE;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
 			out_current_root = Ships[ship_idx].departure_cue;
-		} else {
-			info.attached_tag = entity_specific_tag::ARRIVAL_CUE;
+		else
 			out_current_root = Ships[ship_idx].arrival_cue;
-		}
 	} else if (!stricmp(entity_type, "wing")) {
 		int wing_idx = wing_name_lookup(entity_id);
 		if (wing_idx < 0) {
@@ -991,13 +1041,11 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 			return info;
 		}
 		info.attached_id = Wings[wing_idx].name;
-		if (entity_tag && !stricmp(entity_tag, "departure_cue")) {
-			info.attached_tag = entity_specific_tag::DEPARTURE_CUE;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
 			out_current_root = Wings[wing_idx].departure_cue;
-		} else {
-			info.attached_tag = entity_specific_tag::ARRIVAL_CUE;
+		else
 			out_current_root = Wings[wing_idx].arrival_cue;
-		}
 	} else if (!stricmp(entity_type, "event")) {
 		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, entity_id);
 		if (evt_idx < 0) {
@@ -1063,10 +1111,7 @@ static bool attach_as_entity_formula(
 	}
 
 	// mark_modified
-	if (std::holds_alternative<int>(info.attached_id))
-		mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-	else
-		mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+	mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
 
 	mcp_sexp_forest_mark_dirty({ source, displaced });
 	return true;
@@ -1263,10 +1308,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 						return;
 					}
 
-					if (std::holds_alternative<int>(info.attached_id))
-						mark_modified("MCP: attach SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
-					else
-						mark_modified("MCP: attach SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 				}
 
 				// Handle displaced subtree
@@ -1317,10 +1359,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					return;
 				}
 
-				if (std::holds_alternative<int>(info.attached_id))
-					mark_modified("MCP: insert SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
-				else
-					mark_modified("MCP: insert SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 			}
 
 			mcp_sexp_forest_mark_dirty({ info.root });
@@ -1356,10 +1395,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					return;
 				}
 
-				if (std::holds_alternative<int>(info.attached_id))
-					mark_modified("MCP: insert SEXP node in %s %d", info.attached_type, std::get<int>(info.attached_id));
-				else
-					mark_modified("MCP: insert SEXP node in %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 			}
 
 			mcp_sexp_forest_mark_dirty({ info.root });
@@ -1843,10 +1879,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		}
 
 		// no rollback: it's a modification
-		if (std::holds_alternative<int>(info.attached_id))
-			mark_modified("MCP: replace SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-		else
-			mark_modified("MCP: replace SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 	}
 
 	mcp_sexp_forest_mark_dirty({ info.root });
