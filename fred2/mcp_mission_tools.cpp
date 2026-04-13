@@ -2351,7 +2351,15 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	snprintf(buf, sizeof(buf), "<%s>", name);
 	update_sexp_references(name, buf, OPF_JUMP_NODE_NAME);
 
+	// Must follow the same pattern as management.cpp delete_object() to avoid
+	// orphaning the OBJ_JUMP_NODE object slot.  The CJumpNode move-assignment
+	// operator does not call obj_delete on the overwritten m_objnum, so a
+	// naive vector::erase on a non-last element silently leaks the object.
+	int objnum = Jump_nodes[index].GetSCPObjectNumber();
+	Objects[objnum].type = OBJ_NONE;          // fool destructor into skipping obj_delete
 	Jump_nodes.erase(Jump_nodes.begin() + index);
+	Objects[objnum].type = OBJ_JUMP_NODE;     // restore for obj_delete
+	obj_delete(objnum);                        // free the object slot
 
 	Jumpnode_editor_dialog.initialize_data(1);
 	mark_modified("MCP: delete jump node %s", name);
