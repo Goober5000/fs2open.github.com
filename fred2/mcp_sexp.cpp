@@ -1258,6 +1258,23 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			// (This shouldn't happen since we already checked is_root above.)
 		}
 
+		// If the source is an operator atom that will be spliced into a rest
+		// chain, wrap it in a SEXP_LIST node first.  check_sexp_syntax expects
+		// list wrappers (or data atoms) in rest chains, and the splice would
+		// overwrite source.rest, severing any argument chain.
+		// Entity-formula mode and root-replace mode don't need this because
+		// those paths store the operator atom directly as the formula root.
+		int effective_source = source;
+		bool wrapped_source = false;
+		bool need_wrap = (SEXP_NODE_TYPE(source) == SEXP_ATOM
+			&& Sexp_nodes[source].subtype == SEXP_ATOM_OPERATOR
+			&& !(is_root && is_attached));  // root-replace delegates to entity logic
+		if (need_wrap) {
+			effective_source = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, source, -1);
+			Sexp_nodes[source].parent = effective_source;
+			wrapped_source = true;
+		}
+
 		if (position == 0) {
 			// -------------------------------------------------------
 			// Replace mode
@@ -1277,10 +1294,10 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				int target_parent = Sexp_nodes[target].parent;
 				int target_rest = Sexp_nodes[target].rest;
 
-				// Splice source into target's position
-				Sexp_nodes[source].parent = target_parent;
-				Sexp_nodes[source].rest = target_rest;
-				splice_replace_node(target, source);
+				// Splice effective_source into target's position
+				Sexp_nodes[effective_source].parent = target_parent;
+				Sexp_nodes[effective_source].rest = target_rest;
+				splice_replace_node(target, effective_source);
 
 				// Detach the displaced target
 				Sexp_nodes[target].rest = -1;
@@ -1300,8 +1317,14 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 						else if (pred_ante >= 0)
 							Sexp_nodes[pred_ante].rest = target;
 						// Reset source back to free-standing
-						Sexp_nodes[source].rest = -1;
-						Sexp_nodes[source].parent = -1;
+						if (wrapped_source) {
+							Sexp_nodes[source].parent = -1;
+							free_one_sexp(effective_source);
+							wrapped_source = false;
+						} else {
+							Sexp_nodes[source].rest = -1;
+							Sexp_nodes[source].parent = -1;
+						}
 
 						sink.set_error("Attachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 							info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
@@ -1334,13 +1357,13 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			int pred_list = find_sexp_list(target);
 			int pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
 
-			Sexp_nodes[source].parent = Sexp_nodes[target].parent;
-			Sexp_nodes[source].rest = target;
+			Sexp_nodes[effective_source].parent = Sexp_nodes[target].parent;
+			Sexp_nodes[effective_source].rest = target;
 
 			if (pred_list >= 0)
-				Sexp_nodes[pred_list].first = source;
+				Sexp_nodes[pred_list].first = effective_source;
 			else if (pred_ante >= 0)
-				Sexp_nodes[pred_ante].rest = source;
+				Sexp_nodes[pred_ante].rest = effective_source;
 
 			if (is_attached) {
 				int bad_node = -1;
@@ -1351,8 +1374,14 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 						Sexp_nodes[pred_list].first = target;
 					else if (pred_ante >= 0)
 						Sexp_nodes[pred_ante].rest = target;
-					Sexp_nodes[source].rest = -1;
-					Sexp_nodes[source].parent = -1;
+					if (wrapped_source) {
+						Sexp_nodes[source].parent = -1;
+						free_one_sexp(effective_source);
+						wrapped_source = false;
+					} else {
+						Sexp_nodes[source].rest = -1;
+						Sexp_nodes[source].parent = -1;
+					}
 
 					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
@@ -1377,9 +1406,9 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 			int old_target_rest = Sexp_nodes[target].rest;
 
-			Sexp_nodes[source].parent = Sexp_nodes[target].parent;
-			Sexp_nodes[source].rest = old_target_rest;
-			Sexp_nodes[target].rest = source;
+			Sexp_nodes[effective_source].parent = Sexp_nodes[target].parent;
+			Sexp_nodes[effective_source].rest = old_target_rest;
+			Sexp_nodes[target].rest = effective_source;
 
 			if (is_attached) {
 				int bad_node = -1;
@@ -1387,8 +1416,14 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				if (syntax_result != SEXP_CHECK_NO_ERROR) {
 					// Rollback
 					Sexp_nodes[target].rest = old_target_rest;
-					Sexp_nodes[source].rest = -1;
-					Sexp_nodes[source].parent = -1;
+					if (wrapped_source) {
+						Sexp_nodes[source].parent = -1;
+						free_one_sexp(effective_source);
+						wrapped_source = false;
+					} else {
+						Sexp_nodes[source].rest = -1;
+						Sexp_nodes[source].parent = -1;
+					}
 
 					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
