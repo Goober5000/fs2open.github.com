@@ -1024,6 +1024,54 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 	return info;
 }
 
+// Shared logic for replacing a mission entity's formula with a new source node.
+// Validates source, sets the formula, runs a syntax check (rolling back on failure),
+// handles the displaced subtree, marks modified, and marks the forest dirty.
+// Returns true on success; on failure, populates sink and returns false.
+static bool attach_as_entity_formula(
+	int source, const FormulaRootInfo &info, int current_root,
+	bool delete_displaced, int &displaced, int &freed_count,
+	McpErrorSink &sink)
+{
+	// Validate source against entity's expected return type
+	if (!check_sexp_formula(source, info.opr_type, sink))
+		return false;
+
+	displaced = current_root;
+
+	// Commit: set the entity formula to source
+	set_formula(info, source);
+
+	// Syntax check (defensive, should not fail since check_sexp_formula passed)
+	int bad_node = -1;
+	int syntax_result = check_sexp_syntax(source, static_cast<int>(info.opr_type), 1, &bad_node);
+	if (syntax_result != SEXP_CHECK_NO_ERROR) {
+		// Rollback
+		set_formula(info, current_root);
+		sink.set_error("Attachment would cause syntax error: %s (error code %d, bad node %d)",
+			sexp_error_message(syntax_result), syntax_result, bad_node);
+		return false;
+	}
+
+	// Handle the displaced formula
+	if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
+		if (delete_displaced) {
+			freed_count = free_sexp2(displaced);
+		} else {
+			Sexp_nodes[displaced].parent = -1;
+		}
+	}
+
+	// mark_modified
+	if (std::holds_alternative<int>(info.attached_id))
+		mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
+	else
+		mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
+
+	mcp_sexp_forest_mark_dirty({ source, displaced });
+	return true;
+}
+
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -1112,42 +1160,8 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		FormulaRootInfo info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag, current_root, sink);
 		if (sink.has_error()) return;
 
-		// Validate source against entity's expected return type
-		if (!check_sexp_formula(source, info.opr_type, sink))
+		if (!attach_as_entity_formula(source, info, current_root, delete_displaced, displaced, freed_count, sink))
 			return;
-
-		displaced = current_root;
-
-		// Commit: set the entity formula to source
-		set_formula(info, source);
-
-		// Syntax check (defensive, should not fail since check_sexp_formula passed)
-		int bad_node = -1;
-		int syntax_result = check_sexp_syntax(source, static_cast<int>(info.opr_type), 1, &bad_node);
-		if (syntax_result != SEXP_CHECK_NO_ERROR) {
-			// Rollback
-			set_formula(info, current_root);
-			sink.set_error("Attachment would cause syntax error: %s (error code %d, bad node %d)",
-				sexp_error_message(syntax_result), syntax_result, bad_node);
-			return;
-		}
-
-		// Handle the displaced formula
-		if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
-			if (delete_displaced) {
-				freed_count = free_sexp2(displaced);
-			} else {
-				Sexp_nodes[displaced].parent = -1;
-			}
-		}
-
-		// mark_modified
-		if (std::holds_alternative<int>(info.attached_id))
-			mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-		else
-			mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
-
-		mcp_sexp_forest_mark_dirty({ source, displaced });
 
 	} else {
 		// ---------------------------------------------------------------
@@ -1207,35 +1221,8 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 			if (is_root && is_attached) {
 				// Replacing a formula root via target_node: delegate to entity logic.
-				// Validate source against entity's expected return type.
-				if (!check_sexp_formula(source, info.opr_type, sink))
+				if (!attach_as_entity_formula(source, info, info.root, delete_displaced, displaced, freed_count, sink))
 					return;
-
-				displaced = info.root;
-				set_formula(info, source);
-
-				int bad_node = -1;
-				int syntax_result = check_sexp_syntax(source, static_cast<int>(info.opr_type), 1, &bad_node);
-				if (syntax_result != SEXP_CHECK_NO_ERROR) {
-					set_formula(info, displaced);
-					sink.set_error("Attachment would cause syntax error: %s (error code %d, bad node %d)",
-						sexp_error_message(syntax_result), syntax_result, bad_node);
-					return;
-				}
-
-				if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
-					if (delete_displaced)
-						freed_count = free_sexp2(displaced);
-					else
-						Sexp_nodes[displaced].parent = -1;
-				}
-
-				if (std::holds_alternative<int>(info.attached_id))
-					mark_modified("MCP: attach SEXP formula for %s %d", info.attached_type, std::get<int>(info.attached_id));
-				else
-					mark_modified("MCP: attach SEXP formula for %s %s", info.attached_type, std::get<const char *>(info.attached_id));
-
-				mcp_sexp_forest_mark_dirty({ source, displaced });
 
 			} else {
 				// Embedded replace (Cases C'/D')
