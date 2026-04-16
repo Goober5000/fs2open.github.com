@@ -705,6 +705,115 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
 }
 
+// Build a FormulaRootInfo from user-supplied entity coordinates.
+// Returns the current formula root index via out_current_root, or -1 on error.
+static FormulaRootInfo build_formula_root_info_for_entity(
+	const char *entity_type, const char *entity_id, const char *entity_tag,
+	int &out_current_root, McpErrorSink &sink)
+{
+	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
+	out_current_root = -1;
+
+	// Convert entity_tag string to enum and apply defaults for entities that
+	// have multiple formula slots
+	entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
+	if (tag == entity_specific_tag::NONE) {
+		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing"))
+			tag = entity_specific_tag::ARRIVAL_CUE;
+		else if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage"))
+			tag = entity_specific_tag::TEAM_1;
+	}
+	if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
+		sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
+		return info;
+	}
+
+	if (!stricmp(entity_type, "cutscene")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
+			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = The_mission.cutscenes[idx].formula;
+	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
+			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = Fiction_viewer_stages[idx].formula;
+	} else if (!stricmp(entity_type, "briefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
+		if (idx < 0 || idx >= Briefings[t].num_stages) {
+			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = tag;
+		out_current_root = Briefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "debriefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
+		if (idx < 0 || idx >= Debriefings[t].num_stages) {
+			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = tag;
+		out_current_root = Debriefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "ship")) {
+		int ship_idx = ship_name_lookup(entity_id);
+		if (ship_idx < 0) {
+			set_not_found_error(sink, "Ship", entity_id);
+			return info;
+		}
+		info.attached_id = Ships[ship_idx].ship_name;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
+			out_current_root = Ships[ship_idx].departure_cue;
+		else
+			out_current_root = Ships[ship_idx].arrival_cue;
+	} else if (!stricmp(entity_type, "wing")) {
+		int wing_idx = wing_name_lookup(entity_id);
+		if (wing_idx < 0) {
+			set_not_found_error(sink, "Wing", entity_id);
+			return info;
+		}
+		info.attached_id = Wings[wing_idx].name;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
+			out_current_root = Wings[wing_idx].departure_cue;
+		else
+			out_current_root = Wings[wing_idx].arrival_cue;
+	} else if (!stricmp(entity_type, "event")) {
+		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, entity_id);
+		if (evt_idx < 0) {
+			set_not_found_error(sink, "Event", entity_id);
+			return info;
+		}
+		info.opr_type = OPR_NULL;
+		info.attached_id = Mission_events[evt_idx].name.c_str();
+		out_current_root = Mission_events[evt_idx].formula;
+	} else if (!stricmp(entity_type, "goal")) {
+		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, entity_id);
+		if (goal_idx < 0) {
+			set_not_found_error(sink, "Goal", entity_id);
+			return info;
+		}
+		info.attached_id = Mission_goals[goal_idx].name.c_str();
+		out_current_root = Mission_goals[goal_idx].formula;
+	} else {
+		sink.set_error("Unknown entity type '%s'", entity_type);
+		return info;
+	}
+
+	info.root = out_current_root;
+	return info;
+}
+
 static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -745,6 +854,160 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
 }
+
+// ---------------------------------------------------------------------------
+// Shared target resolution
+// ---------------------------------------------------------------------------
+
+struct ResolvedTarget {
+	enum class Mode { Entity, Node };
+	Mode mode;
+	int node = -1;
+	int original_node = -1;
+	FormulaRootInfo entity_info = {};
+	int entity_current_root = -1;
+};
+
+// Entity-type values that can hold formulas.  Matches the entities scanned
+// by find_formula_root_and_type.
+static const SCP_vector<const char *> attach_entity_type_values = {
+	"cutscene", "fiction_viewer_stage", "briefing_stage", "debriefing_stage",
+	"ship", "wing", "event", "goal"
+};
+static const SCP_vector<const char *> attach_entity_tag_values = {
+	"arrival_cue", "departure_cue", "team_1", "team_2"
+};
+
+static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sink)
+{
+	auto target_opt = get_optional_integer(input, "target_node", sink);
+	auto arg_idx_opt = get_optional_integer(input, "target_argument_index", sink);
+	auto entity_type = get_optional_string(input, "target_entity_type", sink);
+	auto entity_id = get_optional_string(input, "target_entity_id", sink);
+	auto entity_tag = get_optional_string(input, "entity_tag", sink);
+	if (sink.has_error()) return false;
+
+	bool have_target_node = target_opt.has_value();
+	bool have_entity = (entity_type != nullptr);
+
+	if (have_target_node == have_entity) {
+		sink.set_error("Exactly one of 'target_node' or 'target_entity_type' must be provided");
+		return false;
+	}
+
+	if (arg_idx_opt.has_value() && !have_target_node) {
+		sink.set_error("'target_argument_index' can only be used with 'target_node', not with entity mode");
+		return false;
+	}
+
+	if (have_entity) {
+		// --- Entity mode ---
+		if (!entity_id) {
+			sink.set_error("'target_entity_id' is required when 'target_entity_type' is provided");
+			return false;
+		}
+		if (!check_string_enum(entity_type, attach_entity_type_values, "target_entity_type", sink))
+			return false;
+		if (entity_tag) {
+			if (!check_string_enum(entity_tag, attach_entity_tag_values, "entity_tag", sink))
+				return false;
+		}
+		out.mode = ResolvedTarget::Mode::Entity;
+		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
+			out.entity_current_root, sink);
+		if (sink.has_error()) return false;
+		if (out.entity_current_root < 0 || out.entity_current_root >= Num_sexp_nodes) {
+			sink.set_error("Entity has no valid formula root (index %d)", out.entity_current_root);
+			return false;
+		}
+		out.node = out.entity_current_root;
+		out.original_node = out.entity_current_root;
+		return true;
+	}
+
+	// --- Node mode ---
+	int target = *target_opt;
+	if (!check_int_range(target, 0, Num_sexp_nodes - 1, "target_node", sink))
+		return false;
+	if (Sexp_nodes[target].type == SEXP_NOT_USED) {
+		sink.set_error("Target node %d is not in use", target);
+		return false;
+	}
+	out.original_node = target;
+
+	if (!arg_idx_opt.has_value()) {
+		// No argument index — direct node addressing.
+		// Reject locked singletons since they can't be uniquely addressed.
+		if (target == Locked_sexp_true || target == Locked_sexp_false) {
+			sink.set_error("Target node %d is a shared singleton (locked %s) and cannot be "
+				"uniquely addressed. Pass the parent operator as target_node and set "
+				"target_argument_index to the singleton's position in its argument list.",
+				target, (target == Locked_sexp_true) ? "true" : "false");
+			return false;
+		}
+		out.mode = ResolvedTarget::Mode::Node;
+		out.node = target;
+		return true;
+	}
+
+	// --- Node + argument index ---
+	int arg_idx = *arg_idx_opt;
+	if (arg_idx < 0) {
+		sink.set_error("target_argument_index must be non-negative, got %d", arg_idx);
+		return false;
+	}
+
+	// Retarget operator atom to its list wrapper if applicable
+	int resolved = target;
+	if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
+		int list = find_sexp_list(resolved);
+		if (list >= 0)
+			resolved = list;
+	}
+
+	// Must be an operator atom or list wrapper
+	int op_atom;
+	if (SEXP_NODE_TYPE(resolved) == SEXP_LIST) {
+		op_atom = Sexp_nodes[resolved].first;
+		if (op_atom < 0 || Sexp_nodes[op_atom].subtype != SEXP_ATOM_OPERATOR) {
+			sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
+			return false;
+		}
+	} else if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
+		op_atom = resolved;
+	} else {
+		sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
+		return false;
+	}
+
+	// Walk the argument chain from the operator atom
+	int arg = Sexp_nodes[op_atom].rest;
+	int count = 0;
+	for (int i = 0; i < arg_idx; i++) {
+		if (arg < 0)
+			break;
+		arg = Sexp_nodes[arg].rest;
+		count++;
+	}
+
+	if (arg < 0) {
+		// Count total arguments for the error message
+		int total = 0;
+		for (int a = Sexp_nodes[op_atom].rest; a >= 0; a = Sexp_nodes[a].rest)
+			total++;
+		sink.set_error("Operator '%s' has %d argument(s); target_argument_index=%d is out of range",
+			Sexp_nodes[op_atom].text, total, arg_idx);
+		return false;
+	}
+
+	out.mode = ResolvedTarget::Mode::Node;
+	out.node = arg;
+	return true;
+}
+
+// ---------------------------------------------------------------------------
+// detach_sexp_node handler (run on main thread)
+// ---------------------------------------------------------------------------
 
 static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	const FormulaRootInfo *pre_resolved, McpErrorSink &sink);
@@ -964,265 +1227,6 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 // ---------------------------------------------------------------------------
 
 static const SCP_vector<const char *> attach_position_values = { "replace", "before", "after" };
-
-// Entity-type values that can hold formulas.  Matches the entities scanned
-// by find_formula_root_and_type.
-static const SCP_vector<const char *> attach_entity_type_values = {
-	"cutscene", "fiction_viewer_stage", "briefing_stage", "debriefing_stage",
-	"ship", "wing", "event", "goal"
-};
-static const SCP_vector<const char *> attach_entity_tag_values = {
-	"arrival_cue", "departure_cue", "team_1", "team_2"
-};
-
-// Build a FormulaRootInfo from user-supplied entity coordinates.
-// Returns the current formula root index via out_current_root, or -1 on error.
-static FormulaRootInfo build_formula_root_info_for_entity(
-	const char *entity_type, const char *entity_id, const char *entity_tag,
-	int &out_current_root, McpErrorSink &sink)
-{
-	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
-	out_current_root = -1;
-
-	// Convert entity_tag string to enum and apply defaults for entities that
-	// have multiple formula slots
-	entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
-	if (tag == entity_specific_tag::NONE) {
-		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing"))
-			tag = entity_specific_tag::ARRIVAL_CUE;
-		else if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage"))
-			tag = entity_specific_tag::TEAM_1;
-	}
-	if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
-		sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
-		return info;
-	}
-
-	if (!stricmp(entity_type, "cutscene")) {
-		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
-			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		out_current_root = The_mission.cutscenes[idx].formula;
-	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
-		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
-			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		out_current_root = Fiction_viewer_stages[idx].formula;
-	} else if (!stricmp(entity_type, "briefing_stage")) {
-		int idx = atoi(entity_id);
-		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Briefings[t].num_stages) {
-			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		info.attached_tag = tag;
-		out_current_root = Briefings[t].stages[idx].formula;
-	} else if (!stricmp(entity_type, "debriefing_stage")) {
-		int idx = atoi(entity_id);
-		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Debriefings[t].num_stages) {
-			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		info.attached_tag = tag;
-		out_current_root = Debriefings[t].stages[idx].formula;
-	} else if (!stricmp(entity_type, "ship")) {
-		int ship_idx = ship_name_lookup(entity_id);
-		if (ship_idx < 0) {
-			set_not_found_error(sink, "Ship", entity_id);
-			return info;
-		}
-		info.attached_id = Ships[ship_idx].ship_name;
-		info.attached_tag = tag;
-		if (tag == entity_specific_tag::DEPARTURE_CUE)
-			out_current_root = Ships[ship_idx].departure_cue;
-		else
-			out_current_root = Ships[ship_idx].arrival_cue;
-	} else if (!stricmp(entity_type, "wing")) {
-		int wing_idx = wing_name_lookup(entity_id);
-		if (wing_idx < 0) {
-			set_not_found_error(sink, "Wing", entity_id);
-			return info;
-		}
-		info.attached_id = Wings[wing_idx].name;
-		info.attached_tag = tag;
-		if (tag == entity_specific_tag::DEPARTURE_CUE)
-			out_current_root = Wings[wing_idx].departure_cue;
-		else
-			out_current_root = Wings[wing_idx].arrival_cue;
-	} else if (!stricmp(entity_type, "event")) {
-		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, entity_id);
-		if (evt_idx < 0) {
-			set_not_found_error(sink, "Event", entity_id);
-			return info;
-		}
-		info.opr_type = OPR_NULL;
-		info.attached_id = Mission_events[evt_idx].name.c_str();
-		out_current_root = Mission_events[evt_idx].formula;
-	} else if (!stricmp(entity_type, "goal")) {
-		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, entity_id);
-		if (goal_idx < 0) {
-			set_not_found_error(sink, "Goal", entity_id);
-			return info;
-		}
-		info.attached_id = Mission_goals[goal_idx].name.c_str();
-		out_current_root = Mission_goals[goal_idx].formula;
-	} else {
-		sink.set_error("Unknown entity type '%s'", entity_type);
-		return info;
-	}
-
-	info.root = out_current_root;
-	return info;
-}
-
-// ---------------------------------------------------------------------------
-// Shared target resolution
-// ---------------------------------------------------------------------------
-
-struct ResolvedTarget {
-	enum class Mode { Entity, Node };
-	Mode mode;
-	int node = -1;
-	int original_node = -1;
-	FormulaRootInfo entity_info = {};
-	int entity_current_root = -1;
-};
-
-static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sink)
-{
-	auto target_opt = get_optional_integer(input, "target_node", sink);
-	auto arg_idx_opt = get_optional_integer(input, "target_argument_index", sink);
-	auto entity_type = get_optional_string(input, "target_entity_type", sink);
-	auto entity_id = get_optional_string(input, "target_entity_id", sink);
-	auto entity_tag = get_optional_string(input, "entity_tag", sink);
-	if (sink.has_error()) return false;
-
-	bool have_target_node = target_opt.has_value();
-	bool have_entity = (entity_type != nullptr);
-
-	if (have_target_node == have_entity) {
-		sink.set_error("Exactly one of 'target_node' or 'target_entity_type' must be provided");
-		return false;
-	}
-
-	if (arg_idx_opt.has_value() && !have_target_node) {
-		sink.set_error("'target_argument_index' can only be used with 'target_node', not with entity mode");
-		return false;
-	}
-
-	if (have_entity) {
-		// --- Entity mode ---
-		if (!entity_id) {
-			sink.set_error("'target_entity_id' is required when 'target_entity_type' is provided");
-			return false;
-		}
-		if (!check_string_enum(entity_type, attach_entity_type_values, "target_entity_type", sink))
-			return false;
-		if (entity_tag) {
-			if (!check_string_enum(entity_tag, attach_entity_tag_values, "entity_tag", sink))
-				return false;
-		}
-		out.mode = ResolvedTarget::Mode::Entity;
-		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
-			out.entity_current_root, sink);
-		if (sink.has_error()) return false;
-		if (out.entity_current_root < 0 || out.entity_current_root >= Num_sexp_nodes) {
-			sink.set_error("Entity has no valid formula root (index %d)", out.entity_current_root);
-			return false;
-		}
-		out.node = out.entity_current_root;
-		out.original_node = out.entity_current_root;
-		return true;
-	}
-
-	// --- Node mode ---
-	int target = *target_opt;
-	if (!check_int_range(target, 0, Num_sexp_nodes - 1, "target_node", sink))
-		return false;
-	if (Sexp_nodes[target].type == SEXP_NOT_USED) {
-		sink.set_error("Target node %d is not in use", target);
-		return false;
-	}
-	out.original_node = target;
-
-	if (!arg_idx_opt.has_value()) {
-		// No argument index — direct node addressing.
-		// Reject locked singletons since they can't be uniquely addressed.
-		if (target == Locked_sexp_true || target == Locked_sexp_false) {
-			sink.set_error("Target node %d is a shared singleton (locked %s) and cannot be "
-				"uniquely addressed. Pass the parent operator as target_node and set "
-				"target_argument_index to the singleton's position in its argument list.",
-				target, (target == Locked_sexp_true) ? "true" : "false");
-			return false;
-		}
-		out.mode = ResolvedTarget::Mode::Node;
-		out.node = target;
-		return true;
-	}
-
-	// --- Node + argument index ---
-	int arg_idx = *arg_idx_opt;
-	if (arg_idx < 0) {
-		sink.set_error("target_argument_index must be non-negative, got %d", arg_idx);
-		return false;
-	}
-
-	// Retarget operator atom to its list wrapper if applicable
-	int resolved = target;
-	if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
-		int list = find_sexp_list(resolved);
-		if (list >= 0)
-			resolved = list;
-	}
-
-	// Must be an operator atom or list wrapper
-	int op_atom;
-	if (SEXP_NODE_TYPE(resolved) == SEXP_LIST) {
-		op_atom = Sexp_nodes[resolved].first;
-		if (op_atom < 0 || Sexp_nodes[op_atom].subtype != SEXP_ATOM_OPERATOR) {
-			sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
-			return false;
-		}
-	} else if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
-		op_atom = resolved;
-	} else {
-		sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
-		return false;
-	}
-
-	// Walk the argument chain from the operator atom
-	int arg = Sexp_nodes[op_atom].rest;
-	int count = 0;
-	for (int i = 0; i < arg_idx; i++) {
-		if (arg < 0)
-			break;
-		arg = Sexp_nodes[arg].rest;
-		count++;
-	}
-
-	if (arg < 0) {
-		// Count total arguments for the error message
-		int total = 0;
-		for (int a = Sexp_nodes[op_atom].rest; a >= 0; a = Sexp_nodes[a].rest)
-			total++;
-		sink.set_error("Operator '%s' has %d argument(s); target_argument_index=%d is out of range",
-			Sexp_nodes[op_atom].text, total, arg_idx);
-		return false;
-	}
-
-	out.mode = ResolvedTarget::Mode::Node;
-	out.node = arg;
-	return true;
-}
 
 // Shared logic for replacing a mission entity's formula with a new source node.
 // Validates source, sets the formula, runs a syntax check (rolling back on failure),
