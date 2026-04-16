@@ -47,18 +47,26 @@ def register(suite, client):
         assert_error(r)
 
     def test_source_not_in_use():
-        # Allocate and immediately free a node to get a NOT_USED index.
-        r = client.call_tool("create_sexp_node", {
-            "role": "argument",
-            "argument_type": "number",
-            "argument_value": "42",
-        })
+        # Create the target first so it doesn't reuse the freed node's slot.
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
         assert_success(r)
-        freed_node = tool_data(r)["node"]
-        client.call_tool("detach_sexp_node", {"target_node": freed_node, "delete": True})
-        r = client.call_tool("attach_sexp_node", {"source_node": freed_node, "target_node": 0})
-        assert_error(r)
-        assert_in("not in use", tool_text(r).lower())
+        target = tool_data(r)["node"]
+        try:
+            # Allocate and immediately free a node to get a NOT_USED index.
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument",
+                "argument_type": "number",
+                "argument_value": "42",
+            })
+            assert_success(r)
+            freed_node = tool_data(r)["node"]
+            client.call_tool("detach_sexp_node", {"target_node": freed_node, "delete": True})
+
+            r = client.call_tool("attach_sexp_node", {"source_node": freed_node, "target_node": target})
+            assert_error(r)
+            assert_in("not in use", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": target, "delete": True})
 
     def test_attach_locked_false_to_entity():
         # Locked singletons (true/false) are valid attach sources.
@@ -670,19 +678,13 @@ def register(suite, client):
     suite.add("sexp_attach_replace_rollback_on_syntax_error", test_replace_rollback_on_syntax_error)
     def test_attach_locked_true_replace_embedded():
         # Replace the (true) condition inside an event's when formula with (false).
-        # The handler auto-wraps the locked singleton in a list wrapper.
+        # Since true is a locked singleton, we must use target_argument_index
+        # to address it via its parent operator.
         r = client.call_tool("create_event", {"name": "attach_locked_repl"})
         assert_success(r)
         evt_formula = tool_data(r).get("formula")
-        # Walk to find the true operator.
-        r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
-        assert_success(r)
-        true_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "true" and n.get("role") == "operator":
-                true_node = n["node"]
-                break
-        assert_true(true_node is not None, "could not find 'true' operator")
+        # The event formula is ( when ( true ) ( do-nothing ) ).
+        # The root 'when' operator is evt_formula; true is argument 0.
         # Get Locked_sexp_false.
         r = client.call_tool("create_sexp_node", {
             "role": "operator",
@@ -690,10 +692,11 @@ def register(suite, client):
         })
         assert_success(r)
         false_node = tool_data(r)["node"]
-        # Replace the true condition with false.
+        # Replace argument 0 of the when operator (the true condition) with false.
         r = client.call_tool("attach_sexp_node", {
             "source_node": false_node,
-            "target_node": true_node,
+            "target_node": evt_formula,
+            "target_argument_index": 0,
         })
         assert_success(r)
         assert_equal(tool_data(r).get("position"), "replace", "position")
