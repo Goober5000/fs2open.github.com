@@ -1173,20 +1173,24 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		sink.set_error("Source node %d is not in use", source);
 		return;
 	}
-	if (source == Locked_sexp_true || source == Locked_sexp_false) {
-		sink.set_error("Locked singleton nodes (true/false) cannot be used as a source for attach");
-		return;
-	}
-	if (find_sexp_root(source) != source) {
-		sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
-		return;
-	}
-	{
-		FormulaRootInfo src_info = find_formula_root_and_type(source);
-		if (src_info.attached) {
-			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
-				source, src_info.attached_type);
+	bool source_is_locked = (source == Locked_sexp_true || source == Locked_sexp_false);
+	// Locked singletons (true/false) are shared nodes whose fields must not
+	// be modified.  They are still valid attach sources: entity-formula mode
+	// just stores the node index, and node-relative mode auto-wraps them in
+	// a SEXP_LIST whose fields are modified instead.  Skip the root and
+	// attached checks since singletons are intentionally shared.
+	if (!source_is_locked) {
+		if (find_sexp_root(source) != source) {
+			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
 			return;
+		}
+		{
+			FormulaRootInfo src_info = find_formula_root_and_type(source);
+			if (src_info.attached) {
+				sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
+					source, src_info.attached_type);
+				return;
+			}
 		}
 	}
 
@@ -1271,7 +1275,10 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			&& !(is_root && is_attached));  // root-replace delegates to entity logic
 		if (need_wrap) {
 			effective_source = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, source, -1);
-			Sexp_nodes[source].parent = effective_source;
+			// Don't set parent on locked singletons — they're shared and their
+			// parent must stay -1 (matching how the parser handles them).
+			if (!source_is_locked)
+				Sexp_nodes[source].parent = effective_source;
 			wrapped_source = true;
 		}
 
