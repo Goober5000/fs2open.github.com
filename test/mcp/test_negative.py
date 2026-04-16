@@ -111,7 +111,7 @@ def register(suite, client):
         assert_in("not a valid number", tool_text(r))
 
     def test_detach_sexp_node_invalid():
-        r = client.call_tool("detach_sexp_node", {"node": -999})
+        r = client.call_tool("detach_sexp_node", {"target_node": -999})
         assert_error(r)
 
     def test_swap_messages_out_of_range():
