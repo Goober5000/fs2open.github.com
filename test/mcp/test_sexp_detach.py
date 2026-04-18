@@ -36,10 +36,12 @@ from mcp_test_lib import (
     assert_in,
     assert_success,
     assert_true,
+    find_node_by_value,
     run_module_standalone,
     SkipTest,
     tool_data,
     tool_text,
+    tree_values,
 )
 
 
@@ -105,12 +107,7 @@ def register(suite, client):
         s02["root"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s02["root"]})
         assert_success(r)
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                s02["two_node"] = n["node"]
-                break
-        assert_true(s02.get("two_node") is not None,
-                    "could not find '2' node in (+ 1 2 3)")
+        s02["two_node"] = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": s02["two_node"]})
         assert_success(r)
         s02["response"] = tool_data(r)
@@ -229,12 +226,8 @@ def register(suite, client):
         s05["evt_formula"] = tool_data(r).get("formula")
         r = client.call_tool("walk_sexp_tree", {"node": s05["evt_formula"]})
         assert_success(r)
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "true" and n["node"] != s05["evt_formula"]:
-                s05["true_node"] = n["node"]
-                break
-        assert_true(s05.get("true_node") is not None,
-                    "could not find embedded 'true' node in default event formula")
+        s05["true_node"] = find_node_by_value(tool_data(r)["nodes"],
+                                              "true", role="operator")["node"]
 
     def s05_embedded_locked_singleton_is_rejected():
         if "true_node" not in s05:
@@ -309,12 +302,7 @@ def register(suite, client):
         s08["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s08["plus_node"]})
         assert_success(r)
-        three_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "3":
-                three_node = nd["node"]
-                break
-        assert_true(three_node is not None, "could not find '3' node")
+        three_node = find_node_by_value(tool_data(r)["nodes"], "3")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": three_node})
         assert_success(r)
         repl = get_replacement_data(tool_data(r))
@@ -326,7 +314,7 @@ def register(suite, client):
             raise SkipTest("section 8 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s08["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "1", "2", "<placeholder>"], str(remaining))
 
     def s08_cleanup():
@@ -359,12 +347,7 @@ def register(suite, client):
         s09["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s09["plus_node"]})
         assert_success(r)
-        two_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "2":
-                two_node = nd["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": two_node})
         assert_success(r)
         repl = get_replacement_data(tool_data(r))
@@ -376,7 +359,7 @@ def register(suite, client):
             raise SkipTest("section 9 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s09["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_true("+" in remaining and "1" in remaining
                     and "<placeholder>" in remaining and "3" in remaining,
                     str(remaining))
@@ -408,13 +391,9 @@ def register(suite, client):
         s10["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s10["plus_node"]})
         assert_success(r)
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "1":
-                s10["one_node"] = nd["node"]
-            elif nd.get("value") == "2":
-                s10["two_node"] = nd["node"]
-        assert_true("one_node" in s10 and "two_node" in s10,
-                    "did not find both '1' and '2' nodes")
+        nodes = tool_data(r)["nodes"]
+        s10["one_node"] = find_node_by_value(nodes, "1")["node"]
+        s10["two_node"] = find_node_by_value(nodes, "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": s10["two_node"]})
         assert_success(r)
         repl = get_replacement_data(tool_data(r))
@@ -435,7 +414,7 @@ def register(suite, client):
             raise SkipTest("section 10 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s10["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "<placeholder>", "<placeholder>"], str(remaining))
 
     def s10_cleanup():
@@ -467,12 +446,7 @@ def register(suite, client):
         s11["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s11["plus_node"]})
         assert_success(r)
-        two_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "2":
-                two_node = nd["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": two_node, "shrink": True})
         assert_success(r)
         d = tool_data(r)
@@ -484,7 +458,7 @@ def register(suite, client):
             raise SkipTest("section 11 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s11["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "1", "3"], str(remaining))
 
     def s11_cleanup():
@@ -515,12 +489,7 @@ def register(suite, client):
         s12["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s12["plus_node"]})
         assert_success(r)
-        three_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "3":
-                three_node = nd["node"]
-                break
-        assert_true(three_node is not None, "could not find '3' node")
+        three_node = find_node_by_value(tool_data(r)["nodes"], "3")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": three_node, "shrink": True})
         assert_success(r)
 
@@ -529,7 +498,7 @@ def register(suite, client):
             raise SkipTest("section 12 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s12["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "1", "2"], str(remaining))
 
     def s12_cleanup():
@@ -560,12 +529,7 @@ def register(suite, client):
         s13["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s13["plus_node"]})
         assert_success(r)
-        one_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "1":
-                one_node = nd["node"]
-                break
-        assert_true(one_node is not None, "could not find '1' node")
+        one_node = find_node_by_value(tool_data(r)["nodes"], "1")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": one_node, "shrink": True})
         assert_success(r)
 
@@ -574,7 +538,7 @@ def register(suite, client):
             raise SkipTest("section 13 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s13["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "2", "3"], str(remaining))
 
     def s13_cleanup():
@@ -606,12 +570,7 @@ def register(suite, client):
         s14["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s14["plus_node"]})
         assert_success(r)
-        two_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "2":
-                two_node = nd["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": two_node, "shrink": True})
         assert_success(r)
         d = tool_data(r)
@@ -623,7 +582,7 @@ def register(suite, client):
             raise SkipTest("section 14 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s14["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "1", "<placeholder>"], str(remaining))
 
     def s14_cleanup():
@@ -653,12 +612,7 @@ def register(suite, client):
         s15["plus_node"] = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": s15["plus_node"]})
         assert_success(r)
-        two_node = None
-        for nd in tool_data(r)["nodes"]:
-            if nd.get("value") == "2":
-                two_node = nd["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("detach_sexp_node", {"target_node": two_node, "shrink": False})
         assert_success(r)
         repl = get_replacement_data(tool_data(r))
@@ -778,15 +732,11 @@ def register(suite, client):
         s18["when_node"] = tool_data(r).get("node")
         r = client.call_tool("walk_sexp_tree", {"node": s18["when_node"]})
         assert_success(r)
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "and" and n.get("role") == "operator":
-                s18["and_node"] = n["node"]
-                s18["and_wrapper_idx"] = n.get("node_parent")
-                break
-        assert_true(s18.get("and_node") is not None
-                    and s18.get("and_wrapper_idx") is not None
-                    and s18["and_wrapper_idx"] >= 0,
-                    f"and_node={s18.get('and_node')}, wrapper={s18.get('and_wrapper_idx')}")
+        and_n = find_node_by_value(tool_data(r)["nodes"], "and", role="operator")
+        s18["and_node"] = and_n["node"]
+        s18["and_wrapper_idx"] = and_n.get("node_parent")
+        assert_true(s18["and_wrapper_idx"] is not None and s18["and_wrapper_idx"] >= 0,
+                    f"wrapper={s18['and_wrapper_idx']}")
 
     def s18_detach_response_reports_op_atom():
         if "and_node" not in s18:
@@ -827,7 +777,7 @@ def register(suite, client):
         assert_success(r)
         # walk_sexp_tree also returns the empty-text list_wrapper entries;
         # filter them out so we can match the meaningful payload exactly.
-        detached_walk = [n["value"] for n in tool_data(r)["nodes"] if n.get("value")]
+        detached_walk = tree_values(tool_data(r)["nodes"], filter_empty=True)
         assert_equal(detached_walk, ["and", "true", "true"], str(detached_walk))
 
     def s18_original_tree_has_when_placeholder_do_nothing():
@@ -835,7 +785,7 @@ def register(suite, client):
             raise SkipTest("section 18 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s18["when_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_true("when" in remaining and "<placeholder>" in remaining
                     and "do-nothing" in remaining and "and" not in remaining,
                     str(remaining))
@@ -879,11 +829,8 @@ def register(suite, client):
         s19["when_node"] = tool_data(r).get("node")
         r = client.call_tool("walk_sexp_tree", {"node": s19["when_node"]})
         assert_success(r)
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "and" and n.get("role") == "operator":
-                s19["and_node"] = n["node"]
-                break
-        assert_true("and_node" in s19, "could not find 'and' operator")
+        s19["and_node"] = find_node_by_value(tool_data(r)["nodes"],
+                                             "and", role="operator")["node"]
         r = client.call_tool("detach_sexp_node",
                              {"target_node": s19["and_node"], "delete": True})
         assert_success(r)
@@ -909,7 +856,7 @@ def register(suite, client):
             raise SkipTest("section 19 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s19["when_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_true("when" in remaining and "<placeholder>" in remaining
                     and "do-nothing" in remaining and "and" not in remaining,
                     str(remaining))
@@ -940,16 +887,11 @@ def register(suite, client):
         s20["plus_node"] = tool_data(r).get("node")
         r = client.call_tool("walk_sexp_tree", {"node": s20["plus_node"]})
         assert_success(r)
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "-" and n.get("role") == "operator":
-                s20["minus_node"] = n["node"]
-                s20["minus_wrapper_idx"] = n.get("node_parent")
-                break
-        assert_true(s20.get("minus_node") is not None
-                    and s20.get("minus_wrapper_idx") is not None
-                    and s20["minus_wrapper_idx"] >= 0,
-                    f"minus_node={s20.get('minus_node')}, "
-                    f"wrapper={s20.get('minus_wrapper_idx')}")
+        minus_n = find_node_by_value(tool_data(r)["nodes"], "-", role="operator")
+        s20["minus_node"] = minus_n["node"]
+        s20["minus_wrapper_idx"] = minus_n.get("node_parent")
+        assert_true(s20["minus_wrapper_idx"] is not None and s20["minus_wrapper_idx"] >= 0,
+                    f"wrapper={s20['minus_wrapper_idx']}")
 
     def s20_shrink_retarget_response_reports_minus():
         if "minus_node" not in s20:
@@ -989,7 +931,7 @@ def register(suite, client):
             raise SkipTest("section 20 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s20["plus_node"]})
         assert_success(r)
-        remaining = [n["value"] for n in tool_data(r)["nodes"]]
+        remaining = tree_values(tool_data(r)["nodes"])
         assert_equal(remaining, ["+", "1", "2"], str(remaining))
 
     def s20_detached_subtree_walks_to_minus_five_three():
@@ -997,7 +939,7 @@ def register(suite, client):
             raise SkipTest("section 20 setup did not run")
         r = client.call_tool("walk_sexp_tree", {"node": s20["minus_node"]})
         assert_success(r)
-        detached_walk = [n["value"] for n in tool_data(r)["nodes"]]
+        detached_walk = tree_values(tool_data(r)["nodes"])
         assert_equal(detached_walk, ["-", "5", "3"], str(detached_walk))
 
     def s20_cleanup():
@@ -1339,7 +1281,7 @@ def register(suite, client):
             # The tree should still have a placeholder where true was.
             r = client.call_tool("walk_sexp_tree", {"node": root})
             assert_success(r)
-            values = [n["value"] for n in tool_data(r)["nodes"]]
+            values = tree_values(tool_data(r)["nodes"])
             assert_in("<placeholder>", values)
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
