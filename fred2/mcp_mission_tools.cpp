@@ -2219,6 +2219,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 	// Insert
 	Jump_nodes.insert(Jump_nodes.begin() + target_index, std::move(jnp));
+	obj_merge_created_list();
 
 	Jumpnode_editor_dialog.initialize_data(1);
 	mark_modified("MCP: create jump node %s", name);
