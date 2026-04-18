@@ -1461,10 +1461,29 @@ def register(suite, client):
               test_detach_argument_index_on_non_operator)
     suite.add("sexp_detach_argument_index_negative",
               test_detach_argument_index_negative)
+    def test_detach_entity_default_formula_rejected():
+        """Detaching a goal whose formula is already the default (true) should
+        error rather than silently no-op."""
+        r = client.call_tool("create_goal", {"name": "detach_default_test"})
+        assert_success(r)
+        try:
+            r = client.call_tool("detach_sexp_node", {
+                "target_entity_type": "goal",
+                "target_entity_id": "detach_default_test",
+            })
+            assert_error(r)
+            assert_in("already the default", tool_text(r).lower())
+        finally:
+            client.call_tool("delete_goal", {
+                "name": "detach_default_test", "force": True,
+            })
+
     suite.add("sexp_detach_entity_mode",
               test_detach_entity_mode)
     suite.add("sexp_detach_entity_mode_with_delete",
               test_detach_entity_mode_with_delete)
+    suite.add("sexp_detach_entity_default_formula_rejected",
+              test_detach_entity_default_formula_rejected)
     suite.add("sexp_detach_entity_and_node_mutually_exclusive",
               test_detach_entity_and_node_mutually_exclusive)
     suite.add("sexp_detach_old_param_name_rejected",
