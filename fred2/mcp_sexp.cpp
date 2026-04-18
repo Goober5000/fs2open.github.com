@@ -1159,6 +1159,17 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 			replacement = Locked_sexp_true;
 		}
 
+		// If the replacement is the same node as the current formula, there
+		// is nothing to do (e.g. an OPR_BOOL entity already set to true).
+		if (replacement == n) {
+			sink.set_error("Entity formula is already the default (%s); "
+				"there is nothing to detach",
+				Sexp_nodes[n].text);
+			if (replacement != Locked_sexp_true && replacement != Locked_sexp_false)
+				free_sexp2(replacement);
+			return nullptr;
+		}
+
 		// Set the entity formula to the replacement
 		set_formula(info, replacement);
 
@@ -1233,9 +1244,10 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 			freed_count = free_sexp2(n);
 	}
 
-	mcp_sexp_forest_mark_dirty({ info.root });			// mark the tree dirty
 	if (is_root && is_attached)
-		mcp_sexp_forest_mark_dirty({ replacement });	// for case A, the new tree needs to be marked dirty as well
+		mcp_sexp_forest_mark_dirty({ replacement });	// case A: mark the new formula, not the old (now detached/freed) root
+	else
+		mcp_sexp_forest_mark_dirty({ info.root });		// cases B/C/D: mark the tree that was modified
 
 	// If preserved, the detached node is the root of a new free-standing tree
 	if (!do_delete) {
@@ -1259,7 +1271,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	json_object_set_new(result, "detached_node", json_integer(original_n));
 	if (!do_delete)
 		json_object_set_new(result, "detached_node_data", build_sexp_node_json(original_n));
-	json_object_set_new(result, "deleted", do_delete ? json_true() : json_false());
+	json_object_set_new(result, "deleted", (do_delete && freed_count > 0) ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0) {
 		json_object_set_new(result, "replacement_node", json_integer(replacement));
@@ -1575,7 +1587,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		json_object_set_new(result, "displaced_node", json_null());
 	}
 
-	json_object_set_new(result, "deleted_displaced", delete_displaced && displaced >= 0 ? json_true() : json_false());
+	json_object_set_new(result, "deleted_displaced", (delete_displaced && freed_count > 0) ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 
 	req->result_json = make_json_tool_result(result);
