@@ -15,25 +15,13 @@ from mcp_test_lib import (
     assert_in,
     assert_success,
     assert_true,
+    find_node_by_value,
     run_module_standalone,
-    SkipTest,
     tool_data,
     tool_text,
+    tree_signature,
+    tree_values,
 )
-
-
-def tree_signature(walk_nodes):
-    """Snapshot a walk_sexp_tree result for structural comparison."""
-    return [(n["node"], n.get("value"), n.get("node_parent"), n.get("node_rest"),
-             n.get("node_first")) for n in walk_nodes]
-
-
-def tree_values(walk_nodes, filter_empty=False):
-    """Extract values list from a walk, optionally filtering empty wrapper entries."""
-    vals = [n["value"] for n in walk_nodes]
-    if filter_empty:
-        vals = [v for v in vals if v]
-    return vals
 
 
 def register(suite, client):
@@ -45,6 +33,7 @@ def register(suite, client):
     def test_source_out_of_range():
         r = client.call_tool("attach_sexp_node", {"source_node": 99999, "target_node": 0})
         assert_error(r)
+        assert_in("out of range", tool_text(r).lower())
 
     def test_source_not_in_use():
         # Create the target first so it doesn't reuse the freed node's slot.
@@ -107,12 +96,7 @@ def register(suite, client):
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
         assert_success(r)
-        one_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "1":
-                one_node = n["node"]
-                break
-        assert_true(one_node is not None, "could not find '1' node")
+        one_node = find_node_by_value(tool_data(r)["nodes"], "1")["node"]
         r = client.call_tool("attach_sexp_node", {"source_node": one_node, "target_node": root})
         assert_error(r)
         assert_in("free-standing root", tool_text(r).lower())
@@ -232,7 +216,10 @@ def register(suite, client):
         assert_success(r)
         d = tool_data(r)
         assert_true(d.get("deleted_displaced") is True, "deleted_displaced should be true")
-        assert_true(d.get("freed_count", 0) > 0, "freed_count should be > 0")
+        # Default event formula "( when ( true ) ( do-nothing ) )" frees 4 nodes:
+        # the when operator, two list wrappers, and do-nothing.  The locked
+        # singleton "true" is shared and not freed.
+        assert_equal(d.get("freed_count"), 4, "freed_count for default event formula")
         # Old formula should be gone.
         r = client.call_tool("get_sexp_node", {"node": old_formula})
         assert_error(r)
@@ -294,6 +281,7 @@ def register(suite, client):
             "target_entity_id": "foo",
         })
         assert_error(r)
+        assert_in("invalid value", tool_text(r).lower())
         client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
 
     def test_entity_nonexistent_id():
@@ -309,6 +297,7 @@ def register(suite, client):
             "target_entity_id": "no_such_event_xyz",
         })
         assert_error(r)
+        assert_in("not found", tool_text(r).lower())
         client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
 
     def test_entity_debriefing_stage_default_tag():
@@ -427,42 +416,40 @@ def register(suite, client):
         })
         assert_success(r)
         root = tool_data(r)["node"]
-        r = client.call_tool("walk_sexp_tree", {"node": root})
         two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
-        r = client.call_tool("detach_sexp_node", {"target_node": two_node})
-        assert_success(r)
-        placeholder = tool_data(r).get("replacement_node")
-        assert_true(placeholder is not None, "expected a placeholder")
-        # Create source node.
-        r = client.call_tool("create_sexp_node", {
-            "role": "argument",
-            "argument_type": "number",
-            "argument_value": "99",
-        })
-        assert_success(r)
-        src = tool_data(r)["node"]
-        # Attach source at the placeholder's position.
-        r = client.call_tool("attach_sexp_node", {
-            "source_node": src,
-            "target_node": placeholder,
-        })
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(d.get("position"), "replace", "position")
-        assert_true(d.get("displaced_node") is not None, "displaced_node should be set")
-        # Walk the tree — should be + 1 99 3.
-        r = client.call_tool("walk_sexp_tree", {"node": root})
-        assert_success(r)
-        vals = tree_values(tool_data(r)["nodes"])
-        assert_equal(vals, ["+", "1", "99", "3"], "tree after replace")
-        # Clean up.
-        client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
-        client.call_tool("detach_sexp_node", {"target_node": two_node, "delete": True})
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("detach_sexp_node", {"target_node": two_node})
+            assert_success(r)
+            placeholder = tool_data(r).get("replacement_node")
+            assert_true(placeholder is not None, "expected a placeholder")
+            # Create source node.
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument",
+                "argument_type": "number",
+                "argument_value": "99",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            # Attach source at the placeholder's position.
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src,
+                "target_node": placeholder,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("position"), "replace", "position")
+            assert_true(d.get("displaced_node") is not None, "displaced_node should be set")
+            # Walk the tree — should be + 1 99 3.
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            vals = tree_values(tool_data(r)["nodes"])
+            assert_equal(vals, ["+", "1", "99", "3"], "tree after replace")
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+            if two_node is not None:
+                client.call_tool("detach_sexp_node", {"target_node": two_node, "delete": True})
 
     def test_replace_with_delete_displaced():
         r = client.call_tool("create_sexp_node", {
@@ -476,11 +463,7 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
-        two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
             "argument_type": "number",
@@ -537,12 +520,8 @@ def register(suite, client):
         r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
         assert_success(r)
         sig_before = tree_signature(tool_data(r)["nodes"])
-        donothing_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                donothing_node = n["node"]
-                break
-        assert_true(donothing_node is not None, "could not find 'do-nothing' in default event formula")
+        donothing_node = find_node_by_value(tool_data(r)["nodes"],
+                                            "do-nothing", role="operator")["node"]
         # Create a number atom — wrong type for an action slot.
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
@@ -601,12 +580,7 @@ def register(suite, client):
         # Find the "2" node.
         r = client.call_tool("walk_sexp_tree", {"node": root})
         assert_success(r)
-        two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         # Replace "2" with the (+ 3 4) subtree.
         r = client.call_tool("attach_sexp_node", {
             "source_node": src,
@@ -636,12 +610,7 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
-        two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
-        assert_true(two_node is not None, "could not find '2' node")
+        two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
             "argument_type": "number",
@@ -730,32 +699,30 @@ def register(suite, client):
         })
         assert_success(r)
         root = tool_data(r)["node"]
-        r = client.call_tool("walk_sexp_tree", {"node": root})
-        two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
-        r = client.call_tool("create_sexp_node", {
-            "role": "argument",
-            "argument_type": "number",
-            "argument_value": "99",
-        })
-        assert_success(r)
-        src = tool_data(r)["node"]
-        r = client.call_tool("attach_sexp_node", {
-            "source_node": src,
-            "target_node": two_node,
-            "position": "before",
-        })
-        assert_success(r)
-        d = tool_data(r)
-        assert_equal(d.get("position"), "before", "position")
-        assert_true(d.get("displaced_node") is None, "no displaced_node for insert")
-        r = client.call_tool("walk_sexp_tree", {"node": root})
-        vals = tree_values(tool_data(r)["nodes"])
-        assert_equal(vals, ["+", "1", "99", "2", "3"], "tree after insert before")
-        client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument",
+                "argument_type": "number",
+                "argument_value": "99",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src,
+                "target_node": two_node,
+                "position": "before",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("position"), "before", "position")
+            assert_true(d.get("displaced_node") is None, "no displaced_node for insert")
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            vals = tree_values(tool_data(r)["nodes"])
+            assert_equal(vals, ["+", "1", "99", "2", "3"], "tree after insert before")
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
     def test_insert_before_first_arg():
         # Build (+ 1 2), insert 99 before "1". Result: + 99 1 2.
@@ -770,11 +737,7 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
-        one_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "1":
-                one_node = n["node"]
-                break
+        one_node = find_node_by_value(tool_data(r)["nodes"], "1")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
             "argument_type": "number",
@@ -807,11 +770,7 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
-        three_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "3":
-                three_node = n["node"]
-                break
+        three_node = find_node_by_value(tool_data(r)["nodes"], "3")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
             "argument_type": "number",
@@ -844,11 +803,7 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         r = client.call_tool("walk_sexp_tree", {"node": root})
-        one_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "1":
-                one_node = n["node"]
-                break
+        one_node = find_node_by_value(tool_data(r)["nodes"], "1")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
             "argument_type": "number",
@@ -891,6 +846,7 @@ def register(suite, client):
             "position": "before",
         })
         assert_error(r)
+        assert_in("free-standing root", tool_text(r).lower())
         client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
         client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
@@ -917,6 +873,7 @@ def register(suite, client):
             "position": "after",
         })
         assert_error(r)
+        assert_in("free-standing root", tool_text(r).lower())
         client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
         client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
@@ -928,12 +885,8 @@ def register(suite, client):
         # Walk to find the do-nothing operator in the event formula.
         r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
         assert_success(r)
-        donothing_op = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                donothing_op = n["node"]
-                break
-        assert_true(donothing_op is not None, "could not find do-nothing operator")
+        donothing_op = find_node_by_value(tool_data(r)["nodes"],
+                                          "do-nothing", role="operator")["node"]
         # Build a second do-nothing operator.  The handler auto-wraps operator
         # atoms in list wrappers when inserting into rest chains.
         r = client.call_tool("create_sexp_node", {
@@ -969,12 +922,8 @@ def register(suite, client):
         assert_success(r)
         sig_before = tree_signature(tool_data(r)["nodes"])
         # Find the do-nothing operator node.
-        donothing_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                donothing_node = n["node"]
-                break
-        assert_true(donothing_node is not None, "could not find do-nothing operator")
+        donothing_node = find_node_by_value(tool_data(r)["nodes"],
+                                            "do-nothing", role="operator")["node"]
         # Create a number atom — invalid as a sibling in the when's action list.
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
@@ -1021,12 +970,8 @@ def register(suite, client):
         # Walk to find the do-nothing operator.
         r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
         assert_success(r)
-        donothing_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                donothing_node = n["node"]
-                break
-        assert_true(donothing_node is not None, "could not find do-nothing")
+        donothing_node = find_node_by_value(tool_data(r)["nodes"],
+                                            "do-nothing", role="operator")["node"]
         # Get Locked_sexp_false.  It has OPR_BOOL return type, not OPR_NULL,
         # so inserting it after do-nothing in a when's action list should fail
         # syntax check and be rolled back.  This verifies rollback works for
@@ -1071,12 +1016,8 @@ def register(suite, client):
         r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
         assert_success(r)
         sig_before = tree_signature(tool_data(r)["nodes"])
-        donothing_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "do-nothing" and n.get("role") == "operator":
-                donothing_node = n["node"]
-                break
-        assert_true(donothing_node is not None, "could not find do-nothing")
+        donothing_node = find_node_by_value(tool_data(r)["nodes"],
+                                            "do-nothing", role="operator")["node"]
         r = client.call_tool("create_sexp_node", {
             "role": "operator",
             "operator_name": "+",
@@ -1139,31 +1080,29 @@ def register(suite, client):
         })
         assert_success(r)
         root = tool_data(r)["node"]
-        r = client.call_tool("walk_sexp_tree", {"node": root})
-        assert_success(r)
-        original_vals = tree_values(tool_data(r)["nodes"])
-        two_node = None
-        for n in tool_data(r)["nodes"]:
-            if n.get("value") == "2":
-                two_node = n["node"]
-                break
-        # Detach "2" — leaves placeholder.
-        r = client.call_tool("detach_sexp_node", {"target_node": two_node})
-        assert_success(r)
-        placeholder = tool_data(r).get("replacement_node")
-        # Attach "2" back at the placeholder, deleting the placeholder.
-        r = client.call_tool("attach_sexp_node", {
-            "source_node": two_node,
-            "target_node": placeholder,
-            "delete_displaced": True,
-        })
-        assert_success(r)
-        # Tree should be restored.
-        r = client.call_tool("walk_sexp_tree", {"node": root})
-        assert_success(r)
-        restored_vals = tree_values(tool_data(r)["nodes"])
-        assert_equal(restored_vals, original_vals, "tree restored after detach+attach round-trip")
-        client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            original_vals = tree_values(tool_data(r)["nodes"])
+            two_node = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            # Detach "2" — leaves placeholder.
+            r = client.call_tool("detach_sexp_node", {"target_node": two_node})
+            assert_success(r)
+            placeholder = tool_data(r).get("replacement_node")
+            # Attach "2" back at the placeholder, deleting the placeholder.
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": two_node,
+                "target_node": placeholder,
+                "delete_displaced": True,
+            })
+            assert_success(r)
+            # Tree should be restored.
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            restored_vals = tree_values(tool_data(r)["nodes"])
+            assert_equal(restored_vals, original_vals, "tree restored after detach+attach round-trip")
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
     suite.add("sexp_attach_detach_then_attach_restores_tree", test_detach_then_attach_restores_tree)
 
@@ -1180,13 +1119,8 @@ def register(suite, client):
         try:
             r = client.call_tool("walk_sexp_tree", {"node": root})
             assert_success(r)
-            nodes = tool_data(r)["nodes"]
-            true_node = None
-            for n in nodes:
-                if n["value"] == "true" and n["role"] == "operator":
-                    true_node = n["node"]
-                    break
-            assert_true(true_node is not None, "Should find a true operator")
+            true_node = find_node_by_value(tool_data(r)["nodes"],
+                                           "true", role="operator")["node"]
 
             r = client.call_tool("create_sexp_node", {
                 "role": "argument", "argument_type": "number", "argument_value": "1",
@@ -1411,12 +1345,7 @@ def register(suite, client):
             # Find the "1" argument node inside root's tree.
             r = client.call_tool("walk_sexp_tree", {"node": root})
             assert_success(r)
-            one_node = None
-            for n in tool_data(r)["nodes"]:
-                if n.get("value") == "1":
-                    one_node = n["node"]
-                    break
-            assert_true(one_node is not None, "Should find the '1' node")
+            one_node = find_node_by_value(tool_data(r)["nodes"], "1")["node"]
 
             # Try to attach root (= the whole tree) into its own child's
             # position.  This would create a cycle.
@@ -1433,6 +1362,138 @@ def register(suite, client):
 
     suite.add("sexp_attach_cycle_rejected",
               test_attach_cycle_rejected)
+
+    def test_attach_cycle_grandchild_rejected():
+        """Attaching a root into a grandchild position should be rejected.
+        Exercises the multi-level walk-up inside the cycle check."""
+        r = client.call_tool("text_to_sexp", {"text": "( + ( * 2 3 ) 4 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            three_node = find_node_by_value(tool_data(r)["nodes"], "3")["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": root,
+                "target_node": three_node,
+                "position": "replace",
+            })
+            assert_error(r)
+            assert_in("cycle", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node",
+                             {"target_node": root, "delete": True})
+
+    suite.add("sexp_attach_cycle_grandchild_rejected",
+              test_attach_cycle_grandchild_rejected)
+
+    # =================================================================
+    # Round-trip: attach result survives serialize/parse
+    # =================================================================
+
+    def test_attach_then_serialize_roundtrip():
+        """After attach, serializing the host formula and re-parsing should
+        reproduce the same token sequence."""
+        r = client.call_tool("create_event", {"name": "attach_rt_evt"})
+        assert_success(r)
+        try:
+            r = client.call_tool("detach_sexp_node",
+                                 {"target_node": tool_data(r).get("formula"),
+                                  "delete": True})
+            assert_success(r)
+            r = client.call_tool("text_to_sexp",
+                                 {"text": "( when ( and ( true ) ( false ) ) "
+                                          "( do-nothing ) )"})
+            assert_success(r)
+            new_formula = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": new_formula,
+                "target_entity_type": "event",
+                "target_entity_id": "attach_rt_evt",
+            })
+            assert_success(r)
+            # Snapshot the attached formula's token sequence.
+            r = client.call_tool("walk_sexp_tree", {"node": new_formula})
+            assert_success(r)
+            original_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            # Round-trip through text.
+            r = client.call_tool("sexp_to_text", {"node": new_formula})
+            assert_success(r)
+            serialized = tool_text(r)
+            r = client.call_tool("text_to_sexp", {"text": serialized})
+            assert_success(r)
+            parsed_root = tool_data(r)["node"]
+            parsed_vals = None
+            try:
+                r = client.call_tool("walk_sexp_tree", {"node": parsed_root})
+                assert_success(r)
+                parsed_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+                assert_equal(parsed_vals, original_vals,
+                             "round-trip tokens should match the attached formula")
+            finally:
+                client.call_tool("detach_sexp_node",
+                                 {"target_node": parsed_root, "delete": True})
+        finally:
+            client.call_tool("delete_event", {"name": "attach_rt_evt"})
+
+    suite.add("sexp_attach_then_serialize_roundtrip",
+              test_attach_then_serialize_roundtrip)
+
+    # =================================================================
+    # Cross-entity: detach a subtree from one entity, attach into another
+    # =================================================================
+
+    def test_cross_entity_attach():
+        """Attach a boolean subtree as one goal's formula, detach it (which
+        makes it free-standing again), and re-attach it as a different goal's
+        formula.  Exercises the entity-to-entity transfer path."""
+        r = client.call_tool("create_goal", {"name": "attach_cross_a"})
+        assert_success(r)
+        try:
+            r = client.call_tool("create_goal", {"name": "attach_cross_b"})
+            assert_success(r)
+            try:
+                # Plant an 'and' subtree as goal A's formula.
+                r = client.call_tool("text_to_sexp",
+                                     {"text": "( and ( true ) ( true ) )"})
+                assert_success(r)
+                and_node = tool_data(r)["node"]
+                r = client.call_tool("attach_sexp_node", {
+                    "source_node": and_node,
+                    "target_entity_type": "goal",
+                    "target_entity_id": "attach_cross_a",
+                    "delete_displaced": True,
+                })
+                assert_success(r)
+                # Detach goal A's formula — returns the 'and' subtree as a
+                # free-standing root and installs a default replacement in A.
+                r = client.call_tool("detach_sexp_node",
+                                     {"target_node": and_node})
+                assert_success(r)
+                # Re-attach as goal B's formula.
+                r = client.call_tool("attach_sexp_node", {
+                    "source_node": and_node,
+                    "target_entity_type": "goal",
+                    "target_entity_id": "attach_cross_b",
+                    "delete_displaced": True,
+                })
+                assert_success(r)
+                # Verify: goal B's formula is the transferred 'and' subtree.
+                r = client.call_tool("get_goal", {"name": "attach_cross_b"})
+                assert_success(r)
+                assert_equal(tool_data(r).get("formula"), and_node,
+                             "goal B formula should be the cross-attached subtree")
+                r = client.call_tool("walk_sexp_tree", {"node": and_node})
+                assert_success(r)
+                b_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+                assert_equal(b_vals, ["and", "true", "true"],
+                             "goal B tokens after cross-entity attach")
+            finally:
+                client.call_tool("delete_goal", {"name": "attach_cross_b"})
+        finally:
+            client.call_tool("delete_goal", {"name": "attach_cross_a"})
+
+    suite.add("sexp_attach_cross_entity", test_cross_entity_attach)
 
 
 if __name__ == "__main__":
