@@ -207,13 +207,7 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	SCP_string text;
-	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
-
-	json_t *result = json_object();
-	json_object_set_new(result, "node", json_integer(n));
-	json_object_set_new(result, "text", json_string(text.c_str()));
-	req->result_json = make_json_tool_result(result);
+	convert_sexp_to_string(req->result_message, n, SEXP_SAVE_MODE);
 	req->success = true;
 }
 
