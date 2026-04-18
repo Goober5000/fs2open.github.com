@@ -541,6 +541,32 @@ static void undo_source_wrap(int source, int effective_source, bool &wrapped_sou
 	}
 }
 
+// If node is an operator atom that is the first child of a list wrapper,
+// return the wrapper index; otherwise return node unchanged.
+static int retarget_to_list_wrapper(int node)
+{
+	if (SEXP_NODE_TYPE(node) == SEXP_ATOM
+		&& Sexp_nodes[node].subtype == SEXP_ATOM_OPERATOR) {
+		int list = find_sexp_list(node);
+		if (list >= 0)
+			return list;
+	}
+	return node;
+}
+
+// Release a displaced subtree: free it if do_free is true, otherwise detach
+// it by clearing its parent.  Skips locked singletons and negative indices.
+// Returns the number of nodes freed (0 if preserved or skipped).
+static int release_subtree(int node, bool do_free)
+{
+	if (node < 0 || node == Locked_sexp_true || node == Locked_sexp_false)
+		return 0;
+	if (do_free)
+		return free_sexp2(node);
+	Sexp_nodes[node].parent = -1;
+	return 0;
+}
+
 enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
 static entity_specific_tag enum_from_tag(const char *str)
 {
@@ -1014,12 +1040,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 	}
 
 	// Retarget operator atom to its list wrapper if applicable
-	int resolved = target;
-	if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
-		int list = find_sexp_list(resolved);
-		if (list >= 0)
-			resolved = list;
-	}
+	int resolved = retarget_to_list_wrapper(target);
 
 	// Must be an operator atom or list wrapper
 	int op_atom;
@@ -1115,11 +1136,8 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
 	// Skip when pre_resolved (entity mode targets the formula root directly).
-	if (!pre_resolved && SEXP_NODE_TYPE(n) == SEXP_ATOM && Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR) {
-		int list = find_sexp_list(n);
-		if (list >= 0)
-			n = list;
-	}
+	if (!pre_resolved)
+		n = retarget_to_list_wrapper(n);
 
 	// Determine context: walk to tree root and check mission attachment
 	FormulaRootInfo info = pre_resolved ? *pre_resolved : find_formula_root_and_type(n);
@@ -1161,23 +1179,11 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 		// Detach the old tree and optionally free it
-		if (n != Locked_sexp_true && n != Locked_sexp_false) {
-			if (do_delete) {
-				freed_count = free_sexp2(n);
-			} else {
-				Sexp_nodes[n].parent = -1;
-			}
-		}
+		freed_count = release_subtree(n, do_delete);
 
 	} else if (is_root) {
 		// Case B: Root of a free-standing tree
-		if (n != Locked_sexp_true && n != Locked_sexp_false) {
-			if (do_delete) {
-				freed_count = free_sexp2(n);
-			} else {
-				Sexp_nodes[n].parent = -1;
-			}
-		}
+		freed_count = release_subtree(n, do_delete);
 
 		// we may not have actually done anything
 		if (!do_delete && n == original_n) {
@@ -1300,13 +1306,7 @@ static bool attach_as_entity_formula(
 	}
 
 	// Handle the displaced formula
-	if (displaced >= 0 && displaced != Locked_sexp_true && displaced != Locked_sexp_false) {
-		if (delete_displaced) {
-			freed_count = free_sexp2(displaced);
-		} else {
-			Sexp_nodes[displaced].parent = -1;
-		}
-	}
+	freed_count = release_subtree(displaced, delete_displaced);
 
 	// mark_modified
 	mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
@@ -1404,12 +1404,8 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		// operate on the wrapper instead.  Skip when the resolver already
 		// descended via target_argument_index.
 		int original_target = resolved.original_node;
-		if (target == original_target
-			&& SEXP_NODE_TYPE(target) == SEXP_ATOM && Sexp_nodes[target].subtype == SEXP_ATOM_OPERATOR) {
-			int list = find_sexp_list(target);
-			if (list >= 0)
-				target = list;
-		}
+		if (target == original_target)
+			target = retarget_to_list_wrapper(target);
 
 		// Determine context
 		FormulaRootInfo info = find_formula_root_and_type(target);
@@ -1497,8 +1493,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 
 				// Handle displaced subtree
-				if (delete_displaced && displaced != Locked_sexp_true && displaced != Locked_sexp_false)
-					freed_count = free_sexp2(displaced);
+				freed_count = release_subtree(displaced, delete_displaced);
 
 				mcp_sexp_forest_mark_dirty({ info.root });
 				if (!delete_displaced && displaced >= 0)
