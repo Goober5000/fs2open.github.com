@@ -523,7 +523,7 @@ static entity_specific_tag enum_from_tag(const char *str)
 	if (!stricmp(str, "team_2")) return entity_specific_tag::TEAM_2;
 	if (!stricmp(str, "arrival_cue")) return entity_specific_tag::ARRIVAL_CUE;
 	if (!stricmp(str, "departure_cue")) return entity_specific_tag::DEPARTURE_CUE;
-	Warning(LOCATION, "Invalid tag string %s");
+	Warning(LOCATION, "Invalid tag string %s", str);
 	return entity_specific_tag::NONE;
 }
 static const char *enum_to_tag(entity_specific_tag tag)
@@ -916,8 +916,8 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
 			out.entity_current_root, sink);
 		if (sink.has_error()) return false;
-		if (out.entity_current_root < 0 || out.entity_current_root >= Num_sexp_nodes) {
-			sink.set_error("Entity has no valid formula root (index %d)", out.entity_current_root);
+		if (out.entity_current_root >= Num_sexp_nodes) {
+			sink.set_error("Entity formula root index %d is out of range", out.entity_current_root);
 			return false;
 		}
 		out.node = out.entity_current_root;
@@ -991,12 +991,8 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 	}
 
 	if (arg < 0) {
-		// Count total arguments for the error message
-		int total = 0;
-		for (int a = Sexp_nodes[op_atom].rest; a >= 0; a = Sexp_nodes[a].rest)
-			total++;
 		sink.set_error("Operator '%s' has %d argument(s); target_argument_index=%d is out of range",
-			Sexp_nodes[op_atom].text, total, arg_idx);
+			Sexp_nodes[op_atom].text, count, arg_idx);
 		return false;
 	}
 
@@ -1020,6 +1016,11 @@ static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
 	ResolvedTarget target;
 	if (!resolve_target(input, target, sink))
 		return;
+
+	if (target.mode == ResolvedTarget::Mode::Entity && target.entity_current_root < 0) {
+		sink.set_error("Entity has no formula to detach (formula index %d)", target.entity_current_root);
+		return;
+	}
 
 	auto shrink_opt = get_optional_bool(input, "shrink", sink);
 	bool shrink = shrink_opt.has_value() && *shrink_opt;
