@@ -515,6 +515,32 @@ static void splice_replace_node(int old_node, int new_node)
 	}
 }
 
+// Restore the predecessor link that was modified by splice_replace_node or a
+// manual predecessor update.  pred_list is the wrapper whose .first was
+// changed; pred_ante is the sibling whose .rest was changed.
+static void restore_predecessor(int pred_list, int pred_ante, int original_node)
+{
+	if (pred_list >= 0)
+		Sexp_nodes[pred_list].first = original_node;
+	else if (pred_ante >= 0)
+		Sexp_nodes[pred_ante].rest = original_node;
+}
+
+// Undo the operator-atom wrapping performed during attach.  If wrapped_source
+// is true, frees the wrapper and clears the flag.  Otherwise, resets the
+// effective_source (which equals the unwrapped source) back to free-standing.
+static void undo_source_wrap(int source, int effective_source, bool &wrapped_source)
+{
+	if (wrapped_source) {
+		Sexp_nodes[source].parent = -1;
+		free_one_sexp(effective_source);
+		wrapped_source = false;
+	} else {
+		Sexp_nodes[effective_source].rest = -1;
+		Sexp_nodes[effective_source].parent = -1;
+	}
+}
+
 enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
 static entity_specific_tag enum_from_tag(const char *str)
 {
@@ -703,6 +729,36 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	}
 
 	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
+}
+
+// Run check_sexp_syntax on an attached tree after a splice.  If the tree is
+// not attached, returns true immediately (no check needed).  On syntax
+// failure, calls rollback_fn and sets an error on sink, then returns false.
+// On success, returns true; the caller is responsible for calling
+// mark_modified on the true path.
+static bool check_attached_syntax_or_rollback(
+	const FormulaRootInfo &info, bool is_attached,
+	const std::function<void()> &rollback_fn,
+	const char *action_verb,
+	McpErrorSink &sink)
+{
+	if (!is_attached)
+		return true;
+
+	int bad_node = -1;
+	int syntax_result = check_sexp_syntax(
+		info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+	if (syntax_result != SEXP_CHECK_NO_ERROR) {
+		rollback_fn();
+		sink.set_error(
+			"%s would cause syntax error in formula root %d: %s "
+			"(error code %d, bad node %d)",
+			action_verb, info.root,
+			sexp_error_message(syntax_result), syntax_result, bad_node);
+		return false;
+	}
+
+	return true;
 }
 
 // Build a FormulaRootInfo from user-supplied entity coordinates.
@@ -1152,32 +1208,17 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 		}
 
 		// Syntax check for mission-attached trees (Case C).
-		if (is_attached) {
-			int bad_node = -1;
-			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
-			if (syntax_result != SEXP_CHECK_NO_ERROR) {
-				// Rollback via the saved predecessor.  n.rest was never
-				// modified by the forward splice, so it's already target_rest.
-				if (pred_list >= 0)
-					Sexp_nodes[pred_list].first = n;
-				else if (pred_ante >= 0)
-					Sexp_nodes[pred_ante].rest = n;
-
-				// Free the placeholder if one was allocated
+		if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
+				restore_predecessor(pred_list, pred_ante, n);
 				if (replacement >= 0) {
 					Sexp_nodes[replacement].rest = -1;	// don't walk into the live tree
 					Sexp_nodes[replacement].parent = -1;
 					free_sexp2(replacement);
 				}
-
-				sink.set_error("Detachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
-					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-				return nullptr;
-			}
-
-			// no rollback: it's a modification
-			mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
-		}
+			}, "Detachment", sink))
+			return nullptr;
+		if (is_attached)
+			mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
 
 		// Commit: detach and optionally free the target subtree
 		Sexp_nodes[n].rest = -1;	// don't walk into the live tree
@@ -1445,34 +1486,15 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				displaced = target;
 
 				// Syntax check for attached trees (Case C')
-				if (is_attached) {
-					int bad_node = -1;
-					int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
-					if (syntax_result != SEXP_CHECK_NO_ERROR) {
-						// Rollback: restore target to its original position
+				if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 						Sexp_nodes[target].rest = target_rest;
 						Sexp_nodes[target].parent = target_parent;
-						if (pred_list >= 0)
-							Sexp_nodes[pred_list].first = target;
-						else if (pred_ante >= 0)
-							Sexp_nodes[pred_ante].rest = target;
-						// Reset source back to free-standing
-						if (wrapped_source) {
-							Sexp_nodes[source].parent = -1;
-							free_one_sexp(effective_source);
-							wrapped_source = false;
-						} else {
-							Sexp_nodes[source].rest = -1;
-							Sexp_nodes[source].parent = -1;
-						}
-
-						sink.set_error("Attachment would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
-							info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-						return;
-					}
-
+						restore_predecessor(pred_list, pred_ante, target);
+						undo_source_wrap(source, effective_source, wrapped_source);
+					}, "Attachment", sink))
+					return;
+				if (is_attached)
 					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
-				}
 
 				// Handle displaced subtree
 				if (delete_displaced && displaced != Locked_sexp_true && displaced != Locked_sexp_false)
@@ -1505,31 +1527,13 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			else if (pred_ante >= 0)
 				Sexp_nodes[pred_ante].rest = effective_source;
 
-			if (is_attached) {
-				int bad_node = -1;
-				int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
-				if (syntax_result != SEXP_CHECK_NO_ERROR) {
-					// Rollback
-					if (pred_list >= 0)
-						Sexp_nodes[pred_list].first = target;
-					else if (pred_ante >= 0)
-						Sexp_nodes[pred_ante].rest = target;
-					if (wrapped_source) {
-						Sexp_nodes[source].parent = -1;
-						free_one_sexp(effective_source);
-						wrapped_source = false;
-					} else {
-						Sexp_nodes[source].rest = -1;
-						Sexp_nodes[source].parent = -1;
-					}
-
-					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
-						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-					return;
-				}
-
+			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
+					restore_predecessor(pred_list, pred_ante, target);
+					undo_source_wrap(source, effective_source, wrapped_source);
+				}, "Insertion", sink))
+				return;
+			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
-			}
 
 			mcp_sexp_forest_mark_dirty({ info.root });
 
@@ -1550,28 +1554,13 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			Sexp_nodes[effective_source].rest = old_target_rest;
 			Sexp_nodes[target].rest = effective_source;
 
-			if (is_attached) {
-				int bad_node = -1;
-				int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
-				if (syntax_result != SEXP_CHECK_NO_ERROR) {
-					// Rollback
+			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 					Sexp_nodes[target].rest = old_target_rest;
-					if (wrapped_source) {
-						Sexp_nodes[source].parent = -1;
-						free_one_sexp(effective_source);
-						wrapped_source = false;
-					} else {
-						Sexp_nodes[source].rest = -1;
-						Sexp_nodes[source].parent = -1;
-					}
-
-					sink.set_error("Insertion would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
-						info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-					return;
-				}
-
+					undo_source_wrap(source, effective_source, wrapped_source);
+				}, "Insertion", sink))
+				return;
+			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
-			}
 
 			mcp_sexp_forest_mark_dirty({ info.root });
 		}
