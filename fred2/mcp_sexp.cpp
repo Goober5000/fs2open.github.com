@@ -1272,6 +1272,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	if (!do_delete)
 		json_object_set_new(result, "detached_node_data", build_sexp_node_json(original_n));
 	json_object_set_new(result, "deleted", (do_delete && freed_count > 0) ? json_true() : json_false());
+	json_object_set_new(result, "unwrapped", (n != original_n) ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0) {
 		json_object_set_new(result, "replacement_node", json_integer(replacement));
@@ -1423,6 +1424,14 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		FormulaRootInfo info = find_formula_root_and_type(target);
 		bool is_root = (target == info.root);
 		bool is_attached = info.attached;
+
+		// Guard against cycles: if target is inside source's own tree,
+		// splicing source into target's position would create a cycle.
+		if (info.root == source) {
+			sink.set_error("Target node %d is inside source node %d's tree; "
+				"attaching would create a cycle", target, source);
+			return;
+		}
 
 		if (is_root && !is_attached) {
 			// Case B': free-standing root — nothing to attach to
@@ -2530,7 +2539,8 @@ void mcp_register_sexp_tools(json_t *tools)
 			"siblings shift up by one position. By default, the detached node is "
 			"preserved and returned; set 'delete' to true to free it. The response "
 			"includes detached_node (int index), detached_node_data (full node object when "
-			"the node was not deleted), replacement_node (int or null), and replacement_node_data "
+			"the node was not deleted), unwrapped (bool, true if an enclosing list wrapper "
+			"was automatically removed), replacement_node (int or null), and replacement_node_data "
 			"(full node object when a replacement was inserted). For mission-attached "
 			"trees, a syntax check is performed after modification; if the check fails, "
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
