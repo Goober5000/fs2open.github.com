@@ -193,6 +193,36 @@ def assert_non_empty_list(value, msg=""):
 
 
 # ---------------------------------------------------------------------------
+# Sexp-tree walk helpers
+# ---------------------------------------------------------------------------
+
+def find_node_by_value(nodes, value, role=None):
+    """Return the first node dict in a walk_sexp_tree result whose 'value'
+    matches.  If role is given, also require n.get('role') == role.  Raises
+    AssertionError if no match is found."""
+    for n in nodes:
+        if n.get("value") == value and (role is None or n.get("role") == role):
+            return n
+    raise AssertionError(f"No node with value={value!r}"
+                         + (f" role={role!r}" if role is not None else "")
+                         + " in walk result")
+
+
+def tree_signature(walk_nodes):
+    """Snapshot a walk_sexp_tree result for structural comparison."""
+    return [(n["node"], n.get("value"), n.get("node_parent"), n.get("node_rest"),
+             n.get("node_first")) for n in walk_nodes]
+
+
+def tree_values(walk_nodes, filter_empty=False):
+    """Extract values list from a walk, optionally filtering empty wrapper entries."""
+    vals = [n["value"] for n in walk_nodes]
+    if filter_empty:
+        vals = [v for v in vals if v]
+    return vals
+
+
+# ---------------------------------------------------------------------------
 # Test runner
 # ---------------------------------------------------------------------------
 
