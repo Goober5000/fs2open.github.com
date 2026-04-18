@@ -1125,14 +1125,6 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 		return nullptr;
 	}
 
-	if (!pre_resolved && (n == Locked_sexp_true || n == Locked_sexp_false)) {
-		sink.set_error("Target node %d is a shared singleton (locked %s) and cannot be "
-			"uniquely addressed. Pass the parent operator as target_node and set "
-			"target_argument_index to the singleton's position in its argument list.",
-			n, (n == Locked_sexp_true) ? "true" : "false");
-		return nullptr;
-	}
-
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
 	// Skip when pre_resolved (entity mode targets the formula root directly).
@@ -1373,17 +1365,15 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	// a SEXP_LIST whose fields are modified instead.  Skip the root and
 	// attached checks since singletons are intentionally shared.
 	if (!source_is_locked) {
-		if (find_sexp_root(source) != source) {
+		FormulaRootInfo src_info = find_formula_root_and_type(source);
+		if (src_info.root != source) {
 			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
 			return;
 		}
-		{
-			FormulaRootInfo src_info = find_formula_root_and_type(source);
-			if (src_info.attached) {
-				sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
-					source, src_info.attached_type);
-				return;
-			}
+		if (src_info.attached) {
+			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
+				source, src_info.attached_type);
+			return;
 		}
 	}
 
@@ -1445,12 +1435,6 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			// Case A' via target_node with insert mode — formula roots have no sibling chain
 			sink.set_error("Cannot insert before/after a formula root. Use position='replace' to replace the formula.");
 			return;
-		}
-
-		if (!is_root && position != 0) {
-			// Insert modes: target must be embedded (already guaranteed by !is_root).
-			// But also reject if the retargeted target happens to be the root.
-			// (This shouldn't happen since we already checked is_root above.)
 		}
 
 		// If the source is an operator atom that will be spliced into a rest
