@@ -1280,6 +1280,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 // ---------------------------------------------------------------------------
 
 static const SCP_vector<const char *> attach_position_values = { "replace", "before", "after" };
+enum class attach_position { REPLACE, BEFORE, AFTER };
 
 // Shared logic for replacing a mission entity's formula with a new source node.
 // Validates source, sets the formula, runs a syntax check (rolling back on failure),
@@ -1343,12 +1344,12 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	bool delete_displaced = delete_displaced_opt.has_value() && *delete_displaced_opt;
 
 	// Determine position enum
-	int position = 0;  // 0=replace, 1=before, 2=after
+	attach_position position = attach_position::REPLACE;
 	if (position_str) {
 		if (!check_string_enum(position_str, attach_position_values, "position", sink))
 			return;
-		if (!stricmp(position_str, "before")) position = 1;
-		else if (!stricmp(position_str, "after")) position = 2;
+		if (!stricmp(position_str, "before")) position = attach_position::BEFORE;
+		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
 	}
 
 	bool have_entity = (resolved.mode == ResolvedTarget::Mode::Entity);
@@ -1380,13 +1381,11 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	int original_source = source;
 	int displaced = -1;
 	int freed_count = 0;
-	const char *result_position = nullptr;
 
 	if (have_entity) {
 		// ---------------------------------------------------------------
 		// Case A': Entity formula mode
 		// ---------------------------------------------------------------
-		result_position = "entity_formula";
 
 		if (!attach_as_entity_formula(source, resolved.entity_info, resolved.entity_current_root,
 				delete_displaced, displaced, freed_count, sink))
@@ -1431,7 +1430,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			return;
 		}
 
-		if (is_root && is_attached && position != 0) {
+		if (is_root && is_attached && position != attach_position::REPLACE) {
 			// Case A' via target_node with insert mode — formula roots have no sibling chain
 			sink.set_error("Cannot insert before/after a formula root. Use position='replace' to replace the formula.");
 			return;
@@ -1457,11 +1456,10 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			wrapped_source = true;
 		}
 
-		if (position == 0) {
+		if (position == attach_position::REPLACE) {
 			// -------------------------------------------------------
 			// Replace mode
 			// -------------------------------------------------------
-			result_position = "replace";
 
 			if (is_root && is_attached) {
 				// Replacing a formula root via target_node: delegate to entity logic.
@@ -1505,11 +1503,10 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					mcp_sexp_forest_mark_dirty({ displaced });
 			}
 
-		} else if (position == 1) {
+		} else if (position == attach_position::BEFORE) {
 			// -------------------------------------------------------
 			// Insert before
 			// -------------------------------------------------------
-			result_position = "before";
 
 			if (is_root) {
 				sink.set_error("Cannot insert before a tree root; use position='replace', or target an embedded node.");
@@ -1541,8 +1538,6 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			// -------------------------------------------------------
 			// Insert after
 			// -------------------------------------------------------
-			result_position = "after";
-
 			if (is_root) {
 				sink.set_error("Cannot insert after a tree root; use position='replace', or target an embedded node.");
 				return;
@@ -1570,7 +1565,11 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	json_t *result = json_object();
 	json_object_set_new(result, "source_node", json_integer(original_source));
 	json_object_set_new(result, "source_node_data", build_sexp_node_json(original_source));
-	json_object_set_new(result, "position", json_string(result_position));
+	const char *pos_str = have_entity ? "entity_formula"
+		: (position == attach_position::REPLACE) ? "replace"
+		: (position == attach_position::BEFORE)  ? "before"
+		: "after";
+	json_object_set_new(result, "position", json_string(pos_str));
 
 	if (displaced >= 0) {
 		json_object_set_new(result, "displaced_node", json_integer(displaced));
