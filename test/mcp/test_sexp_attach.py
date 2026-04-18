@@ -1397,6 +1397,43 @@ def register(suite, client):
     suite.add("sexp_attach_argument_index_with_entity_mode_rejected",
               test_attach_argument_index_with_entity_mode_rejected)
 
+    # =================================================================
+    # Cycle detection
+    # =================================================================
+
+    def test_attach_cycle_rejected():
+        """Attaching a tree root into one of its own children should be
+        rejected to prevent cycles."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            # Find the "1" argument node inside root's tree.
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            one_node = None
+            for n in tool_data(r)["nodes"]:
+                if n.get("value") == "1":
+                    one_node = n["node"]
+                    break
+            assert_true(one_node is not None, "Should find the '1' node")
+
+            # Try to attach root (= the whole tree) into its own child's
+            # position.  This would create a cycle.
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": root,
+                "target_node": one_node,
+                "position": "replace",
+            })
+            assert_error(r)
+            assert_in("cycle", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node",
+                             {"target_node": root, "delete": True})
+
+    suite.add("sexp_attach_cycle_rejected",
+              test_attach_cycle_rejected)
+
 
 if __name__ == "__main__":
     run_module_standalone(register, "SEXP attach behavior tests")
