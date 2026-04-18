@@ -2360,6 +2360,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	Objects[objnum].type = OBJ_NONE;          // fool destructor into skipping obj_delete
 	Jump_nodes.erase(Jump_nodes.begin() + index);
 	Objects[objnum].type = OBJ_JUMP_NODE;     // restore for obj_delete
+	unmark_object(objnum);
 	obj_delete(objnum);                        // free the object slot
 
 	Jumpnode_editor_dialog.initialize_data(1);

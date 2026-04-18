@@ -1392,6 +1392,7 @@ def register(suite, client):
         r = client.call_tool("create_event", {"name": "detach_ent_test"})
         assert_success(r)
         evt_formula = tool_data(r)["formula"]
+        detached_node = None
         try:
             r = client.call_tool("detach_sexp_node", {
                 "target_entity_type": "event",
@@ -1399,14 +1400,15 @@ def register(suite, client):
             })
             assert_success(r)
             d = tool_data(r)
+            detached_node = d.get("detached_node")
             assert_equal(d["detached_node"], evt_formula,
                          "detached_node should be the old formula root")
             assert_true(d.get("replacement_node") is not None,
                         "Should have a replacement node")
         finally:
-            if "detached_node_data" in tool_data(r):
+            if detached_node is not None:
                 client.call_tool("detach_sexp_node",
-                                 {"target_node": tool_data(r)["detached_node"], "delete": True})
+                                 {"target_node": detached_node, "delete": True})
             client.call_tool("delete_event", {"name": "detach_ent_test", "force": True})
 
     def test_detach_entity_mode_with_delete():
@@ -1437,15 +1439,15 @@ def register(suite, client):
         assert_in("exactly one", tool_text(r).lower())
 
     def test_detach_old_param_name_rejected():
-        """The legacy 'node' parameter name should no longer work."""
+        """The legacy 'node' parameter is silently ignored; the resolver sees
+        neither target_node nor target_entity_type and rejects the call."""
         r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
         assert_success(r)
         root = tool_data(r)["node"]
         try:
-            # Pass "node" instead of "target_node" — the resolver reads
-            # "target_node" so this should fail with a missing-param error.
             r = client.call_tool("detach_sexp_node", {"node": root})
             assert_error(r)
+            assert_in("exactly one", tool_text(r).lower())
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 

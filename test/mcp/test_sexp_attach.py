@@ -1057,6 +1057,70 @@ def register(suite, client):
     suite.add("sexp_attach_insert_after_rollback_in_attached_tree", test_insert_after_rollback_in_attached_tree)
     suite.add("sexp_attach_locked_false_insert_in_attached", test_attach_locked_false_insert_in_attached)
 
+    def _wrap_rollback_helper(position):
+        """Exercise the wrapped-source rollback path for a given position.
+
+        Builds a (+ 1 2) operator source (a bare operator atom, so need_wrap
+        fires) and tries to splice it into an event's action list where the
+        syntax check rejects it (+ returns OPR_POSITIVE, action list expects
+        OPR_NULL).  Verifies rollback restores the tree and source parent.
+        """
+        r = client.call_tool("create_event", {"name": "wrap_rb_test"})
+        assert_success(r)
+        evt_formula = tool_data(r).get("formula")
+        r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
+        assert_success(r)
+        sig_before = tree_signature(tool_data(r)["nodes"])
+        donothing_node = None
+        for n in tool_data(r)["nodes"]:
+            if n.get("value") == "do-nothing" and n.get("role") == "operator":
+                donothing_node = n["node"]
+                break
+        assert_true(donothing_node is not None, "could not find do-nothing")
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "number", "argument_value": "1"},
+                {"argument_type": "number", "argument_value": "2"},
+            ],
+        })
+        assert_success(r)
+        src = tool_data(r)["node"]
+        r = client.call_tool("attach_sexp_node", {
+            "source_node": src,
+            "target_node": donothing_node,
+            "position": position,
+        })
+        assert_error(r)
+        assert_in("syntax", tool_text(r).lower())
+        r = client.call_tool("walk_sexp_tree", {"node": evt_formula})
+        assert_success(r)
+        sig_after = tree_signature(tool_data(r)["nodes"])
+        assert_equal(sig_before, sig_after, "tree unchanged after rollback")
+        r = client.call_tool("get_sexp_node", {"node": src})
+        assert_success(r)
+        assert_equal(tool_data(r).get("node_parent"), -1,
+                     "source parent restored to -1 after wrap rollback")
+        client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
+        client.call_tool("delete_event", {"name": "wrap_rb_test"})
+
+    def test_attach_replace_wrap_rollback():
+        """Replace with a wrapped operator source should roll back cleanly."""
+        _wrap_rollback_helper("replace")
+
+    def test_attach_before_wrap_rollback():
+        """Insert-before with a wrapped operator source should roll back cleanly."""
+        _wrap_rollback_helper("before")
+
+    def test_attach_after_wrap_rollback():
+        """Insert-after with a wrapped operator source should roll back cleanly."""
+        _wrap_rollback_helper("after")
+
+    suite.add("sexp_attach_replace_wrap_rollback", test_attach_replace_wrap_rollback)
+    suite.add("sexp_attach_before_wrap_rollback", test_attach_before_wrap_rollback)
+    suite.add("sexp_attach_after_wrap_rollback", test_attach_after_wrap_rollback)
+
     # =================================================================
     # Round-trip pairing with detach
     # =================================================================
@@ -1293,12 +1357,37 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
 
+    def test_attach_argument_index_negative():
+        """Negative argument index should be rejected."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        src = None
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "9",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root, "target_argument_index": -1,
+            })
+            assert_error(r)
+            assert_in("non-negative", tool_text(r).lower())
+        finally:
+            if src is not None:
+                client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
     suite.add("sexp_attach_target_singleton_without_index_rejected",
               test_attach_target_singleton_without_index_is_rejected)
     suite.add("sexp_attach_replace_singleton_via_argument_index",
               test_attach_replace_singleton_via_argument_index)
     suite.add("sexp_attach_argument_index_out_of_range",
               test_attach_argument_index_out_of_range)
+    suite.add("sexp_attach_argument_index_negative",
+              test_attach_argument_index_negative)
     suite.add("sexp_attach_argument_index_on_non_operator",
               test_attach_argument_index_on_non_operator)
     suite.add("sexp_attach_before_via_argument_index",
