@@ -1493,6 +1493,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				freed_count = release_subtree(displaced, delete_displaced);
 
 				mcp_sexp_forest_mark_dirty({ info.root });
+				mcp_sexp_forest_unmark_dirty_root(source);
 				if (!delete_displaced && displaced >= 0)
 					mcp_sexp_forest_mark_dirty({ displaced });
 			}
@@ -1527,6 +1528,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
+			mcp_sexp_forest_unmark_dirty_root(source);
 
 		} else {
 			// -------------------------------------------------------
@@ -1552,6 +1554,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
+			mcp_sexp_forest_unmark_dirty_root(source);
 		}
 	}
 

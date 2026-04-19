@@ -56,6 +56,13 @@ void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 
+void mcp_sexp_forest_unmark_dirty_root(int root)
+{
+	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
+	g_dirty_roots.erase(root);
+	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
+}
+
 void mcp_sexp_forest_rebuild()
 {
 	if (g_sexp_forest_dirty.load()) {
