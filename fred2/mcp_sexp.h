@@ -29,6 +29,6 @@ bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink 
 // negative value on failure.  Shared with non-SEXP handlers that need to
 // materialize a default formula (e.g. handle_create_event uses this to build
 // "( when ( true ) ( do-nothing ) )").
-int parse_sexp_text(const char *text);
+int parse_sexp_text(const char *text, const char *source);
 
 #endif // _MCP_SEXP_H
