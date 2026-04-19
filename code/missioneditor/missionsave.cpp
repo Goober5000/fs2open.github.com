@@ -4857,7 +4857,7 @@ int Fred_mission_save::save_waypoints()
 					fout(" %s", "false");
 			}
 
-			const SCP_string& jn_layer = jnp->GetFredLayer();
+			const SCP_string& jn_layer = jnp.GetFredLayer();
 			if (!jn_layer.empty() && !lcase_equal(jn_layer, "Default")) {
 				if (optional_string_fred("+Layer:", "$Jump Node:"))
 					parse_comments();
