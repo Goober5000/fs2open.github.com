@@ -712,7 +712,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (!formula.has_value()) {
 		// Use the parser so the default formula has the same node structure
 		// as any formula created via text_to_sexp or loaded from a mission file
-		int default_formula = parse_sexp_text("( when ( true ) ( do-nothing ) )");
+		int default_formula = parse_sexp_text("( when ( true ) ( do-nothing ) )", "create_event");
 		if (default_formula < 0) {
 			sink.set_error("Failed to create default event formula");
 			return;
