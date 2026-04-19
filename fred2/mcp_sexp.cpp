@@ -365,26 +365,30 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 
 // Parse SEXP text and return the root node index, or -1 on failure.
 // Saves and restores the global parse state so it can be called from anywhere.
-int parse_sexp_text(const char *text)
+// Any errors encountered will be stored in the Parse_errors vector.
+int parse_sexp_text(const char *text, const char *source)
 {
+	// Save global parse state (Mp, Current_filename, Warning_count, Error_count)
 	pause_parse();
 
 	SCP_string buf(text);
 	Mp = buf.data();
-	strcpy_s(Current_filename, "mcp_parse_sexp");
+	strcpy_s(Current_filename, source);
 
+	// Enable error collection so error_display() doesn't show modal dialogs
 	Parse_collect_errors = true;
 	Parse_errors.clear();
 
 	int n = get_sexp_main();
 
+	// Restore global parse state
 	Parse_collect_errors = false;
 	unpause_parse();
 
 	if (!Parse_errors.empty()) {
+		// Free any partially-allocated SEXP nodes
 		if (n >= 0)
 			free_sexp2(n);
-		Parse_errors.clear();
 		return -1;
 	}
 
@@ -399,30 +403,10 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	if (!text)
 		return;
 
-	// Save global parse state (Mp, Current_filename, Warning_count, Error_count)
-	pause_parse();
-
-	SCP_string buf(text);
-	Mp = buf.data();
-	strcpy_s(Current_filename, "text_to_sexp");
-
-	// Enable error collection so error_display() doesn't show modal dialogs
-	Parse_collect_errors = true;
-	Parse_errors.clear();
-
-	int n = get_sexp_main();
-
-	Parse_collect_errors = false;
-
-	// Restore global parse state
-	unpause_parse();
+	int n = parse_sexp_text(text, "text_to_sexp");
 
 	// Check for collected parse errors
 	if (!Parse_errors.empty()) {
-		// Free any partially-allocated SEXP nodes
-		if (n >= 0)
-			free_sexp2(n);
-
 		json_t *result = json_object();
 		json_t *errors = json_array();
 		for (const auto &e : Parse_errors) {
@@ -1124,7 +1108,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	if (is_root && is_attached) {
 		// Case A: Root of a mission-attached formula -- replace with default
 		if (info.opr_type == OPR_NULL) {
-			replacement = parse_sexp_text("( do-nothing )");
+			replacement = parse_sexp_text("( do-nothing )", "detach_sexp_node");
 			if (replacement < 0) {
 				sink.set_error("Failed to create replacement formula");
 				return nullptr;
