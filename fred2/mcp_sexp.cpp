@@ -84,17 +84,10 @@ bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink 
 
 	auto actual_return_type = query_operator_return_type(op_const);
 	if (actual_return_type != expected_return_type) {
-		const char *expected_str = (expected_return_type == OPR_NULL) ? "OPR_NULL (action)" : "OPR_BOOL (boolean)";
-		const char *actual_str;
-		switch (actual_return_type) {
-			case OPR_NULL:   actual_str = "OPR_NULL (action)"; break;
-			case OPR_BOOL:   actual_str = "OPR_BOOL (boolean)"; break;
-			case OPR_NUMBER: actual_str = "OPR_NUMBER"; break;
-			case OPR_STRING: actual_str = "OPR_STRING"; break;
-			default:         actual_str = "unknown"; break;
-		}
 		sink.set_error("Formula node %d (\"%s\") has return type %s, but this entity requires %s",
-			node, Sexp_nodes[node].text, actual_str, expected_str);
+			node, Sexp_nodes[node].text,
+			get_opr_type_name(actual_return_type),
+			get_opr_type_name(expected_return_type));
 		return false;
 	}
 
@@ -152,15 +145,10 @@ static json_t *flags_to_json_array(int bitmask, const flag_entry entries[], size
 }
 
 static bool parse_flags_array(const SCP_vector<SCP_string> &strings, const flag_entry entries[], size_t count,
-	const char *param_name, int &out_flags, McpToolRequest *req)
+	const char *param_name, int &out_flags, McpErrorSink &sink)
 {
-	McpErrorSink sink(req);
-	auto lookup_fn = [&](const char *str)->int
-	{
-		for (size_t i = 0; i < count; i++)
-			if (!stricmp(entries[i].name, str))
-				return sz2i(i);
-		return -1;
+	auto lookup_fn = [&](const char *str)->int {
+		return find_item_with_string(entries, count, &flag_entry::name, str);
 	};
 
 	out_flags = 0;
@@ -251,7 +239,7 @@ static const char *get_sexp_value_type(int n)
 	}
 }
 
-static constexpr int MAX_SEXP_WALK_NODES = 500;
+static constexpr size_t MAX_SEXP_WALK_ENTRIES = 500;
 
 static json_t *build_sexp_node_json(int n)
 {
@@ -304,7 +292,7 @@ struct walk_entry {
 
 static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int depth, int max_depth)
 {
-	if (n < 0 || n >= Num_sexp_nodes || (int)entries.size() >= MAX_SEXP_WALK_NODES)
+	if (n < 0 || n >= Num_sexp_nodes || entries.size() >= MAX_SEXP_WALK_ENTRIES)
 		return;
 	if (Sexp_nodes[n].type == SEXP_NOT_USED)
 		return;
@@ -364,7 +352,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 	json_t *result = json_object();
 	json_object_set_new(result, "root", json_integer(n));
 	json_object_set_new(result, "nodes", arr);
-	if ((int)entries.size() >= MAX_SEXP_WALK_NODES)
+	if (entries.size() >= MAX_SEXP_WALK_ENTRIES)
 		json_object_set_new(result, "truncated", json_true());
 
 	req->result_json = make_json_tool_result(result);
@@ -2223,7 +2211,7 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 	if (!flags_arr.has_value() && json_object_get(input, "flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
-		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, sink))
 			return;
 		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	}
@@ -2291,7 +2279,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	if (!flags_arr.has_value() && json_object_get(input, "flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
-		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, req))
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, sink))
 			return;
 		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	} else {
