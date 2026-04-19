@@ -613,7 +613,7 @@ static void handle_get_event(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	int idx = mission_event_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Event", name);
 		return;
@@ -632,7 +632,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (!name) return;
 
 	// Check for duplicate name
-	if (find_item_with_string(Mission_events, &mission_event::name, name) >= 0) {
+	if (mission_event_lookup(name) >= 0) {
 		sink.set_error("An event with name '%s' already exists", name);
 		return;
 	}
@@ -757,7 +757,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	int idx = mission_event_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Event", name);
 		return;
@@ -769,7 +769,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	auto new_name      = get_optional_string(input, "new_name", sink);
 	if (new_name) {
 		if (!check_general_rename(new_name, evt.name.c_str(),
-			[](const char *n) { return find_item_with_string(Mission_events, &mission_event::name, n) >= 0; },
+			[](const char *n) { return mission_event_lookup(n) >= 0; },
 			"Event", sink)) return;
 	}
 
@@ -912,7 +912,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_events, &mission_event::name, name);
+	int idx = mission_event_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Event", name);
 		return;
@@ -1378,7 +1378,7 @@ static void handle_get_goal(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	int idx = mission_goal_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Goal", name);
 		return;
@@ -1397,7 +1397,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	if (!name) return;
 
 	// Check for duplicate name
-	if (find_item_with_string(Mission_goals, &mission_goal::name, name) >= 0) {
+	if (mission_goal_lookup(name) >= 0) {
 		sink.set_error("A goal with name '%s' already exists", name);
 		return;
 	}
@@ -1481,7 +1481,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	int idx = mission_goal_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Goal", name);
 		return;
@@ -1493,7 +1493,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	auto new_name = get_optional_string(input, "new_name", sink);
 	if (new_name) {
 		if (!check_general_rename(new_name, goal.name.c_str(),
-			[](const char *n) { return find_item_with_string(Mission_goals, &mission_goal::name, n) >= 0; },
+			[](const char *n) { return mission_goal_lookup(n) >= 0; },
 			"Goal", sink)) return;
 	}
 
@@ -1596,7 +1596,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+	int idx = mission_goal_lookup(name);
 	if (idx < 0) {
 		set_not_found_error(sink,"Goal", name);
 		return;
