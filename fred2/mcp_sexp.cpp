@@ -33,6 +33,18 @@
 
 #define PLACEHOLDER_STRING "<placeholder>"
 
+static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
+{
+	return validate_single_dialog("SEXP nodes", "cutscene", error_msg)
+		&& validate_single_dialog("SEXP nodes", "fiction viewer", error_msg)
+		&& validate_single_dialog("SEXP nodes", "briefing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "debriefing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "ship", error_msg)
+		&& validate_single_dialog("SEXP nodes", "wing", error_msg)
+		&& validate_single_dialog("SEXP nodes", "event", error_msg)
+		&& validate_single_dialog("SEXP nodes", "goal", error_msg);
+}
+
 // ---------------------------------------------------------------------------
 // SEXP syntax checking helper
 // ---------------------------------------------------------------------------
@@ -59,7 +71,7 @@ static json_t *build_syntax_error_json(int node)
 }
 
 // ---------------------------------------------------------------------------
-// SEXP formula validation
+// SEXP formula helpers
 // ---------------------------------------------------------------------------
 
 bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink &sink)
@@ -109,16 +121,344 @@ bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink 
 	return true;
 }
 
-static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
+enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
+static entity_specific_tag enum_from_tag(const char *str)
 {
-	return validate_single_dialog("SEXP nodes", "cutscene", error_msg)
-		&& validate_single_dialog("SEXP nodes", "fiction viewer", error_msg)
-		&& validate_single_dialog("SEXP nodes", "briefing", error_msg)
-		&& validate_single_dialog("SEXP nodes", "debriefing", error_msg)
-		&& validate_single_dialog("SEXP nodes", "ship", error_msg)
-		&& validate_single_dialog("SEXP nodes", "wing", error_msg)
-		&& validate_single_dialog("SEXP nodes", "event", error_msg)
-		&& validate_single_dialog("SEXP nodes", "goal", error_msg);
+	if (!stricmp(str, "none")) return entity_specific_tag::NONE;
+	if (!stricmp(str, "team_1")) return entity_specific_tag::TEAM_1;
+	if (!stricmp(str, "team_2")) return entity_specific_tag::TEAM_2;
+	if (!stricmp(str, "arrival_cue")) return entity_specific_tag::ARRIVAL_CUE;
+	if (!stricmp(str, "departure_cue")) return entity_specific_tag::DEPARTURE_CUE;
+	Warning(LOCATION, "Invalid tag string %s", str);
+	return entity_specific_tag::NONE;
+}
+static const char *enum_to_tag(entity_specific_tag tag)
+{
+	switch (tag)
+	{
+		case entity_specific_tag::TEAM_1: return "team_1";
+		case entity_specific_tag::TEAM_2: return "team_2";
+		case entity_specific_tag::ARRIVAL_CUE: return "arrival_cue";
+		case entity_specific_tag::DEPARTURE_CUE: return "departure_cue";
+		default: return "none";
+	}
+}
+#if (MAX_TVT_TEAMS) != 2
+#error FormulaRootInfo must be updated with another way to distinguish teams!
+#endif
+
+struct FormulaRootInfo
+{
+	int root;                                       // root of the tree (walked up via parent chain)
+	bool attached;                                  // root is a mission formula
+	sexp_opr_t opr_type;                            // OPR_NULL (events) or OPR_BOOL (all others); only meaningful if attached
+	const char *attached_type;					    // if attached, the entity type that holds the formula
+	std::variant<const char *, int> attached_id;    // if attached, the entity name or index that holds the formula
+	entity_specific_tag attached_tag;               // if attached, additional relevant information about the formula holder
+
+	static bool valid_tag(const char *entity_type, entity_specific_tag tag) {
+		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing")) {
+			return tag == entity_specific_tag::ARRIVAL_CUE || tag == entity_specific_tag::DEPARTURE_CUE;
+		}
+		if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage")) {
+			return tag == entity_specific_tag::TEAM_1 || tag == entity_specific_tag::TEAM_2;
+		}
+		return tag == entity_specific_tag::NONE;
+	}
+
+	SCP_string to_string() const
+	{
+		SCP_string str(attached_type);
+		str += " ";
+		if (std::holds_alternative<const char*>(attached_id)) {
+			str += std::get<const char*>(attached_id);
+		} else {
+			str += std::to_string(std::get<int>(attached_id));
+		}
+		switch (attached_tag) {
+		case entity_specific_tag::ARRIVAL_CUE:
+		case entity_specific_tag::DEPARTURE_CUE:
+			str = " for " + str;
+			str = enum_to_tag(attached_tag) + str;
+			break;
+		case entity_specific_tag::TEAM_1:
+		case entity_specific_tag::TEAM_2:
+			str += ", ";
+			str += enum_to_tag(attached_tag);
+			break;
+		default:
+			break;
+		}
+		return str;
+	}
+};
+
+// Build a FormulaRootInfo from user-supplied entity coordinates.
+// Returns the current formula root index via out_current_root, or -1 on error.
+static FormulaRootInfo build_formula_root_info_for_entity(
+	const char *entity_type, const char *entity_id, const char *entity_tag,
+	int &out_current_root, McpErrorSink &sink)
+{
+	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
+	out_current_root = -1;
+
+	// Convert entity_tag string to enum and apply defaults for entities that
+	// have multiple formula slots
+	entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
+	if (tag == entity_specific_tag::NONE) {
+		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing"))
+			tag = entity_specific_tag::ARRIVAL_CUE;
+		else if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage"))
+			tag = entity_specific_tag::TEAM_1;
+	}
+	if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
+		sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
+		return info;
+	}
+
+	if (!stricmp(entity_type, "cutscene")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
+			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = The_mission.cutscenes[idx].formula;
+	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
+		int idx = atoi(entity_id);
+		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
+			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		out_current_root = Fiction_viewer_stages[idx].formula;
+	} else if (!stricmp(entity_type, "briefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
+		if (idx < 0 || idx >= Briefings[t].num_stages) {
+			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = tag;
+		out_current_root = Briefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "debriefing_stage")) {
+		int idx = atoi(entity_id);
+		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
+		if (idx < 0 || idx >= Debriefings[t].num_stages) {
+			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
+			return info;
+		}
+		info.attached_id = idx;
+		info.attached_tag = tag;
+		out_current_root = Debriefings[t].stages[idx].formula;
+	} else if (!stricmp(entity_type, "ship")) {
+		int ship_idx = ship_name_lookup(entity_id, 1);
+		if (ship_idx < 0) {
+			set_not_found_error(sink, "Ship", entity_id);
+			return info;
+		}
+		info.attached_id = Ships[ship_idx].ship_name;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
+			out_current_root = Ships[ship_idx].departure_cue;
+		else
+			out_current_root = Ships[ship_idx].arrival_cue;
+	} else if (!stricmp(entity_type, "wing")) {
+		int wing_idx = wing_name_lookup(entity_id);
+		if (wing_idx < 0) {
+			set_not_found_error(sink, "Wing", entity_id);
+			return info;
+		}
+		info.attached_id = Wings[wing_idx].name;
+		info.attached_tag = tag;
+		if (tag == entity_specific_tag::DEPARTURE_CUE)
+			out_current_root = Wings[wing_idx].departure_cue;
+		else
+			out_current_root = Wings[wing_idx].arrival_cue;
+	} else if (!stricmp(entity_type, "event")) {
+		int evt_idx = mission_event_lookup(entity_id);
+		if (evt_idx < 0) {
+			set_not_found_error(sink, "Event", entity_id);
+			return info;
+		}
+		info.opr_type = OPR_NULL;
+		info.attached_id = Mission_events[evt_idx].name.c_str();
+		out_current_root = Mission_events[evt_idx].formula;
+	} else if (!stricmp(entity_type, "goal")) {
+		int goal_idx = mission_goal_lookup(entity_id);
+		if (goal_idx < 0) {
+			set_not_found_error(sink, "Goal", entity_id);
+			return info;
+		}
+		info.attached_id = Mission_goals[goal_idx].name.c_str();
+		out_current_root = Mission_goals[goal_idx].formula;
+	} else {
+		sink.set_error("Unknown entity type '%s'", entity_type);
+		return info;
+	}
+
+	info.root = out_current_root;
+	return info;
+}
+
+// Walk up from any node to find its tree root, then check if that root is
+// attached to a mission entity and determine the expected return type.
+static FormulaRootInfo find_formula_root_and_type(int node)
+{
+	// Walk to root
+	int root = find_sexp_root(node);
+
+	// Check against all mission entities
+
+	// Mission cutscenes (OPR_BOOL)
+	for (int i = 0; i < (int)The_mission.cutscenes.size(); i++) {
+		if (The_mission.cutscenes[i].formula == root)
+			return { root, true, OPR_BOOL, "cutscene", i, entity_specific_tag::NONE };
+	}
+
+	// Fiction viewer stages (OPR_BOOL)
+	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++) {
+		if (Fiction_viewer_stages[i].formula == root)
+			return { root, true, OPR_BOOL, "fiction_viewer_stage", i, entity_specific_tag::NONE };
+	}
+
+	// Briefing stages (OPR_BOOL)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Briefings[t].num_stages; s++) {
+			if (Briefings[t].stages[s].formula == root)
+				return { root, true, OPR_BOOL, "briefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+		}
+	}
+
+	// Debriefing stages (OPR_BOOL)
+	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
+		for (int s = 0; s < Debriefings[t].num_stages; s++) {
+			if (Debriefings[t].stages[s].formula == root)
+				return { root, true, OPR_BOOL, "debriefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+		}
+	}
+
+	// Ship arrival/departure cues (OPR_BOOL)
+	for (auto objp : list_range(&obj_used_list)) {
+		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
+			auto shipp = &Ships[objp->instance];
+			if (shipp->arrival_cue == root)
+				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::ARRIVAL_CUE };
+			if (shipp->departure_cue == root)
+				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::DEPARTURE_CUE };
+		}
+	}
+
+	// Wing arrival/departure cues (OPR_BOOL)
+	for (int i = 0; i < Num_wings; i++) {
+		if (Wings[i].arrival_cue == root)
+			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::ARRIVAL_CUE };
+		if (Wings[i].departure_cue == root)
+			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::DEPARTURE_CUE };
+	}
+
+	// Events (OPR_NULL)
+	for (const auto &evt : Mission_events) {
+		if (evt.formula == root)
+			return { root, true, OPR_NULL, "event", evt.name.c_str(), entity_specific_tag::NONE };
+	}
+
+	// Goals (OPR_BOOL)
+	for (const auto &goal : Mission_goals) {
+		if (goal.formula == root)
+			return { root, true, OPR_BOOL, "goal", goal.name.c_str(), entity_specific_tag::NONE };
+	}
+
+	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
+}
+
+// Set a mission entity formula to new_root, using the entity identification
+// from a previously computed FormulaRootInfo.
+static void set_formula(const FormulaRootInfo &info, int new_root)
+{
+	Assertion(info.attached, "set_formula called on unattached formula!");
+
+	const char *type = info.attached_type;
+	int index = std::holds_alternative<int>(info.attached_id) ? std::get<int>(info.attached_id) : -1;
+	const char *name = std::holds_alternative<const char *>(info.attached_id) ? std::get<const char *>(info.attached_id) : nullptr;
+
+	if (!stricmp(type, "cutscene")) {
+		The_mission.cutscenes[index].formula = new_root;
+	} else if (!stricmp(type, "fiction_viewer_stage")) {
+		Fiction_viewer_stages[index].formula = new_root;
+	} else if (!stricmp(type, "briefing_stage")) {
+		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
+		Briefings[t].stages[index].formula = new_root;
+	} else if (!stricmp(type, "debriefing_stage")) {
+		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
+		Debriefings[t].stages[index].formula = new_root;
+	} else if (!stricmp(type, "ship")) {
+		int ship_idx = ship_name_lookup(name, 1);
+		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
+		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
+			Ships[ship_idx].arrival_cue = new_root;
+		else
+			Ships[ship_idx].departure_cue = new_root;
+	} else if (!stricmp(type, "wing")) {
+		int wing_idx = wing_name_lookup(name);
+		Assertion(wing_idx >= 0, "set_formula: wing '%s' not found!", name);
+		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
+			Wings[wing_idx].arrival_cue = new_root;
+		else
+			Wings[wing_idx].departure_cue = new_root;
+	} else if (!stricmp(type, "event")) {
+		int evt_idx = mission_event_lookup(name);
+		Assertion(evt_idx >= 0, "set_formula: event '%s' not found!", name);
+		Mission_events[evt_idx].formula = new_root;
+	} else if (!stricmp(type, "goal")) {
+		int goal_idx = mission_goal_lookup(name);
+		Assertion(goal_idx >= 0, "set_formula: goal '%s' not found!", name);
+		Mission_goals[goal_idx].formula = new_root;
+	} else {
+		Assertion(0, "set_formula: unknown entity type '%s'!", type);
+	}
+}
+
+static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+	auto node = get_required_integer(input, "node", sink);
+	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink))
+		return;
+
+	int n = *node;
+	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
+		sink.set_error("Node %d is not in use", n);
+		return;
+	}
+
+	FormulaRootInfo info = find_formula_root_and_type(n);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "node", json_integer(n));
+	json_object_set_new(result, "root", json_integer(info.root));
+	json_object_set_new(result, "attached", info.attached ? json_true() : json_false());
+
+	if (info.attached) {
+		json_object_set_new(result, "return_type",
+			json_string(get_opr_type_name(info.opr_type)));
+		json_object_set_new(result, "entity_type", json_string(info.attached_type));
+
+		if (std::holds_alternative<const char *>(info.attached_id))
+			json_object_set_new(result, "entity_id",
+				json_string(std::get<const char *>(info.attached_id)));
+		else
+			json_object_set_new(result, "entity_id",
+				json_integer(std::get<int>(info.attached_id)));
+
+		if (info.attached_tag != entity_specific_tag::NONE)
+			json_object_set_new(result, "entity_tag", json_string(enum_to_tag(info.attached_tag)));
+	}
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -450,7 +790,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
-// SEXP node deletion
+// SEXP node manipulation
 // ---------------------------------------------------------------------------
 
 static bool is_placeholder_node(int node)
@@ -535,196 +875,6 @@ static int release_subtree(int node, bool do_free)
 	return 0;
 }
 
-enum class entity_specific_tag { NONE, TEAM_1, TEAM_2, ARRIVAL_CUE, DEPARTURE_CUE };
-static entity_specific_tag enum_from_tag(const char *str)
-{
-	if (!stricmp(str, "none")) return entity_specific_tag::NONE;
-	if (!stricmp(str, "team_1")) return entity_specific_tag::TEAM_1;
-	if (!stricmp(str, "team_2")) return entity_specific_tag::TEAM_2;
-	if (!stricmp(str, "arrival_cue")) return entity_specific_tag::ARRIVAL_CUE;
-	if (!stricmp(str, "departure_cue")) return entity_specific_tag::DEPARTURE_CUE;
-	Warning(LOCATION, "Invalid tag string %s", str);
-	return entity_specific_tag::NONE;
-}
-static const char *enum_to_tag(entity_specific_tag tag)
-{
-	switch (tag)
-	{
-		case entity_specific_tag::TEAM_1: return "team_1";
-		case entity_specific_tag::TEAM_2: return "team_2";
-		case entity_specific_tag::ARRIVAL_CUE: return "arrival_cue";
-		case entity_specific_tag::DEPARTURE_CUE: return "departure_cue";
-		default: return "none";
-	}
-}
-#if (MAX_TVT_TEAMS) != 2
-#error FormulaRootInfo must be updated with another way to distinguish teams!
-#endif
-
-struct FormulaRootInfo
-{
-	int root;                                       // root of the tree (walked up via parent chain)
-	bool attached;                                  // root is a mission formula
-	sexp_opr_t opr_type;                            // OPR_NULL (events) or OPR_BOOL (all others); only meaningful if attached
-	const char *attached_type;					    // if attached, the entity type that holds the formula
-	std::variant<const char *, int> attached_id;    // if attached, the entity name or index that holds the formula
-	entity_specific_tag attached_tag;               // if attached, additional relevant information about the formula holder
-
-	static bool valid_tag(const char *entity_type, entity_specific_tag tag) {
-		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing")) {
-			return tag == entity_specific_tag::ARRIVAL_CUE || tag == entity_specific_tag::DEPARTURE_CUE;
-		}
-		if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage")) {
-			return tag == entity_specific_tag::TEAM_1 || tag == entity_specific_tag::TEAM_2;
-		}
-		return tag == entity_specific_tag::NONE;
-	}
-
-	SCP_string to_string() const
-	{
-		SCP_string str(attached_type);
-		str += " ";
-		if (std::holds_alternative<const char*>(attached_id)) {
-			str += std::get<const char*>(attached_id);
-		} else {
-			str += std::to_string(std::get<int>(attached_id));
-		}
-		switch (attached_tag) {
-		case entity_specific_tag::ARRIVAL_CUE:
-		case entity_specific_tag::DEPARTURE_CUE:
-			str = " for " + str;
-			str = enum_to_tag(attached_tag) + str;
-			break;
-		case entity_specific_tag::TEAM_1:
-		case entity_specific_tag::TEAM_2:
-			str += ", ";
-			str += enum_to_tag(attached_tag);
-			break;
-		default:
-			break;
-		}
-		return str;
-	}
-};
-
-// Set a mission entity formula to new_root, using the entity identification
-// from a previously computed FormulaRootInfo.
-static void set_formula(const FormulaRootInfo &info, int new_root)
-{
-	Assertion(info.attached, "set_formula called on unattached formula!");
-
-	const char *type = info.attached_type;
-	int index = std::holds_alternative<int>(info.attached_id) ? std::get<int>(info.attached_id) : -1;
-	const char *name = std::holds_alternative<const char *>(info.attached_id) ? std::get<const char *>(info.attached_id) : nullptr;
-
-	if (!stricmp(type, "cutscene")) {
-		The_mission.cutscenes[index].formula = new_root;
-	} else if (!stricmp(type, "fiction_viewer_stage")) {
-		Fiction_viewer_stages[index].formula = new_root;
-	} else if (!stricmp(type, "briefing_stage")) {
-		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
-		Briefings[t].stages[index].formula = new_root;
-	} else if (!stricmp(type, "debriefing_stage")) {
-		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
-		Debriefings[t].stages[index].formula = new_root;
-	} else if (!stricmp(type, "ship")) {
-		int ship_idx = ship_name_lookup(name, 1);
-		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
-		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
-			Ships[ship_idx].arrival_cue = new_root;
-		else
-			Ships[ship_idx].departure_cue = new_root;
-	} else if (!stricmp(type, "wing")) {
-		int wing_idx = wing_name_lookup(name);
-		Assertion(wing_idx >= 0, "set_formula: wing '%s' not found!", name);
-		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
-			Wings[wing_idx].arrival_cue = new_root;
-		else
-			Wings[wing_idx].departure_cue = new_root;
-	} else if (!stricmp(type, "event")) {
-		int evt_idx = mission_event_lookup(name);
-		Assertion(evt_idx >= 0, "set_formula: event '%s' not found!", name);
-		Mission_events[evt_idx].formula = new_root;
-	} else if (!stricmp(type, "goal")) {
-		int goal_idx = mission_goal_lookup(name);
-		Assertion(goal_idx >= 0, "set_formula: goal '%s' not found!", name);
-		Mission_goals[goal_idx].formula = new_root;
-	} else {
-		Assertion(0, "set_formula: unknown entity type '%s'!", type);
-	}
-}
-
-// Walk up from any node to find its tree root, then check if that root is
-// attached to a mission entity and determine the expected return type.
-static FormulaRootInfo find_formula_root_and_type(int node)
-{
-	// Walk to root
-	int root = find_sexp_root(node);
-
-	// Check against all mission entities
-
-	// Mission cutscenes (OPR_BOOL)
-	for (int i = 0; i < (int)The_mission.cutscenes.size(); i++) {
-		if (The_mission.cutscenes[i].formula == root)
-			return { root, true, OPR_BOOL, "cutscene", i, entity_specific_tag::NONE };
-	}
-
-	// Fiction viewer stages (OPR_BOOL)
-	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++) {
-		if (Fiction_viewer_stages[i].formula == root)
-			return { root, true, OPR_BOOL, "fiction_viewer_stage", i, entity_specific_tag::NONE };
-	}
-
-	// Briefing stages (OPR_BOOL)
-	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
-		for (int s = 0; s < Briefings[t].num_stages; s++) {
-			if (Briefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "briefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
-		}
-	}
-
-	// Debriefing stages (OPR_BOOL)
-	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
-		for (int s = 0; s < Debriefings[t].num_stages; s++) {
-			if (Debriefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "debriefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
-		}
-	}
-
-	// Ship arrival/departure cues (OPR_BOOL)
-	for (auto objp : list_range(&obj_used_list)) {
-		if (objp->type == OBJ_SHIP || objp->type == OBJ_START) {
-			auto shipp = &Ships[objp->instance];
-			if (shipp->arrival_cue == root)
-				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::ARRIVAL_CUE };
-			if (shipp->departure_cue == root)
-				return { root, true, OPR_BOOL, "ship", shipp->ship_name, entity_specific_tag::DEPARTURE_CUE };
-		}
-	}
-
-	// Wing arrival/departure cues (OPR_BOOL)
-	for (int i = 0; i < Num_wings; i++) {
-		if (Wings[i].arrival_cue == root)
-			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::ARRIVAL_CUE };
-		if (Wings[i].departure_cue == root)
-			return { root, true, OPR_BOOL, "wing", Wings[i].name, entity_specific_tag::DEPARTURE_CUE };
-	}
-
-	// Events (OPR_NULL)
-	for (const auto &evt : Mission_events) {
-		if (evt.formula == root)
-			return { root, true, OPR_NULL, "event", evt.name.c_str(), entity_specific_tag::NONE };
-	}
-
-	// Goals (OPR_BOOL)
-	for (const auto &goal : Mission_goals) {
-		if (goal.formula == root)
-			return { root, true, OPR_BOOL, "goal", goal.name.c_str(), entity_specific_tag::NONE };
-	}
-
-	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
-}
-
 // Run check_sexp_syntax on an attached tree after a splice.  If the tree is
 // not attached, returns true immediately (no check needed).  On syntax
 // failure, calls rollback_fn and sets an error on sink, then returns false.
@@ -753,156 +903,6 @@ static bool check_attached_syntax_or_rollback(
 	}
 
 	return true;
-}
-
-// Build a FormulaRootInfo from user-supplied entity coordinates.
-// Returns the current formula root index via out_current_root, or -1 on error.
-static FormulaRootInfo build_formula_root_info_for_entity(
-	const char *entity_type, const char *entity_id, const char *entity_tag,
-	int &out_current_root, McpErrorSink &sink)
-{
-	FormulaRootInfo info = { -1, true, OPR_BOOL, entity_type, 0, entity_specific_tag::NONE };
-	out_current_root = -1;
-
-	// Convert entity_tag string to enum and apply defaults for entities that
-	// have multiple formula slots
-	entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
-	if (tag == entity_specific_tag::NONE) {
-		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing"))
-			tag = entity_specific_tag::ARRIVAL_CUE;
-		else if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage"))
-			tag = entity_specific_tag::TEAM_1;
-	}
-	if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
-		sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
-		return info;
-	}
-
-	if (!stricmp(entity_type, "cutscene")) {
-		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
-			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		out_current_root = The_mission.cutscenes[idx].formula;
-	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
-		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
-			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		out_current_root = Fiction_viewer_stages[idx].formula;
-	} else if (!stricmp(entity_type, "briefing_stage")) {
-		int idx = atoi(entity_id);
-		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Briefings[t].num_stages) {
-			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		info.attached_tag = tag;
-		out_current_root = Briefings[t].stages[idx].formula;
-	} else if (!stricmp(entity_type, "debriefing_stage")) {
-		int idx = atoi(entity_id);
-		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Debriefings[t].num_stages) {
-			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
-			return info;
-		}
-		info.attached_id = idx;
-		info.attached_tag = tag;
-		out_current_root = Debriefings[t].stages[idx].formula;
-	} else if (!stricmp(entity_type, "ship")) {
-		int ship_idx = ship_name_lookup(entity_id, 1);
-		if (ship_idx < 0) {
-			set_not_found_error(sink, "Ship", entity_id);
-			return info;
-		}
-		info.attached_id = Ships[ship_idx].ship_name;
-		info.attached_tag = tag;
-		if (tag == entity_specific_tag::DEPARTURE_CUE)
-			out_current_root = Ships[ship_idx].departure_cue;
-		else
-			out_current_root = Ships[ship_idx].arrival_cue;
-	} else if (!stricmp(entity_type, "wing")) {
-		int wing_idx = wing_name_lookup(entity_id);
-		if (wing_idx < 0) {
-			set_not_found_error(sink, "Wing", entity_id);
-			return info;
-		}
-		info.attached_id = Wings[wing_idx].name;
-		info.attached_tag = tag;
-		if (tag == entity_specific_tag::DEPARTURE_CUE)
-			out_current_root = Wings[wing_idx].departure_cue;
-		else
-			out_current_root = Wings[wing_idx].arrival_cue;
-	} else if (!stricmp(entity_type, "event")) {
-		int evt_idx = mission_event_lookup(entity_id);
-		if (evt_idx < 0) {
-			set_not_found_error(sink, "Event", entity_id);
-			return info;
-		}
-		info.opr_type = OPR_NULL;
-		info.attached_id = Mission_events[evt_idx].name.c_str();
-		out_current_root = Mission_events[evt_idx].formula;
-	} else if (!stricmp(entity_type, "goal")) {
-		int goal_idx = mission_goal_lookup(entity_id);
-		if (goal_idx < 0) {
-			set_not_found_error(sink, "Goal", entity_id);
-			return info;
-		}
-		info.attached_id = Mission_goals[goal_idx].name.c_str();
-		out_current_root = Mission_goals[goal_idx].formula;
-	} else {
-		sink.set_error("Unknown entity type '%s'", entity_type);
-		return info;
-	}
-
-	info.root = out_current_root;
-	return info;
-}
-
-static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
-{
-	McpErrorSink sink(req);
-	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
-	auto node = get_required_integer(input, "node", sink);
-	if (!node.has_value() || !check_int_range(*node, 0, Num_sexp_nodes - 1, "node", sink))
-		return;
-
-	int n = *node;
-	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
-		sink.set_error("Node %d is not in use", n);
-		return;
-	}
-
-	FormulaRootInfo info = find_formula_root_and_type(n);
-
-	json_t *result = json_object();
-	json_object_set_new(result, "node", json_integer(n));
-	json_object_set_new(result, "root", json_integer(info.root));
-	json_object_set_new(result, "attached", info.attached ? json_true() : json_false());
-
-	if (info.attached) {
-		json_object_set_new(result, "return_type",
-			json_string(get_opr_type_name(info.opr_type)));
-		json_object_set_new(result, "entity_type", json_string(info.attached_type));
-
-		if (std::holds_alternative<const char *>(info.attached_id))
-			json_object_set_new(result, "entity_id",
-				json_string(std::get<const char *>(info.attached_id)));
-		else
-			json_object_set_new(result, "entity_id",
-				json_integer(std::get<int>(info.attached_id)));
-
-		if (info.attached_tag != entity_specific_tag::NONE)
-			json_object_set_new(result, "entity_tag", json_string(enum_to_tag(info.attached_tag)));
-	}
-
-	req->result_json = make_json_tool_result(result);
-	req->success = true;
 }
 
 // ---------------------------------------------------------------------------
