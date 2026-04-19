@@ -498,7 +498,9 @@ static void restore_predecessor(int pred_list, int pred_ante, int original_node)
 static void undo_source_wrap(int source, int effective_source, bool &wrapped_source)
 {
 	if (wrapped_source) {
-		Sexp_nodes[source].parent = -1;
+		// Match the wrap side: don't touch locked singletons' parent field.
+		if (source != Locked_sexp_true && source != Locked_sexp_false)
+			Sexp_nodes[source].parent = -1;
 		free_one_sexp(effective_source);
 		wrapped_source = false;
 	} else {
@@ -626,7 +628,7 @@ static void set_formula(const FormulaRootInfo &info, int new_root)
 		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
 		Debriefings[t].stages[index].formula = new_root;
 	} else if (!stricmp(type, "ship")) {
-		int ship_idx = ship_name_lookup(name);
+		int ship_idx = ship_name_lookup(name, 1);
 		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
 		if (info.attached_tag == entity_specific_tag::ARRIVAL_CUE)
 			Ships[ship_idx].arrival_cue = new_root;
@@ -640,11 +642,11 @@ static void set_formula(const FormulaRootInfo &info, int new_root)
 		else
 			Wings[wing_idx].departure_cue = new_root;
 	} else if (!stricmp(type, "event")) {
-		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, name);
+		int evt_idx = mission_event_lookup(name);
 		Assertion(evt_idx >= 0, "set_formula: event '%s' not found!", name);
 		Mission_events[evt_idx].formula = new_root;
 	} else if (!stricmp(type, "goal")) {
-		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, name);
+		int goal_idx = mission_goal_lookup(name);
 		Assertion(goal_idx >= 0, "set_formula: goal '%s' not found!", name);
 		Mission_goals[goal_idx].formula = new_root;
 	} else {
@@ -813,7 +815,7 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 		info.attached_tag = tag;
 		out_current_root = Debriefings[t].stages[idx].formula;
 	} else if (!stricmp(entity_type, "ship")) {
-		int ship_idx = ship_name_lookup(entity_id);
+		int ship_idx = ship_name_lookup(entity_id, 1);
 		if (ship_idx < 0) {
 			set_not_found_error(sink, "Ship", entity_id);
 			return info;
@@ -837,7 +839,7 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 		else
 			out_current_root = Wings[wing_idx].arrival_cue;
 	} else if (!stricmp(entity_type, "event")) {
-		int evt_idx = find_item_with_string(Mission_events, &mission_event::name, entity_id);
+		int evt_idx = mission_event_lookup(entity_id);
 		if (evt_idx < 0) {
 			set_not_found_error(sink, "Event", entity_id);
 			return info;
@@ -846,7 +848,7 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 		info.attached_id = Mission_events[evt_idx].name.c_str();
 		out_current_root = Mission_events[evt_idx].formula;
 	} else if (!stricmp(entity_type, "goal")) {
-		int goal_idx = find_item_with_string(Mission_goals, &mission_goal::name, entity_id);
+		int goal_idx = mission_goal_lookup(entity_id);
 		if (goal_idx < 0) {
 			set_not_found_error(sink, "Goal", entity_id);
 			return info;
