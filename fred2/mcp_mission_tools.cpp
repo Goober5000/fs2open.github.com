@@ -1095,9 +1095,8 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 
 // Resolve optional "team" parameter to a cmd_brief pointer.
 // Returns nullptr and sets error on failure.
-static cmd_brief *get_cmd_brief_for_team(json_t *input, McpToolRequest *req)
+static cmd_brief *get_cmd_brief_for_team(json_t *input, McpErrorSink &sink)
 {
-	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", sink);
 	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
@@ -1128,7 +1127,7 @@ static void handle_list_cmd_brief_stages(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
-	auto *cb = get_cmd_brief_for_team(input, req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	json_t *arr = json_array();
@@ -1144,7 +1143,7 @@ static void handle_get_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
-	auto *cb = get_cmd_brief_for_team(input, req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -1160,7 +1159,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
-	auto *cb = get_cmd_brief_for_team(input, req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	if (cb->num_stages >= CMD_BRIEF_STAGES_MAX) {
@@ -1211,7 +1210,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
-	auto *cb = get_cmd_brief_for_team(input, req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -1258,7 +1257,7 @@ static void handle_delete_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
 
-	auto *cb = get_cmd_brief_for_team(input, req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -1297,7 +1296,8 @@ static MoveSwapConfig make_cmd_brief_move_swap_config(cmd_brief *cb)
 
 static void handle_move_cmd_brief_stage(json_t *input, McpToolRequest *req)
 {
-	auto *cb = get_cmd_brief_for_team(input, req);
+	McpErrorSink sink(req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	auto cfg = make_cmd_brief_move_swap_config(cb);
@@ -1306,7 +1306,8 @@ static void handle_move_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 {
-	auto *cb = get_cmd_brief_for_team(input, req);
+	McpErrorSink sink(req);
+	auto *cb = get_cmd_brief_for_team(input, sink);
 	if (!cb) return;
 
 	auto cfg = make_cmd_brief_move_swap_config(cb);
@@ -1882,9 +1883,8 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 
 // Resolve optional "team" parameter to a debriefing pointer.
 // Defaults to Team 1. Rejects "none".
-static debriefing *get_debriefing_for_team(json_t *input, McpToolRequest *req)
+static debriefing *get_debriefing_for_team(json_t *input, McpErrorSink &sink)
 {
-	McpErrorSink sink(req);
 	auto team_str = get_optional_string(input, "team", sink);
 	if (sink.has_error()) return nullptr;
 	int team_index = 0;  // default to Team 1
@@ -1915,7 +1915,7 @@ static void handle_list_debriefing_stages(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
-	auto *db = get_debriefing_for_team(input, req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	json_t *arr = json_array();
@@ -1931,7 +1931,7 @@ static void handle_get_debriefing_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
-	auto *db = get_debriefing_for_team(input, req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -1947,7 +1947,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
-	auto *db = get_debriefing_for_team(input, req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	if (db->num_stages >= MAX_DEBRIEF_STAGES) {
@@ -2002,7 +2002,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
-	auto *db = get_debriefing_for_team(input, req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -2052,7 +2052,7 @@ static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_debriefing, sink)) return;
 
-	auto *db = get_debriefing_for_team(input, req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	auto index = get_required_integer(input, "index", sink);
@@ -2094,7 +2094,8 @@ static MoveSwapConfig make_debriefing_move_swap_config(debriefing *db)
 
 static void handle_move_debriefing_stage(json_t *input, McpToolRequest *req)
 {
-	auto *db = get_debriefing_for_team(input, req);
+	McpErrorSink sink(req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	auto cfg = make_debriefing_move_swap_config(db);
@@ -2103,7 +2104,8 @@ static void handle_move_debriefing_stage(json_t *input, McpToolRequest *req)
 
 static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 {
-	auto *db = get_debriefing_for_team(input, req);
+	McpErrorSink sink(req);
+	auto *db = get_debriefing_for_team(input, sink);
 	if (!db) return;
 
 	auto cfg = make_debriefing_move_swap_config(db);
