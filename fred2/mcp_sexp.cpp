@@ -193,6 +193,16 @@ struct FormulaRootInfo
 	}
 };
 
+// Entity-type values that can hold formulas.  Matches the entities scanned
+// by find_formula_root_and_type.
+static const SCP_vector<const char *> formula_entity_type_values = {
+	"cutscene", "fiction_viewer_stage", "briefing_stage", "debriefing_stage",
+	"ship", "wing", "event", "goal"
+};
+static const SCP_vector<const char *> formula_entity_tag_values = {
+	"arrival_cue", "departure_cue", "team_1", "team_2"
+};
+
 // Build a FormulaRootInfo from user-supplied entity coordinates.
 // Returns the current formula root index via out_current_root, or -1 on error.
 static FormulaRootInfo build_formula_root_info_for_entity(
@@ -918,16 +928,6 @@ struct ResolvedTarget {
 	int entity_current_root = -1;
 };
 
-// Entity-type values that can hold formulas.  Matches the entities scanned
-// by find_formula_root_and_type.
-static const SCP_vector<const char *> attach_entity_type_values = {
-	"cutscene", "fiction_viewer_stage", "briefing_stage", "debriefing_stage",
-	"ship", "wing", "event", "goal"
-};
-static const SCP_vector<const char *> attach_entity_tag_values = {
-	"arrival_cue", "departure_cue", "team_1", "team_2"
-};
-
 static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sink)
 {
 	auto target_opt = get_optional_integer(input, "target_node", sink);
@@ -956,10 +956,10 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 			sink.set_error("'target_entity_id' is required when 'target_entity_type' is provided");
 			return false;
 		}
-		if (!check_string_enum(entity_type, attach_entity_type_values, "target_entity_type", sink))
+		if (!check_string_enum(entity_type, formula_entity_type_values, "target_entity_type", sink))
 			return false;
 		if (entity_tag) {
-			if (!check_string_enum(entity_tag, attach_entity_tag_values, "entity_tag", sink))
+			if (!check_string_enum(entity_tag, formula_entity_tag_values, "entity_tag", sink))
 				return false;
 		}
 		out.mode = ResolvedTarget::Mode::Entity;
@@ -1053,7 +1053,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	const FormulaRootInfo *pre_resolved, McpErrorSink &sink);
 
-static void handle_detach_sexp_node(json_t* input, McpToolRequest* req)
+static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
@@ -2464,7 +2464,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "target_entity_type",
 			"Entity type whose formula to detach and replace with a default. "
 			"Mutually exclusive with target_node. Requires target_entity_id.",
-			attach_entity_type_values);
+			formula_entity_type_values);
 		add_string_prop(props, "target_entity_id",
 			"Entity name or index. Required when target_entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
@@ -2473,7 +2473,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Disambiguation tag for entities that have multiple formula slots. "
 			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
 			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
-			attach_entity_tag_values);
+			formula_entity_tag_values);
 		add_bool_prop(props, "shrink",
 			"If true, remove the node and shift subsequent siblings up by one "
 			"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
@@ -2522,7 +2522,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "target_entity_type",
 			"Entity type whose formula the source will become. Mutually exclusive with "
 			"target_node. Requires target_entity_id.",
-			attach_entity_type_values);
+			formula_entity_type_values);
 		add_string_prop(props, "target_entity_id",
 			"Entity name or index. Required when target_entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
@@ -2531,7 +2531,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Disambiguation tag for entities that have multiple formula slots. "
 			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
 			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
-			attach_entity_tag_values);
+			formula_entity_tag_values);
 		add_string_enum_prop(props, "position",
 			"How to position the source relative to the target node. "
 			"'replace' (default) replaces the target; 'before' inserts before the target; "
