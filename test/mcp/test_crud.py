@@ -17,6 +17,7 @@ discovered) so this file can run standalone without that dependency.
 
 from mcp_test_lib import (
     assert_equal,
+    assert_error,
     assert_in,
     assert_is_list,
     assert_success,
@@ -633,6 +634,57 @@ def register(suite, client):
             names = [v.get("name") for v in d]
             assert_in("test_var_a", names)
             assert_in("test_var_b", names)
+
+            # --- Filter tests ---
+
+            # Type filter: number only -> test_var_a present, test_var_b absent
+            r = client.call_tool("list_sexp_variables", {"variable_type": "number"})
+            assert_success(r)
+            names = [v.get("name") for v in tool_data(r)]
+            assert_in("test_var_a", names)
+            assert_true("test_var_b" not in names, "string var should be filtered out")
+
+            # Type filter: string only -> inverse
+            r = client.call_tool("list_sexp_variables", {"variable_type": "string"})
+            assert_success(r)
+            names = [v.get("name") for v in tool_data(r)]
+            assert_in("test_var_b", names)
+            assert_true("test_var_a" not in names, "number var should be filtered out")
+
+            # Create a flagged variable for the flag-filter tests
+            r = client.call_tool("create_sexp_variable", {
+                "name": "test_var_c",
+                "default_value": "7",
+                "variable_type": "number",
+                "variable_flags": ["network"]
+            })
+            assert_success(r)
+            created.append("test_var_c")
+
+            # Flags filter: only test_var_c has the network flag
+            r = client.call_tool("list_sexp_variables", {"variable_flags": ["network"]})
+            assert_success(r)
+            names = [v.get("name") for v in tool_data(r)]
+            assert_equal(names, ["test_var_c"], "network filter")
+
+            # Combined filter: variable_type AND variable_flags both must match
+            r = client.call_tool("list_sexp_variables", {
+                "variable_type": "number",
+                "variable_flags": ["network"]
+            })
+            assert_success(r)
+            names = [v.get("name") for v in tool_data(r)]
+            assert_equal(names, ["test_var_c"], "combined filter")
+
+            # Invalid variable_type enum -> error
+            r = client.call_tool("list_sexp_variables", {"variable_type": "bogus"})
+            assert_error(r)
+
+            # Mutually-exclusive persistence flags -> error (validate_sexp_variable_flags)
+            r = client.call_tool("list_sexp_variables", {
+                "variable_flags": ["save_on_mission_progress", "save_on_mission_close"]
+            })
+            assert_error(r)
 
             r = client.call_tool("get_sexp_variable", {"name": "test_var_a"})
             assert_success(r)

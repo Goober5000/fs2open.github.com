@@ -2134,15 +2134,40 @@ static bool is_variable_referenced_in_sexp_nodes(const char *var_name)
 	return false;
 }
 
-static void handle_list_sexp_variables(json_t * /*input*/, McpToolRequest *req)
+static void handle_list_sexp_variables(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
+	// Optional variable_type filter
+	auto type_str = get_optional_string(input, "variable_type", sink);
+	if (sink.has_error()) return;
+	if (type_str && !check_string_enum(type_str, sexp_var_type_values, "variable_type", sink))
+		return;
+	int type_bits = 0;
+	if (type_str) {
+		type_bits = (stricmp(type_str, "number") == 0) ? SEXP_VARIABLE_NUMBER : SEXP_VARIABLE_STRING;
+	}
+
+	// Optional variable_flags filter (match-ALL)
+	int required_flags = 0;
+	auto flags_arr = get_optional_string_array(input, "variable_flags", sink);
+	if (!flags_arr.has_value() && json_object_get(input, "variable_flags"))
+		return;  // non-string element error already reported by sink
+	if (flags_arr.has_value()) {
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count,
+				"variable_flags", required_flags, sink))
+			return;
+		if (!validate_sexp_variable_flags(required_flags, sink)) return;
+	}
+
 	json_t *arr = json_array();
 	for (int i = 0; i < MAX_SEXP_VARIABLES; i++) {
-		if (Sexp_variables[i].type & SEXP_VARIABLE_SET)
-			json_array_append_new(arr, build_sexp_variable_json(i));
+		const auto &v = Sexp_variables[i];
+		if (!(v.type & SEXP_VARIABLE_SET)) continue;
+		if (type_bits && !(v.type & type_bits)) continue;
+		if (required_flags && (v.type & required_flags) != required_flags) continue;
+		json_array_append_new(arr, build_sexp_variable_json(i));
 	}
 
 	req->result_json = make_json_tool_result(arr);
@@ -2644,10 +2669,21 @@ void mcp_register_sexp_tools(json_t *tools)
 	}
 
 	// list_sexp_variables
-	register_tool(tools, "list_sexp_variables",
-		"List all SEXP variables defined in this mission. "
-		"Returns each variable's name, default value, type (number or string), and flags.",
-		nullptr);
+	{
+		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+		json_t *props = json_object();
+		add_string_enum_prop(props, "variable_type",
+			"Filter to variables of this type only.",
+			sexp_var_type_values);
+		add_string_array_prop(props, "variable_flags",
+			"Filter to variables that have ALL of the specified flags set.",
+			flag_names);
+		register_tool(tools, "list_sexp_variables",
+			"List all SEXP variables defined in this mission. "
+			"Returns each variable's name, default value, type (number or string), and flags. "
+			"Optionally filter by variable_type and/or variable_flags.",
+			props);
+	}
 
 	// get_sexp_variable
 	register_tool_with_required_string(tools, "get_sexp_variable",
