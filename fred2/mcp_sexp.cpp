@@ -2037,7 +2037,7 @@ static json_t *build_sexp_variable_json(int index)
 	else
 		json_object_set_new(obj, "variable_type", json_string("string"));
 
-	json_object_set_new(obj, "flags",
+	json_object_set_new(obj, "variable_flags",
 		flags_to_json_array(Sexp_variables[index].type, sexp_var_flag_entries, sexp_var_flag_entries_count));
 
 	return obj;
@@ -2193,11 +2193,11 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 	// Parse optional flags
 	int flag_bits = 0;
-	auto flags_arr = get_optional_string_array(input, "flags", sink);
-	if (!flags_arr.has_value() && json_object_get(input, "flags"))
+	auto flags_arr = get_optional_string_array(input, "variable_flags", sink);
+	if (!flags_arr.has_value() && json_object_get(input, "variable_flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
-		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, sink))
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "variable_flags", flag_bits, sink))
 			return;
 		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	}
@@ -2261,11 +2261,11 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	int flag_bits;
-	auto flags_arr = get_optional_string_array(input, "flags", sink);
-	if (!flags_arr.has_value() && json_object_get(input, "flags"))
+	auto flags_arr = get_optional_string_array(input, "variable_flags", sink);
+	if (!flags_arr.has_value() && json_object_get(input, "variable_flags"))
 		return;  // non-string element error already reported by sink
 	if (flags_arr.has_value()) {
-		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "flags", flag_bits, sink))
+		if (!parse_flags_array(*flags_arr, sexp_var_flag_entries, sexp_var_flag_entries_count, "variable_flags", flag_bits, sink))
 			return;
 		if (!validate_sexp_variable_flags(flag_bits, sink)) return;
 	} else {
@@ -2666,7 +2666,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "variable_type",
 			"Data type of the variable",
 			sexp_var_type_values);
-		add_string_array_prop(props, "flags",
+		add_string_array_prop(props, "variable_flags",
 			"Persistence and network flags. save_on_mission_progress and save_on_mission_close "
 			"are mutually exclusive.",
 			flag_names);
@@ -2692,7 +2692,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "variable_type",
 			"New data type. Changing type may invalidate existing SEXP references.",
 			sexp_var_type_values);
-		add_string_array_prop(props, "flags",
+		add_string_array_prop(props, "variable_flags",
 			"New persistence and network flags (replaces all existing flags). "
 			"save_on_mission_progress and save_on_mission_close are mutually exclusive.",
 			flag_names);
