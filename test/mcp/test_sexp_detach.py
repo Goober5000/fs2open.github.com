@@ -1269,11 +1269,11 @@ def register(suite, client):
         assert_success(r)
         root = tool_data(r)["node"]
         try:
-            # Walk to find the when operator (the root) — argument 0 is the
-            # condition (true), argument 1 is the action (do-nothing).
-            # Detach argument 0 (the true boolean wrapper) via index.
+            # The when operator (the root) has argument 1 = the condition (true),
+            # argument 2 = the action (do-nothing).
+            # Detach argument 1 (the true boolean wrapper) via index.
             r = client.call_tool("detach_sexp_node",
-                                 {"target_node": root, "target_argument_index": 0, "delete": True})
+                                 {"target_node": root, "target_argument_index": 1, "delete": True})
             assert_success(r)
             d = tool_data(r)
             assert_true(d.get("deleted"), "Should have deleted the detached node")
@@ -1310,22 +1310,22 @@ def register(suite, client):
         node = tool_data(r)["node"]
         try:
             r = client.call_tool("detach_sexp_node",
-                                 {"target_node": node, "target_argument_index": 0})
+                                 {"target_node": node, "target_argument_index": 1})
             assert_error(r)
             assert_in("operator", tool_text(r).lower())
         finally:
             client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
 
-    def test_detach_argument_index_negative():
-        """Negative argument index should be rejected."""
+    def test_detach_argument_index_below_minimum():
+        """Non-positive argument index should be rejected (1-based)."""
         r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
         assert_success(r)
         root = tool_data(r)["node"]
         try:
             r = client.call_tool("detach_sexp_node",
-                                 {"target_node": root, "target_argument_index": -1})
+                                 {"target_node": root, "target_argument_index": 0})
             assert_error(r)
-            assert_in("non-negative", tool_text(r).lower())
+            assert_in("1-based", tool_text(r).lower())
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
@@ -1401,8 +1401,8 @@ def register(suite, client):
               test_detach_argument_index_out_of_range)
     suite.add("sexp_detach_argument_index_on_non_operator",
               test_detach_argument_index_on_non_operator)
-    suite.add("sexp_detach_argument_index_negative",
-              test_detach_argument_index_negative)
+    suite.add("sexp_detach_argument_index_below_minimum",
+              test_detach_argument_index_below_minimum)
     def test_detach_entity_default_formula_rejected():
         """Detaching a goal whose formula is already the default (true) should
         error rather than silently no-op."""
