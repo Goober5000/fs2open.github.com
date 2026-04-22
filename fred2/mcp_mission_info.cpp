@@ -62,7 +62,7 @@ static bool validate_dialog_for_mission_info(SCP_string &error_msg)
 // build_mission_info_json — shared JSON builder for get/update
 // ---------------------------------------------------------------------------
 
-json_t *build_mission_info_json()
+static json_t *build_mission_info_json()
 {
 	json_t *info = json_object();
 
