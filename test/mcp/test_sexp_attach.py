@@ -73,7 +73,7 @@ def register(suite, client):
         r = client.call_tool("attach_sexp_node", {
             "source_node": false_node,
             "target_entity_type": "debriefing_stage",
-            "target_entity_id": "0",
+            "target_entity_id": "1",
         })
         assert_success(r)
         d = tool_data(r)
@@ -312,7 +312,7 @@ def register(suite, client):
         r = client.call_tool("attach_sexp_node", {
             "source_node": src,
             "target_entity_type": "debriefing_stage",
-            "target_entity_id": "0",
+            "target_entity_id": "1",
         })
         assert_success(r)
         d = tool_data(r)
@@ -333,7 +333,7 @@ def register(suite, client):
         r = client.call_tool("attach_sexp_node", {
             "source_node": src,
             "target_entity_type": "debriefing_stage",
-            "target_entity_id": "0",
+            "target_entity_id": "1",
             "entity_tag": "team_2",
         })
         assert_success(r)
@@ -353,7 +353,7 @@ def register(suite, client):
         r = client.call_tool("attach_sexp_node", {
             "source_node": src,
             "target_entity_type": "fiction_viewer_stage",
-            "target_entity_id": "0",
+            "target_entity_id": "1",
         })
         assert_success(r)
         assert_equal(tool_data(r).get("position"), "entity_formula", "position")
@@ -661,11 +661,11 @@ def register(suite, client):
         })
         assert_success(r)
         false_node = tool_data(r)["node"]
-        # Replace argument 0 of the when operator (the true condition) with false.
+        # Replace argument 1 of the when operator (the true condition) with false.
         r = client.call_tool("attach_sexp_node", {
             "source_node": false_node,
             "target_node": evt_formula,
-            "target_argument_index": 0,
+            "target_argument_index": 1,
         })
         assert_success(r)
         assert_equal(tool_data(r).get("position"), "replace", "position")
@@ -1150,11 +1150,11 @@ def register(suite, client):
             assert_success(r)
             src = tool_data(r)["node"]
 
-            # Replace argument 0 of the root when operator (the condition = true)
+            # Replace argument 1 of the root when operator (the condition = true)
             r = client.call_tool("attach_sexp_node", {
                 "source_node": src,
                 "target_node": root,
-                "target_argument_index": 0,
+                "target_argument_index": 1,
             })
             assert_success(r)
 
@@ -1205,7 +1205,7 @@ def register(suite, client):
             src = tool_data(r)["node"]
 
             r = client.call_tool("attach_sexp_node", {
-                "source_node": src, "target_node": target, "target_argument_index": 0,
+                "source_node": src, "target_node": target, "target_argument_index": 1,
             })
             assert_error(r)
             assert_in("operator", tool_text(r).lower())
@@ -1226,11 +1226,11 @@ def register(suite, client):
             assert_success(r)
             src = tool_data(r)["node"]
 
-            # Insert before argument 1 (the "2")
+            # Insert before argument 2 (the "2")
             r = client.call_tool("attach_sexp_node", {
                 "source_node": src,
                 "target_node": root,
-                "target_argument_index": 1,
+                "target_argument_index": 2,
                 "position": "before",
             })
             assert_success(r)
@@ -1255,11 +1255,11 @@ def register(suite, client):
             assert_success(r)
             src = tool_data(r)["node"]
 
-            # Insert after argument 0 (the "1")
+            # Insert after argument 1 (the "1")
             r = client.call_tool("attach_sexp_node", {
                 "source_node": src,
                 "target_node": root,
-                "target_argument_index": 0,
+                "target_argument_index": 1,
                 "position": "after",
             })
             assert_success(r)
@@ -1284,15 +1284,15 @@ def register(suite, client):
                 "source_node": src,
                 "target_entity_type": "event",
                 "target_entity_id": "foo",
-                "target_argument_index": 0,
+                "target_argument_index": 1,
             })
             assert_error(r)
             assert_in("target_node", tool_text(r).lower())
         finally:
             client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
 
-    def test_attach_argument_index_negative():
-        """Negative argument index should be rejected."""
+    def test_attach_argument_index_below_minimum():
+        """Non-positive argument index should be rejected (1-based)."""
         r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
         assert_success(r)
         root = tool_data(r)["node"]
@@ -1305,10 +1305,10 @@ def register(suite, client):
             src = tool_data(r)["node"]
 
             r = client.call_tool("attach_sexp_node", {
-                "source_node": src, "target_node": root, "target_argument_index": -1,
+                "source_node": src, "target_node": root, "target_argument_index": 0,
             })
             assert_error(r)
-            assert_in("non-negative", tool_text(r).lower())
+            assert_in("1-based", tool_text(r).lower())
         finally:
             if src is not None:
                 client.call_tool("detach_sexp_node", {"target_node": src, "delete": True})
@@ -1320,8 +1320,8 @@ def register(suite, client):
               test_attach_replace_singleton_via_argument_index)
     suite.add("sexp_attach_argument_index_out_of_range",
               test_attach_argument_index_out_of_range)
-    suite.add("sexp_attach_argument_index_negative",
-              test_attach_argument_index_negative)
+    suite.add("sexp_attach_argument_index_below_minimum",
+              test_attach_argument_index_below_minimum)
     suite.add("sexp_attach_argument_index_on_non_operator",
               test_attach_argument_index_on_non_operator)
     suite.add("sexp_attach_before_via_argument_index",

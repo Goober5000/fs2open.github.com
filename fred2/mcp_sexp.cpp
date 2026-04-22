@@ -228,40 +228,40 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 
 	if (!stricmp(entity_type, "cutscene")) {
 		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)The_mission.cutscenes.size()) {
-			sink.set_error("Cutscene index %d is out of range (0..%d)", idx, (int)The_mission.cutscenes.size() - 1);
+		if (idx < 1 || idx > (int)The_mission.cutscenes.size()) {
+			sink.set_error("Cutscene index %d is out of range (1..%d)", idx, (int)The_mission.cutscenes.size());
 			return info;
 		}
 		info.attached_id = idx;
-		out_current_root = The_mission.cutscenes[idx].formula;
+		out_current_root = The_mission.cutscenes[idx - 1].formula;
 	} else if (!stricmp(entity_type, "fiction_viewer_stage")) {
 		int idx = atoi(entity_id);
-		if (idx < 0 || idx >= (int)Fiction_viewer_stages.size()) {
-			sink.set_error("Fiction viewer stage index %d is out of range (0..%d)", idx, (int)Fiction_viewer_stages.size() - 1);
+		if (idx < 1 || idx > (int)Fiction_viewer_stages.size()) {
+			sink.set_error("Fiction viewer stage index %d is out of range (1..%d)", idx, (int)Fiction_viewer_stages.size());
 			return info;
 		}
 		info.attached_id = idx;
-		out_current_root = Fiction_viewer_stages[idx].formula;
+		out_current_root = Fiction_viewer_stages[idx - 1].formula;
 	} else if (!stricmp(entity_type, "briefing_stage")) {
 		int idx = atoi(entity_id);
 		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Briefings[t].num_stages) {
-			sink.set_error("Briefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Briefings[t].num_stages - 1);
+		if (idx < 1 || idx > Briefings[t].num_stages) {
+			sink.set_error("Briefing stage index %d is out of range for team %d (1..%d)", idx, t + 1, Briefings[t].num_stages);
 			return info;
 		}
 		info.attached_id = idx;
 		info.attached_tag = tag;
-		out_current_root = Briefings[t].stages[idx].formula;
+		out_current_root = Briefings[t].stages[idx - 1].formula;
 	} else if (!stricmp(entity_type, "debriefing_stage")) {
 		int idx = atoi(entity_id);
 		int t = (tag == entity_specific_tag::TEAM_2) ? 1 : 0;
-		if (idx < 0 || idx >= Debriefings[t].num_stages) {
-			sink.set_error("Debriefing stage index %d is out of range for team %d (0..%d)", idx, t + 1, Debriefings[t].num_stages - 1);
+		if (idx < 1 || idx > Debriefings[t].num_stages) {
+			sink.set_error("Debriefing stage index %d is out of range for team %d (1..%d)", idx, t + 1, Debriefings[t].num_stages);
 			return info;
 		}
 		info.attached_id = idx;
 		info.attached_tag = tag;
-		out_current_root = Debriefings[t].stages[idx].formula;
+		out_current_root = Debriefings[t].stages[idx - 1].formula;
 	} else if (!stricmp(entity_type, "ship")) {
 		int ship_idx = ship_name_lookup(entity_id, 1);
 		if (ship_idx < 0) {
@@ -321,23 +321,23 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 
 	// Check against all mission entities
 
-	// Mission cutscenes (OPR_BOOL)
+	// Mission cutscenes (OPR_BOOL) — attached_id is 1-based for client consumption
 	for (int i = 0; i < (int)The_mission.cutscenes.size(); i++) {
 		if (The_mission.cutscenes[i].formula == root)
-			return { root, true, OPR_BOOL, "cutscene", i, entity_specific_tag::NONE };
+			return { root, true, OPR_BOOL, "cutscene", i + 1, entity_specific_tag::NONE };
 	}
 
 	// Fiction viewer stages (OPR_BOOL)
 	for (int i = 0; i < (int)Fiction_viewer_stages.size(); i++) {
 		if (Fiction_viewer_stages[i].formula == root)
-			return { root, true, OPR_BOOL, "fiction_viewer_stage", i, entity_specific_tag::NONE };
+			return { root, true, OPR_BOOL, "fiction_viewer_stage", i + 1, entity_specific_tag::NONE };
 	}
 
 	// Briefing stages (OPR_BOOL)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Briefings[t].num_stages; s++) {
 			if (Briefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "briefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+				return { root, true, OPR_BOOL, "briefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -345,7 +345,7 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	for (int t = 0; t < MAX_TVT_TEAMS; t++) {
 		for (int s = 0; s < Debriefings[t].num_stages; s++) {
 			if (Debriefings[t].stages[s].formula == root)
-				return { root, true, OPR_BOOL, "debriefing_stage", s, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
+				return { root, true, OPR_BOOL, "debriefing_stage", s + 1, (t == 0) ? entity_specific_tag::TEAM_1 : entity_specific_tag::TEAM_2 };
 		}
 	}
 
@@ -393,16 +393,17 @@ static void set_formula(const FormulaRootInfo &info, int new_root)
 	int index = std::holds_alternative<int>(info.attached_id) ? std::get<int>(info.attached_id) : -1;
 	const char *name = std::holds_alternative<const char *>(info.attached_id) ? std::get<const char *>(info.attached_id) : nullptr;
 
+	// Stage indices are stored 1-based in attached_id; subtract 1 for array access.
 	if (!stricmp(type, "cutscene")) {
-		The_mission.cutscenes[index].formula = new_root;
+		The_mission.cutscenes[index - 1].formula = new_root;
 	} else if (!stricmp(type, "fiction_viewer_stage")) {
-		Fiction_viewer_stages[index].formula = new_root;
+		Fiction_viewer_stages[index - 1].formula = new_root;
 	} else if (!stricmp(type, "briefing_stage")) {
 		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
-		Briefings[t].stages[index].formula = new_root;
+		Briefings[t].stages[index - 1].formula = new_root;
 	} else if (!stricmp(type, "debriefing_stage")) {
 		int t = (info.attached_tag == entity_specific_tag::TEAM_1) ? 0 : 1;
-		Debriefings[t].stages[index].formula = new_root;
+		Debriefings[t].stages[index - 1].formula = new_root;
 	} else if (!stricmp(type, "ship")) {
 		int ship_idx = ship_name_lookup(name, 1);
 		Assertion(ship_idx >= 0, "set_formula: ship '%s' not found!", name);
@@ -1002,8 +1003,8 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 
 	// --- Node + argument index ---
 	int arg_idx = *arg_idx_opt;
-	if (arg_idx < 0) {
-		sink.set_error("target_argument_index must be non-negative, got %d", arg_idx);
+	if (arg_idx < 1) {
+		sink.set_error("target_argument_index must be positive (got %d); argument positions are 1-based", arg_idx);
 		return false;
 	}
 
@@ -1025,10 +1026,11 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 		return false;
 	}
 
-	// Walk the argument chain from the operator atom
+	// Walk the argument chain from the operator atom.
+	// arg_idx is 1-based; the first argument is at arg_idx == 1.
 	int arg = Sexp_nodes[op_atom].rest;
 	int count = 0;
-	for (int i = 0; i < arg_idx; i++) {
+	for (int i = 1; i < arg_idx; i++) {
 		if (arg < 0)
 			break;
 		arg = Sexp_nodes[arg].rest;
@@ -2480,7 +2482,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Shared locked singletons (true/false) cannot be targeted directly; use "
 			"target_argument_index with the parent operator instead.");
 		add_integer_prop(props, "target_argument_index",
-			"0-based index into the argument list of the operator at target_node. "
+			"1-based index into the argument list of the operator at target_node. "
 			"When provided, target_node must be an operator (or its list wrapper) and "
 			"the detach operates on that argument instead of the operator itself.");
 		add_string_enum_prop(props, "target_entity_type",
@@ -2490,7 +2492,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_prop(props, "target_entity_id",
 			"Entity name or index. Required when target_entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
-			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 0-based stage index.");
+			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
 		add_string_enum_prop(props, "entity_tag",
 			"Disambiguation tag for entities that have multiple formula slots. "
 			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
@@ -2537,7 +2539,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Shared locked singletons (true/false) cannot be targeted directly; use "
 			"target_argument_index with the parent operator instead.");
 		add_integer_prop(props, "target_argument_index",
-			"0-based index into the argument list of the operator at target_node. "
+			"1-based index into the argument list of the operator at target_node. "
 			"When provided, target_node must be an operator (or its list wrapper) and "
 			"the attach operates on that argument instead of the node itself.");
 		add_string_enum_prop(props, "target_entity_type",
@@ -2547,7 +2549,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_prop(props, "target_entity_id",
 			"Entity name or index. Required when target_entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
-			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 0-based stage index.");
+			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
 		add_string_enum_prop(props, "entity_tag",
 			"Disambiguation tag for entities that have multiple formula slots. "
 			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "

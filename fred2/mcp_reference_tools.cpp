@@ -539,7 +539,7 @@ void mcp_register_reference_tools(json_t *tools)
 			"Sexp_nodes[] index for context-filtered results "
 			"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results.");
 		add_integer_prop(props, "arg_index",
-			"Argument position within the operator at 'node' (0-based). "
+			"Argument position within the operator at 'node' (1-based). "
 			"Used together with 'node' for context filtering.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
@@ -3260,8 +3260,17 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 
 	// Optional: node index for context-filtered results
 	int parent_node = get_optional_integer(arguments, "node", sink).value_or(-1);
-	int arg_index = get_optional_integer(arguments, "arg_index", sink).value_or(-1);
+	auto arg_index_opt = get_optional_integer(arguments, "arg_index", sink);
 	if (err) return err;
+	int arg_index = -1;  // sentinel: no context filter
+	if (arg_index_opt.has_value()) {
+		if (*arg_index_opt < 1) {
+			sink.set_error("arg_index must be positive (got %d); argument positions are 1-based",
+				*arg_index_opt);
+			return err;
+		}
+		arg_index = *arg_index_opt - 1;  // get_listing_opf expects 0-based
+	}
 
 	// Marshal the listing call to the main thread.  The get_listing_opf_*
 	// helpers read main-thread-owned globals (Ships[], Wings[], etc.), so they
