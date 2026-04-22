@@ -1216,11 +1216,10 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 			free_one_sexp(n);
 			freed_count++;
 			Sexp_nodes[original_n].parent = -1;
-			// Reparent siblings in original_n's rest chain: alloc_sexp had
-			// set them to parent = wrapper, which we just freed.  Point them
-			// at the operator atom (the new root of the detached subtree).
+			// Reparent siblings to -1 to match the parser's convention for
+			// arg chains directly under a top-level operator atom (no wrapper).
 			for (int sib = Sexp_nodes[original_n].rest; sib != -1; sib = Sexp_nodes[sib].rest)
-				Sexp_nodes[sib].parent = original_n;
+				Sexp_nodes[sib].parent = -1;
 		}
 		mcp_sexp_forest_mark_dirty({ original_n });
 	}
