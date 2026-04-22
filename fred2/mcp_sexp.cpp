@@ -2065,7 +2065,7 @@ static bool validate_sexp_variable_name(const char *name, McpErrorSink &sink, in
 
 static bool validate_sexp_variable_number_value(const char *value, McpErrorSink &sink)
 {
-	// Validate that value is a valid integer (optional leading minus, then digits)
+	// Validate that value is a valid integer (optional leading sign, then digits)
 	const char *p = value;
 	if (*p == '-' || *p == '+')
 		p++;
@@ -2104,7 +2104,7 @@ static bool validate_sexp_variable_flags(int flags, McpErrorSink &sink)
 static void update_sexp_node_variable_references(const char *old_name, const char *new_name)
 {
 	for (int i = 0; i < Num_sexp_nodes; i++) {
-		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, old_name)) {
+		if ((Sexp_nodes[i].type != SEXP_NOT_USED) && (Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, old_name)) {
 			strcpy_s(Sexp_nodes[i].text, new_name);
 		}
 	}
@@ -2113,12 +2113,11 @@ static void update_sexp_node_variable_references(const char *old_name, const cha
 static int reset_sexp_node_variable_references(const char *var_name, int var_type)
 {
 	int count = 0;
-	const char *placeholder = (var_type & SEXP_VARIABLE_NUMBER) ? "number" : "string";
 
 	for (int i = 0; i < Num_sexp_nodes; i++) {
-		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name)) {
+		if ((Sexp_nodes[i].type != SEXP_NOT_USED) && (Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name)) {
 			Sexp_nodes[i].type &= ~SEXP_FLAG_VARIABLE;
-			strcpy_s(Sexp_nodes[i].text, placeholder);
+			strcpy_s(Sexp_nodes[i].text, PLACEHOLDER_STRING);
 			count++;
 		}
 	}
@@ -2128,7 +2127,7 @@ static int reset_sexp_node_variable_references(const char *var_name, int var_typ
 static bool is_variable_referenced_in_sexp_nodes(const char *var_name)
 {
 	for (int i = 0; i < Num_sexp_nodes; i++) {
-		if ((Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name))
+		if ((Sexp_nodes[i].type != SEXP_NOT_USED) && (Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name))
 			return true;
 	}
 	return false;
@@ -2478,14 +2477,13 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_integer_prop(props, "target_node",
 			"Node index of the SEXP node to detach. "
 			"Mutually exclusive with target_entity_type. If the target is an operator "
-			"inside a list wrapper, the wrapper is automatically targeted instead. "
+			"inside a list wrapper, the wrapper is automatically detached instead. "
 			"Shared locked singletons (true/false) cannot be targeted directly; use "
 			"target_argument_index with the parent operator instead.");
 		add_integer_prop(props, "target_argument_index",
 			"0-based index into the argument list of the operator at target_node. "
 			"When provided, target_node must be an operator (or its list wrapper) and "
-			"the detach operates on that argument instead of the node itself. Required "
-			"when target_node resolves to a shared locked singleton (true/false).");
+			"the detach operates on that argument instead of the operator itself.");
 		add_string_enum_prop(props, "target_entity_type",
 			"Entity type whose formula to detach and replace with a default. "
 			"Mutually exclusive with target_node. Requires target_entity_id.",
@@ -2542,8 +2540,7 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_integer_prop(props, "target_argument_index",
 			"0-based index into the argument list of the operator at target_node. "
 			"When provided, target_node must be an operator (or its list wrapper) and "
-			"the attach operates on that argument instead of the node itself. Required "
-			"when target_node resolves to a shared locked singleton (true/false).");
+			"the attach operates on that argument instead of the node itself.");
 		add_string_enum_prop(props, "target_entity_type",
 			"Entity type whose formula the source will become. Mutually exclusive with "
 			"target_node. Requires target_entity_id.",
@@ -2688,7 +2685,7 @@ void mcp_register_sexp_tools(json_t *tools)
 	// get_sexp_variable
 	register_tool_with_required_string(tools, "get_sexp_variable",
 		"Get full details of a SEXP variable by name, including default value, "
-		"type, and persistence/network flags.",
+		"type (number or string), and flags.",
 		"name", "Name of the variable to retrieve");
 
 	// create_sexp_variable
