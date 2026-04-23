@@ -864,6 +864,11 @@ static void undo_source_wrap(int source, int effective_source, bool &wrapped_sou
 // return the wrapper index; otherwise return node unchanged.
 static int retarget_to_list_wrapper(int node)
 {
+	// Locked singletons may or may not be wrapped, but since they aren't
+	// unique, it's not possible to determine which wrapper we may need
+	if (node == Locked_sexp_true || node == Locked_sexp_false)
+		return node;
+
 	if (SEXP_NODE_TYPE(node) == SEXP_ATOM
 		&& Sexp_nodes[node].subtype == SEXP_ATOM_OPERATOR) {
 		int list = find_sexp_list(node);
