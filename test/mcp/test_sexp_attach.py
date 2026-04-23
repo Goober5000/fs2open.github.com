@@ -1166,6 +1166,30 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
+    def test_attach_replace_last_arg_via_argument_index():
+        """Replace the last argument of a multi-arg operator via arg_idx.
+        Exercises the resolver walk landing exactly on the final rest slot."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 3 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "99",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            # Replace arg 3 (the "3") with 99.
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root, "target_argument_index": 3,
+            })
+            assert_success(r)
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_equal(values, ["+", "1", "2", "99"])
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
     def test_attach_argument_index_out_of_range():
         """Out-of-range argument index should be rejected."""
         r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
@@ -1272,6 +1296,55 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
+    def test_attach_before_first_via_argument_index():
+        """Insert before the first argument via arg_idx.
+        Boundary case: resolver walk runs zero times (arg_idx == 1)."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 3 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "99",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root,
+                "target_argument_index": 1, "position": "before",
+            })
+            assert_success(r)
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_equal(values, ["+", "99", "1", "2", "3"])
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
+    def test_attach_after_last_via_argument_index():
+        """Insert after the last argument via arg_idx.
+        Boundary case: resolver walks to the final rest slot; insert-after
+        then appends onto the end of the argument chain."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 3 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "99",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root,
+                "target_argument_index": 3, "position": "after",
+            })
+            assert_success(r)
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_equal(values, ["+", "1", "2", "3", "99"])
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
     def test_attach_argument_index_with_entity_mode_rejected():
         """Passing target_argument_index with entity mode should error."""
         r = client.call_tool("create_sexp_node", {
@@ -1318,6 +1391,8 @@ def register(suite, client):
               test_attach_target_singleton_without_index_is_rejected)
     suite.add("sexp_attach_replace_singleton_via_argument_index",
               test_attach_replace_singleton_via_argument_index)
+    suite.add("sexp_attach_replace_last_arg_via_argument_index",
+              test_attach_replace_last_arg_via_argument_index)
     suite.add("sexp_attach_argument_index_out_of_range",
               test_attach_argument_index_out_of_range)
     suite.add("sexp_attach_argument_index_below_minimum",
@@ -1326,8 +1401,12 @@ def register(suite, client):
               test_attach_argument_index_on_non_operator)
     suite.add("sexp_attach_before_via_argument_index",
               test_attach_before_via_argument_index)
+    suite.add("sexp_attach_before_first_via_argument_index",
+              test_attach_before_first_via_argument_index)
     suite.add("sexp_attach_after_via_argument_index",
               test_attach_after_via_argument_index)
+    suite.add("sexp_attach_after_last_via_argument_index",
+              test_attach_after_last_via_argument_index)
     suite.add("sexp_attach_argument_index_with_entity_mode_rejected",
               test_attach_argument_index_with_entity_mode_rejected)
 
