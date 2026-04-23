@@ -1127,8 +1127,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 			sink.set_error("Entity formula is already the default (%s); "
 				"there is nothing to detach",
 				Sexp_nodes[n].text);
-			if (replacement != Locked_sexp_true && replacement != Locked_sexp_false)
-				free_sexp2(replacement);
+			free_sexp2(replacement);
 			return nullptr;
 		}
 
@@ -1141,8 +1140,7 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 		if (syntax_result != SEXP_CHECK_NO_ERROR) {
 			// Rollback
 			set_formula(info, n);
-			if (replacement != Locked_sexp_true && replacement != Locked_sexp_false)
-				free_sexp2(replacement);
+			free_sexp2(replacement);
 			sink.set_error("Detachment would cause syntax error: %s (error code %d, bad node %d)",
 				sexp_error_message(syntax_result), syntax_result, bad_node);
 			return nullptr;
@@ -1842,8 +1840,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				free_sexp2(result.arg_node);
 			else if (next != -1)				// arg was never created, so just free the chain
 				free_sexp2(next);
-			if (!op_is_locked)
-				free_sexp2(op_node);
+			free_sexp2(op_node);
 
 			if (warnings) json_decref(warnings);
 			return;
