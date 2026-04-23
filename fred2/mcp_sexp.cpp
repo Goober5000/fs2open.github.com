@@ -843,17 +843,47 @@ static void restore_predecessor(int pred_list, int pred_ante, int original_node)
 		Sexp_nodes[pred_ante].rest = original_node;
 }
 
-// Undo the operator-atom wrapping performed during attach.  If wrapped_source
-// is true, frees the wrapper and clears the flag.  Otherwise, resets the
-// effective_source (which equals the unwrapped source) back to free-standing.
-static void undo_source_wrap(int source, int effective_source, bool &wrapped_source)
+// Wraps n in a list wrapper.  Returns the wrapper node.
+static int wrap_node(int n, int rest = -1)
 {
-	if (wrapped_source) {
-		// Match the wrap side: don't touch locked singletons' parent field.
-		if (source != Locked_sexp_true && source != Locked_sexp_false)
-			Sexp_nodes[source].parent = -1;
-		free_one_sexp(effective_source);
-		wrapped_source = false;
+	int wrapper_n = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, n, rest);
+
+	// Note that alloc_sexp has already set the parents on n's rest chain,
+	// as well as the parent of the wrapped node (unless the wrapped node
+	// is a singleton)
+
+	return wrapper_n;
+}
+
+// Unwraps the node enclosed in wrapper_n, and returns it.
+static int unwrap_node(int wrapper_n, bool free_wrapper)
+{
+	int n = Sexp_nodes[wrapper_n].first;
+
+	// Locked singletons' parents are already -1, but we should be
+	// in the habit of not modifying any of their fields
+	if (n != Locked_sexp_true && n != Locked_sexp_false)
+		Sexp_nodes[n].parent = -1;
+
+	// Set the parents on n's rest chain to -1 to match the parser's convention for
+	// arg chains directly under a top-level operator atom (no wrapper).
+	for (int sibling = Sexp_nodes[n].rest; sibling != -1; sibling = Sexp_nodes[sibling].rest)
+		Sexp_nodes[sibling].parent = -1;
+
+	if (free_wrapper)
+		free_one_sexp(wrapper_n);
+	else
+		Sexp_nodes[wrapper_n].first = -1;
+
+	return n;
+}
+
+// Performs the actual technical separation of a subtree from a supertree.
+// If source is a wrapped node, it is unwrapped in the process.
+static void make_source_free_standing(int source, int effective_source)
+{
+	if (source != effective_source) {
+		unwrap_node(effective_source, true);
 	} else {
 		Sexp_nodes[effective_source].rest = -1;
 		Sexp_nodes[effective_source].parent = -1;
@@ -1218,13 +1248,8 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 	if (!do_delete) {
 		// but if the new free-standing tree is wrapped, unwrap it
 		if (n != original_n) {
-			free_one_sexp(n);
+			unwrap_node(n, true);
 			freed_count++;
-			Sexp_nodes[original_n].parent = -1;
-			// Reparent siblings to -1 to match the parser's convention for
-			// arg chains directly under a top-level operator atom (no wrapper).
-			for (int sib = Sexp_nodes[original_n].rest; sib != -1; sib = Sexp_nodes[sib].rest)
-				Sexp_nodes[sib].parent = -1;
 		}
 		mcp_sexp_forest_mark_dirty({ original_n });
 	}
@@ -1331,13 +1356,12 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		sink.set_error("Source node %d is not in use", source);
 		return;
 	}
-	bool source_is_locked = (source == Locked_sexp_true || source == Locked_sexp_false);
 	// Locked singletons (true/false) are shared nodes whose fields must not
 	// be modified.  They are still valid attach sources: entity-formula mode
 	// just stores the node index, and node-relative mode auto-wraps them in
 	// a SEXP_LIST whose fields are modified instead.  Skip the root and
 	// attached checks since singletons are intentionally shared.
-	if (!source_is_locked) {
+	if (source != Locked_sexp_true && source != Locked_sexp_false) {
 		FormulaRootInfo src_info = find_formula_root_and_type(source);
 		if (src_info.root != source) {
 			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
@@ -1415,17 +1439,11 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		// Entity-formula mode and root-replace mode don't need this because
 		// those paths store the operator atom directly as the formula root.
 		int effective_source = source;
-		bool wrapped_source = false;
 		bool need_wrap = (SEXP_NODE_TYPE(source) == SEXP_ATOM
 			&& Sexp_nodes[source].subtype == SEXP_ATOM_OPERATOR
 			&& !(is_root && is_attached));  // root-replace delegates to entity logic
 		if (need_wrap) {
-			effective_source = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, source, -1);
-			// Don't set parent on locked singletons — they're shared and their
-			// parent must stay -1 (matching how the parser handles them).
-			if (!source_is_locked)
-				Sexp_nodes[source].parent = effective_source;
-			wrapped_source = true;
+			effective_source = wrap_node(source);
 		}
 
 		if (position == attach_position::REPLACE) {
@@ -1461,7 +1479,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 						Sexp_nodes[target].rest = target_rest;
 						Sexp_nodes[target].parent = target_parent;
 						restore_predecessor(pred_list, pred_ante, target);
-						undo_source_wrap(source, effective_source, wrapped_source);
+						make_source_free_standing(source, effective_source);
 					}, "Attachment", sink))
 					return;
 				if (is_attached)
@@ -1499,7 +1517,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 					restore_predecessor(pred_list, pred_ante, target);
-					undo_source_wrap(source, effective_source, wrapped_source);
+					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return;
 			if (is_attached)
@@ -1525,7 +1543,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 					Sexp_nodes[target].rest = old_target_rest;
-					undo_source_wrap(source, effective_source, wrapped_source);
+					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return;
 			if (is_attached)
@@ -1656,7 +1674,7 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 			sink.set_error("Boolean argument %d must be \"true\" or \"false\", got \"%s\"", arg_index, value_str);
 			return -1;
 		}
-		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, locked_node, next);
+		return wrap_node(locked_node, next);
 	}
 
 	if (!stricmp(type_str, "node")) {
@@ -1683,8 +1701,8 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 			sink.set_error("Node argument %d: node %d is not the root of its own tree", arg_index, idx);
 			return -1;
 		}
-		// Always wrap in SEXP_LIST to avoid corrupting existing tree linkage
-		return alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, idx, next);
+		// Always wrap to avoid corrupting existing tree linkage
+		return wrap_node(idx, next);
 	}
 
 	// Should not reach here if type was validated
@@ -1833,15 +1851,16 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 
 		// there might have been an error in the argument loop
 		if (sink.has_error()) {
-			// Before freeing, sever first pointers on node-type wrappers so
-			// free_sexp2 doesn't recurse into referenced existing trees
+			// Before freeing, unwrap wrapped nodes so free_sexp2
+			// doesn't recurse into referenced existing trees
 			int walk = (result.arg_node != -1) ? result.arg_node : next;
 			while (walk != -1) {
 				if (Sexp_nodes[walk].subtype == SEXP_ATOM_LIST
 					&& Sexp_nodes[walk].first != Locked_sexp_true
 					&& Sexp_nodes[walk].first != Locked_sexp_false
-				)
-					Sexp_nodes[walk].first = -1;
+				) {
+					unwrap_node(walk, false);	// don't free the wrapper so that the arg chain remains intact - we need to free the arg chain later
+				}
 				walk = Sexp_nodes[walk].rest;
 			}
 
@@ -1866,10 +1885,6 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 
 		// Link arguments to operator
 		Sexp_nodes[op_node].rest = next;
-
-		// Set parent pointers on argument chain
-		for (int arg = next; arg != -1; arg = Sexp_nodes[arg].rest)
-			Sexp_nodes[arg].parent = op_node;
 	} else if (Operators[op_idx].min > 0) {
 		// No arguments provided but operator expects some
 		warnings = json_array();
