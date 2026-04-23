@@ -955,7 +955,7 @@ static bool check_attached_syntax_or_rollback(
 // Shared target resolution
 // ---------------------------------------------------------------------------
 
-struct ResolvedTarget {
+struct GeneralSEXPTarget {
 	enum class Mode { Entity, Node };
 	Mode mode;
 	int node = -1;
@@ -964,7 +964,7 @@ struct ResolvedTarget {
 	int entity_current_root = -1;
 };
 
-static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sink)
+static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpErrorSink &sink)
 {
 	auto target_opt = get_optional_integer(input, "target_node", sink);
 	auto arg_idx_opt = get_optional_integer(input, "target_argument_index", sink);
@@ -998,7 +998,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 			if (!check_string_enum(entity_tag, formula_entity_tag_values, "entity_tag", sink))
 				return false;
 		}
-		out.mode = ResolvedTarget::Mode::Entity;
+		out.mode = GeneralSEXPTarget::Mode::Entity;
 		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
 			out.entity_current_root, sink);
 		if (sink.has_error()) return false;
@@ -1031,7 +1031,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 				target, (target == Locked_sexp_true) ? "true" : "false");
 			return false;
 		}
-		out.mode = ResolvedTarget::Mode::Node;
+		out.mode = GeneralSEXPTarget::Mode::Node;
 		out.node = target;
 		return true;
 	}
@@ -1044,18 +1044,18 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 	}
 
 	// Retarget operator atom to its list wrapper if applicable
-	int resolved = retarget_to_list_wrapper(target);
+	int retargeted = retarget_to_list_wrapper(target);
 
 	// Must be an operator atom or list wrapper
 	int op_atom;
-	if (SEXP_NODE_TYPE(resolved) == SEXP_LIST) {
-		op_atom = Sexp_nodes[resolved].first;
+	if (SEXP_NODE_TYPE(retargeted) == SEXP_LIST) {
+		op_atom = Sexp_nodes[retargeted].first;
 		if (op_atom < 0 || Sexp_nodes[op_atom].subtype != SEXP_ATOM_OPERATOR) {
 			sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
 			return false;
 		}
-	} else if (SEXP_NODE_TYPE(resolved) == SEXP_ATOM && Sexp_nodes[resolved].subtype == SEXP_ATOM_OPERATOR) {
-		op_atom = resolved;
+	} else if (SEXP_NODE_TYPE(retargeted) == SEXP_ATOM && Sexp_nodes[retargeted].subtype == SEXP_ATOM_OPERATOR) {
+		op_atom = retargeted;
 	} else {
 		sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
 		return false;
@@ -1078,7 +1078,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 		return false;
 	}
 
-	out.mode = ResolvedTarget::Mode::Node;
+	out.mode = GeneralSEXPTarget::Mode::Node;
 	out.node = arg;
 	return true;
 }
@@ -1087,19 +1087,19 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 // detach_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
-static json_t *handle_detach_sexp_node(const ResolvedTarget &target, bool shrink, bool do_delete, McpErrorSink &sink);
+static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, bool shrink, bool do_delete, McpErrorSink &sink);
 
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	ResolvedTarget target;
-	if (!resolve_target(input, target, sink))
+	GeneralSEXPTarget general_target;
+	if (!parse_general_target(input, general_target, sink))
 		return;
 
-	if (target.mode == ResolvedTarget::Mode::Entity && target.entity_current_root < 0) {
-		sink.set_error("Entity has no formula to detach (formula index %d)", target.entity_current_root);
+	if (general_target.mode == GeneralSEXPTarget::Mode::Entity && general_target.entity_current_root < 0) {
+		sink.set_error("Entity has no formula to detach (formula index %d)", general_target.entity_current_root);
 		return;
 	}
 
@@ -1108,16 +1108,16 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	auto delete_opt = get_optional_bool(input, "delete", sink);
 	bool do_delete = delete_opt.has_value() && *delete_opt;
 
-	auto result_json = handle_detach_sexp_node(target, shrink, do_delete, sink);
+	auto result_json = handle_detach_sexp_node(general_target, shrink, do_delete, sink);
 	if (sink.has_error()) return;
 
 	req->result_json = result_json;
 	req->success = true;
 }
 
-static json_t *handle_detach_sexp_node(const ResolvedTarget &target, bool shrink, bool do_delete, McpErrorSink &sink)
+static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, bool shrink, bool do_delete, McpErrorSink &sink)
 {
-	int n = target.node;
+	int n = general_target.node;
 	int original_n = n;
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
@@ -1128,11 +1128,11 @@ static json_t *handle_detach_sexp_node(const ResolvedTarget &target, bool shrink
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
 	// Skip for entity mode which targets the formula root directly.
-	if (target.mode == ResolvedTarget::Mode::Node)
+	if (general_target.mode == GeneralSEXPTarget::Mode::Node)
 		n = retarget_to_list_wrapper(n);
 
 	// Determine context: walk to tree root and check mission attachment
-	FormulaRootInfo info = (target.mode == ResolvedTarget::Mode::Entity) ? target.entity_info : find_formula_root_and_type(n);
+	FormulaRootInfo info = (general_target.mode == GeneralSEXPTarget::Mode::Entity) ? general_target.entity_info : find_formula_root_and_type(n);
 	bool is_root = (n == info.root);
 	bool is_attached = info.attached;
 
@@ -1313,7 +1313,7 @@ static bool attach_as_entity_formula(
 	return true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolved, attach_position position, bool delete_displaced, McpErrorSink &sink);
+static json_t *handle_attach_sexp_node(int source, const GeneralSEXPTarget &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
 
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
@@ -1327,8 +1327,8 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	if (!check_int_range(source, 0, Num_sexp_nodes - 1, "source_node", sink))
 		return;
 
-	ResolvedTarget resolved;
-	if (!resolve_target(input, resolved, sink))
+	GeneralSEXPTarget general_target;
+	if (!parse_general_target(input, general_target, sink))
 		return;
 
 	auto position_str = get_optional_string(input, "position", sink);
@@ -1346,16 +1346,16 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
 	}
 
-	auto result_json = handle_attach_sexp_node(source, resolved, position, delete_displaced, sink);
+	auto result_json = handle_attach_sexp_node(source, general_target, position, delete_displaced, sink);
 	if (sink.has_error()) return;
 
 	req->result_json = result_json;
 	req->success = true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolved, attach_position position, bool delete_displaced, McpErrorSink &sink)
+static json_t *handle_attach_sexp_node(int source, const GeneralSEXPTarget &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
 {
-	bool have_entity = (resolved.mode == ResolvedTarget::Mode::Entity);
+	bool have_entity = (general_target.mode == GeneralSEXPTarget::Mode::Entity);
 
 	// --- Validate source ---
 	if (Sexp_nodes[source].type == SEXP_NOT_USED) {
@@ -1389,7 +1389,7 @@ static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolve
 		// Case A': Entity formula mode
 		// ---------------------------------------------------------------
 
-		if (!attach_as_entity_formula(source, resolved.entity_info, resolved.entity_current_root,
+		if (!attach_as_entity_formula(source, general_target.entity_info, general_target.entity_current_root,
 				delete_displaced, displaced, freed_count, sink))
 			return nullptr;
 
@@ -1397,7 +1397,7 @@ static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolve
 		// ---------------------------------------------------------------
 		// Node-relative mode
 		// ---------------------------------------------------------------
-		int target = resolved.node;
+		int target = general_target.node;
 
 		if (target == source) {
 			sink.set_error("Source and target cannot be the same node (%d)", source);
@@ -1407,7 +1407,7 @@ static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolve
 		// Retarget: if target is an operator atom inside a list wrapper,
 		// operate on the wrapper instead.  Skip when the resolver already
 		// descended via target_argument_index.
-		int original_target = resolved.original_node;
+		int original_target = general_target.original_node;
 		if (target == original_target)
 			target = retarget_to_list_wrapper(target);
 
