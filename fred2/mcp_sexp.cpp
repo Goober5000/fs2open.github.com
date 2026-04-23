@@ -1758,13 +1758,18 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	// Create operator atom
 	int op_node = alloc_sexp(op_name, SEXP_ATOM, SEXP_ATOM_OPERATOR, -1, -1);
 
-	// Handle locked singletons (true/false operators)
-	bool op_is_locked = (op_node == Locked_sexp_true || op_node == Locked_sexp_false);
-
-	// Parse arguments (if any)
 	json_t *warnings = nullptr;
 	json_t *args = json_object_get(input, "operator_arguments");
-	if (args && json_is_array(args) && json_array_size(args) > 0) {
+	bool has_args = (args && json_is_array(args) && json_array_size(args) > 0);
+
+	// Locked singletons (true/false operators) should not have anything linked
+	if (has_args && (op_node == Locked_sexp_true || op_node == Locked_sexp_false)) {
+		sink.set_error("Operator '%s' does not accept arguments", op_name);
+		return;
+	}
+
+	// Parse arguments (if any)
+	if (has_args) {
 		size_t num_args = json_array_size(args);
 
 		// Build argument chain right-to-left
@@ -1855,10 +1860,6 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		}
 
 		// Link arguments to operator
-		if (op_is_locked) {
-			// Locked singletons can't have rest modified; wrap in a list first
-			op_node = alloc_sexp("", SEXP_LIST, SEXP_ATOM_LIST, op_node, -1);
-		}
 		Sexp_nodes[op_node].rest = next;
 
 		// Set parent pointers on argument chain
