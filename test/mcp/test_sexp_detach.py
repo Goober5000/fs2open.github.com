@@ -1331,6 +1331,28 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
+    def test_detach_last_arg_via_argument_index():
+        """Detach the last argument of a multi-arg operator via arg_idx.
+        Exercises the resolver walk landing exactly on the final rest slot."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 3 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            # Detach arg 3 (the "3") — the last argument.
+            r = client.call_tool("detach_sexp_node",
+                                 {"target_node": root, "target_argument_index": 3,
+                                  "delete": True})
+            assert_success(r)
+            d = tool_data(r)
+            assert_true(d.get("deleted"), "should have deleted the detached node")
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            # "3" is gone; placeholder replaces the last arg slot.
+            assert_equal(values, ["+", "1", "2", "<placeholder>"])
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
     def test_detach_entity_mode():
         """Entity-mode detach should replace the formula with a default."""
         r = client.call_tool("create_event", {"name": "detach_ent_test"})
@@ -1405,6 +1427,8 @@ def register(suite, client):
               test_detach_argument_index_on_non_operator)
     suite.add("sexp_detach_argument_index_below_minimum",
               test_detach_argument_index_below_minimum)
+    suite.add("sexp_detach_last_arg_via_argument_index",
+              test_detach_last_arg_via_argument_index)
     def test_detach_entity_default_formula_rejected():
         """Detaching a goal whose formula is already the default (true) should
         error rather than silently no-op."""
