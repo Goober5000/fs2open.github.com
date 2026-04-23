@@ -1087,8 +1087,7 @@ static bool resolve_target(json_t *input, ResolvedTarget &out, McpErrorSink &sin
 // detach_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
-static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
-	const FormulaRootInfo *pre_resolved, McpErrorSink &sink);
+static json_t *handle_detach_sexp_node(const ResolvedTarget &target, bool shrink, bool do_delete, McpErrorSink &sink);
 
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
@@ -1109,20 +1108,16 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	auto delete_opt = get_optional_bool(input, "delete", sink);
 	bool do_delete = delete_opt.has_value() && *delete_opt;
 
-	const FormulaRootInfo *pre = nullptr;
-	if (target.mode == ResolvedTarget::Mode::Entity)
-		pre = &target.entity_info;
-
-	auto result_json = handle_detach_sexp_node(target.node, shrink, do_delete, pre, sink);
+	auto result_json = handle_detach_sexp_node(target, shrink, do_delete, sink);
 	if (sink.has_error()) return;
 
 	req->result_json = result_json;
 	req->success = true;
 }
 
-static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
-	const FormulaRootInfo *pre_resolved, McpErrorSink &sink)
+static json_t *handle_detach_sexp_node(const ResolvedTarget &target, bool shrink, bool do_delete, McpErrorSink &sink)
 {
+	int n = target.node;
 	int original_n = n;
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
@@ -1132,12 +1127,12 @@ static json_t *handle_detach_sexp_node(int n, bool shrink, bool do_delete,
 
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
-	// Skip when pre_resolved (entity mode targets the formula root directly).
-	if (!pre_resolved)
+	// Skip for entity mode which targets the formula root directly.
+	if (target.mode == ResolvedTarget::Mode::Node)
 		n = retarget_to_list_wrapper(n);
 
 	// Determine context: walk to tree root and check mission attachment
-	FormulaRootInfo info = pre_resolved ? *pre_resolved : find_formula_root_and_type(n);
+	FormulaRootInfo info = (target.mode == ResolvedTarget::Mode::Entity) ? target.entity_info : find_formula_root_and_type(n);
 	bool is_root = (n == info.root);
 	bool is_attached = info.attached;
 
@@ -1318,6 +1313,8 @@ static bool attach_as_entity_formula(
 	return true;
 }
 
+static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolved, attach_position position, bool delete_displaced, McpErrorSink &sink);
+
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -1349,12 +1346,21 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
 	}
 
+	auto result_json = handle_attach_sexp_node(source, resolved, position, delete_displaced, sink);
+	if (sink.has_error()) return;
+
+	req->result_json = result_json;
+	req->success = true;
+}
+
+static json_t *handle_attach_sexp_node(int source, const ResolvedTarget &resolved, attach_position position, bool delete_displaced, McpErrorSink &sink)
+{
 	bool have_entity = (resolved.mode == ResolvedTarget::Mode::Entity);
 
 	// --- Validate source ---
 	if (Sexp_nodes[source].type == SEXP_NOT_USED) {
 		sink.set_error("Source node %d is not in use", source);
-		return;
+		return nullptr;
 	}
 	// Locked singletons (true/false) are shared nodes whose fields must not
 	// be modified.  They are still valid attach sources: entity-formula mode
@@ -1365,12 +1371,12 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		FormulaRootInfo src_info = find_formula_root_and_type(source);
 		if (src_info.root != source) {
 			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
-			return;
+			return nullptr;
 		}
 		if (src_info.attached) {
 			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
 				source, src_info.attached_type);
-			return;
+			return nullptr;
 		}
 	}
 
@@ -1385,7 +1391,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 		if (!attach_as_entity_formula(source, resolved.entity_info, resolved.entity_current_root,
 				delete_displaced, displaced, freed_count, sink))
-			return;
+			return nullptr;
 
 	} else {
 		// ---------------------------------------------------------------
@@ -1395,7 +1401,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 		if (target == source) {
 			sink.set_error("Source and target cannot be the same node (%d)", source);
-			return;
+			return nullptr;
 		}
 
 		// Retarget: if target is an operator atom inside a list wrapper,
@@ -1415,7 +1421,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		if (info.root == source) {
 			sink.set_error("Target node %d is inside source node %d's tree; "
 				"attaching would create a cycle", target, source);
-			return;
+			return nullptr;
 		}
 
 		if (is_root && !is_attached) {
@@ -1423,13 +1429,13 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			sink.set_error("Target node %d is a free-standing root; to attach source as a formula, "
 				"use target_entity_type/target_entity_id. To replace content inside a tree, "
 				"target an embedded node.", target);
-			return;
+			return nullptr;
 		}
 
 		if (is_root && is_attached && position != attach_position::REPLACE) {
 			// Case A' via target_node with insert mode — formula roots have no sibling chain
 			sink.set_error("Cannot insert before/after a formula root. Use position='replace' to replace the formula.");
-			return;
+			return nullptr;
 		}
 
 		// If the source is an operator atom that will be spliced into a rest
@@ -1454,7 +1460,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			if (is_root && is_attached) {
 				// Replacing a formula root via target_node: delegate to entity logic.
 				if (!attach_as_entity_formula(source, info, info.root, delete_displaced, displaced, freed_count, sink))
-					return;
+					return nullptr;
 
 			} else {
 				// Embedded replace (Cases C'/D')
@@ -1481,7 +1487,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 						restore_predecessor(pred_list, pred_ante, target);
 						make_source_free_standing(source, effective_source);
 					}, "Attachment", sink))
-					return;
+					return nullptr;
 				if (is_attached)
 					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 
@@ -1501,7 +1507,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 
 			if (is_root) {
 				sink.set_error("Cannot insert before a tree root; use position='replace', or target an embedded node.");
-				return;
+				return nullptr;
 			}
 
 			int pred_list = find_sexp_list(target);
@@ -1519,7 +1525,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					restore_predecessor(pred_list, pred_ante, target);
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
-				return;
+				return nullptr;
 			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
@@ -1532,7 +1538,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 			// -------------------------------------------------------
 			if (is_root) {
 				sink.set_error("Cannot insert after a tree root; use position='replace', or target an embedded node.");
-				return;
+				return nullptr;
 			}
 
 			int old_target_rest = Sexp_nodes[target].rest;
@@ -1545,7 +1551,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 					Sexp_nodes[target].rest = old_target_rest;
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
-				return;
+				return nullptr;
 			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
@@ -1575,8 +1581,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	json_object_set_new(result, "deleted_displaced", (delete_displaced && freed_count > 0) ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 
-	req->result_json = make_json_tool_result(result);
-	req->success = true;
+	return make_json_tool_result(result);
 }
 
 // ---------------------------------------------------------------------------
