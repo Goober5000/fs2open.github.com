@@ -1093,18 +1093,19 @@ def register(suite, client):
             client.call_tool("delete_event",
                              {"name": "test_shrink_rollback", "force": True})
 
-    def test_detach_unwrap_preserves_child_parent_pointers():
-        """Bug regression: unwrapping after detach leaves children with stale parents.
+    def test_detach_unwrap_clears_stale_sibling_parents():
+        """Regression: unwrapping after detach must clear stale sibling parents.
 
         When the user passes an operator atom to detach_sexp_node, the
         handler retargets to the enclosing list wrapper, processes the
-        detach, and then (on the !do_delete path) frees the wrapper and
-        resets ONLY the operator atom's parent pointer back to -1.  But
-        for any wrapper allocated by the SEXP parser, alloc_sexp set the
-        entire rest chain's parent fields to the wrapper, so the operator
-        atom's siblings (its arguments) all still point at the now-freed
-        wrapper slot.  The detached free-standing subtree is then
-        internally inconsistent.
+        detach, and then (on the !do_delete path) frees the wrapper.
+        Before the fix, the operator atom's sibling wrappers still pointed
+        at that (now-freed) wrapper slot — leaving a dangling reference.
+
+        The detached subtree must match the parser's convention for a
+        natively-parsed free-standing tree: wrappers directly under a
+        top-level operator atom have parent = -1 (not the operator, and
+        not the prior enclosing wrapper).
 
         This only manifests when the operator actually has an enclosing
         wrapper, which in parser-produced trees happens for *nested*
@@ -1141,9 +1142,10 @@ def register(suite, client):
                          "preserved detach should report the operator atom index")
 
             # Walk the new free-standing subtree and check a sibling's
-            # parent.  The proper parent is detached_root (the new root
-            # after unwrap).  In the buggy version, parent still points
-            # at the freed wrapper.
+            # parent.  Per parser convention for a natively-parsed free
+            # tree, wrappers directly under a top-level operator atom have
+            # parent = -1.  In the buggy version, parent still pointed at
+            # the freed enclosing wrapper (neither -1 nor detached_root).
             r = client.call_tool("walk_sexp_tree", {"node": detached_root})
             assert_success(r)
             nodes = tool_data(r).get("nodes", [])
@@ -1157,10 +1159,10 @@ def register(suite, client):
                         f"walked {[(n['node'], n.get('role')) for n in nodes]}")
 
             parent = sibling.get("node_parent")
-            assert_equal(parent, detached_root,
-                         f"sibling node {sibling['node']} should have parent="
-                         f"{detached_root} (the new root after unwrap); got "
-                         f"parent={parent}, which points to a freed wrapper slot")
+            assert_equal(parent, -1,
+                         f"sibling node {sibling['node']} should have parent=-1 "
+                         f"(matching parser convention for a free-standing tree); "
+                         f"got parent={parent}")
         finally:
             if detached_root is not None:
                 client.call_tool("detach_sexp_node",
@@ -1231,8 +1233,8 @@ def register(suite, client):
 
     suite.add("sexp_detach_shrink_rollback_restores_last_sibling",
               test_detach_shrink_rollback_restores_last_sibling)
-    suite.add("sexp_detach_unwrap_preserves_child_parent_pointers",
-              test_detach_unwrap_preserves_child_parent_pointers)
+    suite.add("sexp_detach_unwrap_clears_stale_sibling_parents",
+              test_detach_unwrap_clears_stale_sibling_parents)
     suite.add("sexp_detach_reports_consistent_node_when_retargeted",
               test_detach_reports_consistent_node_when_retargeted)
 
