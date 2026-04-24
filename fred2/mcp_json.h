@@ -61,9 +61,16 @@ void add_vec3d_array_prop(json_t *props, const char *name, const char *descripti
 void add_matrix_prop(json_t *props, const char *name, const char *description);
 void add_color_prop(json_t *props, const char *name, const char *description);
 
-// Register an MCP tool schema in the tools array.
+// Build a schema_extras object with a branch constraint (e.g. "oneOf" or "anyOf")
+// between one or more groups of required fields.
+json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups);
+
+// Register an MCP tool schema in the tools array.  If schema_extras is
+// provided, its keys are merged into the inputSchema (e.g. {"oneOf": [...]} or
+// {"anyOf": [...]}).  Ownership of schema_extras transfers to this function.
 void register_tool(json_t *tools, const char *name, const char *description,
-	json_t *properties, json_t *required_arr = nullptr);
+	json_t *properties, json_t *required_arr = nullptr,
+	json_t *schema_extras = nullptr);
 
 // Shorthand: register a tool whose only parameter is a single required string.
 void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
