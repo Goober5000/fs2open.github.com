@@ -1420,6 +1420,22 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
 
+    def test_detach_target_entity_id_with_node_mode_rejected():
+        """Passing target_entity_id with target_node (no entity_type) should
+        error; target_entity_id is only valid in entity mode."""
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("detach_sexp_node", {
+                "target_node": root,
+                "target_entity_id": "phantom_entity",
+            })
+            assert_error(r)
+            assert_in("target_entity_id", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node", {"target_node": root, "delete": True})
+
     def test_detach_old_param_name_rejected():
         """The legacy 'node' parameter is silently ignored; the resolver sees
         neither target_node nor target_entity_type and rejects the call."""
@@ -1472,6 +1488,8 @@ def register(suite, client):
               test_detach_entity_and_node_mutually_exclusive)
     suite.add("sexp_detach_entity_tag_with_node_mode_rejected",
               test_detach_entity_tag_with_node_mode_rejected)
+    suite.add("sexp_detach_target_entity_id_with_node_mode_rejected",
+              test_detach_target_entity_id_with_node_mode_rejected)
     suite.add("sexp_detach_old_param_name_rejected",
               test_detach_old_param_name_rejected)
 

@@ -171,6 +171,31 @@ json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SC
 	return extras;
 }
 
+json_t *build_dependencies_extras(const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &deps)
+{
+	json_t *deps_obj = json_object();
+	for (const auto &dep : deps) {
+		json_t *arr = json_array();
+		for (const char *name : dep.second)
+			json_array_append_new(arr, json_string(name));
+		json_object_set_new(deps_obj, dep.first, arr);
+	}
+
+	json_t *extras = json_object();
+	json_object_set_new(extras, "dependencies", deps_obj);
+	return extras;
+}
+
+json_t *merge_schema_extras(json_t *dest, json_t *source)
+{
+	if (source) {
+		if (dest)
+			json_object_update(dest, source);
+		json_decref(source);
+	}
+	return dest;
+}
+
 void register_tool(json_t *tools, const char *name, const char *description,
 	json_t *properties, json_t *required_arr, json_t *schema_extras)
 {
