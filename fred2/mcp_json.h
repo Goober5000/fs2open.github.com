@@ -4,6 +4,7 @@
 #include <functional>
 #include <initializer_list>
 #include <optional>
+#include <utility>
 #include <jansson.h>
 
 #include "globalincs/vmallocator.h"	// for SCP_string
@@ -64,6 +65,19 @@ void add_color_prop(json_t *props, const char *name, const char *description);
 // Build a schema_extras object with a branch constraint (e.g. "oneOf" or "anyOf")
 // between one or more groups of required fields.
 json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups);
+
+// Build a schema_extras object with a "dependencies" constraint expressing
+// conditional presence: for each pair {dependent_field, required_fields}, if
+// dependent_field is present in the input then every name in required_fields
+// must also be present.  Useful for constraints like "entity_tag is only valid
+// with target_entity_type".
+json_t *build_dependencies_extras(
+	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &deps);
+
+// Merge the key-value pairs from `source` into `dest`, taking ownership of
+// `source` (it is decref'd).  Returns `dest` so the result can be passed
+// directly as register_tool's schema_extras argument.
+json_t *merge_schema_extras(json_t *dest, json_t *source);
 
 // Register an MCP tool schema in the tools array.  If schema_extras is
 // provided, its keys are merged into the inputSchema (e.g. {"oneOf": [...]} or

@@ -1010,6 +1010,11 @@ static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpError
 		return false;
 	}
 
+	if (entity_id && have_target_node) {
+		sink.set_error("'target_entity_id' can only be used with 'target_entity_type', not with node mode");
+		return false;
+	}
+
 	if (have_entity) {
 		// --- Entity mode ---
 		if (!entity_id) {
@@ -1360,6 +1365,11 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	auto position_str = get_optional_string(input, "position", sink);
 	auto delete_displaced_opt = get_optional_bool(input, "delete_displaced", sink);
 	if (sink.has_error()) return;
+
+	if (position_str && general_target.mode != GeneralSEXPTarget::Mode::Node) {
+		sink.set_error("'position' can only be used with 'target_node', not with entity mode");
+		return;
+	}
 
 	bool delete_displaced = delete_displaced_opt.has_value() && *delete_displaced_opt;
 
@@ -2574,7 +2584,13 @@ void mcp_register_sexp_tools(json_t *tools)
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
 			"be targeted directly; use target_argument_index with the parent operator.",
 			props, nullptr,
-			build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }));
+			merge_schema_extras(
+				build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }),
+				build_dependencies_extras({
+					{"target_argument_index", {"target_node"}},
+					{"target_entity_id", {"target_entity_type"}},
+					{"entity_tag", {"target_entity_type"}},
+				})));
 	}
 
 	// attach_sexp_node
@@ -2635,7 +2651,14 @@ void mcp_register_sexp_tools(json_t *tools)
 			"displaced_node (int or null), displaced_node_data (full node object when preserved), "
 			"deleted_displaced (bool), and freed_count (int).",
 			props, req,
-			build_branch_required_fields("oneOf", { { "target_node" }, { "target_entity_type" , "target_entity_id" } }));
+			merge_schema_extras(
+				build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }),
+				build_dependencies_extras({
+					{"target_argument_index", {"target_node"}},
+					{"target_entity_id", {"target_entity_type"}},
+					{"entity_tag", {"target_entity_type"}},
+					{"position", {"target_node"}},
+				})));
 	}
 
 	// create_sexp_node
