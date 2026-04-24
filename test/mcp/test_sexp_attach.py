@@ -1639,6 +1639,29 @@ def register(suite, client):
     suite.add("sexp_attach_embedded_replace_unwraps_displaced_wrapper",
               test_attach_embedded_replace_unwraps_displaced_wrapper)
 
+    def test_attach_position_with_entity_mode_rejected():
+        """Passing 'position' with entity mode should error; position is only
+        meaningful in node-relative mode."""
+        r = client.call_tool("create_event", {"name": "attach_pos_test"})
+        assert_success(r)
+        try:
+            r = client.call_tool("text_to_sexp", {"text": "( true )"})
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src,
+                "target_entity_type": "event",
+                "target_entity_id": "attach_pos_test",
+                "position": "before",
+            })
+            assert_error(r)
+            assert_in("position", tool_text(r).lower())
+        finally:
+            client.call_tool("delete_event", {"name": "attach_pos_test", "force": True})
+
+    suite.add("sexp_attach_position_with_entity_mode_rejected",
+              test_attach_position_with_entity_mode_rejected)
+
 
 if __name__ == "__main__":
     run_module_standalone(register, "SEXP attach behavior tests")
