@@ -1574,6 +1574,71 @@ def register(suite, client):
 
     suite.add("sexp_attach_cross_entity", test_cross_entity_attach)
 
+    # =================================================================
+    # Displaced-tree normalization: unwrap wrappers when preserved
+    # =================================================================
+
+    def test_attach_embedded_replace_unwraps_displaced_wrapper():
+        """When an embedded LIST-wrapper arg is replaced and preserved, the
+        displaced tree becomes free-standing and must be unwrapped so its
+        root is a bare operator atom (matching the parser's convention for
+        top-level operators).
+        """
+        # Build ( and ( do-nothing ) ( do-nothing ) ) and replace the first
+        # ( do-nothing ) wrapper with a plain boolean singleton so the
+        # displaced tree is a typical arg-position wrapper.
+        r = client.call_tool("text_to_sexp", {"text": "( and ( do-nothing ) ( do-nothing ) )"})
+        assert_success(r)
+        and_root = tool_data(r)["node"]
+        source_node = None
+        displaced_reported = None
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": and_root})
+            assert_success(r)
+            # First do-nothing is argument index 1 of 'and'.  We target the
+            # LIST wrapper directly (not the operator atom inside).
+            do_nothing_ops = [n for n in tool_data(r)["nodes"]
+                              if n.get("value") == "do-nothing" and n.get("role") == "operator"]
+            assert_true(len(do_nothing_ops) >= 1, "expected do-nothing operator")
+            wrapper_idx = do_nothing_ops[0].get("node_parent")
+            assert_true(wrapper_idx is not None and wrapper_idx >= 0,
+                        f"wrapper={wrapper_idx}")
+
+            # Create a free-standing true source to splice in.
+            r = client.call_tool("create_sexp_node", {"role": "operator", "operator_name": "true"})
+            assert_success(r)
+            source_node = tool_data(r)["node"]
+
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": source_node,
+                "target_node": wrapper_idx,
+                "position": "replace",
+                "delete_displaced": False,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            displaced_reported = d.get("displaced_node")
+            assert_true(displaced_reported is not None and displaced_reported >= 0,
+                        f"displaced_node={displaced_reported}")
+            # It should report the inner operator atom, not the freed wrapper.
+            assert_true(displaced_reported != wrapper_idx,
+                        f"displaced should be unwrapped inner node, not wrapper {wrapper_idx}")
+            dd = d.get("displaced_node_data")
+            assert_true(dd is not None and dd.get("role") == "operator"
+                        and dd.get("value") == "do-nothing" and dd.get("node_parent") == -1,
+                        f"displaced_node_data={dd}")
+            # The wrapper index should no longer be in use.
+            r = client.call_tool("get_sexp_node", {"node": wrapper_idx})
+            assert_error(r)
+        finally:
+            if displaced_reported is not None and displaced_reported >= 0:
+                client.call_tool("detach_sexp_node",
+                                 {"target_node": displaced_reported, "delete": True})
+            client.call_tool("detach_sexp_node", {"target_node": and_root, "delete": True})
+
+    suite.add("sexp_attach_embedded_replace_unwraps_displaced_wrapper",
+              test_attach_embedded_replace_unwraps_displaced_wrapper)
+
 
 if __name__ == "__main__":
     run_module_standalone(register, "SEXP attach behavior tests")
