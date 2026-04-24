@@ -1005,6 +1005,11 @@ static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpError
 		return false;
 	}
 
+	if (entity_tag && have_target_node) {
+		sink.set_error("'entity_tag' can only be used with 'target_entity_type', not with node mode");
+		return false;
+	}
+
 	if (have_entity) {
 		// --- Entity mode ---
 		if (!entity_id) {
