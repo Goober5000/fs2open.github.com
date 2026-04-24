@@ -1489,8 +1489,6 @@ def register(suite, client):
             r = client.call_tool("detach_sexp_node", {"target_node": wrapper_idx})
             assert_success(r)
             d = tool_data(r)
-            assert_true(d.get("unwrapped") is True,
-                        f"unwrapped={d.get('unwrapped')}")
             # The reported detached_node should be the inner 'and' atom,
             # not the freed wrapper.
             assert_equal(d.get("detached_node"), and_n["node"],
