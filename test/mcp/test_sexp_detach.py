@@ -1457,6 +1457,63 @@ def register(suite, client):
     suite.add("sexp_detach_old_param_name_rejected",
               test_detach_old_param_name_rejected)
 
+    # =================================================================
+    # Direct wrapper targeting: unwrap even without retargeting
+    # =================================================================
+
+    def test_detach_direct_wrapper_target_unwraps():
+        """When the user passes a LIST wrapper's index directly (no
+        retargeting path), the detach handler still unwraps it so the
+        resulting free-standing tree has a bare operator atom at the root
+        (matching the parser's convention for top-level operators).
+
+        Regression: previously the unwrap only fired when retargeting
+        happened (n != original_n), so direct wrapper targets left a
+        wrapper-rooted tree behind, violating the invariant.
+        """
+        r = client.call_tool("text_to_sexp",
+                             {"text": "( when ( and ( true ) ( true ) ) ( do-nothing ) )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        detached_root = None
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            # Find the 'and' operator, then its enclosing wrapper.  Target
+            # the wrapper directly so retargeting does not trigger.
+            and_n = find_node_by_value(tool_data(r)["nodes"], "and", role="operator")
+            wrapper_idx = and_n.get("node_parent")
+            assert_true(wrapper_idx is not None and wrapper_idx >= 0,
+                        f"wrapper={wrapper_idx}")
+
+            r = client.call_tool("detach_sexp_node", {"target_node": wrapper_idx})
+            assert_success(r)
+            d = tool_data(r)
+            assert_true(d.get("unwrapped") is True,
+                        f"unwrapped={d.get('unwrapped')}")
+            # The reported detached_node should be the inner 'and' atom,
+            # not the freed wrapper.
+            assert_equal(d.get("detached_node"), and_n["node"],
+                         f"detached_node={d.get('detached_node')}, expected and={and_n['node']}")
+            dn = get_detached_data(d)
+            assert_true(dn is not None and dn.get("role") == "operator"
+                        and dn.get("value") == "and" and dn.get("node_parent") == -1,
+                        f"detached_node_data={dn}")
+            detached_root = d.get("detached_node")
+
+            # The wrapper index should no longer be in use.
+            r = client.call_tool("get_sexp_node", {"node": wrapper_idx})
+            assert_error(r)
+        finally:
+            if detached_root is not None:
+                client.call_tool("detach_sexp_node",
+                                 {"target_node": detached_root, "delete": True})
+            client.call_tool("detach_sexp_node",
+                             {"target_node": root, "delete": True})
+
+    suite.add("sexp_detach_direct_wrapper_target_unwraps",
+              test_detach_direct_wrapper_target_unwraps)
+
 
 if __name__ == "__main__":
     run_module_standalone(register, "SEXP detach behavior tests")
