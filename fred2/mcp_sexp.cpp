@@ -2711,7 +2711,11 @@ void mcp_register_sexp_tools(json_t *tools)
 			"with optional arguments, suitable for assigning as a mission entity's "
 			"formula. When role is 'argument', creates a standalone argument node "
 			"(number, string, or boolean). Does not enforce argument count or check syntax.",
-			props, req);
+			props, req,
+			build_conditional_required_fields("role", {
+				{"operator", {"operator_name"}},
+				{"argument", {"argument_type", "argument_value"}},
+			}));
 	}
 
 	// update_sexp_node

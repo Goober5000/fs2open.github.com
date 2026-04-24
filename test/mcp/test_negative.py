@@ -110,6 +110,22 @@ def register(suite, client):
         assert_error(r)
         assert_in("not a valid number", tool_text(r))
 
+    def test_create_sexp_node_operator_missing_name():
+        """role='operator' without operator_name should error (schema
+        enforces this via if/then; runtime also rejects it)."""
+        r = client.call_tool("create_sexp_node", {"role": "operator"})
+        assert_error(r)
+        assert_in("operator_name", tool_text(r).lower())
+
+    def test_create_sexp_node_argument_missing_type():
+        """role='argument' without argument_type should error."""
+        r = client.call_tool("create_sexp_node", {
+            "role": "argument",
+            "argument_value": "42",
+        })
+        assert_error(r)
+        assert_in("argument_type", tool_text(r).lower())
+
     def test_detach_sexp_node_invalid():
         r = client.call_tool("detach_sexp_node", {"target_node": -999})
         assert_error(r)
@@ -206,6 +222,8 @@ def register(suite, client):
         ("negative_create_sexp_node_wrong_arg_type", test_create_sexp_node_wrong_arg_type),
         ("negative_create_sexp_node_invalid_number_value", test_create_sexp_node_invalid_number_value),
         ("negative_create_sexp_node_argument_invalid_number", test_create_sexp_node_argument_invalid_number),
+        ("negative_create_sexp_node_operator_missing_name", test_create_sexp_node_operator_missing_name),
+        ("negative_create_sexp_node_argument_missing_type", test_create_sexp_node_argument_missing_type),
         ("negative_detach_sexp_node_invalid", test_detach_sexp_node_invalid),
         ("negative_swap_messages_out_of_range", test_swap_messages_out_of_range),
         ("negative_move_event_out_of_range", test_move_event_out_of_range),
