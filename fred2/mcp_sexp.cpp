@@ -890,6 +890,25 @@ static void make_source_free_standing(int source, int effective_source)
 	}
 }
 
+// Normalize a subtree that just became free-standing.  If its root is a LIST
+// wrapper, unwrap it so the new root is a bare operator atom (or the data atom
+// inside) -- matching the parser's convention that top-level trees are not
+// wrapped in a redundant list.  Updates `node` to the (possibly new) root
+// index and increments `freed_count` when an unwrap occurs.  Returns true if
+// an unwrap was performed, false otherwise.
+static bool normalize_free_standing_root(int &node, int &freed_count)
+{
+	if (node < 0 || node == Locked_sexp_true || node == Locked_sexp_false)
+		return false;
+	if (SEXP_NODE_TYPE(node) != SEXP_LIST)
+		return false;
+	if (Sexp_nodes[node].first < 0)
+		return false;	// defensive: empty wrapper shouldn't exist
+	node = unwrap_node(node, true);
+	freed_count++;
+	return true;
+}
+
 // If node is an operator atom that is the first child of a list wrapper,
 // return the wrapper index; otherwise return node unchanged.
 static int retarget_to_list_wrapper(int node)
@@ -1239,24 +1258,25 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 	else
 		mcp_sexp_forest_mark_dirty({ info.root });		// cases B/C/D: mark the tree that was modified
 
-	// If preserved, the detached node is the root of a new free-standing tree
+	// If preserved, the detached node is the root of a new free-standing tree.
+	// Normalize the root so it is not a redundant list wrapper (matching the
+	// parser's convention that top-level trees are not wrapped).
+	int new_root = n;
+	bool was_unwrapped = false;
 	if (!do_delete) {
-		// but if the new free-standing tree is wrapped, unwrap it
-		if (n != original_n) {
-			unwrap_node(n, true);
-			freed_count++;
-		}
-		mcp_sexp_forest_mark_dirty({ original_n });
+		was_unwrapped = normalize_free_standing_root(new_root, freed_count);
+		mcp_sexp_forest_mark_dirty({ new_root });
 	}
 
-	// Build response.  Always report the node the user passed in, regardless
-	// of whether we retargeted internally to a list wrapper.
+	// Build response.  detached_node is the root of the resulting free-standing
+	// tree after any normalization.  When do_delete is true the tree is gone,
+	// so we echo the node the user passed in.
 	json_t *result = json_object();
-	json_object_set_new(result, "detached_node", json_integer(original_n));
+	json_object_set_new(result, "detached_node", json_integer(do_delete ? original_n : new_root));
 	if (!do_delete)
-		json_object_set_new(result, "detached_node_data", build_sexp_node_json(original_n));
+		json_object_set_new(result, "detached_node_data", build_sexp_node_json(new_root));
 	json_object_set_new(result, "deleted", (do_delete && freed_count > 0) ? json_true() : json_false());
-	json_object_set_new(result, "unwrapped", (n != original_n) ? json_true() : json_false());
+	json_object_set_new(result, "unwrapped", was_unwrapped ? json_true() : json_false());
 	json_object_set_new(result, "freed_count", json_integer(freed_count));
 	if (replacement >= 0) {
 		json_object_set_new(result, "replacement_node", json_integer(replacement));
@@ -1305,6 +1325,8 @@ static bool attach_as_entity_formula(
 
 	// Handle the displaced formula
 	freed_count = release_subtree(displaced, delete_displaced);
+	if (!delete_displaced)
+		normalize_free_standing_root(displaced, freed_count);
 
 	// mark_modified
 	mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
@@ -1493,6 +1515,8 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPTarget &gene
 
 				// Handle displaced subtree
 				freed_count = release_subtree(displaced, delete_displaced);
+				if (!delete_displaced)
+					normalize_free_standing_root(displaced, freed_count);
 
 				mcp_sexp_forest_mark_dirty({ info.root });
 				mcp_sexp_forest_unmark_dirty_root(source);
