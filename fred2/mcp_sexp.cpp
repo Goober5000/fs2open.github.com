@@ -2568,7 +2568,8 @@ void mcp_register_sexp_tools(json_t *tools)
 			"trees, a syntax check is performed after modification; if the check fails, "
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
 			"be targeted directly; use target_argument_index with the parent operator.",
-			props, nullptr);
+			props, nullptr,
+			build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }));
 	}
 
 	// attach_sexp_node
@@ -2628,7 +2629,8 @@ void mcp_register_sexp_tools(json_t *tools)
 			"includes source_node (int), source_node_data (full node object), position (string), "
 			"displaced_node (int or null), displaced_node_data (full node object when preserved), "
 			"deleted_displaced (bool), and freed_count (int).",
-			props, req);
+			props, req,
+			build_branch_required_fields("oneOf", { { "target_node" }, { "target_entity_type" , "target_entity_id" } }));
 	}
 
 	// create_sexp_node

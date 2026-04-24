@@ -154,8 +154,25 @@ void add_object_array_prop(json_t *props, const char *name, const char *descript
 	json_object_set_new(props, name, p);
 }
 
+json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups)
+{
+	json_t *arr = json_array();
+	for (const auto &fields : groups) {
+		json_t *branch = json_object();
+		json_t *req = json_array();
+		for (const char *name : fields)
+			json_array_append_new(req, json_string(name));
+		json_object_set_new(branch, "required", req);
+		json_array_append_new(arr, branch);
+	}
+
+	json_t *extras = json_object();
+	json_object_set_new(extras, branchType, arr);
+	return extras;
+}
+
 void register_tool(json_t *tools, const char *name, const char *description,
-	json_t *properties, json_t *required_arr)
+	json_t *properties, json_t *required_arr, json_t *schema_extras)
 {
 	json_t *tool = json_object();
 	json_object_set_new(tool, "name", json_string(name));
@@ -166,6 +183,10 @@ void register_tool(json_t *tools, const char *name, const char *description,
 	json_object_set_new(schema, "properties", properties ? properties : json_object());
 	if (required_arr)
 		json_object_set_new(schema, "required", required_arr);
+	if (schema_extras) {
+		json_object_update(schema, schema_extras);
+		json_decref(schema_extras);
+	}
 	json_object_set_new(tool, "inputSchema", schema);
 
 	json_array_append_new(tools, tool);
