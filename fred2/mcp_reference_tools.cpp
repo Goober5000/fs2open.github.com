@@ -622,7 +622,8 @@ void mcp_register_reference_tools(json_t *tools)
 			"supply one or more of 'position', 'normal', or 'orientation' to transform. "
 			"All coordinate data uses the engine's left-handed coordinate system "
 			"(+X right, +Y up, +Z forward).",
-			props, req);
+			props, req,
+			build_branch_required_fields("anyOf", { { "position" }, { "normal" }, { "orientation" } }));
 	}
 
 	// list_persona_types
@@ -752,7 +753,8 @@ void mcp_register_reference_tools(json_t *tools)
 			"and classes. Returns matches with parent context. At least one parameter required. "
 			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
 			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props);
+			props, nullptr,
+			build_branch_required_fields("anyOf", { { "search" }, { "child_type" } }));
 	}
 
 	// list_scripting_hooks
