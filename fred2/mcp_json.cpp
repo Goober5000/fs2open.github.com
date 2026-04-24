@@ -171,6 +171,48 @@ json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SC
 	return extras;
 }
 
+json_t *build_conditional_required_fields(const char *property_name,
+	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &value_to_required)
+{
+	json_t *all_of = json_array();
+	for (const auto &entry : value_to_required) {
+		// Build the "if" fragment that matches when `property_name` is present
+		// and has the given value.  The `required` guard ensures the `if`
+		// does not match when the property is absent (otherwise absence of
+		// constraints would trivially satisfy the check).
+		json_t *if_obj = json_object();
+		{
+			json_t *if_props = json_object();
+			json_t *const_obj = json_object();
+			json_object_set_new(const_obj, "const", json_string(entry.first));
+			json_object_set_new(if_props, property_name, const_obj);
+			json_object_set_new(if_obj, "properties", if_props);
+
+			json_t *if_required = json_array();
+			json_array_append_new(if_required, json_string(property_name));
+			json_object_set_new(if_obj, "required", if_required);
+		}
+
+		// Build the "then" fragment that requires the listed fields.
+		json_t *then_obj = json_object();
+		{
+			json_t *then_required = json_array();
+			for (const char *field : entry.second)
+				json_array_append_new(then_required, json_string(field));
+			json_object_set_new(then_obj, "required", then_required);
+		}
+
+		json_t *case_obj = json_object();
+		json_object_set_new(case_obj, "if", if_obj);
+		json_object_set_new(case_obj, "then", then_obj);
+		json_array_append_new(all_of, case_obj);
+	}
+
+	json_t *extras = json_object();
+	json_object_set_new(extras, "allOf", all_of);
+	return extras;
+}
+
 json_t *build_dependencies_extras(const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &deps)
 {
 	json_t *deps_obj = json_object();

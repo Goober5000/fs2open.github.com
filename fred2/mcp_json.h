@@ -66,6 +66,14 @@ void add_color_prop(json_t *props, const char *name, const char *description);
 // between one or more groups of required fields.
 json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups);
 
+// Build a schema_extras object with an "allOf" of if/then constraints
+// expressing: for each entry {value, required_fields}, if `property_name` is
+// present and equals `value`, then the listed fields are required.  Useful
+// for discriminator-style parameters (e.g. a `role` field where different
+// values require different companion parameters).
+json_t *build_conditional_required_fields(const char *property_name,
+	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &value_to_required);
+
 // Build a schema_extras object with a "dependencies" constraint expressing
 // conditional presence: for each pair {dependent_field, required_fields}, if
 // dependent_field is present in the input then every name in required_fields
