@@ -1943,12 +1943,17 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		auto undo_a = handle_detach_sexp_node(make_node_ref(det_a.detached_node),
 			/*shrink=*/false, /*do_delete=*/false, rb_sink);
 
-		// Construct a synthetic det_b' so rollback_detach knows the new
-		// placeholder identity at b's slot.
-		detach_result det_b_prime = det_b;
-		det_b_prime.replacement = undo_a.replacement;
-		rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, rb_sink);
-		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+		// If undo_a failed, undo_a.replacement is -1 and the subsequent
+		// rollback_detach calls would operate on stale or invalid data.
+		// Bail out early; report_composed_error will surface "rollback failed".
+		if (!rb_sink.has_error()) {
+			// Construct a synthetic det_b' so rollback_detach knows the new
+			// placeholder identity at b's slot.
+			detach_result det_b_prime = det_b;
+			det_b_prime.replacement = undo_a.replacement;
+			rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, rb_sink);
+			rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+		}
 
 		report_composed_error(sink, att_b_err, rb_sink.has_error(), det_b.detached_node, "Second attach");
 		if (att_b_err) json_decref(att_b_err);
