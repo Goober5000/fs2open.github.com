@@ -983,6 +983,16 @@ struct GeneralSEXPReference {
 	int entity_current_root = -1;
 };
 
+// Construct a Mode::Node GeneralSEXPReference pointing at the given node.
+static GeneralSEXPReference make_node_ref(int node)
+{
+	GeneralSEXPReference ref;
+	ref.mode = GeneralSEXPReference::Mode::Node;
+	ref.node = node;
+	ref.original_node = node;
+	return ref;
+}
+
 static bool parse_general_sexp_reference(json_t *input, const char *field_prefix, GeneralSEXPReference &out, McpErrorSink &sink)
 {
 	SCP_string field_prefix_scp_str;
@@ -1138,6 +1148,23 @@ struct detach_result {
 
 static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink);
 
+static json_t *build_detach_response_json(const detach_result &result, bool do_delete)
+{
+	json_t *result_json = json_object();
+	json_object_set_new(result_json, "detached_node", json_integer(result.detached_node));
+	if (!do_delete)
+		json_object_set_new(result_json, "detached_node_data", build_sexp_node_json(result.detached_node));
+	json_object_set_new(result_json, "deleted", (do_delete && result.freed_count > 0) ? json_true() : json_false());
+	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
+	if (result.replacement >= 0) {
+		json_object_set_new(result_json, "replacement_node", json_integer(result.replacement));
+		json_object_set_new(result_json, "replacement_node_data", build_sexp_node_json(result.replacement));
+	} else {
+		json_object_set_new(result_json, "replacement_node", json_null());
+	}
+	return result_json;
+}
+
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -1160,21 +1187,7 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	auto result = handle_detach_sexp_node(general_ref, shrink, do_delete, sink);
 	if (sink.has_error()) return;
 
-	// Build response
-	json_t *result_json = json_object();
-	json_object_set_new(result_json, "detached_node", json_integer(result.detached_node));
-	if (!do_delete)
-		json_object_set_new(result_json, "detached_node_data", build_sexp_node_json(result.detached_node));
-	json_object_set_new(result_json, "deleted", (do_delete && result.freed_count > 0) ? json_true() : json_false());
-	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
-	if (result.replacement >= 0) {
-		json_object_set_new(result_json, "replacement_node", json_integer(result.replacement));
-		json_object_set_new(result_json, "replacement_node_data", build_sexp_node_json(result.replacement));
-	}
-	else
-		json_object_set_new(result_json, "replacement_node", json_null());
-
-	req->result_json = make_json_tool_result(result_json);
+	req->result_json = make_json_tool_result(build_detach_response_json(result, do_delete));
 	req->success = true;
 }
 
@@ -1383,6 +1396,32 @@ struct attach_result {
 
 static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
 
+static json_t *build_attach_response_json(int source, const GeneralSEXPReference &general_target,
+	attach_position position, bool delete_displaced, const attach_result &result)
+{
+	json_t *result_json = json_object();
+	json_object_set_new(result_json, "source_node", json_integer(source));
+	json_object_set_new(result_json, "source_node_data", build_sexp_node_json(source));
+	const char *pos_str = (general_target.mode == GeneralSEXPReference::Mode::Entity)
+		? "entity_formula"
+		: (position == attach_position::REPLACE) ? "replace"
+		: (position == attach_position::BEFORE)  ? "before"
+		: "after";
+	json_object_set_new(result_json, "position", json_string(pos_str));
+
+	if (result.displaced >= 0) {
+		json_object_set_new(result_json, "displaced_node", json_integer(result.displaced));
+		if (!delete_displaced && result.displaced != Locked_sexp_true && result.displaced != Locked_sexp_false)
+			json_object_set_new(result_json, "displaced_node_data", build_sexp_node_json(result.displaced));
+	} else {
+		json_object_set_new(result_json, "displaced_node", json_null());
+	}
+
+	json_object_set_new(result_json, "deleted_displaced", (delete_displaced && result.freed_count > 0) ? json_true() : json_false());
+	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
+	return result_json;
+}
+
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -1422,29 +1461,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	auto result = handle_attach_sexp_node(source, general_target, position, delete_displaced, sink);
 	if (sink.has_error()) return;
 
-	// Build response
-	json_t *result_json = json_object();
-	json_object_set_new(result_json, "source_node", json_integer(source));
-	json_object_set_new(result_json, "source_node_data", build_sexp_node_json(source));
-	const char *pos_str = (general_target.mode == GeneralSEXPReference::Mode::Entity)
-		? "entity_formula"
-		: (position == attach_position::REPLACE) ? "replace"
-		: (position == attach_position::BEFORE)  ? "before"
-		: "after";
-	json_object_set_new(result_json, "position", json_string(pos_str));
-
-	if (result.displaced >= 0) {
-		json_object_set_new(result_json, "displaced_node", json_integer(result.displaced));
-		if (!delete_displaced && result.displaced != Locked_sexp_true && result.displaced != Locked_sexp_false)
-			json_object_set_new(result_json, "displaced_node_data", build_sexp_node_json(result.displaced));
-	} else {
-		json_object_set_new(result_json, "displaced_node", json_null());
-	}
-
-	json_object_set_new(result_json, "deleted_displaced", (delete_displaced && result.freed_count > 0) ? json_true() : json_false());
-	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
-
-	req->result_json = make_json_tool_result(result_json);
+	req->result_json = make_json_tool_result(build_attach_response_json(source, general_target, position, delete_displaced, result));
 	req->success = true;
 }
 
@@ -1666,6 +1683,275 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 		pred_list,
 		pred_ante
 	};
+}
+
+// ---------------------------------------------------------------------------
+// move_sexp_node and swap_sexp_nodes handlers (run on main thread)
+//
+// Composed from handle_detach_sexp_node + handle_attach_sexp_node.  Atomicity
+// is achieved via rollback_detach, which inverts a successful detach so that
+// composed operations can be aborted cleanly when a later step fails.
+// ---------------------------------------------------------------------------
+
+// Reverse a successful detach.  All four detach cases (entity-formula root,
+// free-standing root, embedded shrink=false, embedded shrink=true) are
+// recoverable using the data captured in detach_result.  Errors during
+// rollback are written to the supplied sink so the caller can compose a
+// combined "operation failed AND rollback failed" message.
+static bool rollback_detach(const GeneralSEXPReference &orig_ref,
+	const detach_result &det, bool shrink, McpErrorSink &rollback_sink)
+{
+	if (orig_ref.mode == GeneralSEXPReference::Mode::Entity) {
+		// Case A: entity-formula root.  Re-install the detached subtree as the
+		// entity's formula, freeing the default that detach inserted.
+		GeneralSEXPReference dest = orig_ref;
+		dest.entity_current_root = det.replacement;
+		dest.node = det.replacement;
+		dest.original_node = det.replacement;
+		handle_attach_sexp_node(det.detached_node, dest,
+			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink);
+		return !rollback_sink.has_error();
+	}
+
+	if (!shrink && det.replacement >= 0) {
+		// Case C/D shrink=false: re-install by replacing the placeholder.
+		GeneralSEXPReference dest = make_node_ref(det.replacement);
+		handle_attach_sexp_node(det.detached_node, dest,
+			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink);
+		return !rollback_sink.has_error();
+	}
+
+	if (shrink && (det.pred_list >= 0 || det.pred_ante >= 0)) {
+		// Case D shrink=true: direct splice using det.pred_list / det.pred_ante.
+		// The post-syntax-check commit cleared n.parent and n.rest, so we
+		// reconstruct them from the predecessor.
+		int n = det.detached_node;
+		int current_link = (det.pred_list >= 0)
+			? Sexp_nodes[det.pred_list].first
+			: Sexp_nodes[det.pred_ante].rest;
+		Sexp_nodes[n].rest = current_link;
+		Sexp_nodes[n].parent = (det.pred_list >= 0)
+			? det.pred_list
+			: Sexp_nodes[det.pred_ante].parent;
+		restore_predecessor(det.pred_list, det.pred_ante, n);
+		mcp_sexp_forest_mark_dirty({ find_formula_root_and_type(n).root });
+		return true;
+	}
+
+	// Case B (free-standing root): nothing meaningful was committed.
+	return true;
+}
+
+// Compose the user-visible error after a composed-operation step failed.
+// step_err is the json_t error from a sub-operation (attach or detach).  If
+// the rollback succeeded, the sub-operation's error text is forwarded to the
+// user sink verbatim; otherwise a combined message is reported, including
+// the orphaned source's node index so the client can recover it.
+static void report_composed_error(McpErrorSink &user_sink, json_t *step_err,
+	bool rollback_failed, int orphan_node, const char *step_label)
+{
+	if (rollback_failed) {
+		user_sink.set_error("%s failed AND rollback failed; "
+			"a SEXP subtree remains free-standing at node %d. "
+			"Use sexp_to_text or walk_sexp_tree to inspect it; "
+			"use attach_sexp_node to re-integrate it.",
+			step_label, orphan_node);
+		return;
+	}
+	const char *err_text = extract_tool_result_text(step_err);
+	user_sink.set_error("%s", err_text ? err_text : "operation failed");
+}
+
+static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	GeneralSEXPReference src_ref;
+	if (!parse_general_sexp_reference(input, "source_", src_ref, sink)) return;
+	GeneralSEXPReference tgt_ref;
+	if (!parse_general_sexp_reference(input, "target_", tgt_ref, sink)) return;
+
+	if (src_ref.mode == GeneralSEXPReference::Mode::Entity && src_ref.entity_current_root < 0) {
+		sink.set_error("Source entity has no formula to move (formula index %d)", src_ref.entity_current_root);
+		return;
+	}
+
+	auto position_str = get_optional_string(input, "position", sink);
+	auto shrink_opt = get_optional_bool(input, "shrink", sink);
+	if (sink.has_error()) return;
+
+	if (position_str && tgt_ref.mode != GeneralSEXPReference::Mode::Node) {
+		sink.set_error("'position' can only be used with 'target_node', not with target entity mode");
+		return;
+	}
+
+	bool shrink = shrink_opt.has_value() && *shrink_opt;
+
+	attach_position position = attach_position::REPLACE;
+	if (position_str) {
+		if (!check_string_enum(position_str, attach_position_values, "position", sink)) return;
+		if (!stricmp(position_str, "before")) position = attach_position::BEFORE;
+		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
+	}
+
+	// Same-node guard: compare resolved absolute indices before any mutation.
+	if (src_ref.node == tgt_ref.node) {
+		sink.set_error("Source and target resolve to the same node (%d); move would be a no-op", src_ref.node);
+		return;
+	}
+
+	// Step 1: detach the source.
+	auto det = handle_detach_sexp_node(src_ref, shrink, /*do_delete=*/false, sink);
+	if (sink.has_error()) return;
+
+	// Step 2: attach the detached subtree at the target.  Capture errors in a
+	// local sink so that on failure we can roll back the detach before
+	// surfacing the error to the user.
+	json_t *attach_err = nullptr;
+	McpErrorSink attach_sink(&attach_err);
+	auto att = handle_attach_sexp_node(det.detached_node, tgt_ref, position,
+		/*delete_displaced=*/false, attach_sink);
+	if (attach_sink.has_error()) {
+		json_t *rb_err = nullptr;
+		McpErrorSink rb_sink(&rb_err);
+		rollback_detach(src_ref, det, shrink, rb_sink);
+		report_composed_error(sink, attach_err, rb_sink.has_error(), det.detached_node, "Attach");
+		if (attach_err) json_decref(attach_err);
+		if (rb_err) json_decref(rb_err);
+		return;
+	}
+
+	// Step 3: build the combined response.
+	json_t *result_json = json_object();
+	json_object_set_new(result_json, "moved_node", json_integer(det.detached_node));
+	json_object_set_new(result_json, "detached", build_detach_response_json(det, /*do_delete=*/false));
+	json_object_set_new(result_json, "attached",
+		build_attach_response_json(det.detached_node, tgt_ref, position, /*delete_displaced=*/false, att));
+
+	req->result_json = make_json_tool_result(result_json);
+	req->success = true;
+}
+
+static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	GeneralSEXPReference src_ref;
+	if (!parse_general_sexp_reference(input, "source_", src_ref, sink)) return;
+	GeneralSEXPReference tgt_ref;
+	if (!parse_general_sexp_reference(input, "target_", tgt_ref, sink)) return;
+
+	if (src_ref.mode == GeneralSEXPReference::Mode::Entity && src_ref.entity_current_root < 0) {
+		sink.set_error("Source entity has no formula to swap (formula index %d)", src_ref.entity_current_root);
+		return;
+	}
+	if (tgt_ref.mode == GeneralSEXPReference::Mode::Entity && tgt_ref.entity_current_root < 0) {
+		sink.set_error("Target entity has no formula to swap (formula index %d)", tgt_ref.entity_current_root);
+		return;
+	}
+
+	// Same-node guard: succeed with swapped=false to mirror the no-op semantics
+	// of the existing per-entity swap_* tools.
+	if (src_ref.node == tgt_ref.node) {
+		json_t *result = json_object();
+		json_object_set_new(result, "swapped", json_false());
+		json_object_set_new(result, "reason", json_string("source and target resolve to the same node"));
+		req->result_json = make_json_tool_result(result);
+		req->success = true;
+		return;
+	}
+
+	// Step 1: detach source.
+	auto det_a = handle_detach_sexp_node(src_ref, /*shrink=*/false, /*do_delete=*/false, sink);
+	if (sink.has_error()) return;
+
+	// Step 2: detach target.  On failure, undo step 1.
+	json_t *det_b_err = nullptr;
+	McpErrorSink det_b_sink(&det_b_err);
+	auto det_b = handle_detach_sexp_node(tgt_ref, /*shrink=*/false, /*do_delete=*/false, det_b_sink);
+	if (det_b_sink.has_error()) {
+		json_t *rb_err = nullptr;
+		McpErrorSink rb_sink(&rb_err);
+		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+		report_composed_error(sink, det_b_err, rb_sink.has_error(), det_a.detached_node, "Target detach");
+		if (det_b_err) json_decref(det_b_err);
+		if (rb_err) json_decref(rb_err);
+		return;
+	}
+
+	// Step 3: build attach destinations.  Each side's vacated slot is either
+	// the entity itself (entity-mode -- the placeholder is the inserted default
+	// formula that we will displace) or the placeholder spliced in by detach.
+	auto build_dest = [](const GeneralSEXPReference &orig, const detach_result &det) {
+		if (orig.mode == GeneralSEXPReference::Mode::Entity) {
+			GeneralSEXPReference dest = orig;
+			dest.entity_current_root = det.replacement;
+			dest.node = det.replacement;
+			dest.original_node = det.replacement;
+			return dest;
+		}
+		return make_node_ref(det.replacement);
+	};
+	GeneralSEXPReference dest_for_a = build_dest(tgt_ref, det_b);  // a goes to b's vacated slot
+	GeneralSEXPReference dest_for_b = build_dest(src_ref, det_a);  // b goes to a's vacated slot
+
+	// Step 4: attach a at b's slot.
+	json_t *att_a_err = nullptr;
+	McpErrorSink att_a_sink(&att_a_err);
+	auto att_a = handle_attach_sexp_node(det_a.detached_node, dest_for_a,
+		attach_position::REPLACE, /*delete_displaced=*/true, att_a_sink);
+	if (att_a_sink.has_error()) {
+		json_t *rb_err = nullptr;
+		McpErrorSink rb_sink(&rb_err);
+		rollback_detach(tgt_ref, det_b, /*shrink=*/false, rb_sink);
+		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+		report_composed_error(sink, att_a_err, rb_sink.has_error(), det_a.detached_node, "First attach");
+		if (att_a_err) json_decref(att_a_err);
+		if (rb_err) json_decref(rb_err);
+		return;
+	}
+
+	// Step 5: attach b at a's slot.
+	json_t *att_b_err = nullptr;
+	McpErrorSink att_b_sink(&att_b_err);
+	auto att_b = handle_attach_sexp_node(det_b.detached_node, dest_for_b,
+		attach_position::REPLACE, /*delete_displaced=*/true, att_b_sink);
+	if (att_b_sink.has_error()) {
+		// Undo step 4: detach a from b's slot so it's free-standing again.
+		// After att_a, det_a.detached_node is embedded at b's old slot.
+		json_t *rb_err = nullptr;
+		McpErrorSink rb_sink(&rb_err);
+		auto undo_a = handle_detach_sexp_node(make_node_ref(det_a.detached_node),
+			/*shrink=*/false, /*do_delete=*/false, rb_sink);
+
+		// Construct a synthetic det_b' so rollback_detach knows the new
+		// placeholder identity at b's slot (only relevant for node-mode tgt).
+		detach_result det_b_prime = det_b;
+		if (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
+			det_b_prime.replacement = undo_a.replacement;
+		rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, rb_sink);
+		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+
+		report_composed_error(sink, att_b_err, rb_sink.has_error(), det_b.detached_node, "Second attach");
+		if (att_b_err) json_decref(att_b_err);
+		if (rb_err) json_decref(rb_err);
+		return;
+	}
+
+	// Step 6: build the combined response.
+	json_t *result = json_object();
+	json_object_set_new(result, "swapped", json_true());
+	json_object_set_new(result, "first_attach",
+		build_attach_response_json(det_a.detached_node, dest_for_a,
+			attach_position::REPLACE, /*delete_displaced=*/true, att_a));
+	json_object_set_new(result, "second_attach",
+		build_attach_response_json(det_b.detached_node, dest_for_b,
+			attach_position::REPLACE, /*delete_displaced=*/true, att_b));
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
 }
 
 // ---------------------------------------------------------------------------
@@ -2718,6 +3004,158 @@ void mcp_register_sexp_tools(json_t *tools)
 				})));
 	}
 
+	// move_sexp_node
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "source_node",
+			"Node index of the SEXP node to move. "
+			"Mutually exclusive with source_entity_type. If the source is an operator "
+			"inside a list wrapper, the wrapper is automatically moved instead. "
+			"Shared locked singletons (true/false) cannot be targeted directly; use "
+			"source_argument_index with the parent operator instead.");
+		add_integer_prop(props, "source_argument_index",
+			"1-based index into the argument list of the operator at source_node. "
+			"When provided, source_node must be an operator (or its list wrapper) and "
+			"the move operates on that argument instead of the operator itself.");
+		add_string_enum_prop(props, "source_entity_type",
+			"Entity type whose formula to move. Mutually exclusive with source_node. "
+			"Requires source_entity_id. The entity's formula is replaced with a default.",
+			formula_entity_type_values);
+		add_string_prop(props, "source_entity_id",
+			"Entity name or index. Required when source_entity_type is set. "
+			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
+			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
+		add_string_enum_prop(props, "source_entity_tag",
+			"Disambiguation tag for entities that have multiple formula slots. "
+			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
+			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
+			formula_entity_tag_values);
+
+		add_integer_prop(props, "target_node",
+			"Node index of an existing tree node to position the source relative to. "
+			"Mutually exclusive with target_entity_type. If the target is an operator "
+			"inside a list wrapper, the wrapper is automatically targeted instead. "
+			"Shared locked singletons (true/false) cannot be targeted directly; use "
+			"target_argument_index with the parent operator instead.");
+		add_integer_prop(props, "target_argument_index",
+			"1-based index into the argument list of the operator at target_node. "
+			"When provided, target_node must be an operator (or its list wrapper) and "
+			"the move operates on that argument instead of the node itself.");
+		add_string_enum_prop(props, "target_entity_type",
+			"Entity type whose formula the source will become. Mutually exclusive with "
+			"target_node. Requires target_entity_id.",
+			formula_entity_type_values);
+		add_string_prop(props, "target_entity_id",
+			"Entity name or index. Required when target_entity_type is set.");
+		add_string_enum_prop(props, "target_entity_tag",
+			"Disambiguation tag for entities that have multiple formula slots.",
+			formula_entity_tag_values);
+
+		add_string_enum_prop(props, "position",
+			"How to position the source relative to the target node. "
+			"'replace' (default) replaces the target; 'before' inserts before the target; "
+			"'after' inserts after the target. Only used with target_node.",
+			attach_position_values);
+		add_bool_prop(props, "shrink",
+			"If true, when removing the source from a sibling chain, shift subsequent "
+			"siblings up by one position instead of leaving a " PLACEHOLDER_STRING ". "
+			"Defaults to false.");
+
+		register_tool(tools, "move_sexp_node",
+			"Move a SEXP subtree from one location to another in a single atomic operation. "
+			"Composes detach_sexp_node + attach_sexp_node internally: the source is detached "
+			"into a free-standing tree, then attached at the target.  If the attach fails "
+			"(e.g. due to a syntax check), the detach is rolled back so the original tree is "
+			"left unchanged. The source can be specified by node index (source_node), by "
+			"node index plus argument position (source_node + source_argument_index), or by "
+			"entity coordinates (source_entity_type + source_entity_id).  The target uses "
+			"the same three forms with target_ prefixes.  In node-relative target mode, "
+			"position can be 'replace' (default), 'before', or 'after' -- same semantics as "
+			"attach_sexp_node.  In entity target mode, the source replaces the entity's "
+			"current formula. The response includes 'moved_node' (int, the absolute index "
+			"of the relocated subtree's root) and the full 'detached' and 'attached' "
+			"sub-objects (see detach_sexp_node and attach_sexp_node for their fields).",
+			props, /*required=*/nullptr,
+			merge_schema_extras(
+				build_branch_required_fields_allof("oneOf", {
+					{ {"source_node"}, {"source_entity_type", "source_entity_id"} },
+					{ {"target_node"}, {"target_entity_type", "target_entity_id"} },
+				}),
+				build_dependencies_extras({
+					{"source_argument_index", {"source_node"}},
+					{"source_entity_id",      {"source_entity_type"}},
+					{"source_entity_tag",     {"source_entity_type"}},
+					{"target_argument_index", {"target_node"}},
+					{"target_entity_id",      {"target_entity_type"}},
+					{"target_entity_tag",     {"target_entity_type"}},
+					{"position",              {"target_node"}},
+				})));
+	}
+
+	// swap_sexp_nodes
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "source_node",
+			"Node index of the first SEXP node to swap. "
+			"Mutually exclusive with source_entity_type. If the source is an operator "
+			"inside a list wrapper, the wrapper is automatically swapped instead. "
+			"Shared locked singletons (true/false) cannot be targeted directly; use "
+			"source_argument_index with the parent operator instead.");
+		add_integer_prop(props, "source_argument_index",
+			"1-based index into the argument list of the operator at source_node.");
+		add_string_enum_prop(props, "source_entity_type",
+			"Entity type for the first formula in the swap. Mutually exclusive with "
+			"source_node. Requires source_entity_id.",
+			formula_entity_type_values);
+		add_string_prop(props, "source_entity_id",
+			"Entity name or index. Required when source_entity_type is set.");
+		add_string_enum_prop(props, "source_entity_tag",
+			"Disambiguation tag for entities that have multiple formula slots.",
+			formula_entity_tag_values);
+
+		add_integer_prop(props, "target_node",
+			"Node index of the second SEXP node to swap. "
+			"Mutually exclusive with target_entity_type.");
+		add_integer_prop(props, "target_argument_index",
+			"1-based index into the argument list of the operator at target_node.");
+		add_string_enum_prop(props, "target_entity_type",
+			"Entity type for the second formula in the swap. Mutually exclusive with "
+			"target_node. Requires target_entity_id.",
+			formula_entity_type_values);
+		add_string_prop(props, "target_entity_id",
+			"Entity name or index. Required when target_entity_type is set.");
+		add_string_enum_prop(props, "target_entity_tag",
+			"Disambiguation tag for entities that have multiple formula slots.",
+			formula_entity_tag_values);
+
+		register_tool(tools, "swap_sexp_nodes",
+			"Exchange two SEXP subtrees in place, preserving each other's structural "
+			"position. Composes detach_sexp_node + attach_sexp_node internally and is "
+			"atomic: if any sub-step fails, all earlier steps are rolled back. Each "
+			"endpoint can be specified by node index (source_node/target_node), by "
+			"node index plus argument position, or by entity coordinates "
+			"(entity_type + entity_id). All four mode combinations are supported "
+			"(node/node, entity/entity, node/entity, entity/node). If source and "
+			"target resolve to the same node, the call succeeds as a no-op with "
+			"'swapped' set to false. The response includes 'swapped' (bool) and, "
+			"when swapped=true, 'first_attach' and 'second_attach' (see attach_sexp_node "
+			"for their fields).",
+			props, /*required=*/nullptr,
+			merge_schema_extras(
+				build_branch_required_fields_allof("oneOf", {
+					{ {"source_node"}, {"source_entity_type", "source_entity_id"} },
+					{ {"target_node"}, {"target_entity_type", "target_entity_id"} },
+				}),
+				build_dependencies_extras({
+					{"source_argument_index", {"source_node"}},
+					{"source_entity_id",      {"source_entity_type"}},
+					{"source_entity_tag",     {"source_entity_type"}},
+					{"target_argument_index", {"target_node"}},
+					{"target_entity_id",      {"target_entity_type"}},
+					{"target_entity_tag",     {"target_entity_type"}},
+				})));
+	}
+
 	// create_sexp_node
 	{
 		json_t *props = json_object();
@@ -2922,6 +3360,14 @@ bool mcp_handle_sexp_tool(const char *tool_name, json_t *input_json, McpToolRequ
 	}
 	if (strcmp(tool_name, "attach_sexp_node") == 0) {
 		handle_attach_sexp_node(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "move_sexp_node") == 0) {
+		handle_move_sexp_node(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "swap_sexp_nodes") == 0) {
+		handle_swap_sexp_nodes(input_json, req);
 		return true;
 	}
 	if (strcmp(tool_name, "create_sexp_node") == 0) {
