@@ -177,6 +177,67 @@ def register(suite, client):
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
             client.call_tool("detach_sexp_node", {"node": b, "delete": True})
 
+    def test_move_replace_default_preserves_displaced():
+        # Default delete_displaced=False: replacing "20" with "2" should preserve
+        # the displaced "20" as a free-standing root, reachable via walk_sexp_tree.
+        a = _build_plus_tree([1, 2, 3])
+        b = _build_plus_tree([10, 20, 30])
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            two = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": b})
+            twenty = find_node_by_value(tool_data(r)["nodes"], "20")["node"]
+
+            r = client.call_tool("move_sexp_node", {
+                "source_node": two,
+                "target_node": twenty,
+                "delete_displaced": False,
+            })
+            assert_success(r)
+            attached = tool_data(r).get("attached", {})
+            displaced = attached.get("displaced_node")
+            assert_true(displaced is not None, "displaced_node reported")
+            assert_equal(attached.get("deleted_displaced"), False, "deleted_displaced=false")
+            # The displaced node should still be a valid free-standing root.
+            r = client.call_tool("walk_sexp_tree", {"node": displaced})
+            assert_success(r)
+            disp_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_in("20", disp_vals, "displaced subtree still walkable as free-standing")
+            client.call_tool("detach_sexp_node", {"node": displaced, "delete": True})
+        finally:
+            client.call_tool("detach_sexp_node", {"node": a, "delete": True})
+            client.call_tool("detach_sexp_node", {"node": b, "delete": True})
+
+    def test_move_replace_delete_displaced():
+        # delete_displaced=True: the displaced "20" subtree is freed; subsequent
+        # walks of its index should fail (node no longer in use).
+        a = _build_plus_tree([1, 2, 3])
+        b = _build_plus_tree([10, 20, 30])
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            two = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": b})
+            twenty = find_node_by_value(tool_data(r)["nodes"], "20")["node"]
+
+            r = client.call_tool("move_sexp_node", {
+                "source_node": two,
+                "target_node": twenty,
+                "delete_displaced": True,
+            })
+            assert_success(r)
+            attached = tool_data(r).get("attached", {})
+            assert_equal(attached.get("deleted_displaced"), True, "deleted_displaced=true")
+            assert_true(attached.get("freed_count", 0) > 0, "freed_count > 0")
+            # The displaced node index should no longer be in use.
+            displaced = attached.get("displaced_node")
+            assert_true(displaced is not None, "displaced_node still reported (as int)")
+            r = client.call_tool("get_sexp_node", {"node": displaced})
+            assert_error(r)
+            assert_in("not in use", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node", {"node": a, "delete": True})
+            client.call_tool("detach_sexp_node", {"node": b, "delete": True})
+
     # =================================================================
     # move_sexp_node — entity mode
     # =================================================================
@@ -666,6 +727,8 @@ def register(suite, client):
     suite.add("sexp_move_node_before", test_move_node_before)
     suite.add("sexp_move_node_after", test_move_node_after)
     suite.add("sexp_move_with_shrink_collapses_source_slot", test_move_with_shrink_collapses_source_slot)
+    suite.add("sexp_move_replace_default_preserves_displaced", test_move_replace_default_preserves_displaced)
+    suite.add("sexp_move_replace_delete_displaced", test_move_replace_delete_displaced)
     suite.add("sexp_move_entity_to_entity", test_move_entity_to_entity)
     suite.add("sexp_move_node_to_entity", test_move_node_to_entity)
     suite.add("sexp_move_entity_to_node", test_move_entity_to_node)
