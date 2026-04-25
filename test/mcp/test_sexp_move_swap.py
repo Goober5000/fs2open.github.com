@@ -723,6 +723,63 @@ def register(suite, client):
             client.call_tool("delete_event", {"name": "swarb_evt", "force": True})
             client.call_tool("delete_goal", {"name": "swarb_goal", "force": True})
 
+    def test_swap_atomic_rollback_step5_failure():
+        # Step-5 failure path: first attach succeeds, second attach fails,
+        # rollback restores both sides.  Sibling test to the type-mismatch
+        # one, which exercises step-4 failure.
+        #
+        # Construction: source = event entity (entity-mode, OPR_NULL formula),
+        # target = a literal `5` inside a free-standing ( + 1 5 2 ) tree.
+        # - Step 4 attaches the event's old when-tree at the tree-B slot.
+        #   Tree B is free-standing so the syntax check is skipped; an
+        #   OPR_NULL operator in an OPF_NUMBER slot is accepted because nothing
+        #   checks it.
+        # - Step 5 attaches the literal 5 at the event entity.  This goes
+        #   through check_sexp_formula, which rejects 5 since it isn't an
+        #   operator -- triggering the rollback.
+        client.call_tool("create_event", {"name": "sw5b_evt"})
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 5 2 )"})
+        assert_success(r)
+        b_root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("get_event", {"name": "sw5b_evt"})
+            assert_success(r)
+            evt_pre = tool_data(r).get("formula")
+            r = client.call_tool("walk_sexp_tree", {"node": evt_pre})
+            assert_success(r)
+            evt_pre_sig = tree_signature(tool_data(r)["nodes"])
+
+            r = client.call_tool("walk_sexp_tree", {"node": b_root})
+            assert_success(r)
+            b_pre_sig = tree_signature(tool_data(r)["nodes"])
+            five = find_node_by_value(tool_data(r)["nodes"], "5")["node"]
+
+            r = client.call_tool("swap_sexp_nodes", {
+                "source_entity_type": "event",
+                "source_entity_id": "sw5b_evt",
+                "target_node": five,
+            })
+            assert_error(r)
+
+            # Event formula restored.
+            r = client.call_tool("get_event", {"name": "sw5b_evt"})
+            assert_success(r)
+            assert_equal(tool_data(r).get("formula"), evt_pre,
+                "event formula root unchanged after step-5 rollback")
+            r = client.call_tool("walk_sexp_tree", {"node": evt_pre})
+            assert_success(r)
+            assert_equal(tree_signature(tool_data(r)["nodes"]), evt_pre_sig,
+                "event formula structure unchanged after step-5 rollback")
+
+            # + tree restored.
+            r = client.call_tool("walk_sexp_tree", {"node": b_root})
+            assert_success(r)
+            assert_equal(tree_signature(tool_data(r)["nodes"]), b_pre_sig,
+                "+ tree structure unchanged after step-5 rollback")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": b_root, "delete": True})
+            client.call_tool("delete_event", {"name": "sw5b_evt", "force": True})
+
     suite.add("sexp_move_node_to_node_replace", test_move_node_to_node_replace)
     suite.add("sexp_move_node_before", test_move_node_before)
     suite.add("sexp_move_node_after", test_move_node_after)
@@ -744,6 +801,7 @@ def register(suite, client):
     suite.add("sexp_swap_locked_singleton_via_argument_index", test_swap_locked_singleton_via_argument_index)
     suite.add("sexp_swap_round_trip_idempotent", test_swap_round_trip_idempotent)
     suite.add("sexp_swap_atomic_rollback_on_type_mismatch", test_swap_atomic_rollback_on_type_mismatch)
+    suite.add("sexp_swap_atomic_rollback_step5_failure", test_swap_atomic_rollback_step5_failure)
 
 
 if __name__ == "__main__":
