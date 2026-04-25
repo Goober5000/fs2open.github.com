@@ -66,6 +66,17 @@ json_t *vmake_tool_result(bool is_error, const char *format, va_list args)
 	return make_tool_result(buf.c_str(), is_error);
 }
 
+const char *extract_tool_result_text(json_t *tool_result)
+{
+	if (!tool_result) return nullptr;
+	json_t *content = json_object_get(tool_result, "content");
+	if (!content || !json_is_array(content) || json_array_size(content) == 0) return nullptr;
+	json_t *first = json_array_get(content, 0);
+	if (!first) return nullptr;
+	json_t *text = json_object_get(first, "text");
+	return json_is_string(text) ? json_string_value(text) : nullptr;
+}
+
 json_t *make_json_tool_result(json_t *data)
 {
 	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
@@ -168,6 +179,30 @@ json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SC
 
 	json_t *extras = json_object();
 	json_object_set_new(extras, branchType, arr);
+	return extras;
+}
+
+json_t *build_branch_required_fields_allof(const char *branchType,
+	const SCP_vector<SCP_vector<SCP_vector<const char *>>> &per_branch_groups)
+{
+	json_t *all_of = json_array();
+	for (const auto &groups : per_branch_groups) {
+		json_t *arr = json_array();
+		for (const auto &fields : groups) {
+			json_t *branch = json_object();
+			json_t *req = json_array();
+			for (const char *name : fields)
+				json_array_append_new(req, json_string(name));
+			json_object_set_new(branch, "required", req);
+			json_array_append_new(arr, branch);
+		}
+		json_t *branch_obj = json_object();
+		json_object_set_new(branch_obj, branchType, arr);
+		json_array_append_new(all_of, branch_obj);
+	}
+
+	json_t *extras = json_object();
+	json_object_set_new(extras, "allOf", all_of);
 	return extras;
 }
 

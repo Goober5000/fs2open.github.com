@@ -34,6 +34,7 @@ import test_crud
 import test_sexp_roundtrip
 import test_sexp_detach
 import test_sexp_attach
+import test_sexp_move_swap
 import test_negative
 
 
@@ -49,6 +50,7 @@ AREAS = [
     test_sexp_roundtrip,
     test_sexp_detach,
     test_sexp_attach,
+    test_sexp_move_swap,
     test_negative,
 ]
 
