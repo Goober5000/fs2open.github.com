@@ -79,6 +79,12 @@ def register(suite, client):
         d = tool_data(r)
         assert_equal(d.get("position"), "entity_formula", "position")
         assert_equal(d.get("source_node"), false_node, "source_node echoed")
+        # Confirm the mutation actually reached the debriefing stage's formula
+        # field, not just the response payload.
+        r = client.call_tool("get_debriefing_stage", {"index": 1})
+        assert_success(r)
+        assert_equal(tool_data(r).get("formula"), false_node,
+                     "debriefing_stage formula updated to source")
         # Clean up.
         client.call_tool("delete_debriefing_stage", {"index": 1})
 
@@ -121,6 +127,22 @@ def register(suite, client):
         client.call_tool("detach_sexp_node", {"node": target, "delete": True})
         client.call_tool("delete_event", {"name": "attach_src_test"})
 
+    def test_self_attach_rejected():
+        # Source and target nodes cannot be the same: passing the same index for
+        # both should be rejected before any tree mutation occurs.
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": root,
+                "target_node": root,
+            })
+            assert_error(r)
+            assert_in("same node", tool_text(r).lower())
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
     def test_must_specify_target():
         r = client.call_tool("create_sexp_node", {
             "role": "argument",
@@ -157,6 +179,7 @@ def register(suite, client):
     suite.add("sexp_attach_locked_false_to_entity", test_attach_locked_false_to_entity)
     suite.add("sexp_attach_source_not_a_root", test_source_not_a_root)
     suite.add("sexp_attach_source_already_attached", test_source_already_attached)
+    suite.add("sexp_attach_self_attach_rejected", test_self_attach_rejected)
     suite.add("sexp_attach_must_specify_target", test_must_specify_target)
     suite.add("sexp_attach_both_targets_specified", test_both_targets_specified)
 
@@ -433,6 +456,44 @@ def register(suite, client):
         client.call_tool("detach_sexp_node", {"node": src, "delete": True})
         client.call_tool("delete_goal", {"name": "attach_rb_goal"})
 
+    def test_attach_bare_operator_as_entity_formula():
+        # Exercise the entity-formula path with a 0-arg bare operator atom as
+        # the source (no list wrapper, no argument chain).  do-nothing returns
+        # OPR_NULL, which matches what events expect.
+        r = client.call_tool("create_event", {"name": "attach_bare_op"})
+        assert_success(r)
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "operator",
+                "operator_name": "do-nothing",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src,
+                "target_entity_type": "event",
+                "target_entity_id": "attach_bare_op",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("position"), "entity_formula", "position")
+            assert_equal(d.get("source_node"), src, "source_node echoed")
+            # Confirm the event formula is now the bare operator atom.
+            r = client.call_tool("get_event", {"name": "attach_bare_op"})
+            assert_success(r)
+            assert_equal(tool_data(r).get("formula"), src, "event formula updated to bare op")
+            # Walking the source should yield exactly one node: do-nothing.
+            r = client.call_tool("walk_sexp_tree", {"node": src})
+            assert_success(r)
+            vals = tree_values(tool_data(r)["nodes"])
+            assert_equal(vals, ["do-nothing"], "bare operator tree has just the operator")
+            # Clean up the displaced original formula if it was preserved.
+            displaced = d.get("displaced_node")
+            if displaced is not None and displaced != src:
+                client.call_tool("detach_sexp_node", {"node": displaced, "delete": True})
+        finally:
+            client.call_tool("delete_event", {"name": "attach_bare_op"})
+
     suite.add("sexp_attach_entity_event_formula", test_entity_event_formula)
     suite.add("sexp_attach_entity_event_delete_displaced", test_entity_event_delete_displaced)
     suite.add("sexp_attach_entity_displace_locked_singleton_with_delete",
@@ -445,6 +506,7 @@ def register(suite, client):
     suite.add("sexp_attach_entity_debriefing_team_2", test_entity_debriefing_stage_team_2)
     suite.add("sexp_attach_entity_fiction_viewer_stage", test_entity_fiction_viewer_stage)
     suite.add("sexp_attach_entity_rollback_preserves_formula", test_entity_rollback_preserves_formula)
+    suite.add("sexp_attach_bare_operator_as_entity_formula", test_attach_bare_operator_as_entity_formula)
 
     # =================================================================
     # Node-relative replace mode (Cases C'/D')
@@ -674,7 +736,11 @@ def register(suite, client):
         assert_success(r)
         d = tool_data(r)
         assert_equal(d.get("displaced_node"), two_node, "displaced_node is the replaced node")
-        assert_true(d.get("displaced_node_data") is not None, "displaced_node_data present")
+        dd = d.get("displaced_node_data")
+        assert_true(dd is not None, "displaced_node_data present")
+        assert_equal(dd.get("value"), "2", "displaced_node_data value")
+        assert_equal(dd.get("role"), "argument", "displaced_node_data role")
+        assert_equal(dd.get("node_parent"), -1, "displaced_node_data parent is -1")
         assert_true(d.get("deleted_displaced") is False, "deleted_displaced is false")
         # Displaced node should still be accessible as a free-standing root.
         r = client.call_tool("get_sexp_node", {"node": two_node})
@@ -1393,6 +1459,74 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"node": root, "delete": True})
 
+    def test_insert_before_placeholder_via_arg_idx():
+        """Insert before a placeholder argument resolved via target_argument_index.
+        Placeholders are ordinary string atoms (text='<placeholder>') in the
+        rest chain, so insert-before should treat them like any other arg."""
+        # Build (+ <placeholder> 5): a node-typed argument with value "-1" is
+        # normalized to a placeholder string atom by create_sexp_node.
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": "-1"},
+                {"argument_type": "number", "argument_value": "5"},
+            ],
+        })
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "42",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root,
+                "target_argument_index": 1, "position": "before",
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("position"), "before", "position")
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"])
+            assert_equal(values, ["+", "42", "<placeholder>", "5"],
+                         "tree after insert before placeholder")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
+    def test_insert_after_placeholder_via_arg_idx():
+        """Insert after a placeholder argument resolved via target_argument_index."""
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "+",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": "-1"},
+                {"argument_type": "number", "argument_value": "5"},
+            ],
+        })
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("create_sexp_node", {
+                "role": "argument", "argument_type": "number", "argument_value": "42",
+            })
+            assert_success(r)
+            src = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src, "target_node": root,
+                "target_argument_index": 1, "position": "after",
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("position"), "after", "position")
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_success(r)
+            values = tree_values(tool_data(r)["nodes"])
+            assert_equal(values, ["+", "<placeholder>", "42", "5"],
+                         "tree after insert after placeholder")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
     def test_attach_argument_index_with_entity_mode_rejected():
         """Passing target_argument_index with entity mode should error."""
         r = client.call_tool("create_sexp_node", {
@@ -1455,6 +1589,10 @@ def register(suite, client):
               test_attach_after_via_argument_index)
     suite.add("sexp_attach_after_last_via_argument_index",
               test_attach_after_last_via_argument_index)
+    suite.add("sexp_attach_insert_before_placeholder_via_arg_idx",
+              test_insert_before_placeholder_via_arg_idx)
+    suite.add("sexp_attach_insert_after_placeholder_via_arg_idx",
+              test_insert_after_placeholder_via_arg_idx)
     suite.add("sexp_attach_argument_index_with_entity_mode_rejected",
               test_attach_argument_index_with_entity_mode_rejected)
 
