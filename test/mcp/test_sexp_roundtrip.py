@@ -71,7 +71,7 @@ def register(suite, client):
         node = ctx.get("sexp_simple_node")
         if node is None:
             raise SkipTest("No sexp node")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_simple_node", None)
 
@@ -106,7 +106,7 @@ def register(suite, client):
         node = ctx.get("sexp_complex_node")
         if node is None:
             raise SkipTest("No complex sexp node")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_complex_node", None)
 
@@ -140,7 +140,7 @@ def register(suite, client):
         node = ctx.get("sexp_created_node")
         if node is None:
             raise SkipTest("No created sexp node")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_created_node", None)
 
@@ -171,7 +171,7 @@ def register(suite, client):
         node = ctx.get("sexp_args_node")
         if node is None:
             raise SkipTest("No sexp args node")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_args_node", None)
 
@@ -217,7 +217,7 @@ def register(suite, client):
         node = ctx.get("sexp_composed_node")
         if node is None:
             raise SkipTest("No composed sexp node")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_composed_node", None)
         ctx.pop("sexp_sub_node", None)
@@ -267,7 +267,7 @@ def register(suite, client):
         node = ctx.get("sexp_nonroot_tree")
         if node is None:
             raise SkipTest("No nonroot tree")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_nonroot_tree", None)
 
@@ -310,7 +310,7 @@ def register(suite, client):
         node = ctx.get("sexp_preserved_node")
         if node is None:
             raise SkipTest("No preserved tree")
-        r = client.call_tool("detach_sexp_node", {"target_node": node, "delete": True})
+        r = client.call_tool("detach_sexp_node", {"node": node, "delete": True})
         assert_success(r)
         ctx.pop("sexp_preserved_node", None)
 
