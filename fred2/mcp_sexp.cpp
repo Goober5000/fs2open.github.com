@@ -1763,22 +1763,39 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 
 // Compose the user-visible error after a composed-operation step failed.
 // step_err is the json_t error from a sub-operation (attach or detach).  If
-// the rollback succeeded, the sub-operation's error text is forwarded to the
-// user sink verbatim; otherwise a combined message is reported, including
-// the orphaned source's node index so the client can recover it.
+// orphan_nodes is empty, the sub-operation's error text is forwarded to the
+// user sink verbatim; otherwise a combined message is reported listing each
+// SEXP subtree that remains free-standing because some part of the rollback
+// failed, so the client can recover them.
 static void report_composed_error(McpErrorSink &user_sink, json_t *step_err,
-	bool rollback_failed, int orphan_node, const char *step_label)
+	const SCP_vector<int> &orphan_nodes, const char *step_label)
 {
-	if (rollback_failed) {
+	if (orphan_nodes.empty()) {
+		const char *err_text = extract_tool_result_text(step_err);
+		user_sink.set_error("%s", err_text ? err_text : "operation failed");
+		return;
+	}
+
+	if (orphan_nodes.size() == 1) {
 		user_sink.set_error("%s failed AND rollback failed; "
 			"a SEXP subtree remains free-standing at node %d. "
 			"Use sexp_to_text or walk_sexp_tree to inspect it; "
 			"use attach_sexp_node to re-integrate it.",
-			step_label, orphan_node);
+			step_label, orphan_nodes[0]);
 		return;
 	}
-	const char *err_text = extract_tool_result_text(step_err);
-	user_sink.set_error("%s", err_text ? err_text : "operation failed");
+
+	SCP_string node_list;
+	for (size_t i = 0; i < orphan_nodes.size(); i++) {
+		if (i > 0)
+			node_list += (i + 1 == orphan_nodes.size()) ? " and " : ", ";
+		node_list += std::to_string(orphan_nodes[i]);
+	}
+	user_sink.set_error("%s failed AND rollback failed; "
+		"%zu SEXP subtrees remain free-standing at nodes %s. "
+		"Use sexp_to_text or walk_sexp_tree to inspect them; "
+		"use attach_sexp_node to re-integrate them.",
+		step_label, orphan_nodes.size(), node_list.c_str());
 }
 
 static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
@@ -1818,6 +1835,21 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	// Free-standing source guard: a free-standing root has no "location" to
+	// move from -- detaching it would be a no-op, and the user should call
+	// attach_sexp_node directly.  Entity mode is by definition mission-attached
+	// and was already validated above.
+	if (src_ref.mode == GeneralSEXPReference::Mode::Node) {
+		int probe = retarget_to_list_wrapper(src_ref.node);
+		FormulaRootInfo src_info = find_formula_root_and_type(probe);
+		if (src_info.root == probe && !src_info.attached) {
+			sink.set_error("source_node %d is a free-standing root; "
+				"use attach_sexp_node directly to install it at the target.",
+				src_ref.node);
+			return;
+		}
+	}
+
 	// Step 1: detach the source.
 	auto det = handle_detach_sexp_node(src_ref, shrink, /*do_delete=*/false, sink);
 	if (sink.has_error()) return;
@@ -1830,12 +1862,12 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	auto att = handle_attach_sexp_node(det.detached_node, tgt_ref, position,
 		delete_displaced, attach_sink);
 	if (attach_sink.has_error()) {
-		json_t *rb_err = nullptr;
-		McpErrorSink rb_sink(&rb_err);
-		rollback_detach(src_ref, det, shrink, rb_sink);
-		report_composed_error(sink, attach_err, rb_sink.has_error(), det.detached_node, "Attach");
+		McpErrorSink null_sink;	// dev/null
+		bool restored = rollback_detach(src_ref, det, shrink, null_sink);
+		SCP_vector<int> orphans;
+		if (!restored) orphans.push_back(det.detached_node);
+		report_composed_error(sink, attach_err, orphans, "Attach");
 		if (attach_err) json_decref(attach_err);
-		if (rb_err) json_decref(rb_err);
 		return;
 	}
 
@@ -1889,12 +1921,12 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	McpErrorSink det_b_sink(&det_b_err);
 	auto det_b = handle_detach_sexp_node(tgt_ref, /*shrink=*/false, /*do_delete=*/false, det_b_sink);
 	if (det_b_sink.has_error()) {
-		json_t *rb_err = nullptr;
-		McpErrorSink rb_sink(&rb_err);
-		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
-		report_composed_error(sink, det_b_err, rb_sink.has_error(), det_a.detached_node, "Target detach");
+		McpErrorSink null_sink;	// dev/null
+		bool a_restored = rollback_detach(src_ref, det_a, /*shrink=*/false, null_sink);
+		SCP_vector<int> orphans;
+		if (!a_restored) orphans.push_back(det_a.detached_node);
+		report_composed_error(sink, det_b_err, orphans, "Target detach");
 		if (det_b_err) json_decref(det_b_err);
-		if (rb_err) json_decref(rb_err);
 		return;
 	}
 
@@ -1920,13 +1952,15 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	auto att_a = handle_attach_sexp_node(det_a.detached_node, dest_for_a,
 		attach_position::REPLACE, /*delete_displaced=*/true, att_a_sink);
 	if (att_a_sink.has_error()) {
-		json_t *rb_err = nullptr;
-		McpErrorSink rb_sink(&rb_err);
-		rollback_detach(tgt_ref, det_b, /*shrink=*/false, rb_sink);
-		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
-		report_composed_error(sink, att_a_err, rb_sink.has_error(), det_a.detached_node, "First attach");
+		McpErrorSink null_sink_1;	// dev/null
+		McpErrorSink null_sink_2;	// dev/null
+		bool b_restored = rollback_detach(tgt_ref, det_b, /*shrink=*/false, null_sink_1);
+		bool a_restored = rollback_detach(src_ref, det_a, /*shrink=*/false, null_sink_2);
+		SCP_vector<int> orphans;
+		if (!b_restored) orphans.push_back(det_b.detached_node);
+		if (!a_restored) orphans.push_back(det_a.detached_node);
+		report_composed_error(sink, att_a_err, orphans, "First attach");
 		if (att_a_err) json_decref(att_a_err);
-		if (rb_err) json_decref(rb_err);
 		return;
 	}
 
@@ -1936,28 +1970,47 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	auto att_b = handle_attach_sexp_node(det_b.detached_node, dest_for_b,
 		attach_position::REPLACE, /*delete_displaced=*/true, att_b_sink);
 	if (att_b_sink.has_error()) {
+		// Reachability note: when tgt_ref is entity mode, this branch is
+		// unreachable.  Both step 4 and step 5 run check_sexp_formula against
+		// an entity OPR (OPR_NULL or OPR_BOOL); since a originated at src and
+		// b originated at tgt, step-4 success implies step-5 success.  Any
+		// OPR mismatch fails step 4 first.  The rollback below is therefore
+		// only exercised when tgt_ref is node mode -- but it still has to
+		// handle src_ref being either node or entity.
+
 		// Undo step 4: detach a from b's slot so it's free-standing again.
 		// After att_a, det_a.detached_node is embedded at b's old slot.
-		json_t *rb_err = nullptr;
-		McpErrorSink rb_sink(&rb_err);
+		// undo_a uses its own private sink so the bool return is independent
+		// of any later rollback failure.
+		McpErrorSink undo_sink;	// dev/null
 		auto undo_a = handle_detach_sexp_node(make_node_ref(det_a.detached_node),
-			/*shrink=*/false, /*do_delete=*/false, rb_sink);
+			/*shrink=*/false, /*do_delete=*/false, undo_sink);
+		bool a_extracted = !undo_sink.has_error();
 
-		// If undo_a failed, undo_a.replacement is -1 and the subsequent
-		// rollback_detach calls would operate on stale or invalid data.
-		// Bail out early; report_composed_error will surface "rollback failed".
-		if (!rb_sink.has_error()) {
-			// Construct a synthetic det_b' so rollback_detach knows the new
-			// placeholder identity at b's slot.
+		// If undo_a succeeded, both detached subtrees are free-standing again
+		// and we can attempt to put each back where it came from.  If it
+		// failed, det_a is still embedded at b's old slot (tree state is
+		// wedged) and we report only det_b as a free-standing orphan.
+		bool b_restored = false;
+		bool a_restored = false;
+		if (a_extracted) {
+			McpErrorSink null_sink_1;	// dev/null
+			McpErrorSink null_sink_2;	// dev/null
 			detach_result det_b_prime = det_b;
 			det_b_prime.replacement = undo_a.replacement;
-			rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, rb_sink);
-			rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
+			b_restored = rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, null_sink_1);
+			a_restored = rollback_detach(src_ref, det_a, /*shrink=*/false, null_sink_2);
 		}
 
-		report_composed_error(sink, att_b_err, rb_sink.has_error(), det_b.detached_node, "Second attach");
+		SCP_vector<int> orphans;
+		if (!a_extracted) {
+			orphans.push_back(det_b.detached_node);
+		} else {
+			if (!b_restored) orphans.push_back(det_b.detached_node);
+			if (!a_restored) orphans.push_back(det_a.detached_node);
+		}
+		report_composed_error(sink, att_b_err, orphans, "Second attach");
 		if (att_b_err) json_decref(att_b_err);
-		if (rb_err) json_decref(rb_err);
 		return;
 	}
 

@@ -47,6 +47,7 @@ void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 	if (g_sexp_forest_dirty.load())
 		return;  // full rebuild already pending; partial set is redundant
 	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
+
 	for (int r : roots) {
 		// skip special root nodes and unused nodes
 		if ((r < 0) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
@@ -56,10 +57,18 @@ void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 
-void mcp_sexp_forest_unmark_dirty_root(int root)
+void mcp_sexp_forest_unmark_dirty(const SCP_vector<int> &roots)
 {
+	if (g_sexp_forest_dirty.load())
+		return;  // full rebuild already pending; partial set is redundant
 	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
-	g_dirty_roots.erase(root);
+
+	for (int r : roots) {
+		// skip special root nodes and unused nodes
+		if ((r < 0) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
+			continue;
+		g_dirty_roots.erase(r);
+	}
 	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 
