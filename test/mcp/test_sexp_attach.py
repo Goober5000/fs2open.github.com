@@ -225,6 +225,52 @@ def register(suite, client):
         assert_error(r)
         client.call_tool("delete_event", {"name": "attach_evt_del"})
 
+    def test_entity_displace_locked_singleton_with_delete():
+        # When delete_displaced=true is requested but the displaced formula is
+        # a locked singleton (true/false), the singleton cannot be freed: it's
+        # a shared global.  deleted_displaced must report false and freed_count
+        # must be 0.  The singleton must remain a valid node afterward.
+        r = client.call_tool("create_goal", {"name": "attach_sing_disp"})
+        assert_success(r)
+        try:
+            # Plant Locked_sexp_true as the goal's formula so we know exactly
+            # what we're displacing on the second attach.
+            r = client.call_tool("create_sexp_node", {
+                "role": "operator", "operator_name": "true",
+            })
+            assert_success(r)
+            true_node = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": true_node,
+                "target_entity_type": "goal",
+                "target_entity_id": "attach_sing_disp",
+                "delete_displaced": True,
+            })
+            assert_success(r)
+            # Now displace the singleton with a real subtree.
+            r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
+            assert_success(r)
+            new_formula = tool_data(r)["node"]
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": new_formula,
+                "target_entity_type": "goal",
+                "target_entity_id": "attach_sing_disp",
+                "delete_displaced": True,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("displaced_node"), true_node,
+                         "displaced_node should be the locked true singleton")
+            assert_true(d.get("deleted_displaced") is False,
+                        "deleted_displaced should be false: locked singleton cannot be freed")
+            assert_equal(d.get("freed_count"), 0,
+                         "freed_count should be 0 when only a singleton is displaced")
+            # Singleton must still be a valid in-use node.
+            r = client.call_tool("get_sexp_node", {"node": true_node})
+            assert_success(r)
+        finally:
+            client.call_tool("delete_goal", {"name": "attach_sing_disp"})
+
     def test_entity_goal_formula():
         r = client.call_tool("create_sexp_node", {
             "role": "operator",
@@ -389,6 +435,8 @@ def register(suite, client):
 
     suite.add("sexp_attach_entity_event_formula", test_entity_event_formula)
     suite.add("sexp_attach_entity_event_delete_displaced", test_entity_event_delete_displaced)
+    suite.add("sexp_attach_entity_displace_locked_singleton_with_delete",
+              test_entity_displace_locked_singleton_with_delete)
     suite.add("sexp_attach_entity_goal_formula", test_entity_goal_formula)
     suite.add("sexp_attach_entity_wrong_return_type", test_entity_wrong_return_type)
     suite.add("sexp_attach_entity_unknown_type", test_entity_unknown_type)
