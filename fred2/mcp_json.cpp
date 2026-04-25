@@ -186,20 +186,8 @@ json_t *build_branch_required_fields_allof(const char *branchType,
 	const SCP_vector<SCP_vector<SCP_vector<const char *>>> &per_branch_groups)
 {
 	json_t *all_of = json_array();
-	for (const auto &groups : per_branch_groups) {
-		json_t *arr = json_array();
-		for (const auto &fields : groups) {
-			json_t *branch = json_object();
-			json_t *req = json_array();
-			for (const char *name : fields)
-				json_array_append_new(req, json_string(name));
-			json_object_set_new(branch, "required", req);
-			json_array_append_new(arr, branch);
-		}
-		json_t *branch_obj = json_object();
-		json_object_set_new(branch_obj, branchType, arr);
-		json_array_append_new(all_of, branch_obj);
-	}
+	for (const auto &groups : per_branch_groups)
+		json_array_append_new(all_of, build_branch_required_fields(branchType, groups));
 
 	json_t *extras = json_object();
 	json_object_set_new(extras, "allOf", all_of);

@@ -182,11 +182,10 @@ def register(suite, client):
     # =================================================================
 
     def test_move_entity_to_entity():
-        # Move an event's formula to a goal's formula (both OPR_NULL).
+        # Move one event's formula to another event's formula (both OPR_NULL).
         client.call_tool("create_event", {"name": "mvent_src"})
-        client.call_tool("create_goal", {"name": "mvent_tgt", "goal_type": "Primary"})
+        client.call_tool("create_event", {"name": "mvent_tgt"})
         try:
-            # Give the event a distinctive formula.
             r = client.call_tool("text_to_sexp", {"text": "( do-nothing )"})
             assert_success(r)
             new_root = tool_data(r)["node"]
@@ -196,34 +195,45 @@ def register(suite, client):
                 "target_entity_id": "mvent_src",
             })
             assert_success(r)
-            # Now move event -> goal.
+            r = client.call_tool("get_event", {"name": "mvent_src"})
+            assert_success(r)
+            src_pre_root = tool_data(r).get("formula")
+
             r = client.call_tool("move_sexp_node", {
                 "source_entity_type": "event",
                 "source_entity_id": "mvent_src",
-                "target_entity_type": "goal",
+                "target_entity_type": "event",
                 "target_entity_id": "mvent_tgt",
             })
             assert_success(r)
-            # Both entities should now have valid formulas.
-            r = client.call_tool("get_event", {"name": "mvent_src"})
+
+            # Target now holds the original source formula.
+            r = client.call_tool("get_event", {"name": "mvent_tgt"})
             assert_success(r)
-            assert_true(tool_data(r).get("formula") is not None, "event formula present")
-            r = client.call_tool("get_goal", {"name": "mvent_tgt"})
-            assert_success(r)
-            assert_true(tool_data(r).get("formula") is not None, "goal formula present")
+            assert_equal(tool_data(r).get("formula"), src_pre_root, "tgt formula now == src's pre-move formula")
         finally:
             client.call_tool("delete_event", {"name": "mvent_src", "force": True})
-            client.call_tool("delete_goal", {"name": "mvent_tgt", "force": True})
+            client.call_tool("delete_event", {"name": "mvent_tgt", "force": True})
 
     def test_move_node_to_entity():
-        # Build a free-standing OPR_NULL tree, move it to be an event's formula.
+        # move requires the source to be at a detachable position (embedded
+        # in a tree or attached as an entity formula).  Build a tree
+        # containing an embedded OPR_NULL action subtree and move that subtree
+        # to become an event's formula.
         client.call_tool("create_event", {"name": "mvne_tgt"})
         try:
-            r = client.call_tool("text_to_sexp", {"text": "( do-nothing )"})
+            # ( when ( true ) ( do-nothing ) ) - the (do-nothing) is at when's
+            # argument index 2 and is OPR_NULL, suitable for an event formula.
+            r = client.call_tool("text_to_sexp",
+                {"text": "( when ( true ) ( do-nothing ) )"})
             assert_success(r)
-            free_root = tool_data(r)["node"]
+            container = tool_data(r)["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": container})
+            assert_success(r)
+            do_nothing = find_node_by_value(tool_data(r)["nodes"], "do-nothing")["node"]
+
             r = client.call_tool("move_sexp_node", {
-                "source_node": free_root,
+                "source_node": do_nothing,
                 "target_entity_type": "event",
                 "target_entity_id": "mvne_tgt",
             })
@@ -231,6 +241,7 @@ def register(suite, client):
             r = client.call_tool("get_event", {"name": "mvne_tgt"})
             assert_success(r)
             assert_true(tool_data(r).get("formula") is not None, "event formula set")
+            client.call_tool("detach_sexp_node", {"node": container, "delete": True})
         finally:
             client.call_tool("delete_event", {"name": "mvne_tgt", "force": True})
 
