@@ -1128,7 +1128,15 @@ static bool parse_general_sexp_reference(json_t *input, const char *field_prefix
 // detach_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
-static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink);
+struct detach_result {
+	int detached_node = -1;
+	int freed_count = 0;
+	int replacement = -1;
+	int pred_list = -1;
+	int pred_ante = -1;
+};
+
+static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink);
 
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
@@ -1149,21 +1157,35 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	auto delete_opt = get_optional_bool(input, "delete", sink);
 	bool do_delete = delete_opt.has_value() && *delete_opt;
 
-	auto result_json = handle_detach_sexp_node(general_ref, shrink, do_delete, sink);
+	auto result = handle_detach_sexp_node(general_ref, shrink, do_delete, sink);
 	if (sink.has_error()) return;
 
-	req->result_json = result_json;
+	// Build response
+	json_t *result_json = json_object();
+	json_object_set_new(result_json, "detached_node", json_integer(result.detached_node));
+	if (!do_delete)
+		json_object_set_new(result_json, "detached_node_data", build_sexp_node_json(result.detached_node));
+	json_object_set_new(result_json, "deleted", (do_delete && result.freed_count > 0) ? json_true() : json_false());
+	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
+	if (result.replacement >= 0) {
+		json_object_set_new(result_json, "replacement_node", json_integer(result.replacement));
+		json_object_set_new(result_json, "replacement_node_data", build_sexp_node_json(result.replacement));
+	}
+	else
+		json_object_set_new(result_json, "replacement_node", json_null());
+
+	req->result_json = make_json_tool_result(result_json);
 	req->success = true;
 }
 
-static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink)
+static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink)
 {
 	int n = general_ref.node;
 	int original_n = n;
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
 		sink.set_error("Node %d is not in use", n);
-		return nullptr;
+		return {};
 	}
 
 	// If the client targeted an operator atom inside a list wrapper,
@@ -1180,13 +1202,17 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 	int replacement = -1;
 	int freed_count = 0;
 
+	// in case we need to reverse the detach after it was successful
+	int pred_list = -1;
+	int pred_ante = -1;
+
 	if (is_root && is_attached) {
 		// Case A: Root of a mission-attached formula -- replace with default
 		if (info.opr_type == OPR_NULL) {
 			replacement = parse_sexp_text("( do-nothing )", "detach_sexp_node");
 			if (replacement < 0) {
 				sink.set_error("Failed to create replacement formula");
-				return nullptr;
+				return {};
 			}
 		} else {
 			replacement = Locked_sexp_true;
@@ -1199,7 +1225,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 				"there is nothing to detach",
 				Sexp_nodes[n].text);
 			free_sexp2(replacement);
-			return nullptr;
+			return {};
 		}
 
 		// Set the entity formula to the replacement
@@ -1214,7 +1240,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 			free_sexp2(replacement);
 			sink.set_error("Detachment would cause syntax error: %s (error code %d, bad node %d)",
 				sexp_error_message(syntax_result), syntax_result, bad_node);
-			return nullptr;
+			return {};
 		}
 		// no rollback: it's a modification
 
@@ -1230,7 +1256,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 		// we may not have actually done anything
 		if (!do_delete && n == original_n) {
 			sink.set_error("Node %d is already the root of a detached tree; there is nothing to do. Pass delete=true to free it, or pass an inner node to detach a sub-tree.", n);
-			return nullptr;
+			return {};
 		}
 
 	} else {
@@ -1240,8 +1266,8 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 		// Locate the predecessor before splicing so we can reliably restore
 		// it on rollback.  splice_replace_node can't find the old position if
 		// the forward splice replaced n with -1 (shrink mode, last sibling).
-		int pred_list = find_sexp_list(n);                                      // wrapper whose .first == n
-		int pred_ante = (pred_list < 0) ? find_sexp_antecedent(n) : -1;         // sibling whose .rest == n
+		pred_list = find_sexp_list(n);                                      // wrapper whose .first == n
+		pred_ante = (pred_list < 0) ? find_sexp_antecedent(n) : -1;         // sibling whose .rest == n
 
 		if (shrink) {
 			// Shrink mode: link the predecessor directly to the next sibling,
@@ -1264,7 +1290,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 					free_sexp2(replacement);
 				}
 			}, "Detachment", sink))
-			return nullptr;
+			return {};
 		if (is_attached)
 			mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
 
@@ -1289,22 +1315,16 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, 
 		mcp_sexp_forest_mark_dirty({ new_root });
 	}
 
-	// Build response.  detached_node is the root of the resulting free-standing
+	// Return response.  detached_node is the root of the resulting free-standing
 	// tree after any normalization.  When do_delete is true the tree is gone,
 	// so we echo the node the user passed in.
-	json_t *result = json_object();
-	json_object_set_new(result, "detached_node", json_integer(do_delete ? original_n : new_root));
-	if (!do_delete)
-		json_object_set_new(result, "detached_node_data", build_sexp_node_json(new_root));
-	json_object_set_new(result, "deleted", (do_delete && freed_count > 0) ? json_true() : json_false());
-	json_object_set_new(result, "freed_count", json_integer(freed_count));
-	if (replacement >= 0) {
-		json_object_set_new(result, "replacement_node", json_integer(replacement));
-		json_object_set_new(result, "replacement_node_data", build_sexp_node_json(replacement));
-	}
-	else
-		json_object_set_new(result, "replacement_node", json_null());
-	return make_json_tool_result(result);
+	return {
+		do_delete ? original_n : new_root,
+		freed_count,
+		replacement,
+		pred_list,
+		pred_ante
+	};
 }
 
 // ---------------------------------------------------------------------------
@@ -1354,7 +1374,14 @@ static bool attach_as_entity_formula(
 	return true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
+struct attach_result {
+	int displaced = -1;
+	int freed_count = 0;
+	int pred_list = -1;
+	int pred_ante = -1;
+};
+
+static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
 
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
@@ -1392,21 +1419,43 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
 	}
 
-	auto result_json = handle_attach_sexp_node(source, general_target, position, delete_displaced, sink);
+	auto result = handle_attach_sexp_node(source, general_target, position, delete_displaced, sink);
 	if (sink.has_error()) return;
 
-	req->result_json = result_json;
+	// Build response
+	json_t *result_json = json_object();
+	json_object_set_new(result_json, "source_node", json_integer(source));
+	json_object_set_new(result_json, "source_node_data", build_sexp_node_json(source));
+	const char *pos_str = (general_target.mode == GeneralSEXPReference::Mode::Entity)
+		? "entity_formula"
+		: (position == attach_position::REPLACE) ? "replace"
+		: (position == attach_position::BEFORE)  ? "before"
+		: "after";
+	json_object_set_new(result_json, "position", json_string(pos_str));
+
+	if (result.displaced >= 0) {
+		json_object_set_new(result_json, "displaced_node", json_integer(result.displaced));
+		if (!delete_displaced && result.displaced != Locked_sexp_true && result.displaced != Locked_sexp_false)
+			json_object_set_new(result_json, "displaced_node_data", build_sexp_node_json(result.displaced));
+	} else {
+		json_object_set_new(result_json, "displaced_node", json_null());
+	}
+
+	json_object_set_new(result_json, "deleted_displaced", (delete_displaced && result.freed_count > 0) ? json_true() : json_false());
+	json_object_set_new(result_json, "freed_count", json_integer(result.freed_count));
+
+	req->result_json = make_json_tool_result(result_json);
 	req->success = true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
+static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
 {
 	bool have_entity = (general_target.mode == GeneralSEXPReference::Mode::Entity);
 
 	// --- Validate source ---
 	if (Sexp_nodes[source].type == SEXP_NOT_USED) {
 		sink.set_error("Source node %d is not in use", source);
-		return nullptr;
+		return {};
 	}
 	// Locked singletons (true/false) are shared nodes whose fields must not
 	// be modified.  They are still valid attach sources: entity-formula mode
@@ -1417,17 +1466,21 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 		FormulaRootInfo src_info = find_formula_root_and_type(source);
 		if (src_info.root != source) {
 			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
-			return nullptr;
+			return {};
 		}
 		if (src_info.attached) {
 			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
 				source, src_info.attached_type);
-			return nullptr;
+			return {};
 		}
 	}
 
 	int displaced = -1;
 	int freed_count = 0;
+
+	// in case we need to reverse the detach after it was successful
+	int pred_list = -1;
+	int pred_ante = -1;
 
 	if (have_entity) {
 		// ---------------------------------------------------------------
@@ -1436,7 +1489,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 
 		if (!attach_as_entity_formula(source, general_target.entity_info, general_target.entity_current_root,
 				delete_displaced, displaced, freed_count, sink))
-			return nullptr;
+			return {};
 
 	} else {
 		// ---------------------------------------------------------------
@@ -1446,7 +1499,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 
 		if (target == source) {
 			sink.set_error("Source and target cannot be the same node (%d)", source);
-			return nullptr;
+			return {};
 		}
 
 		// Retarget: if target is an operator atom inside a list wrapper,
@@ -1466,7 +1519,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 		if (info.root == source) {
 			sink.set_error("Target node %d is inside source node %d's tree; "
 				"attaching would create a cycle", target, source);
-			return nullptr;
+			return {};
 		}
 
 		if (is_root && !is_attached) {
@@ -1474,13 +1527,13 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 			sink.set_error("Target node %d is a free-standing root; to attach source as a formula, "
 				"use target_entity_type/target_entity_id. To replace content inside a tree, "
 				"target an embedded node.", target);
-			return nullptr;
+			return {};
 		}
 
 		if (is_root && is_attached && position != attach_position::REPLACE) {
 			// Case A' via target_node with insert mode — formula roots have no sibling chain
 			sink.set_error("Cannot insert before/after a formula root. Use position='replace' to replace the formula.");
-			return nullptr;
+			return {};
 		}
 
 		// If the source is an operator atom that will be spliced into a rest
@@ -1505,12 +1558,12 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 			if (is_root && is_attached) {
 				// Replacing a formula root via target_node: delegate to entity logic.
 				if (!attach_as_entity_formula(source, info, info.root, delete_displaced, displaced, freed_count, sink))
-					return nullptr;
+					return {};
 
 			} else {
 				// Embedded replace (Cases C'/D')
-				int pred_list = find_sexp_list(target);
-				int pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
+				pred_list = find_sexp_list(target);
+				pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
 
 				int target_parent = Sexp_nodes[target].parent;
 				int target_rest = Sexp_nodes[target].rest;
@@ -1532,7 +1585,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 						restore_predecessor(pred_list, pred_ante, target);
 						make_source_free_standing(source, effective_source);
 					}, "Attachment", sink))
-					return nullptr;
+					return {};
 				if (is_attached)
 					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 
@@ -1554,11 +1607,11 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 
 			if (is_root) {
 				sink.set_error("Cannot insert before a tree root; use position='replace', or target an embedded node.");
-				return nullptr;
+				return {};
 			}
 
-			int pred_list = find_sexp_list(target);
-			int pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
+			pred_list = find_sexp_list(target);
+			pred_ante = (pred_list < 0) ? find_sexp_antecedent(target) : -1;
 
 			Sexp_nodes[effective_source].parent = Sexp_nodes[target].parent;
 			Sexp_nodes[effective_source].rest = target;
@@ -1572,7 +1625,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 					restore_predecessor(pred_list, pred_ante, target);
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
-				return nullptr;
+				return {};
 			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
@@ -1585,7 +1638,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 			// -------------------------------------------------------
 			if (is_root) {
 				sink.set_error("Cannot insert after a tree root; use position='replace', or target an embedded node.");
-				return nullptr;
+				return {};
 			}
 
 			int old_target_rest = Sexp_nodes[target].rest;
@@ -1598,7 +1651,7 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 					Sexp_nodes[target].rest = old_target_rest;
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
-				return nullptr;
+				return {};
 			if (is_attached)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
@@ -1607,28 +1660,12 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 		}
 	}
 
-	// Build response
-	json_t *result = json_object();
-	json_object_set_new(result, "source_node", json_integer(source));
-	json_object_set_new(result, "source_node_data", build_sexp_node_json(source));
-	const char *pos_str = have_entity ? "entity_formula"
-		: (position == attach_position::REPLACE) ? "replace"
-		: (position == attach_position::BEFORE)  ? "before"
-		: "after";
-	json_object_set_new(result, "position", json_string(pos_str));
-
-	if (displaced >= 0) {
-		json_object_set_new(result, "displaced_node", json_integer(displaced));
-		if (!delete_displaced && displaced != Locked_sexp_true && displaced != Locked_sexp_false)
-			json_object_set_new(result, "displaced_node_data", build_sexp_node_json(displaced));
-	} else {
-		json_object_set_new(result, "displaced_node", json_null());
-	}
-
-	json_object_set_new(result, "deleted_displaced", (delete_displaced && freed_count > 0) ? json_true() : json_false());
-	json_object_set_new(result, "freed_count", json_integer(freed_count));
-
-	return make_json_tool_result(result);
+	return {
+		displaced,
+		freed_count,
+		pred_list,
+		pred_ante
+	};
 }
 
 // ---------------------------------------------------------------------------
