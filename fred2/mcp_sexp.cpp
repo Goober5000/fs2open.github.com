@@ -1798,6 +1798,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 
 	auto position_str = get_optional_string(input, "position", sink);
 	auto shrink_opt = get_optional_bool(input, "shrink", sink);
+	auto delete_displaced_opt = get_optional_bool(input, "delete_displaced", sink);
 	if (sink.has_error()) return;
 
 	if (position_str && tgt_ref.mode != GeneralSEXPReference::Mode::Node) {
@@ -1806,6 +1807,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	}
 
 	bool shrink = shrink_opt.has_value() && *shrink_opt;
+	bool delete_displaced = delete_displaced_opt.has_value() && *delete_displaced_opt;
 
 	attach_position position = parse_attach_position("position", position_str, sink);
 	if (position == attach_position::INVALID) return;
@@ -1826,7 +1828,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	json_t *attach_err = nullptr;
 	McpErrorSink attach_sink(&attach_err);
 	auto att = handle_attach_sexp_node(det.detached_node, tgt_ref, position,
-		/*delete_displaced=*/false, attach_sink);
+		delete_displaced, attach_sink);
 	if (attach_sink.has_error()) {
 		json_t *rb_err = nullptr;
 		McpErrorSink rb_sink(&rb_err);
@@ -1842,7 +1844,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	json_object_set_new(result_json, "moved_node", json_integer(det.detached_node));
 	json_object_set_new(result_json, "detached", build_detach_response_json(det, /*do_delete=*/false));
 	json_object_set_new(result_json, "attached",
-		build_attach_response_json(det.detached_node, tgt_ref, position, /*delete_displaced=*/false, att));
+		build_attach_response_json(det.detached_node, tgt_ref, position, delete_displaced, att));
 
 	req->result_json = make_json_tool_result(result_json);
 	req->success = true;
@@ -3074,6 +3076,12 @@ void mcp_register_sexp_tools(json_t *tools)
 			"If true, when removing the source from a sibling chain, shift subsequent "
 			"siblings up by one position instead of leaving a " PLACEHOLDER_STRING ". "
 			"Defaults to false.");
+		add_bool_prop(props, "delete_displaced",
+			"If true, free the displaced subtree at the target slot when in 'replace' "
+			"mode or entity target mode. If false (the default), the displaced subtree "
+			"is preserved as a free-standing root and reported in the 'attached' "
+			"sub-object's 'displaced_node' field. No effect for 'before'/'after' "
+			"positions, which never displace anything.");
 
 		register_tool(tools, "move_sexp_node",
 			"Move a SEXP subtree from one location to another in a single atomic operation. "
@@ -3088,10 +3096,9 @@ void mcp_register_sexp_tools(json_t *tools)
 			"attach_sexp_node.  In entity target mode, the source replaces the entity's "
 			"current formula. The response includes 'moved_node' (int, the absolute index of "
 			"the relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
-			"(see detach_sexp_node and attach_sexp_node for their fields). Note that when "
-			"position='replace' or in entity target mode, anything already at the target slot "
-			"is preserved as a free-standing root rather than freed, per the default behavior "
-			"of attach_sexp_node; the caller is responsible for using or freeing it.",
+			"(see detach_sexp_node and attach_sexp_node for their fields). By default, anything "
+			"already at the target slot is preserved as a free-standing root and reported in "
+			"the response; pass delete_displaced=true to free it instead.",
 			props, /*required=*/nullptr,
 			merge_schema_extras(
 				build_branch_required_fields_allof("oneOf", {
