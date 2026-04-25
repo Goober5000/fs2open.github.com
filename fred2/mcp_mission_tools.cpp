@@ -3279,6 +3279,8 @@ static const char *mission_tool_names[] = {
 	"text_to_sexp",
 	"detach_sexp_node",
 	"attach_sexp_node",
+	"move_sexp_node",
+	"swap_sexp_nodes",
 	"create_sexp_node",
 	"update_sexp_node",
 	"list_sexp_variables",

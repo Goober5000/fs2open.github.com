@@ -38,6 +38,10 @@ json_t *make_tool_result(const char *text, bool is_error = false);
 json_t *make_tool_result(bool is_error, const char *format, ...);
 json_t *vmake_tool_result(bool is_error, const char *format, va_list args);
 
+// Extract the human-readable text from a tool-result JSON object produced by
+// vmake_tool_result.  Returns nullptr if the structure does not match.
+const char *extract_tool_result_text(json_t *tool_result);
+
 // Build an MCP tool-result whose text content is pretty-printed JSON.
 // Takes ownership of `data` (decrefs it after serializing).
 json_t *make_json_tool_result(json_t *data);
@@ -65,6 +69,13 @@ void add_color_prop(json_t *props, const char *name, const char *description);
 // Build a schema_extras object with a branch constraint (e.g. "oneOf" or "anyOf")
 // between one or more groups of required fields.
 json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups);
+
+// Build {"allOf": [{<branchType>: [<group_a>]}, {<branchType>: [<group_b>]}, ...]}
+// for tools that need multiple independent branch constraints (e.g. one oneOf
+// for source_* and another for target_*).  Each entry in per_branch_groups is
+// the equivalent of one build_branch_required_fields call's `groups` argument.
+json_t *build_branch_required_fields_allof(const char *branchType,
+	const SCP_vector<SCP_vector<SCP_vector<const char *>>> &per_branch_groups);
 
 // Build a schema_extras object with an "allOf" of if/then constraints
 // expressing: for each entry {value, required_fields}, if `property_name` is
