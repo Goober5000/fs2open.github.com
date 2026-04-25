@@ -1204,12 +1204,12 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 				sexp_error_message(syntax_result), syntax_result, bad_node);
 			return nullptr;
 		}
-
 		// no rollback: it's a modification
-		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 		// Detach the old tree and optionally free it
 		freed_count = release_subtree(n, do_delete);
+
+		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 	} else if (is_root) {
 		// Case B: Root of a free-standing tree
@@ -1272,9 +1272,8 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 	// Normalize the root so it is not a redundant list wrapper (matching the
 	// parser's convention that top-level trees are not wrapped).
 	int new_root = n;
-	bool was_unwrapped = false;
 	if (!do_delete) {
-		was_unwrapped = normalize_free_standing_root(new_root, freed_count);
+		normalize_free_standing_root(new_root, freed_count);
 		mcp_sexp_forest_mark_dirty({ new_root });
 	}
 
@@ -1337,7 +1336,6 @@ static bool attach_as_entity_formula(
 	if (!delete_displaced)
 		normalize_free_standing_root(displaced, freed_count);
 
-	// mark_modified
 	mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
 
 	mcp_sexp_forest_mark_dirty({ source, displaced });
@@ -2073,8 +2071,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 				info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
 			return;
 		}
-
 		// no rollback: it's a modification
+
 		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 	}
 
@@ -2578,8 +2576,13 @@ void mcp_register_sexp_tools(json_t *tools)
 			"siblings shift up by one position. By default, the detached node is "
 			"preserved and returned; set 'delete' to true to free it. The response "
 			"includes detached_node (int index), detached_node_data (full node object when "
-			"the node was not deleted), replacement_node (int or null), and replacement_node_data "
-			"(full node object when a replacement was inserted). For mission-attached "
+			"the node was not deleted), replacement_node (int or null), replacement_node_data "
+			"(full node object when a replacement was inserted), deleted (bool, true only when "
+			"'delete' was requested and at least one node was actually freed), and freed_count "
+			"(int, total number of nodes freed during the operation). Note - freed_count may be "
+			"non-zero even when 'delete' is false: if the detached subtree's root is a "
+			"redundant list wrapper, it is unwrapped so the new free-standing root is the "
+			"bare operator atom, and the wrapper counts toward freed_count. For mission-attached "
 			"trees, a syntax check is performed after modification; if the check fails, "
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
 			"be targeted directly; use target_argument_index with the parent operator.",
@@ -2649,7 +2652,13 @@ void mcp_register_sexp_tools(json_t *tools)
 			"directly; use target_argument_index with the parent operator. The response "
 			"includes source_node (int), source_node_data (full node object), position (string), "
 			"displaced_node (int or null), displaced_node_data (full node object when preserved), "
-			"deleted_displaced (bool), and freed_count (int).",
+			"deleted_displaced (bool, true only when 'delete_displaced' was requested and at least "
+			"one node was actually freed; a locked singleton displaced from an entity formula "
+			"cannot be freed and will report false), and freed_count (int, total number of "
+			"nodes freed during the operation). Note - freed_count may be non-zero even when "
+			"'delete_displaced' is false: if the displaced subtree's root is a redundant list "
+			"wrapper, it is unwrapped so the preserved free-standing root is the bare operator "
+			"atom, and the wrapper counts toward freed_count.",
 			props, req,
 			merge_schema_extras(
 				build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }),
