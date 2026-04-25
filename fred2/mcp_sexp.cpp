@@ -1426,7 +1426,6 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 		}
 	}
 
-	int original_source = source;
 	int displaced = -1;
 	int freed_count = 0;
 
@@ -1610,8 +1609,8 @@ static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &g
 
 	// Build response
 	json_t *result = json_object();
-	json_object_set_new(result, "source_node", json_integer(original_source));
-	json_object_set_new(result, "source_node_data", build_sexp_node_json(original_source));
+	json_object_set_new(result, "source_node", json_integer(source));
+	json_object_set_new(result, "source_node_data", build_sexp_node_json(source));
 	const char *pos_str = have_entity ? "entity_formula"
 		: (position == attach_position::REPLACE) ? "replace"
 		: (position == attach_position::BEFORE)  ? "before"
