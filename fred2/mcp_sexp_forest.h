@@ -20,12 +20,12 @@ void mcp_sexp_forest_mark_dirty();
 // Safe to call from any thread.
 void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots);
 
-// Remove a root from the partial-rebuild set.  Call when a node that was
+// Remove root nodes from the partial-rebuild set.  Call when a node that was
 // previously marked dirty as a root is being absorbed into another tree
 // (e.g., during attach_sexp_node) so that partial rebuild doesn't re-stamp
 // it as a free-standing root.  Safe to call from any thread.  No-op if
 // root is not currently in the dirty set.
-void mcp_sexp_forest_unmark_dirty_root(int root);
+void mcp_sexp_forest_unmark_dirty(const SCP_vector<int> &roots);
 
 // Rebuild the forest from the current Sexp_nodes[] array.
 // MUST be called on the main thread only.

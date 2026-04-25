@@ -19,6 +19,7 @@ struct color;           // full definition in graphics/2d.h
 // Functions that take McpErrorSink& work with both conventions.
 class McpErrorSink {
 public:
+	explicit McpErrorSink() : m_req(nullptr), m_err(nullptr), m_has_error(false) {}	// dev/null sink
 	explicit McpErrorSink(McpToolRequest *req) : m_req(req), m_err(nullptr), m_has_error(false) {}
 	explicit McpErrorSink(json_t **err) : m_req(nullptr), m_err(err), m_has_error(false) {}
 
