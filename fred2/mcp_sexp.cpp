@@ -1345,7 +1345,31 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 // ---------------------------------------------------------------------------
 
 static const SCP_vector<const char *> attach_position_values = { "replace", "before", "after" };
-enum class attach_position { REPLACE, BEFORE, AFTER };
+enum class attach_position { INVALID, REPLACE, BEFORE, AFTER };
+
+static attach_position parse_attach_position(const char *position_param, const char *position_str, McpErrorSink &sink)
+{
+	if (position_str) {
+		if (!check_string_enum(position_str, attach_position_values, position_param, sink))
+			return attach_position::INVALID;
+		if (!stricmp(position_str, "replace")) return attach_position::REPLACE;
+		else if (!stricmp(position_str, "before")) return attach_position::BEFORE;
+		else if (!stricmp(position_str, "after")) return attach_position::AFTER;
+		else {
+			sink.set_error("internal error: '%s' value '%s' passed check_string_enum but is not handled", position_param, position_str);
+			return attach_position::INVALID;
+		}
+	}
+	return attach_position::REPLACE;
+}
+
+static const char *attach_position_to_string(attach_position position)
+{
+	return (position == attach_position::REPLACE) ? "replace"
+		: (position == attach_position::BEFORE) ? "before"
+		: (position == attach_position::AFTER) ? "after"
+		: "invalid";
+}
 
 // Shared logic for replacing a mission entity's formula with a new source node.
 // Validates source, sets the formula, runs a syntax check (rolling back on failure),
@@ -1402,11 +1426,11 @@ static json_t *build_attach_response_json(int source, const GeneralSEXPReference
 	json_t *result_json = json_object();
 	json_object_set_new(result_json, "source_node", json_integer(source));
 	json_object_set_new(result_json, "source_node_data", build_sexp_node_json(source));
-	const char *pos_str = (general_target.mode == GeneralSEXPReference::Mode::Entity)
-		? "entity_formula"
-		: (position == attach_position::REPLACE) ? "replace"
-		: (position == attach_position::BEFORE)  ? "before"
-		: "after";
+	const char *pos_str;
+	if (general_target.mode == GeneralSEXPReference::Mode::Entity)
+		pos_str = "entity_formula";
+	else
+		pos_str = attach_position_to_string(position);
 	json_object_set_new(result_json, "position", json_string(pos_str));
 
 	if (result.displaced >= 0) {
@@ -1450,13 +1474,8 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	bool delete_displaced = delete_displaced_opt.has_value() && *delete_displaced_opt;
 
 	// Determine position enum
-	attach_position position = attach_position::REPLACE;
-	if (position_str) {
-		if (!check_string_enum(position_str, attach_position_values, "position", sink))
-			return;
-		if (!stricmp(position_str, "before")) position = attach_position::BEFORE;
-		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
-	}
+	attach_position position = parse_attach_position("position", position_str, sink);
+	if (position == attach_position::INVALID) return;
 
 	auto result = handle_attach_sexp_node(source, general_target, position, delete_displaced, sink);
 	if (sink.has_error()) return;
@@ -1788,12 +1807,8 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 
 	bool shrink = shrink_opt.has_value() && *shrink_opt;
 
-	attach_position position = attach_position::REPLACE;
-	if (position_str) {
-		if (!check_string_enum(position_str, attach_position_values, "position", sink)) return;
-		if (!stricmp(position_str, "before")) position = attach_position::BEFORE;
-		else if (!stricmp(position_str, "after")) position = attach_position::AFTER;
-	}
+	attach_position position = parse_attach_position("position", position_str, sink);
+	if (position == attach_position::INVALID) return;
 
 	// Same-node guard: compare resolved absolute indices before any mutation.
 	if (src_ref.node == tgt_ref.node) {
@@ -1927,10 +1942,9 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 			/*shrink=*/false, /*do_delete=*/false, rb_sink);
 
 		// Construct a synthetic det_b' so rollback_detach knows the new
-		// placeholder identity at b's slot (only relevant for node-mode tgt).
+		// placeholder identity at b's slot.
 		detach_result det_b_prime = det_b;
-		if (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
-			det_b_prime.replacement = undo_a.replacement;
+		det_b_prime.replacement = undo_a.replacement;
 		rollback_detach(tgt_ref, det_b_prime, /*shrink=*/false, rb_sink);
 		rollback_detach(src_ref, det_a, /*shrink=*/false, rb_sink);
 
@@ -3072,9 +3086,12 @@ void mcp_register_sexp_tools(json_t *tools)
 			"the same three forms with target_ prefixes.  In node-relative target mode, "
 			"position can be 'replace' (default), 'before', or 'after' -- same semantics as "
 			"attach_sexp_node.  In entity target mode, the source replaces the entity's "
-			"current formula. The response includes 'moved_node' (int, the absolute index "
-			"of the relocated subtree's root) and the full 'detached' and 'attached' "
-			"sub-objects (see detach_sexp_node and attach_sexp_node for their fields).",
+			"current formula. The response includes 'moved_node' (int, the absolute index of "
+			"the relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
+			"(see detach_sexp_node and attach_sexp_node for their fields). Note that when "
+			"position='replace' or in entity target mode, anything already at the target slot "
+			"is preserved as a free-standing root rather than freed, per the default behavior "
+			"of attach_sexp_node; the caller is responsible for using or freeing it.",
 			props, /*required=*/nullptr,
 			merge_schema_extras(
 				build_branch_required_fields_allof("oneOf", {
