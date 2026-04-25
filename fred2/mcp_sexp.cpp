@@ -971,10 +971,10 @@ static bool check_attached_syntax_or_rollback(
 }
 
 // ---------------------------------------------------------------------------
-// Shared target resolution
+// SEXP reference resolution
 // ---------------------------------------------------------------------------
 
-struct GeneralSEXPTarget {
+struct GeneralSEXPReference {
 	enum class Mode { Entity, Node };
 	Mode mode;
 	int node = -1;
@@ -983,51 +983,63 @@ struct GeneralSEXPTarget {
 	int entity_current_root = -1;
 };
 
-static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpErrorSink &sink)
+static bool parse_general_sexp_reference(json_t *input, const char *field_prefix, GeneralSEXPReference &out, McpErrorSink &sink)
 {
-	auto target_opt = get_optional_integer(input, "target_node", sink);
-	auto arg_idx_opt = get_optional_integer(input, "target_argument_index", sink);
-	auto entity_type = get_optional_string(input, "target_entity_type", sink);
-	auto entity_id = get_optional_string(input, "target_entity_id", sink);
-	auto entity_tag = get_optional_string(input, "entity_tag", sink);
+	SCP_string field_prefix_scp_str;
+	if (field_prefix && field_prefix[0]) {
+		field_prefix_scp_str += field_prefix;
+	}
+	auto node_scp_str = field_prefix_scp_str + "node";
+	auto node_str = node_scp_str.c_str();
+	auto arg_idx_scp_str = field_prefix_scp_str + "argument_index";
+	auto arg_idx_str = arg_idx_scp_str.c_str();
+	auto entity_type_scp_str = field_prefix_scp_str + "entity_type";
+	auto entity_type_str = entity_type_scp_str.c_str();
+	auto entity_id_scp_str = field_prefix_scp_str + "entity_id";
+	auto entity_id_str = entity_id_scp_str.c_str();
+	auto entity_tag_scp_str = field_prefix_scp_str + "entity_tag";
+	auto entity_tag_str = entity_tag_scp_str.c_str();
+
+	auto node_opt = get_optional_integer(input, node_str, sink);
+	auto arg_idx_opt = get_optional_integer(input, arg_idx_str, sink);
+	auto entity_type = get_optional_string(input, entity_type_str, sink);
+	auto entity_id = get_optional_string(input, entity_id_str, sink);
+	auto entity_tag = get_optional_string(input, entity_tag_str, sink);
 	if (sink.has_error()) return false;
 
-	bool have_target_node = target_opt.has_value();
+	bool have_node = node_opt.has_value();
 	bool have_entity = (entity_type != nullptr);
 
-	if (have_target_node == have_entity) {
-		sink.set_error("Exactly one of 'target_node' or 'target_entity_type' must be provided");
+	if (have_node == have_entity) {
+		sink.set_error("Exactly one of '%s' or '%s' must be provided", node_str, entity_type_str);
 		return false;
 	}
-
-	if (arg_idx_opt.has_value() && !have_target_node) {
-		sink.set_error("'target_argument_index' can only be used with 'target_node', not with entity mode");
+	if (arg_idx_opt.has_value() && !have_node) {
+		sink.set_error("'%s' can only be used with '%s', not with entity mode", arg_idx_str, node_str);
 		return false;
 	}
-
-	if (entity_tag && have_target_node) {
-		sink.set_error("'entity_tag' can only be used with 'target_entity_type', not with node mode");
+	if (entity_tag && have_node) {
+		sink.set_error("'%s' can only be used with '%s', not with node mode", entity_tag_str, entity_type_str);
 		return false;
 	}
-
-	if (entity_id && have_target_node) {
-		sink.set_error("'target_entity_id' can only be used with 'target_entity_type', not with node mode");
+	if (entity_id && have_node) {
+		sink.set_error("'%s' can only be used with '%s', not with node mode", entity_id_str, entity_type_str);
 		return false;
 	}
 
 	if (have_entity) {
 		// --- Entity mode ---
 		if (!entity_id) {
-			sink.set_error("'target_entity_id' is required when 'target_entity_type' is provided");
+			sink.set_error("'%s' is required when '%s' is provided", entity_id_str, entity_type_str);
 			return false;
 		}
-		if (!check_string_enum(entity_type, formula_entity_type_values, "target_entity_type", sink))
+		if (!check_string_enum(entity_type, formula_entity_type_values, entity_type_str, sink))
 			return false;
 		if (entity_tag) {
-			if (!check_string_enum(entity_tag, formula_entity_tag_values, "entity_tag", sink))
+			if (!check_string_enum(entity_tag, formula_entity_tag_values, entity_tag_str, sink))
 				return false;
 		}
-		out.mode = GeneralSEXPTarget::Mode::Entity;
+		out.mode = GeneralSEXPReference::Mode::Entity;
 		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
 			out.entity_current_root, sink);
 		if (sink.has_error()) return false;
@@ -1041,52 +1053,52 @@ static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpError
 	}
 
 	// --- Node mode ---
-	int target = *target_opt;
-	if (!check_int_range(target, 0, Num_sexp_nodes - 1, "target_node", sink))
+	int node = *node_opt;
+	if (!check_int_range(node, 0, Num_sexp_nodes - 1, node_str, sink))
 		return false;
-	if (Sexp_nodes[target].type == SEXP_NOT_USED) {
-		sink.set_error("Target node %d is not in use", target);
+	if (Sexp_nodes[node].type == SEXP_NOT_USED) {
+		sink.set_error("%s %d is not in use", node_str, node);
 		return false;
 	}
-	out.original_node = target;
+	out.original_node = node;
 
 	if (!arg_idx_opt.has_value()) {
 		// No argument index — direct node addressing.
 		// Reject locked singletons since they can't be uniquely addressed.
-		if (target == Locked_sexp_true || target == Locked_sexp_false) {
-			sink.set_error("Target node %d is a shared singleton (locked %s) and cannot be "
-				"uniquely addressed. Pass the parent operator as target_node and set "
-				"target_argument_index to the singleton's position in its argument list.",
-				target, (target == Locked_sexp_true) ? "true" : "false");
+		if (node == Locked_sexp_true || node == Locked_sexp_false) {
+			sink.set_error("%s %d is a shared singleton (locked %s) and cannot be "
+				"uniquely addressed. Pass the parent operator as %s and set "
+				"%s to the singleton's position in its argument list.",
+				node_str, node, (node == Locked_sexp_true) ? "true" : "false", node_str, arg_idx_str);
 			return false;
 		}
-		out.mode = GeneralSEXPTarget::Mode::Node;
-		out.node = target;
+		out.mode = GeneralSEXPReference::Mode::Node;
+		out.node = node;
 		return true;
 	}
 
 	// --- Node + argument index ---
 	int arg_idx = *arg_idx_opt;
 	if (arg_idx < 1) {
-		sink.set_error("target_argument_index must be positive (got %d); argument positions are 1-based", arg_idx);
+		sink.set_error("%s must be positive (got %d); argument positions are 1-based", arg_idx_str, arg_idx);
 		return false;
 	}
 
 	// Retarget operator atom to its list wrapper if applicable
-	int retargeted = retarget_to_list_wrapper(target);
+	int retargeted = retarget_to_list_wrapper(node);
 
 	// Must be an operator atom or list wrapper
 	int op_atom;
 	if (SEXP_NODE_TYPE(retargeted) == SEXP_LIST) {
 		op_atom = Sexp_nodes[retargeted].first;
 		if (op_atom < 0 || Sexp_nodes[op_atom].subtype != SEXP_ATOM_OPERATOR) {
-			sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
+			sink.set_error("%s requires %s to be an operator or its list wrapper", arg_idx_str, node_str);
 			return false;
 		}
 	} else if (SEXP_NODE_TYPE(retargeted) == SEXP_ATOM && Sexp_nodes[retargeted].subtype == SEXP_ATOM_OPERATOR) {
 		op_atom = retargeted;
 	} else {
-		sink.set_error("target_argument_index requires target_node to be an operator or its list wrapper");
+		sink.set_error("%s requires %s to be an operator or its list wrapper", arg_idx_str, node_str);
 		return false;
 	}
 
@@ -1102,12 +1114,12 @@ static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpError
 	}
 
 	if (arg < 0) {
-		sink.set_error("Operator '%s' has %d argument(s); target_argument_index=%d is out of range",
-			Sexp_nodes[op_atom].text, count, arg_idx);
+		sink.set_error("Operator '%s' has %d argument(s); %s=%d is out of range",
+			Sexp_nodes[op_atom].text, count, arg_idx_str, arg_idx);
 		return false;
 	}
 
-	out.mode = GeneralSEXPTarget::Mode::Node;
+	out.mode = GeneralSEXPReference::Mode::Node;
 	out.node = arg;
 	return true;
 }
@@ -1116,19 +1128,19 @@ static bool parse_general_target(json_t *input, GeneralSEXPTarget &out, McpError
 // detach_sexp_node handler (run on main thread)
 // ---------------------------------------------------------------------------
 
-static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, bool shrink, bool do_delete, McpErrorSink &sink);
+static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink);
 
 static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	GeneralSEXPTarget general_target;
-	if (!parse_general_target(input, general_target, sink))
+	GeneralSEXPReference general_ref;
+	if (!parse_general_sexp_reference(input, nullptr, general_ref, sink))
 		return;
 
-	if (general_target.mode == GeneralSEXPTarget::Mode::Entity && general_target.entity_current_root < 0) {
-		sink.set_error("Entity has no formula to detach (formula index %d)", general_target.entity_current_root);
+	if (general_ref.mode == GeneralSEXPReference::Mode::Entity && general_ref.entity_current_root < 0) {
+		sink.set_error("Entity has no formula to detach (formula index %d)", general_ref.entity_current_root);
 		return;
 	}
 
@@ -1137,16 +1149,16 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	auto delete_opt = get_optional_bool(input, "delete", sink);
 	bool do_delete = delete_opt.has_value() && *delete_opt;
 
-	auto result_json = handle_detach_sexp_node(general_target, shrink, do_delete, sink);
+	auto result_json = handle_detach_sexp_node(general_ref, shrink, do_delete, sink);
 	if (sink.has_error()) return;
 
 	req->result_json = result_json;
 	req->success = true;
 }
 
-static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, bool shrink, bool do_delete, McpErrorSink &sink)
+static json_t *handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink)
 {
-	int n = general_target.node;
+	int n = general_ref.node;
 	int original_n = n;
 
 	if (Sexp_nodes[n].type == SEXP_NOT_USED) {
@@ -1157,11 +1169,11 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 	// If the client targeted an operator atom inside a list wrapper,
 	// retarget to the wrapper so the entire sub-expression is detached.
 	// Skip for entity mode which targets the formula root directly.
-	if (general_target.mode == GeneralSEXPTarget::Mode::Node)
+	if (general_ref.mode == GeneralSEXPReference::Mode::Node)
 		n = retarget_to_list_wrapper(n);
 
 	// Determine context: walk to tree root and check mission attachment
-	FormulaRootInfo info = (general_target.mode == GeneralSEXPTarget::Mode::Entity) ? general_target.entity_info : find_formula_root_and_type(n);
+	FormulaRootInfo info = (general_ref.mode == GeneralSEXPReference::Mode::Entity) ? general_ref.entity_info : find_formula_root_and_type(n);
 	bool is_root = (n == info.root);
 	bool is_attached = info.attached;
 
@@ -1223,7 +1235,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 
 	} else {
 		// Cases C & D: Embedded node -- splice a replacement into the link chain.
-		int target_rest = Sexp_nodes[n].rest;
+		int rest = Sexp_nodes[n].rest;
 
 		// Locate the predecessor before splicing so we can reliably restore
 		// it on rollback.  splice_replace_node can't find the old position if
@@ -1235,10 +1247,10 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 			// Shrink mode: link the predecessor directly to the next sibling,
 			// shifting subsequent arguments up by one position.
 			replacement = -1;
-			splice_replace_node(n, target_rest);
+			splice_replace_node(n, rest);
 		} else {
 			// Default mode: insert a placeholder to preserve argument positions.
-			replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, target_rest);
+			replacement = alloc_sexp(PLACEHOLDER_STRING, SEXP_ATOM, SEXP_ATOM_STRING, -1, rest);
 			Sexp_nodes[replacement].parent = Sexp_nodes[n].parent;
 			splice_replace_node(n, replacement);
 		}
@@ -1256,7 +1268,7 @@ static json_t *handle_detach_sexp_node(const GeneralSEXPTarget &general_target, 
 		if (is_attached)
 			mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
 
-		// Commit: detach and optionally free the target subtree
+		// Commit: detach and optionally free the subtree
 		Sexp_nodes[n].rest = -1;	// don't walk into the live tree
 		Sexp_nodes[n].parent = -1;
 		if (do_delete)
@@ -1342,7 +1354,7 @@ static bool attach_as_entity_formula(
 	return true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const GeneralSEXPTarget &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
+static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
 
 static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
@@ -1356,15 +1368,15 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	if (!check_int_range(source, 0, Num_sexp_nodes - 1, "source_node", sink))
 		return;
 
-	GeneralSEXPTarget general_target;
-	if (!parse_general_target(input, general_target, sink))
+	GeneralSEXPReference general_target;
+	if (!parse_general_sexp_reference(input, "target_", general_target, sink))
 		return;
 
 	auto position_str = get_optional_string(input, "position", sink);
 	auto delete_displaced_opt = get_optional_bool(input, "delete_displaced", sink);
 	if (sink.has_error()) return;
 
-	if (position_str && general_target.mode != GeneralSEXPTarget::Mode::Node) {
+	if (position_str && general_target.mode != GeneralSEXPReference::Mode::Node) {
 		sink.set_error("'position' can only be used with 'target_node', not with entity mode");
 		return;
 	}
@@ -1387,9 +1399,9 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-static json_t *handle_attach_sexp_node(int source, const GeneralSEXPTarget &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
+static json_t *handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
 {
-	bool have_entity = (general_target.mode == GeneralSEXPTarget::Mode::Entity);
+	bool have_entity = (general_target.mode == GeneralSEXPReference::Mode::Entity);
 
 	// --- Validate source ---
 	if (Sexp_nodes[source].type == SEXP_NOT_USED) {
@@ -2534,22 +2546,22 @@ void mcp_register_sexp_tools(json_t *tools)
 	// detach_sexp_node
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "target_node",
+		add_integer_prop(props, "node",
 			"Node index of the SEXP node to detach. "
-			"Mutually exclusive with target_entity_type. If the target is an operator "
+			"Mutually exclusive with entity_type. If the target is an operator "
 			"inside a list wrapper, the wrapper is automatically detached instead. "
 			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"target_argument_index with the parent operator instead.");
-		add_integer_prop(props, "target_argument_index",
-			"1-based index into the argument list of the operator at target_node. "
-			"When provided, target_node must be an operator (or its list wrapper) and "
+			"argument_index with the parent operator instead.");
+		add_integer_prop(props, "argument_index",
+			"1-based index into the argument list of the operator at node. "
+			"When provided, node must be an operator (or its list wrapper) and "
 			"the detach operates on that argument instead of the operator itself.");
-		add_string_enum_prop(props, "target_entity_type",
+		add_string_enum_prop(props, "entity_type",
 			"Entity type whose formula to detach and replace with a default. "
-			"Mutually exclusive with target_node. Requires target_entity_id.",
+			"Mutually exclusive with node. Requires entity_id.",
 			formula_entity_type_values);
-		add_string_prop(props, "target_entity_id",
-			"Entity name or index. Required when target_entity_type is set. "
+		add_string_prop(props, "entity_id",
+			"Entity name or index. Required when entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
 			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
 		add_string_enum_prop(props, "entity_tag",
@@ -2565,9 +2577,9 @@ void mcp_register_sexp_tools(json_t *tools)
 			"the detached node is preserved and returned in the response.");
 		register_tool(tools, "detach_sexp_node",
 			"Detach a SEXP node from its tree. The target can be specified by node index "
-			"(target_node), by node index plus argument position (target_node + "
-			"target_argument_index), or by entity coordinates (target_entity_type + "
-			"target_entity_id). If the target is an operator inside a list wrapper, the "
+			"(node), by node index plus argument position (node + "
+			"argument_index), or by entity coordinates (entity_type + "
+			"entity_id). If the target is an operator inside a list wrapper, the "
 			"wrapper is automatically detached as well. If the node is the root of a "
 			"mission entity's formula (or entity mode is used), it is replaced with an "
 			"appropriate default (e.g. do-nothing for action formulas, true for boolean "
@@ -2585,14 +2597,14 @@ void mcp_register_sexp_tools(json_t *tools)
 			"bare operator atom, and the wrapper counts toward freed_count. For mission-attached "
 			"trees, a syntax check is performed after modification; if the check fails, "
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
-			"be targeted directly; use target_argument_index with the parent operator.",
+			"be targeted directly; use argument_index with the parent operator.",
 			props, nullptr,
 			merge_schema_extras(
-				build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }),
+				build_branch_required_fields("oneOf", { {"node"}, {"entity_type", "entity_id"} }),
 				build_dependencies_extras({
-					{"target_argument_index", {"target_node"}},
-					{"target_entity_id", {"target_entity_type"}},
-					{"entity_tag", {"target_entity_type"}},
+					{"argument_index", {"node"}},
+					{"entity_id", {"entity_type"}},
+					{"entity_tag", {"entity_type"}},
 				})));
 	}
 
@@ -2620,7 +2632,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Entity name or index. Required when target_entity_type is set. "
 			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
 			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
-		add_string_enum_prop(props, "entity_tag",
+		add_string_enum_prop(props, "target_entity_tag",
 			"Disambiguation tag for entities that have multiple formula slots. "
 			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
 			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
@@ -2665,7 +2677,7 @@ void mcp_register_sexp_tools(json_t *tools)
 				build_dependencies_extras({
 					{"target_argument_index", {"target_node"}},
 					{"target_entity_id", {"target_entity_type"}},
-					{"entity_tag", {"target_entity_type"}},
+					{"target_entity_tag", {"target_entity_type"}},
 					{"position", {"target_node"}},
 				})));
 	}
