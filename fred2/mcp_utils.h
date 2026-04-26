@@ -5,6 +5,7 @@
 #include <utility>
 
 #include "globalincs/vmallocator.h"
+#include "parse/sexp.h"
 
 // ---------------------------------------------------------------------------
 // Fuzzy search
@@ -47,5 +48,44 @@ SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 
 	return matches;
 }
+
+// ---------------------------------------------------------------------------
+// SEXPs
+// ---------------------------------------------------------------------------
+
+// Metadata for a SEXP argument type (OPF_*)
+struct opf_type_info {
+	const char *name;        // string from opf_to_name
+	const char *description; // what this type accepts
+	const char **accepts;    // null-terminated list of value categories
+	const char *notes;       // optional extra context (may be nullptr)
+};
+
+extern const opf_type_info Opf_type_info[];
+
+// Metadata for a SEXP return type (OPR_*)
+struct opr_type_info {
+	sexp_opr_t opr_value;
+	const char *name;
+	const char *description;
+	const char **compatible_with; // null-terminated list of argument type names this can satisfy
+};
+
+extern const opr_type_info Opr_type_info[];
+
+// Look up the human-readable name for an OPR_* return type constant.
+const char *opr_to_name(int opr_value);
+
+// Look up the human-readable name for an OPF_* argument type constant.
+const char *opf_to_name(int opf);
+
+// Reverse mapping: MCP name → OPF_* constant.
+// Returns -1 if the name is not recognized.
+int opf_from_name(const char *name);
+
+const char *mcp_get_sexp_category_name(int category_id);
+
+const char *mcp_get_sexp_category_description(int category_id);
+
 
 #endif // _MCP_UTILS_H
