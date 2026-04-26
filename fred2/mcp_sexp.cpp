@@ -832,15 +832,18 @@ static void splice_replace_node(int old_node, int new_node)
 	}
 }
 
-// Restore the predecessor link that was modified by splice_replace_node or a
-// manual predecessor update.  pred_list is the wrapper whose .first was
-// changed; pred_ante is the sibling whose .rest was changed.
-static void restore_predecessor(int pred_list, int pred_ante, int original_node)
+// Set the predecessor link to point at `node`.  pred_list is the wrapper whose
+// .first should reference `node`; pred_ante is the sibling whose .rest should
+// reference `node`.  Exactly one of the two should be >= 0 (matching how
+// find_sexp_list / find_sexp_antecedent identify a node's predecessor).  This
+// is the inverse of splice_replace_node and is also handy for rolling back a
+// predecessor update.
+static void splice_set_predecessor(int pred_list, int pred_ante, int node)
 {
 	if (pred_list >= 0)
-		Sexp_nodes[pred_list].first = original_node;
+		Sexp_nodes[pred_list].first = node;
 	else if (pred_ante >= 0)
-		Sexp_nodes[pred_ante].rest = original_node;
+		Sexp_nodes[pred_ante].rest = node;
 }
 
 // Wraps n in a list wrapper.  Returns the wrapper node.
@@ -878,15 +881,18 @@ static int unwrap_node(int wrapper_n, bool free_wrapper)
 	return n;
 }
 
-// Performs the actual technical separation of a subtree from a supertree.
-// If source is a wrapped node, it is unwrapped in the process.
-static void make_source_free_standing(int source, int effective_source)
+// Make `node` a free-standing root, separating it from any supertree.  If
+// `wrapper_or_node` differs from `node`, it is the list wrapper currently
+// enclosing `node` and gets unwrapped (and freed) in the process; otherwise
+// `node`'s parent/rest fields are cleared directly.  Pass node twice when
+// there is no wrapper.
+static void make_free_standing(int node, int wrapper_or_node)
 {
-	if (source != effective_source) {
-		unwrap_node(effective_source, true);
+	if (node != wrapper_or_node) {
+		unwrap_node(wrapper_or_node, true);
 	} else {
-		Sexp_nodes[effective_source].rest = -1;
-		Sexp_nodes[effective_source].parent = -1;
+		Sexp_nodes[node].rest = -1;
+		Sexp_nodes[node].parent = -1;
 	}
 }
 
@@ -1297,7 +1303,7 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 
 		// Syntax check for mission-attached trees (Case C).
 		if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
-				restore_predecessor(pred_list, pred_ante, n);
+				splice_set_predecessor(pred_list, pred_ante, n);
 				if (replacement >= 0) {
 					Sexp_nodes[replacement].rest = -1;	// don't walk into the live tree
 					Sexp_nodes[replacement].parent = -1;
@@ -1620,8 +1626,8 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 						Sexp_nodes[target].rest = target_rest;
 						Sexp_nodes[target].parent = target_parent;
-						restore_predecessor(pred_list, pred_ante, target);
-						make_source_free_standing(source, effective_source);
+						splice_set_predecessor(pred_list, pred_ante, target);
+						make_free_standing(source, effective_source);
 					}, "Attachment", sink))
 					return {};
 				if (is_attached && !suppress_mark_modified)
@@ -1660,8 +1666,8 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				Sexp_nodes[pred_ante].rest = effective_source;
 
 			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
-					restore_predecessor(pred_list, pred_ante, target);
-					make_source_free_standing(source, effective_source);
+					splice_set_predecessor(pred_list, pred_ante, target);
+					make_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return {};
 			if (is_attached && !suppress_mark_modified)
@@ -1687,7 +1693,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 
 			if (!check_attached_syntax_or_rollback(info, is_attached, [&]() {
 					Sexp_nodes[target].rest = old_target_rest;
-					make_source_free_standing(source, effective_source);
+					make_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return {};
 			if (is_attached && !suppress_mark_modified)
@@ -1776,7 +1782,7 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 		Sexp_nodes[n].parent = (det.pred_list >= 0)
 			? det.pred_list
 			: Sexp_nodes[det.pred_ante].parent;
-		restore_predecessor(det.pred_list, det.pred_ante, n);
+		splice_set_predecessor(det.pred_list, det.pred_ante, n);
 		mcp_sexp_forest_mark_dirty({ find_formula_root_and_type(n).root });
 		return true;
 	}
