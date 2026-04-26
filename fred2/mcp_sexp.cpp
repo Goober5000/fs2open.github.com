@@ -1844,9 +1844,12 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	int tgt_eff = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
 		? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
 
-	// Same-node guard: compare effective slot indices before any mutation.
+	// Same-slot no-op: trivially succeed without mutating state, autosaving,
+	// or returning a flag.  Mirrors the convention of the per-entity move/swap
+	// tools in mcp_mission_tools.cpp.
 	if (src_eff == tgt_eff) {
-		sink.set_error("Source and target resolve to the same slot (node %d); move would be a no-op", src_eff);
+		req->result_json = make_json_tool_result(json_object());
+		req->success = true;
 		return;
 	}
 
@@ -1935,13 +1938,11 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	int tgt_eff = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
 		? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
 
-	// Same-node guard: succeed with swapped=false to mirror the no-op semantics
-	// of the existing per-entity swap_* tools.
+	// Same-slot no-op: trivially succeed without mutating state, autosaving,
+	// or returning a flag.  Mirrors the convention of the per-entity move/swap
+	// tools in mcp_mission_tools.cpp.
 	if (src_eff == tgt_eff) {
-		json_t *result = json_object();
-		json_object_set_new(result, "swapped", json_false());
-		json_object_set_new(result, "reason", json_string("source and target resolve to the same slot"));
-		req->result_json = make_json_tool_result(result);
+		req->result_json = make_json_tool_result(json_object());
 		req->success = true;
 		return;
 	}
@@ -2094,7 +2095,6 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 
 	// Step 6: build the combined response.
 	json_t *result = json_object();
-	json_object_set_new(result, "swapped", json_true());
 	json_object_set_new(result, "first_attach",
 		build_attach_response_json(det_a.detached_node, dest_for_a,
 			attach_position::REPLACE, /*delete_displaced=*/true, att_a));
@@ -3250,9 +3250,11 @@ void mcp_register_sexp_tools(json_t *tools)
 			"the same three forms with target_ prefixes.  In node-relative target mode, "
 			"position can be 'replace' (default), 'before', or 'after' -- same semantics as "
 			"attach_sexp_node.  In entity target mode, the source replaces the entity's "
-			"current formula. The response includes 'moved_node' (int, the absolute index of "
-			"the relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
-			"(see detach_sexp_node and attach_sexp_node for their fields). By default, anything "
+			"current formula. If source and target resolve to the same slot, the call is a "
+			"trivial no-op (success with an empty response, no autosave). Otherwise the "
+			"response includes 'moved_node' (int, the absolute index of the relocated "
+			"subtree's root) and the full 'detached' and 'attached' sub-objects (see "
+			"detach_sexp_node and attach_sexp_node for their fields). By default, anything "
 			"already at the target slot is preserved as a free-standing root and reported in "
 			"the response; pass delete_displaced=true to free it instead.",
 			props, /*required=*/nullptr,
@@ -3298,12 +3300,11 @@ void mcp_register_sexp_tools(json_t *tools)
 			"node index plus argument position, or by entity coordinates "
 			"(entity_type + entity_id). All four mode combinations are supported "
 			"(node/node, entity/entity, node/entity, entity/node). If source and "
-			"target resolve to the same node, the call succeeds as a no-op with "
-			"'swapped' set to false. The response includes 'swapped' (bool) and, "
-			"when swapped=true, 'first_attach' and 'second_attach' (see attach_sexp_node "
-			"for their fields).  'first_attach' reports the source attached at the "
-			"target's vacated slot; 'second_attach' reports the target attached at the "
-			"source's vacated slot.",
+			"target resolve to the same slot, the call is a trivial no-op (success "
+			"with an empty response, no autosave). Otherwise the response includes "
+			"'first_attach' and 'second_attach' (see attach_sexp_node for their fields).  "
+			"'first_attach' reports the source attached at the target's vacated slot; "
+			"'second_attach' reports the target attached at the source's vacated slot.",
 			props, /*required=*/nullptr,
 			merge_schema_extras(
 				build_branch_required_fields_allof("oneOf", {
