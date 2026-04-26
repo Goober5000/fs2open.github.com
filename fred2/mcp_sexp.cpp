@@ -1631,7 +1631,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 					normalize_free_standing_root(displaced, freed_count);
 
 				mcp_sexp_forest_mark_dirty({ info.root });
-				mcp_sexp_forest_unmark_dirty_root(source);
+				mcp_sexp_forest_unmark_dirty({ source });
 				if (!delete_displaced && displaced >= 0)
 					mcp_sexp_forest_mark_dirty({ displaced });
 			}
@@ -1666,7 +1666,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
-			mcp_sexp_forest_unmark_dirty_root(source);
+			mcp_sexp_forest_unmark_dirty({ source });
 
 		} else {
 			// -------------------------------------------------------
@@ -1692,7 +1692,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
-			mcp_sexp_forest_unmark_dirty_root(source);
+			mcp_sexp_forest_unmark_dirty({ source });
 		}
 	}
 
@@ -1910,6 +1910,46 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		req->result_json = make_json_tool_result(result);
 		req->success = true;
 		return;
+	}
+
+	// Containment guard: swap requires the two subtrees to be disjoint.  If
+	// one operand is inside the other's subtree, swap can't be cleanly
+	// implemented as two detaches + two attaches because each detach disturbs
+	// the other's slot.  Reject up-front before any mutation.
+	{
+		int src_root = (src_ref.mode == GeneralSEXPReference::Mode::Node)
+			? retarget_to_list_wrapper(src_ref.node) : src_ref.node;
+		int tgt_root = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
+			? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
+
+		// Walk up from descendant via find_parent_operator, which handles
+		// both the embedded case (.parent links) and the free-standing case
+		// (reverse-iteration via .antecedent) -- a plain .parent walk would
+		// miss the latter because of the unwrap convention.  If ancestor is
+		// a list wrapper, the operator atom we're matching against is its
+		// .first; otherwise ancestor itself.
+		auto contains = [](int ancestor, int descendant) {
+			if (descendant < 0 || ancestor < 0) return false;
+			int target_op = (SEXP_NODE_TYPE(ancestor) == SEXP_LIST)
+				? Sexp_nodes[ancestor].first : ancestor;
+			for (int cur = descendant; cur >= 0; cur = find_parent_operator(cur)) {
+				if (cur == target_op) return true;
+			}
+			return false;
+		};
+
+		if (contains(src_root, tgt_root)) {
+			sink.set_error("Cannot swap: target (node %d) is inside source's subtree "
+				"(rooted at node %d). Swap requires disjoint operands.",
+				tgt_root, src_root);
+			return;
+		}
+		if (contains(tgt_root, src_root)) {
+			sink.set_error("Cannot swap: source (node %d) is inside target's subtree "
+				"(rooted at node %d). Swap requires disjoint operands.",
+				src_root, tgt_root);
+			return;
+		}
 	}
 
 	// Step 1: detach source.
