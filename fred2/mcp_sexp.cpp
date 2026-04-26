@@ -2911,6 +2911,83 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 // Registration
 // ---------------------------------------------------------------------------
 
+// Schema descriptor for a "general SEXP reference" parameter group.  Used by
+// add_general_sexp_ref_props to emit the five props (<prefix>node,
+// <prefix>argument_index, <prefix>entity_type, <prefix>entity_id,
+// <prefix>entity_tag) consistently across the four tools that share this
+// reference shape (detach_sexp_node, attach_sexp_node, move_sexp_node,
+// swap_sexp_nodes).  All boilerplate text -- mutual-exclusion notes, list-
+// wrapper retarget warnings, locked-singleton workaround, per-entity-type
+// id/tag guidance -- lives in the helper, so callers only supply the bits
+// that genuinely vary by tool.
+struct GeneralSexpRefDesc {
+	// First sentence of the <prefix>node description (no trailing period).
+	// E.g. "Node index of the SEXP node to move".
+	const char *node_intro;
+	// Past-tense verb dropped into "...the wrapper is automatically <verb>
+	// instead."  E.g. "moved", "swapped", "detached", "targeted".
+	const char *retarget_verb;
+	// Verb dropped into "...the <verb> operates on that argument instead of
+	// the operator itself."  E.g. "move", "swap", "detach", "attach".
+	const char *arg_action_verb;
+	// First sentence of the <prefix>entity_type description (no trailing
+	// period).  E.g. "Entity type whose formula to move", "Entity type for
+	// the first formula in the swap".
+	const char *entity_type_role;
+	// Optional follow-on sentence appended after the mut-ex/requires text in
+	// the <prefix>entity_type description.  E.g. for detach / move source:
+	// "The entity's formula is replaced with a default."  Pass nullptr when
+	// the tool has no such side-effect to advertise.
+	const char *entity_type_extra;
+};
+
+static void add_general_sexp_ref_props(json_t *props, const char *prefix,
+	const GeneralSexpRefDesc &d)
+{
+	SCP_string p = prefix ? prefix : "";
+
+	// <prefix>node
+	SCP_string node_desc = d.node_intro;
+	node_desc += ". Mutually exclusive with " + p + "entity_type. ";
+	node_desc += "If the node is an operator inside a list wrapper, the wrapper is automatically ";
+	node_desc += d.retarget_verb;
+	node_desc += " instead. ";
+	node_desc += "Shared locked singletons (true/false) cannot be targeted directly; use ";
+	node_desc += p + "argument_index with the parent operator instead.";
+	add_integer_prop(props, (p + "node").c_str(), node_desc.c_str());
+
+	// <prefix>argument_index
+	SCP_string arg_desc = "1-based index into the argument list of the operator at " + p + "node. ";
+	arg_desc += "When provided, " + p + "node must be an operator (or its list wrapper) and the ";
+	arg_desc += d.arg_action_verb;
+	arg_desc += " operates on that argument instead of the operator itself.";
+	add_integer_prop(props, (p + "argument_index").c_str(), arg_desc.c_str());
+
+	// <prefix>entity_type
+	SCP_string et_desc = d.entity_type_role;
+	et_desc += ". Mutually exclusive with " + p + "node. Requires " + p + "entity_id.";
+	if (d.entity_type_extra && d.entity_type_extra[0]) {
+		et_desc += " ";
+		et_desc += d.entity_type_extra;
+	}
+	add_string_enum_prop(props, (p + "entity_type").c_str(), et_desc.c_str(),
+		formula_entity_type_values);
+
+	// <prefix>entity_id
+	SCP_string id_desc = "Entity name or index. Required when " + p + "entity_type is set. ";
+	id_desc += "For ships/wings: the ship or wing name. ";
+	id_desc += "For events/goals: the event or goal name. ";
+	id_desc += "For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.";
+	add_string_prop(props, (p + "entity_id").c_str(), id_desc.c_str());
+
+	// <prefix>entity_tag
+	add_string_enum_prop(props, (p + "entity_tag").c_str(),
+		"Disambiguation tag for entities that have multiple formula slots. "
+		"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
+		"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
+		formula_entity_tag_values);
+}
+
 void mcp_register_sexp_tools(json_t *tools)
 {
 	// -----------------------------------------------------------------------
@@ -2995,29 +3072,13 @@ void mcp_register_sexp_tools(json_t *tools)
 	// detach_sexp_node
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "node",
-			"Node index of the SEXP node to detach. "
-			"Mutually exclusive with entity_type. If the target is an operator "
-			"inside a list wrapper, the wrapper is automatically detached instead. "
-			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"argument_index with the parent operator instead.");
-		add_integer_prop(props, "argument_index",
-			"1-based index into the argument list of the operator at node. "
-			"When provided, node must be an operator (or its list wrapper) and "
-			"the detach operates on that argument instead of the operator itself.");
-		add_string_enum_prop(props, "entity_type",
-			"Entity type whose formula to detach and replace with a default. "
-			"Mutually exclusive with node. Requires entity_id.",
-			formula_entity_type_values);
-		add_string_prop(props, "entity_id",
-			"Entity name or index. Required when entity_type is set. "
-			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
-			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
-		add_string_enum_prop(props, "entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots. "
-			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
-			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
-			formula_entity_tag_values);
+		add_general_sexp_ref_props(props, "", {
+			"Node index of the SEXP node to detach",                       // node_intro
+			"detached",                                                     // retarget_verb
+			"detach",                                                       // arg_action_verb
+			"Entity type whose formula to detach",                          // entity_type_role
+			"The entity's formula is replaced with a default.",             // entity_type_extra
+		});
 		add_bool_prop(props, "shrink",
 			"If true, remove the node and shift subsequent siblings up by one "
 			"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
@@ -3063,29 +3124,13 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_integer_prop(props, "source_node",
 			"Node index of the free-standing root to attach. Must have parent == -1 "
 			"and not be attached to any mission entity.");
-		add_integer_prop(props, "target_node",
-			"Node index of an existing tree node to position the source relative to. "
-			"Mutually exclusive with target_entity_type. If the target is an operator "
-			"inside a list wrapper, the wrapper is automatically targeted instead. "
-			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"target_argument_index with the parent operator instead.");
-		add_integer_prop(props, "target_argument_index",
-			"1-based index into the argument list of the operator at target_node. "
-			"When provided, target_node must be an operator (or its list wrapper) and "
-			"the attach operates on that argument instead of the node itself.");
-		add_string_enum_prop(props, "target_entity_type",
-			"Entity type whose formula the source will become. Mutually exclusive with "
-			"target_node. Requires target_entity_id.",
-			formula_entity_type_values);
-		add_string_prop(props, "target_entity_id",
-			"Entity name or index. Required when target_entity_type is set. "
-			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
-			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
-		add_string_enum_prop(props, "target_entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots. "
-			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
-			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
-			formula_entity_tag_values);
+		add_general_sexp_ref_props(props, "target_", {
+			"Node index of an existing tree node to position the source relative to", // node_intro
+			"targeted",                                                                // retarget_verb
+			"attach",                                                                  // arg_action_verb
+			"Entity type whose formula the source will become",                        // entity_type_role
+			nullptr,                                                                   // entity_type_extra
+		});
 		add_string_enum_prop(props, "position",
 			"How to position the source relative to the target node. "
 			"'replace' (default) replaces the target; 'before' inserts before the target; "
@@ -3134,49 +3179,20 @@ void mcp_register_sexp_tools(json_t *tools)
 	// move_sexp_node
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "source_node",
-			"Node index of the SEXP node to move. "
-			"Mutually exclusive with source_entity_type. If the source is an operator "
-			"inside a list wrapper, the wrapper is automatically moved instead. "
-			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"source_argument_index with the parent operator instead.");
-		add_integer_prop(props, "source_argument_index",
-			"1-based index into the argument list of the operator at source_node. "
-			"When provided, source_node must be an operator (or its list wrapper) and "
-			"the move operates on that argument instead of the operator itself.");
-		add_string_enum_prop(props, "source_entity_type",
-			"Entity type whose formula to move. Mutually exclusive with source_node. "
-			"Requires source_entity_id. The entity's formula is replaced with a default.",
-			formula_entity_type_values);
-		add_string_prop(props, "source_entity_id",
-			"Entity name or index. Required when source_entity_type is set. "
-			"For ships/wings: the ship or wing name. For events/goals: the event or goal "
-			"name. For cutscenes/fiction viewer/briefing/debriefing stages: the 1-based stage index.");
-		add_string_enum_prop(props, "source_entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots. "
-			"For ships/wings: 'arrival_cue' (default) or 'departure_cue'. "
-			"For briefing/debriefing stages: 'team_1' (default) or 'team_2'.",
-			formula_entity_tag_values);
-
-		add_integer_prop(props, "target_node",
-			"Node index of an existing tree node to position the source relative to. "
-			"Mutually exclusive with target_entity_type. If the target is an operator "
-			"inside a list wrapper, the wrapper is automatically targeted instead. "
-			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"target_argument_index with the parent operator instead.");
-		add_integer_prop(props, "target_argument_index",
-			"1-based index into the argument list of the operator at target_node. "
-			"When provided, target_node must be an operator (or its list wrapper) and "
-			"the move operates on that argument instead of the node itself.");
-		add_string_enum_prop(props, "target_entity_type",
-			"Entity type whose formula the source will become. Mutually exclusive with "
-			"target_node. Requires target_entity_id.",
-			formula_entity_type_values);
-		add_string_prop(props, "target_entity_id",
-			"Entity name or index. Required when target_entity_type is set.");
-		add_string_enum_prop(props, "target_entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots.",
-			formula_entity_tag_values);
+		add_general_sexp_ref_props(props, "source_", {
+			"Node index of the SEXP node to move",                          // node_intro
+			"moved",                                                         // retarget_verb
+			"move",                                                          // arg_action_verb
+			"Entity type whose formula to move",                             // entity_type_role
+			"The entity's formula is replaced with a default.",              // entity_type_extra
+		});
+		add_general_sexp_ref_props(props, "target_", {
+			"Node index of an existing tree node to position the source relative to", // node_intro
+			"targeted",                                                                // retarget_verb
+			"move",                                                                    // arg_action_verb
+			"Entity type whose formula the source will become",                        // entity_type_role
+			nullptr,                                                                   // entity_type_extra
+		});
 
 		add_string_enum_prop(props, "position",
 			"How to position the source relative to the target node. "
@@ -3230,38 +3246,20 @@ void mcp_register_sexp_tools(json_t *tools)
 	// swap_sexp_nodes
 	{
 		json_t *props = json_object();
-		add_integer_prop(props, "source_node",
-			"Node index of the first SEXP node to swap. "
-			"Mutually exclusive with source_entity_type. If the source is an operator "
-			"inside a list wrapper, the wrapper is automatically swapped instead. "
-			"Shared locked singletons (true/false) cannot be targeted directly; use "
-			"source_argument_index with the parent operator instead.");
-		add_integer_prop(props, "source_argument_index",
-			"1-based index into the argument list of the operator at source_node.");
-		add_string_enum_prop(props, "source_entity_type",
-			"Entity type for the first formula in the swap. Mutually exclusive with "
-			"source_node. Requires source_entity_id.",
-			formula_entity_type_values);
-		add_string_prop(props, "source_entity_id",
-			"Entity name or index. Required when source_entity_type is set.");
-		add_string_enum_prop(props, "source_entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots.",
-			formula_entity_tag_values);
-
-		add_integer_prop(props, "target_node",
-			"Node index of the second SEXP node to swap. "
-			"Mutually exclusive with target_entity_type.");
-		add_integer_prop(props, "target_argument_index",
-			"1-based index into the argument list of the operator at target_node.");
-		add_string_enum_prop(props, "target_entity_type",
-			"Entity type for the second formula in the swap. Mutually exclusive with "
-			"target_node. Requires target_entity_id.",
-			formula_entity_type_values);
-		add_string_prop(props, "target_entity_id",
-			"Entity name or index. Required when target_entity_type is set.");
-		add_string_enum_prop(props, "target_entity_tag",
-			"Disambiguation tag for entities that have multiple formula slots.",
-			formula_entity_tag_values);
+		add_general_sexp_ref_props(props, "source_", {
+			"Node index of the first SEXP node to swap",      // node_intro
+			"swapped",                                         // retarget_verb
+			"swap",                                            // arg_action_verb
+			"Entity type for the first formula in the swap",   // entity_type_role
+			nullptr,                                           // entity_type_extra
+		});
+		add_general_sexp_ref_props(props, "target_", {
+			"Node index of the second SEXP node to swap",      // node_intro
+			"swapped",                                         // retarget_verb
+			"swap",                                            // arg_action_verb
+			"Entity type for the second formula in the swap",  // entity_type_role
+			nullptr,                                           // entity_type_extra
+		});
 
 		register_tool(tools, "swap_sexp_nodes",
 			"Exchange two SEXP subtrees in place, preserving each other's structural "
