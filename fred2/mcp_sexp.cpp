@@ -3652,13 +3652,15 @@ void mcp_register_sexp_tools(json_t *tools)
 			"New data type. Changing type may invalidate existing SEXP references.",
 			sexp_var_type_values);
 		add_string_array_prop(props, "variable_flags",
-			"New persistence and network flags (replaces all existing flags). "
+			"New persistence and network flags. Specify the complete set you want — "
+			"this replaces all existing flags rather than merging. "
 			"save_on_mission_progress and save_on_mission_close are mutually exclusive.",
 			flag_names);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_sexp_variable",
-			"Update a SEXP variable's properties. Only provided fields are changed. "
+			"Update a SEXP variable's properties. Omitted fields are unchanged; "
+			"provided fields replace existing values (variable_flags replaces the full flag set, not a delta). "
 			"If renaming, all SEXP node references are updated automatically.",
 			props, req);
 	}
