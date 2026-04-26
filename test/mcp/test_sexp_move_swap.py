@@ -336,17 +336,23 @@ def register(suite, client):
     # move_sexp_node — guards and error paths
     # =================================================================
 
-    def test_move_same_node_errors():
+    def test_move_same_node_is_noop():
+        # Same-slot move is a trivial no-op: success, no error, no flag, no
+        # autosave.  Mirrors the per-entity move/swap convention.
         a = _build_plus_tree([1, 2, 3])
         try:
             r = client.call_tool("walk_sexp_tree", {"node": a})
             two = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            pre_sig = tree_signature(tool_data(r)["nodes"])
             r = client.call_tool("move_sexp_node", {
                 "source_node": two,
                 "target_node": two,
             })
-            assert_error(r)
-            assert_in("same node", tool_text(r).lower())
+            assert_success(r)
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after same-slot move no-op")
         finally:
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
 
@@ -473,7 +479,6 @@ def register(suite, client):
                 "target_node": three,
             })
             assert_success(r)
-            assert_equal(tool_data(r).get("swapped"), True, "swapped=true")
             r = client.call_tool("walk_sexp_tree", {"node": a})
             vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
             order = [v for v in vals if v in ("+", "1", "2", "3", "4")]
@@ -551,7 +556,6 @@ def register(suite, client):
                 "target_entity_id": "swent_b",
             })
             assert_success(r)
-            assert_equal(tool_data(r).get("swapped"), True, "swapped=true")
 
             # After swap, each event's formula should now be the other's.
             r = client.call_tool("get_event", {"name": "swent_a"})
@@ -601,7 +605,7 @@ def register(suite, client):
             # (If this is supported, the assertion would need to be different.)
             if not r.get("isError"):
                 # If supported, just succeed-and-move-on.
-                assert_equal(tool_data(r).get("swapped"), True, "swapped=true if supported")
+                pass
             else:
                 # Document the failure mode; verify rollback left the event
                 # formula intact.
@@ -619,18 +623,22 @@ def register(suite, client):
     # =================================================================
 
     def test_swap_same_node_is_noop():
+        # Same-slot swap is a trivial no-op: success, no flag, no autosave.
+        # Mirrors the per-entity move/swap convention.
         a = _build_plus_tree([1, 2, 3])
         try:
             r = client.call_tool("walk_sexp_tree", {"node": a})
             two = find_node_by_value(tool_data(r)["nodes"], "2")["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            pre_sig = tree_signature(tool_data(r)["nodes"])
             r = client.call_tool("swap_sexp_nodes", {
                 "source_node": two,
                 "target_node": two,
             })
             assert_success(r)
-            d = tool_data(r)
-            assert_equal(d.get("swapped"), False, "swapped=false for same node")
-            assert_in("reason", d)
+            r = client.call_tool("walk_sexp_tree", {"node": a})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after same-slot swap no-op")
         finally:
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
 
@@ -649,7 +657,6 @@ def register(suite, client):
                 "target_argument_index": 2,
             })
             assert_success(r)
-            assert_equal(tool_data(r).get("swapped"), True, "swapped=true")
             r = client.call_tool("walk_sexp_tree", {"node": root})
             vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
             # The first non-and value should now be false, second true.
@@ -789,7 +796,7 @@ def register(suite, client):
     suite.add("sexp_move_entity_to_entity", test_move_entity_to_entity)
     suite.add("sexp_move_node_to_entity", test_move_node_to_entity)
     suite.add("sexp_move_entity_to_node", test_move_entity_to_node)
-    suite.add("sexp_move_same_node_errors", test_move_same_node_errors)
+    suite.add("sexp_move_same_node_is_noop", test_move_same_node_is_noop)
     suite.add("sexp_move_locked_singleton_bare_source_errors", test_move_locked_singleton_bare_source_errors)
     suite.add("sexp_move_atomic_rollback_shrink_false", test_move_atomic_rollback_shrink_false)
     suite.add("sexp_move_atomic_rollback_shrink_true", test_move_atomic_rollback_shrink_true)
