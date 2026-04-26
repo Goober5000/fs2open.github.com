@@ -757,6 +757,16 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 	auto needle = get_required_string(input, "text", sink, true);
 	if (!needle) return;
 
+	// The '@' prefix is a SEXP display convention for variable references
+	// (sexp_to_text emits "@var", text_to_sexp accepts it).  Stored node text
+	// is bare, so a naive client passing "@var" would otherwise find nothing.
+	// Strip a single leading '@', if it exists.
+	if (needle[0] == '@') needle++;
+	if (!needle[0]) {
+		sink.set_error("Required parameter must not be empty after stripping leading '@': text");
+		return;
+	}
+
 	const char *match_mode_str = get_optional_string(input, "match_mode", sink);
 	if (sink.has_error()) return;
 	bool exact = false;
@@ -3229,7 +3239,10 @@ void mcp_register_sexp_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "text",
-			"Text to search for in SEXP node values.  Must be non-empty.");
+			"Text to search for in SEXP node values.  Must be non-empty.  "
+			"A leading '@' is stripped before matching (the '@' prefix is a "
+			"SEXP display convention for variable references and is never "
+			"stored in node text).");
 		add_string_enum_prop(props, "match_mode",
 			"How to compare 'text' against each node's value.  'substring' (default) "
 			"matches if 'text' appears anywhere in the node's value.  'exact' matches "
