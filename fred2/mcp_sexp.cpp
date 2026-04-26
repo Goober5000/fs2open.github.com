@@ -1146,7 +1146,7 @@ struct detach_result {
 	int pred_ante = -1;
 };
 
-static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink);
+static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink, bool suppress_mark_modified = false);
 
 static json_t *build_detach_response_json(const detach_result &result, bool do_delete)
 {
@@ -1191,7 +1191,7 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink)
+static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink, bool suppress_mark_modified)
 {
 	int n = general_ref.node;
 	int original_n = n;
@@ -1260,7 +1260,8 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 		// Detach the old tree and optionally free it
 		freed_count = release_subtree(n, do_delete);
 
-		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
+		if (!suppress_mark_modified)
+			mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 	} else if (is_root) {
 		// Case B: Root of a free-standing tree
@@ -1304,7 +1305,7 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 				}
 			}, "Detachment", sink))
 			return {};
-		if (is_attached)
+		if (is_attached && !suppress_mark_modified)
 			mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
 
 		// Commit: detach and optionally free the subtree
@@ -1378,7 +1379,7 @@ static const char *attach_position_to_string(attach_position position)
 static bool attach_as_entity_formula(
 	int source, const FormulaRootInfo &info, int current_root,
 	bool delete_displaced, int &displaced, int &freed_count,
-	McpErrorSink &sink)
+	McpErrorSink &sink, bool suppress_mark_modified = false)
 {
 	// Validate source against entity's expected return type
 	if (!check_sexp_formula(source, info.opr_type, sink))
@@ -1405,7 +1406,8 @@ static bool attach_as_entity_formula(
 	if (!delete_displaced)
 		normalize_free_standing_root(displaced, freed_count);
 
-	mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
+	if (!suppress_mark_modified)
+		mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
 
 	mcp_sexp_forest_mark_dirty({ source, displaced });
 	return true;
@@ -1418,7 +1420,7 @@ struct attach_result {
 	int pred_ante = -1;
 };
 
-static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink);
+static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink, bool suppress_mark_modified = false);
 
 static json_t *build_attach_response_json(int source, const GeneralSEXPReference &general_target,
 	attach_position position, bool delete_displaced, const attach_result &result)
@@ -1484,7 +1486,7 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink)
+static attach_result handle_attach_sexp_node(int source, const GeneralSEXPReference &general_target, attach_position position, bool delete_displaced, McpErrorSink &sink, bool suppress_mark_modified)
 {
 	bool have_entity = (general_target.mode == GeneralSEXPReference::Mode::Entity);
 
@@ -1524,7 +1526,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 		// ---------------------------------------------------------------
 
 		if (!attach_as_entity_formula(source, general_target.entity_info, general_target.entity_current_root,
-				delete_displaced, displaced, freed_count, sink))
+				delete_displaced, displaced, freed_count, sink, suppress_mark_modified))
 			return {};
 
 	} else {
@@ -1593,7 +1595,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 
 			if (is_root && is_attached) {
 				// Replacing a formula root via target_node: delegate to entity logic.
-				if (!attach_as_entity_formula(source, info, info.root, delete_displaced, displaced, freed_count, sink))
+				if (!attach_as_entity_formula(source, info, info.root, delete_displaced, displaced, freed_count, sink, suppress_mark_modified))
 					return {};
 
 			} else {
@@ -1622,7 +1624,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 						make_source_free_standing(source, effective_source);
 					}, "Attachment", sink))
 					return {};
-				if (is_attached)
+				if (is_attached && !suppress_mark_modified)
 					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 
 				// Handle displaced subtree
@@ -1662,7 +1664,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return {};
-			if (is_attached)
+			if (is_attached && !suppress_mark_modified)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
@@ -1688,7 +1690,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 					make_source_free_standing(source, effective_source);
 				}, "Insertion", sink))
 				return {};
-			if (is_attached)
+			if (is_attached && !suppress_mark_modified)
 				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
@@ -1722,13 +1724,16 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 {
 	if (orig_ref.mode == GeneralSEXPReference::Mode::Entity) {
 		// Case A: entity-formula root.  Re-install the detached subtree as the
-		// entity's formula, freeing the default that detach inserted.
+		// entity's formula, freeing the default that detach inserted.  A
+		// successful rollback restores the pre-call state, so suppress the
+		// inner mark_modified -- no autosave entry is warranted.
 		GeneralSEXPReference dest = orig_ref;
 		dest.entity_current_root = det.replacement;
 		dest.node = det.replacement;
 		dest.original_node = det.replacement;
 		handle_attach_sexp_node(det.detached_node, dest,
-			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink);
+			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink,
+			/*suppress_mark_modified=*/true);
 		return !rollback_sink.has_error();
 	}
 
@@ -1736,7 +1741,8 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 		// Case C/D shrink=false: re-install by replacing the placeholder.
 		GeneralSEXPReference dest = make_node_ref(det.replacement);
 		handle_attach_sexp_node(det.detached_node, dest,
-			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink);
+			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink,
+			/*suppress_mark_modified=*/true);
 		return !rollback_sink.has_error();
 	}
 
@@ -1858,8 +1864,9 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Step 1: detach the source.
-	auto det = handle_detach_sexp_node(src_ref, shrink, /*do_delete=*/false, sink);
+	// Step 1: detach the source.  Suppress the inner mark_modified -- the
+	// composer emits one high-level entry on success.
+	auto det = handle_detach_sexp_node(src_ref, shrink, /*do_delete=*/false, sink, /*suppress_mark_modified=*/true);
 	if (sink.has_error()) return;
 
 	// Step 2: attach the detached subtree at the target.  Capture errors in a
@@ -1868,12 +1875,17 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	json_t *attach_err = nullptr;
 	McpErrorSink attach_sink(&attach_err);
 	auto att = handle_attach_sexp_node(det.detached_node, tgt_ref, position,
-		delete_displaced, attach_sink);
+		delete_displaced, attach_sink, /*suppress_mark_modified=*/true);
 	if (attach_sink.has_error()) {
 		McpErrorSink null_sink;	// dev/null
 		bool restored = rollback_detach(src_ref, det, shrink, null_sink);
 		SCP_vector<int> orphans;
 		if (!restored) orphans.push_back(det.detached_node);
+		// If rollback succeeded, net state matches pre-call -- no autosave.
+		// If it failed, the mission is in a partial state; record one entry
+		// so the user can recover via the autosave history.
+		if (!restored)
+			mark_modified("MCP: move SEXP subtree (partial -- rollback failed)");
 		report_composed_error(sink, attach_err, orphans, "Attach");
 		if (attach_err) json_decref(attach_err);
 		return;
@@ -1885,6 +1897,10 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	json_object_set_new(result_json, "detached", build_detach_response_json(det, /*do_delete=*/false));
 	json_object_set_new(result_json, "attached",
 		build_attach_response_json(det.detached_node, tgt_ref, position, delete_displaced, att));
+
+	// One high-level entry for the composed operation, in lieu of the inner
+	// detach + attach autosaves we suppressed.
+	mark_modified("MCP: move SEXP subtree from node %d to node %d", src_eff, tgt_eff);
 
 	req->result_json = make_json_tool_result(result_json);
 	req->success = true;
@@ -1965,19 +1981,22 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Step 1: detach source.
-	auto det_a = handle_detach_sexp_node(src_ref, /*shrink=*/false, /*do_delete=*/false, sink);
+	// Step 1: detach source.  Suppress the inner mark_modified -- the
+	// composer emits one high-level entry on success.
+	auto det_a = handle_detach_sexp_node(src_ref, /*shrink=*/false, /*do_delete=*/false, sink, /*suppress_mark_modified=*/true);
 	if (sink.has_error()) return;
 
 	// Step 2: detach target.  On failure, undo step 1.
 	json_t *det_b_err = nullptr;
 	McpErrorSink det_b_sink(&det_b_err);
-	auto det_b = handle_detach_sexp_node(tgt_ref, /*shrink=*/false, /*do_delete=*/false, det_b_sink);
+	auto det_b = handle_detach_sexp_node(tgt_ref, /*shrink=*/false, /*do_delete=*/false, det_b_sink, /*suppress_mark_modified=*/true);
 	if (det_b_sink.has_error()) {
 		McpErrorSink null_sink;	// dev/null
 		bool a_restored = rollback_detach(src_ref, det_a, /*shrink=*/false, null_sink);
 		SCP_vector<int> orphans;
 		if (!a_restored) orphans.push_back(det_a.detached_node);
+		if (!a_restored)
+			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, det_b_err, orphans, "Target detach");
 		if (det_b_err) json_decref(det_b_err);
 		return;
@@ -2003,7 +2022,8 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	json_t *att_a_err = nullptr;
 	McpErrorSink att_a_sink(&att_a_err);
 	auto att_a = handle_attach_sexp_node(det_a.detached_node, dest_for_a,
-		attach_position::REPLACE, /*delete_displaced=*/true, att_a_sink);
+		attach_position::REPLACE, /*delete_displaced=*/true, att_a_sink,
+		/*suppress_mark_modified=*/true);
 	if (att_a_sink.has_error()) {
 		McpErrorSink null_sink_1;	// dev/null
 		McpErrorSink null_sink_2;	// dev/null
@@ -2012,6 +2032,8 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		SCP_vector<int> orphans;
 		if (!b_restored) orphans.push_back(det_b.detached_node);
 		if (!a_restored) orphans.push_back(det_a.detached_node);
+		if (!b_restored || !a_restored)
+			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, att_a_err, orphans, "First attach");
 		if (att_a_err) json_decref(att_a_err);
 		return;
@@ -2021,7 +2043,8 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	json_t *att_b_err = nullptr;
 	McpErrorSink att_b_sink(&att_b_err);
 	auto att_b = handle_attach_sexp_node(det_b.detached_node, dest_for_b,
-		attach_position::REPLACE, /*delete_displaced=*/true, att_b_sink);
+		attach_position::REPLACE, /*delete_displaced=*/true, att_b_sink,
+		/*suppress_mark_modified=*/true);
 	if (att_b_sink.has_error()) {
 		// Reachability note: when tgt_ref is entity mode, this branch is
 		// unreachable.  Both step 4 and step 5 run check_sexp_formula against
@@ -2037,7 +2060,7 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		// of any later rollback failure.
 		McpErrorSink undo_sink;	// dev/null
 		auto undo_a = handle_detach_sexp_node(make_node_ref(det_a.detached_node),
-			/*shrink=*/false, /*do_delete=*/false, undo_sink);
+			/*shrink=*/false, /*do_delete=*/false, undo_sink, /*suppress_mark_modified=*/true);
 		bool a_extracted = !undo_sink.has_error();
 
 		// If undo_a succeeded, both detached subtrees are free-standing again
@@ -2062,6 +2085,8 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 			if (!b_restored) orphans.push_back(det_b.detached_node);
 			if (!a_restored) orphans.push_back(det_a.detached_node);
 		}
+		if (!orphans.empty())
+			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, att_b_err, orphans, "Second attach");
 		if (att_b_err) json_decref(att_b_err);
 		return;
@@ -2076,6 +2101,10 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	json_object_set_new(result, "second_attach",
 		build_attach_response_json(det_b.detached_node, dest_for_b,
 			attach_position::REPLACE, /*delete_displaced=*/true, att_b));
+
+	// One high-level entry for the composed operation, in lieu of the inner
+	// detach + attach autosaves we suppressed.
+	mark_modified("MCP: swap SEXP subtrees at nodes %d and %d", src_eff, tgt_eff);
 
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
