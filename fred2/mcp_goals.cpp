@@ -289,6 +289,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Rename last — updates SEXP references
 	if (new_name && stricmp(goal.name.c_str(), new_name) != 0) {
 		update_sexp_references(goal.name.c_str(), new_name, OPF_GOAL_NAME);
+		mcp_sexp_forest_mark_dirty();
 		goal.name = new_name;
 		changed = true;
 	}
@@ -323,6 +324,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 	// Invalidate SEXP references
 	SCP_string buf = SCP_string("<") + Mission_goals[idx].name + ">";
 	update_sexp_references(Mission_goals[idx].name.c_str(), buf.c_str(), OPF_GOAL_NAME);
+	mcp_sexp_forest_mark_dirty();
 
 	// Free the SEXP formula
 	if (Mission_goals[idx].formula >= 0)
