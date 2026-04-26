@@ -1175,7 +1175,7 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 		return;
 
 	if (general_ref.mode == GeneralSEXPReference::Mode::Entity && general_ref.entity_current_root < 0) {
-		sink.set_error("Entity has no formula to detach (formula index %d)", general_ref.entity_current_root);
+		sink.set_error("Entity (%s) has no formula to detach.", general_ref.entity_info.to_string().c_str());
 		return;
 	}
 
@@ -1815,7 +1815,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	if (!parse_general_sexp_reference(input, "target_", tgt_ref, sink)) return;
 
 	if (src_ref.mode == GeneralSEXPReference::Mode::Entity && src_ref.entity_current_root < 0) {
-		sink.set_error("Source entity has no formula to move (formula index %d)", src_ref.entity_current_root);
+		sink.set_error("Source entity (%s) has no formula to move; use attach_sexp_node to install one first.", src_ref.entity_info.to_string().c_str());
 		return;
 	}
 
@@ -1920,11 +1920,11 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	if (!parse_general_sexp_reference(input, "target_", tgt_ref, sink)) return;
 
 	if (src_ref.mode == GeneralSEXPReference::Mode::Entity && src_ref.entity_current_root < 0) {
-		sink.set_error("Source entity has no formula to swap (formula index %d)", src_ref.entity_current_root);
+		sink.set_error("Source entity (%s) has no formula to swap; use attach_sexp_node to install one first.", src_ref.entity_info.to_string().c_str());
 		return;
 	}
 	if (tgt_ref.mode == GeneralSEXPReference::Mode::Entity && tgt_ref.entity_current_root < 0) {
-		sink.set_error("Target entity has no formula to swap (formula index %d)", tgt_ref.entity_current_root);
+		sink.set_error("Target entity (%s) has no formula to swap; use attach_sexp_node to install one first.", tgt_ref.entity_info.to_string().c_str());
 		return;
 	}
 
