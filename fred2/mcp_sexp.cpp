@@ -1829,9 +1829,18 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	attach_position position = parse_attach_position("position", position_str, sink);
 	if (position == attach_position::INVALID) return;
 
-	// Same-node guard: compare resolved absolute indices before any mutation.
-	if (src_ref.node == tgt_ref.node) {
-		sink.set_error("Source and target resolve to the same node (%d); move would be a no-op", src_ref.node);
+	// Compute effective slot indices by retargeting operator atoms to their
+	// list wrappers (the same retarget detach does internally).  This makes
+	// the same-node guard catch the case where the user addresses a slot via
+	// the bare operator atom on one side and via the wrapper on the other.
+	int src_eff = (src_ref.mode == GeneralSEXPReference::Mode::Node)
+		? retarget_to_list_wrapper(src_ref.node) : src_ref.node;
+	int tgt_eff = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
+		? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
+
+	// Same-node guard: compare effective slot indices before any mutation.
+	if (src_eff == tgt_eff) {
+		sink.set_error("Source and target resolve to the same slot (node %d); move would be a no-op", src_eff);
 		return;
 	}
 
@@ -1840,9 +1849,8 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	// attach_sexp_node directly.  Entity mode is by definition mission-attached
 	// and was already validated above.
 	if (src_ref.mode == GeneralSEXPReference::Mode::Node) {
-		int probe = retarget_to_list_wrapper(src_ref.node);
-		FormulaRootInfo src_info = find_formula_root_and_type(probe);
-		if (src_info.root == probe && !src_info.attached) {
+		FormulaRootInfo src_info = find_formula_root_and_type(src_eff);
+		if (src_info.root == src_eff && !src_info.attached) {
 			sink.set_error("source_node %d is a free-standing root; "
 				"use attach_sexp_node directly to install it at the target.",
 				src_ref.node);
@@ -1901,12 +1909,22 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		return;
 	}
 
+	// Compute effective slot indices by retargeting operator atoms to their
+	// list wrappers (the same retarget detach does internally).  This makes
+	// the same-node guard catch the case where the user addresses a slot via
+	// the bare operator atom on one side and via the wrapper on the other,
+	// and is also what the containment guard below operates on.
+	int src_eff = (src_ref.mode == GeneralSEXPReference::Mode::Node)
+		? retarget_to_list_wrapper(src_ref.node) : src_ref.node;
+	int tgt_eff = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
+		? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
+
 	// Same-node guard: succeed with swapped=false to mirror the no-op semantics
 	// of the existing per-entity swap_* tools.
-	if (src_ref.node == tgt_ref.node) {
+	if (src_eff == tgt_eff) {
 		json_t *result = json_object();
 		json_object_set_new(result, "swapped", json_false());
-		json_object_set_new(result, "reason", json_string("source and target resolve to the same node"));
+		json_object_set_new(result, "reason", json_string("source and target resolve to the same slot"));
 		req->result_json = make_json_tool_result(result);
 		req->success = true;
 		return;
@@ -1917,11 +1935,6 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	// implemented as two detaches + two attaches because each detach disturbs
 	// the other's slot.  Reject up-front before any mutation.
 	{
-		int src_root = (src_ref.mode == GeneralSEXPReference::Mode::Node)
-			? retarget_to_list_wrapper(src_ref.node) : src_ref.node;
-		int tgt_root = (tgt_ref.mode == GeneralSEXPReference::Mode::Node)
-			? retarget_to_list_wrapper(tgt_ref.node) : tgt_ref.node;
-
 		// Walk up from descendant via find_parent_operator, which handles
 		// both the embedded case (.parent links) and the free-standing case
 		// (reverse-iteration via .antecedent) -- a plain .parent walk would
@@ -1938,16 +1951,16 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 			return false;
 		};
 
-		if (contains(src_root, tgt_root)) {
+		if (contains(src_eff, tgt_eff)) {
 			sink.set_error("Cannot swap: target (node %d) is inside source's subtree "
 				"(rooted at node %d). Swap requires disjoint operands.",
-				tgt_root, src_root);
+				tgt_eff, src_eff);
 			return;
 		}
-		if (contains(tgt_root, src_root)) {
+		if (contains(tgt_eff, src_eff)) {
 			sink.set_error("Cannot swap: source (node %d) is inside target's subtree "
 				"(rooted at node %d). Swap requires disjoint operands.",
-				src_root, tgt_root);
+				src_eff, tgt_eff);
 			return;
 		}
 	}
@@ -3261,7 +3274,9 @@ void mcp_register_sexp_tools(json_t *tools)
 			"target resolve to the same node, the call succeeds as a no-op with "
 			"'swapped' set to false. The response includes 'swapped' (bool) and, "
 			"when swapped=true, 'first_attach' and 'second_attach' (see attach_sexp_node "
-			"for their fields).",
+			"for their fields).  'first_attach' reports the source attached at the "
+			"target's vacated slot; 'second_attach' reports the target attached at the "
+			"source's vacated slot.",
 			props, /*required=*/nullptr,
 			merge_schema_extras(
 				build_branch_required_fields_allof("oneOf", {
