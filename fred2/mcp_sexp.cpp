@@ -1714,22 +1714,25 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 // composed operations can be aborted cleanly when a later step fails.
 // ---------------------------------------------------------------------------
 
-// Construct a GeneralSEXPReference pointing at the slot vacated by a detach.
-// For entity mode: an entity ref retargeted to the new default formula
-// (det.replacement) that detach installed.  For node mode: a node ref pointing
-// at the placeholder that detach spliced in.  Used by composers that need to
-// attach something into the slot a detach just emptied.
-static GeneralSEXPReference dest_for_vacated_slot(
-	const GeneralSEXPReference &orig, const detach_result &det)
+// Construct a copy of orig with its addressed node set to new_node.  For
+// entity-mode references, also updates entity_current_root so the result
+// addresses the entity's current formula at new_node; entity_info, attached
+// metadata, etc. are preserved.  For node-mode references, returns a fresh
+// node ref (the original mode-specific fields don't apply).  Used wherever
+// a composer needs to point an existing reference at a different slot --
+// e.g. after a detach to re-address the placeholder or default that took
+// the original's place.
+static GeneralSEXPReference rebind_ref(
+	const GeneralSEXPReference &orig, int new_node)
 {
 	if (orig.mode == GeneralSEXPReference::Mode::Entity) {
 		GeneralSEXPReference dest = orig;
-		dest.entity_current_root = det.replacement;
-		dest.node = det.replacement;
-		dest.original_node = det.replacement;
+		dest.entity_current_root = new_node;
+		dest.node = new_node;
+		dest.original_node = new_node;
 		return dest;
 	}
-	return make_node_ref(det.replacement);
+	return make_node_ref(new_node);
 }
 
 // Reverse a successful detach.  All four detach cases (entity-formula root,
@@ -1745,7 +1748,7 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 		// entity's formula, freeing the default that detach inserted.  A
 		// successful rollback restores the pre-call state, so suppress the
 		// inner mark_modified -- no autosave entry is warranted.
-		GeneralSEXPReference dest = dest_for_vacated_slot(orig_ref, det);
+		GeneralSEXPReference dest = rebind_ref(orig_ref, det.replacement);
 		handle_attach_sexp_node(det.detached_node, dest,
 			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink,
 			/*suppress_mark_modified=*/true);
@@ -1754,7 +1757,7 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 
 	if (!shrink && det.replacement >= 0) {
 		// Case C/D shrink=false: re-install by replacing the placeholder.
-		GeneralSEXPReference dest = dest_for_vacated_slot(orig_ref, det);
+		GeneralSEXPReference dest = rebind_ref(orig_ref, det.replacement);
 		handle_attach_sexp_node(det.detached_node, dest,
 			attach_position::REPLACE, /*delete_displaced=*/true, rollback_sink,
 			/*suppress_mark_modified=*/true);
@@ -2021,8 +2024,8 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	// Step 3: build attach destinations.  Each side's vacated slot is either
 	// the entity itself (entity-mode -- the placeholder is the inserted default
 	// formula that we will displace) or the placeholder spliced in by detach.
-	GeneralSEXPReference dest_for_a = dest_for_vacated_slot(tgt_ref, det_b);  // a goes to b's vacated slot
-	GeneralSEXPReference dest_for_b = dest_for_vacated_slot(src_ref, det_a);  // b goes to a's vacated slot
+	GeneralSEXPReference dest_for_a = rebind_ref(tgt_ref, det_b.replacement);  // a goes to b's vacated slot
+	GeneralSEXPReference dest_for_b = rebind_ref(src_ref, det_a.replacement);  // b goes to a's vacated slot
 
 	// Step 4: attach a at b's slot.
 	json_t *att_a_err = nullptr;
