@@ -171,6 +171,8 @@ set(FRED2_SOURCES
 	mcp_mission_info.h
 	mcp_messages.cpp
 	mcp_messages.h
+	mcp_events.cpp
+	mcp_events.h
 	mcp_sexp.cpp
 	mcp_sexp.h
 	mcp_sexp_forest.cpp
