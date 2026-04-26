@@ -104,3 +104,13 @@ void array_move_element(std::vector<T> &vec, int from, int to)
 	}
 	vec[to] = std::move(temp);
 }
+
+// Linear search in a sentinel-terminated (t->name == nullptr) named-info table.
+template<typename T>
+const T *find_named_info(const T *table, const char *name)
+{
+	for (const T *t = table; t->name; t++)
+		if (stricmp(name, t->name) == 0)
+			return t;
+	return nullptr;
+}
