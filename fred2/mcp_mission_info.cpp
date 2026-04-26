@@ -103,16 +103,16 @@ static json_t *build_mission_info_json()
 	json_object_set_new(info, "respawns", json_integer((int)The_mission.num_respawns));
 	json_object_set_new(info, "max_respawn_delay", json_integer(The_mission.max_respawn_delay));
 
-	// Mission flags
+	// Mission flags — list only the names of flags that are set
 	{
-		json_t *flags_obj = json_object();
+		json_t *flags_arr = json_array();
 		for (size_t i = 0; i < Num_parse_mission_flags; i++) {
 			if (!Parse_mission_flags[i].in_use)
 				continue;
-			bool is_set = The_mission.flags[Parse_mission_flags[i].def];
-			json_object_set_new(flags_obj, Parse_mission_flags[i].name, json_boolean(is_set));
+			if (The_mission.flags[Parse_mission_flags[i].def])
+				json_array_append_new(flags_arr, json_string(Parse_mission_flags[i].name));
 		}
-		json_object_set_new(info, "mission_flags", flags_obj);
+		json_object_set_new(info, "mission_flags", flags_arr);
 	}
 	json_object_set_new(info, "all_teams_at_war", json_boolean(Mission_all_attack != 0));
 
