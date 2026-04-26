@@ -6,6 +6,7 @@
 #include "mcp_mission_tools.h"
 #include "mcp_sexp_forest.h"
 #include "mcp_reference_tools.h"
+#include "mcp_utils.h"
 #include "sexp_tree.h"
 
 #include <jansson.h>
@@ -98,8 +99,8 @@ bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink 
 	if (actual_return_type != expected_return_type) {
 		sink.set_error("Formula node %d (\"%s\") has return type %s, but this entity requires %s",
 			node, Sexp_nodes[node].text,
-			get_opr_type_name(actual_return_type),
-			get_opr_type_name(expected_return_type));
+			opr_to_name(actual_return_type),
+			opr_to_name(expected_return_type));
 		return false;
 	}
 
@@ -454,7 +455,7 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 
 	if (info.attached) {
 		json_object_set_new(result, "return_type",
-			json_string(get_opr_type_name(info.opr_type)));
+			json_string(opr_to_name(info.opr_type)));
 		json_object_set_new(result, "entity_type", json_string(info.attached_type));
 
 		if (std::holds_alternative<const char *>(info.attached_id))
@@ -633,7 +634,7 @@ static json_t *build_sexp_node_json(int n)
 	int op_index = get_operator_index(n);
 	if (op_index >= 0) {
 		int ret = query_operator_return_type(op_index);
-		json_object_set_new(obj, "return_type", json_string(get_opr_type_name(ret)));
+		json_object_set_new(obj, "return_type", json_string(opr_to_name(ret)));
 	} else {
 		json_object_set_new(obj, "return_type", json_null());
 	}
@@ -2520,7 +2521,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 
 				if (!is_arg_type_compatible(expected_opf, result.type_str, is_variable, node_opr)) {
 					sink.set_error("Argument %d: type '%s' is not compatible with expected type '%s' for operator '%s'",
-						i, result.type_str, opf_to_string(expected_opf), op_name);
+						i, result.type_str, opf_to_name(expected_opf), op_name);
 					break;
 				}
 			}
