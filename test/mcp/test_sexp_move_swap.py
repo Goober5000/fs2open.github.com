@@ -655,6 +655,44 @@ def register(suite, client):
         finally:
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
 
+    def test_swap_overlapping_subtrees_errors():
+        # If one operand is inside the other's subtree, swap can't be cleanly
+        # implemented and the containment guard should reject up-front before
+        # any mutation.  Tests both directions (parent-as-source and
+        # parent-as-target) and verifies the tree is untouched.
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 ( * 10 20 ) 30 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            pre_sig = tree_signature(tool_data(r)["nodes"])
+            mul_op = find_node_by_value(tool_data(r)["nodes"], "*")["node"]
+            twenty = find_node_by_value(tool_data(r)["nodes"], "20")["node"]
+
+            # Direction 1: source contains target (mul subtree contains 20).
+            r = client.call_tool("swap_sexp_nodes", {
+                "source_node": mul_op,
+                "target_node": twenty,
+            })
+            assert_error(r)
+            assert_in("inside", tool_text(r).lower())
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after rejected swap (source contains target)")
+
+            # Direction 2: target contains source (same nodes, swapped roles).
+            r = client.call_tool("swap_sexp_nodes", {
+                "source_node": twenty,
+                "target_node": mul_op,
+            })
+            assert_error(r)
+            assert_in("inside", tool_text(r).lower())
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after rejected swap (target contains source)")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
     def test_swap_locked_singleton_via_argument_index():
         # Swap two locked singletons addressed via parent + argument_index.
         # Build (and (true) (false)); swap them so we get (and (false) (true)).
@@ -818,6 +856,7 @@ def register(suite, client):
     suite.add("sexp_swap_two_entity_formulas", test_swap_two_entity_formulas)
     suite.add("sexp_swap_entity_with_embedded_node", test_swap_entity_with_embedded_node)
     suite.add("sexp_swap_same_node_is_noop", test_swap_same_node_is_noop)
+    suite.add("sexp_swap_overlapping_subtrees_errors", test_swap_overlapping_subtrees_errors)
     suite.add("sexp_swap_locked_singleton_via_argument_index", test_swap_locked_singleton_via_argument_index)
     suite.add("sexp_swap_round_trip_idempotent", test_swap_round_trip_idempotent)
     suite.add("sexp_swap_atomic_rollback_on_type_mismatch", test_swap_atomic_rollback_on_type_mismatch)
