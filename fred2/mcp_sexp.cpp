@@ -598,7 +598,7 @@ static const char *get_sexp_value_type(int n)
 	}
 }
 
-static constexpr size_t MAX_SEXP_WALK_ENTRIES = 500;
+#define MAX_SEXP_WALK_ENTRIES 500
 
 static json_t *build_sexp_node_json(int n)
 {
@@ -3090,7 +3090,9 @@ void mcp_register_sexp_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_integer_prop(props, "node", "Root node index to start traversal from");
-		add_integer_prop(props, "depth", "Maximum recursion depth (default: unlimited)");
+		add_integer_prop(props, "depth",
+			"Maximum recursion depth. 0 returns only the root node; N returns the root "
+			"plus N levels of descendants. Omit or pass a negative value for unlimited depth.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("node"));
 		register_tool(tools, "walk_sexp_tree",
@@ -3099,7 +3101,10 @@ void mcp_register_sexp_tools(json_t *tools)
 			"(operator/argument/list_wrapper), child/sibling indices, and "
 			"walk_first/walk_rest indices into the array for easy traversal. "
 			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
-			"operators deeper in the tree are wrapped in list nodes.",
+			"operators deeper in the tree are wrapped in list nodes. "
+			"The result is capped at " SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the response "
+			"includes 'truncated': true. To inspect a larger tree, call again with a "
+			"deeper sub-node as the root, or use the 'depth' parameter to limit the walk.",
 			props, req);
 	}
 
