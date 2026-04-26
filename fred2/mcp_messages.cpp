@@ -3,6 +3,7 @@
 #include "mcp_mission_tools.h"
 #include "mcp_app.h"
 #include "mcp_json.h"
+#include "mcp_sexp_forest.h"
 #include "mcpserver.h"
 #include "mcp_array_utils.h"
 
@@ -302,6 +303,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		// Update SEXP references before changing the name
 		update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE);
 		update_sexp_references(Messages[idx].name, new_name, OPF_MESSAGE_OR_STRING);
+		mcp_sexp_forest_mark_dirty();
 		strcpy_s(Messages[idx].name, new_name);
 		changed = true;
 	}
@@ -347,6 +349,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	snprintf(buf, sizeof(buf), "<%s>", Messages[idx].name);
 	update_sexp_references(Messages[idx].name, buf, OPF_MESSAGE);
 	update_sexp_references(Messages[idx].name, buf, OPF_MESSAGE_OR_STRING);
+	mcp_sexp_forest_mark_dirty();
 
 	// Remove from array by shifting (matches FRED's CMessageEditorDlg::OnDelete pattern)
 	array_remove_slot(Messages, Num_messages, idx);

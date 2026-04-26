@@ -546,7 +546,15 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	convert_sexp_to_string(req->result_message, n, SEXP_SAVE_MODE);
+	SCP_string text;
+	convert_sexp_to_string(text, n, SEXP_SAVE_MODE);
+
+	json_t *result = make_tool_result(text.c_str());
+	json_t *sc = json_object();
+	json_object_set_new(sc, "text", json_string(text.c_str()));
+	json_object_set_new(result, "structuredContent", sc);
+
+	req->result_json = result;
 	req->success = true;
 }
 

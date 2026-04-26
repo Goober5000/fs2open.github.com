@@ -440,6 +440,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	// Rename last — updates SEXP references
 	if (new_name && stricmp(evt.name.c_str(), new_name) != 0) {
 		update_sexp_references(evt.name.c_str(), new_name, OPF_EVENT_NAME);
+		mcp_sexp_forest_mark_dirty();
 		evt.name = new_name;
 		changed = true;
 	}
@@ -474,6 +475,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	// Invalidate SEXP references
 	SCP_string buf = SCP_string("<") + Mission_events[idx].name + ">";
 	update_sexp_references(Mission_events[idx].name.c_str(), buf.c_str(), OPF_EVENT_NAME);
+	mcp_sexp_forest_mark_dirty();
 
 	// Free the SEXP formula
 	if (Mission_events[idx].formula >= 0)
