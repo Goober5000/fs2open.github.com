@@ -571,10 +571,14 @@ def register(suite, client):
             client.call_tool("delete_event", {"name": "swent_b", "force": True})
 
     def test_swap_entity_with_embedded_node():
-        # Mixed mode: swap an event's formula with a sub-expression of a
-        # free-standing tree.
+        # Mixed mode: swap an event's formula with an embedded action subtree
+        # inside a free-standing tree.  Both endpoints are OPR_NULL action
+        # slots so the type check passes.  Verifies the swap actually
+        # exchanges the subtrees rather than just succeeding silently.
         client.call_tool("create_event", {"name": "swen_evt"})
         try:
+            # Install a distinguishable when-tree formula on the event:
+            # ( when ( true ) ( do-nothing ) ).
             r = client.call_tool("text_to_sexp",
                 {"text": "( when ( true ) ( do-nothing ) )"})
             assert_success(r)
@@ -586,34 +590,43 @@ def register(suite, client):
             })
             assert_success(r)
 
-            # Build a free-standing tree containing another OPR_NULL subtree.
+            # Build a free-standing tree with an embedded OPR_NULL action.
+            # Use 'false' as the bool so we can tell the two when-nodes apart
+            # after the swap.
             r = client.call_tool("text_to_sexp",
                 {"text": "( when ( false ) ( do-nothing ) )"})
             assert_success(r)
             free_root = tool_data(r)["node"]
+            r = client.call_tool("walk_sexp_tree", {"node": free_root})
+            free_inner_dn = find_node_by_value(tool_data(r)["nodes"], "do-nothing")["node"]
 
-            # Swap the event's formula with free_root (root-to-entity == both
-            # are OPR_NULL formula roots so types match).
+            # Swap event's formula <-> free tree's inner do-nothing.
             r = client.call_tool("swap_sexp_nodes", {
                 "source_entity_type": "event",
                 "source_entity_id": "swen_evt",
-                "target_node": free_root,
+                "target_node": free_inner_dn,
             })
-            # Note: target_node = a free-standing root.  attach has a guard
-            # against attaching at a free-standing root in node mode.  Expect
-            # the swap to error gracefully and leave both unchanged.
-            # (If this is supported, the assertion would need to be different.)
-            if not r.get("isError"):
-                # If supported, just succeed-and-move-on.
-                pass
-            else:
-                # Document the failure mode; verify rollback left the event
-                # formula intact.
-                r = client.call_tool("get_event", {"name": "swen_evt"})
-                assert_success(r)
-                # Should still have a valid formula root.
-                assert_true(tool_data(r).get("formula") is not None, "event formula intact")
-            # Clean up the free tree if it still exists.
+            assert_success(r)
+
+            # After the swap:
+            # - Event formula is now just ( do-nothing ).
+            # - Free tree is now ( when ( false ) ( when ( true ) ( do-nothing ) ) ).
+            r = client.call_tool("get_event", {"name": "swen_evt"})
+            assert_success(r)
+            evt_post_root = tool_data(r).get("formula")
+            r = client.call_tool("walk_sexp_tree", {"node": evt_post_root})
+            evt_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_in("do-nothing", evt_vals, "event formula has do-nothing")
+            assert_true("when" not in evt_vals, "event formula no longer has when")
+            assert_true("true" not in evt_vals, "event formula no longer has true")
+
+            r = client.call_tool("walk_sexp_tree", {"node": free_root})
+            free_vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            assert_equal(free_vals.count("when"), 2, "free tree has two whens after swap")
+            assert_in("false", free_vals, "free tree still has false")
+            assert_in("true", free_vals, "free tree now has true (from event formula)")
+            assert_in("do-nothing", free_vals, "free tree still has do-nothing")
+
             client.call_tool("detach_sexp_node", {"node": free_root, "delete": True})
         finally:
             client.call_tool("delete_event", {"name": "swen_evt", "force": True})
