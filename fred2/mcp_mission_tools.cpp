@@ -1040,6 +1040,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	if (new_name && stricmp(jn.GetName(), new_name) != 0) {
 		if (!check_object_rename("jump node", new_name, sink, -1, -1, -1, index)) return;
 		update_sexp_references(jn.GetName(), new_name, OPF_JUMP_NODE_NAME);
+		mcp_sexp_forest_mark_dirty();
 		jn.SetName(new_name);
 		changed = true;
 	}
@@ -1132,6 +1133,7 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	char buf[NAME_LENGTH + 4];
 	snprintf(buf, sizeof(buf), "<%s>", name);
 	update_sexp_references(name, buf, OPF_JUMP_NODE_NAME);
+	mcp_sexp_forest_mark_dirty();
 
 	// Must follow the same pattern as management.cpp delete_object() to avoid
 	// orphaning the OBJ_JUMP_NODE object slot.  The CJumpNode move-assignment
@@ -1285,6 +1287,7 @@ static void rename_waypoint_sexp_refs(const char *old_list_name, int old_1based,
 	waypoint_stuff_name(new_name, new_list_name, new_1based);
 	update_sexp_references(old_name, new_name);
 	ai_update_goal_references(sexp_ref_type::WAYPOINT, old_name, new_name);
+	mcp_sexp_forest_mark_dirty();
 }
 
 // Convenience overload for renaming within the same list.
@@ -1303,6 +1306,7 @@ static void invalidate_waypoint_sexp_refs(const char *list_name, int one_based)
 	snprintf(buf, sizeof(buf), "<%s>", wpt_name);
 	update_sexp_references(wpt_name, buf);
 	ai_update_goal_references(sexp_ref_type::WAYPOINT, wpt_name, buf);
+	mcp_sexp_forest_mark_dirty();
 }
 
 static void rename_waypoint_sexp_refs_to_temp(const char *list_name, int one_based, char *temp_buf, size_t buf_size)
@@ -1312,6 +1316,7 @@ static void rename_waypoint_sexp_refs_to_temp(const char *list_name, int one_bas
 	snprintf(temp_buf, buf_size, "<temp_wpt_%d>", one_based);
 	update_sexp_references(name, temp_buf);
 	ai_update_goal_references(sexp_ref_type::WAYPOINT, name, temp_buf);
+	mcp_sexp_forest_mark_dirty();
 }
 
 static void rename_waypoint_sexp_refs_from_temp(const char *temp_name, const char *list_name, int new_1based)
@@ -1320,6 +1325,7 @@ static void rename_waypoint_sexp_refs_from_temp(const char *temp_name, const cha
 	waypoint_stuff_name(new_name, list_name, new_1based);
 	update_sexp_references(temp_name, new_name);
 	ai_update_goal_references(sexp_ref_type::WAYPOINT, temp_name, new_name);
+	mcp_sexp_forest_mark_dirty();
 }
 
 static void handle_create_waypoint_list(json_t *input, McpToolRequest *req)
@@ -1407,6 +1413,7 @@ static void handle_update_waypoint_list(json_t *input, McpToolRequest *req)
 		// Update SEXP references for the list name
 		update_sexp_references(old_name, new_name);
 		ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, old_name, new_name);
+		mcp_sexp_forest_mark_dirty();
 
 		// Update SEXP references for each individual waypoint name
 		for (int wpt_idx = 0; wpt_idx < (int)wl.get_waypoints().size(); wpt_idx++)
@@ -1475,6 +1482,7 @@ static void handle_delete_waypoint_list(json_t *input, McpToolRequest *req)
 	snprintf(buf, sizeof(buf), "<%s>", name);
 	update_sexp_references(name, buf);
 	ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, name, buf);
+	mcp_sexp_forest_mark_dirty();
 
 	// Invalidate references for each individual waypoint name
 	for (int wpt_idx = 0; wpt_idx < (int)Waypoint_lists[index].get_waypoints().size(); wpt_idx++)
@@ -1717,6 +1725,7 @@ static void handle_delete_waypoint(json_t *input, McpToolRequest *req)
 		snprintf(buf, sizeof(buf), "<%s>", list);
 		update_sexp_references(list, buf);
 		ai_update_goal_references(sexp_ref_type::WAYPOINT_PATH, list, buf);
+		mcp_sexp_forest_mark_dirty();
 	}
 
 	// Save info before removal (waypoint_remove may erase the list)
