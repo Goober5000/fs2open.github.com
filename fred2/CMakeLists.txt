@@ -159,6 +159,8 @@ set(FRED2_SOURCES
 	mcpserver.cpp
 	mcpserver.h
 	mcp_array_utils.h
+	mcp_utils.cpp
+	mcp_utils.h
 	mcp_app.cpp
 	mcp_app.h
 	mcp_json.cpp
