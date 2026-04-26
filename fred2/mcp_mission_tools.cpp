@@ -2064,6 +2064,7 @@ static const char *mission_tool_names[] = {
 	"get_sexp_node",
 	"get_sexp_formula_info",
 	"walk_sexp_tree",
+	"find_sexp_text",
 	"text_to_sexp",
 	"detach_sexp_node",
 	"attach_sexp_node",
