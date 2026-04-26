@@ -863,3 +863,19 @@ json_t *make_not_found_error(const char *entity_type, const char *name)
 {
 	return make_tool_result(true, "%s not found: '%s'", entity_type, name);
 }
+
+size_t json_array_max_string_length(json_t *arr, const char *field)
+{
+	size_t max_len = 0;
+	size_t idx;
+	json_t *el;
+	json_array_foreach(arr, idx, el) {
+		const char *s = json_string_value(json_object_get(el, field));
+		if (s) {
+			size_t len = strlen(s);
+			if (len > max_len)
+				max_len = len;
+		}
+	}
+	return max_len;
+}

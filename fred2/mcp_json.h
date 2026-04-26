@@ -231,4 +231,7 @@ void set_not_found_error(McpErrorSink &sink, const char *entity_type, const char
 // Builds an MCP error result with "EntityType not found: name" text (for reference tools).
 json_t *make_not_found_error(const char *entity_type, const char *name);
 
+// Compute max string length for a named field across a jansson array.
+size_t json_array_max_string_length(json_t *arr, const char *field);
+
 #endif // _MCP_JSON_H
