@@ -598,6 +598,21 @@ static const char *get_sexp_value_type(int n)
 	}
 }
 
+// Schema-enum strings derived from get_sexp_value_type().  Used by
+// find_sexp_text (the only tool today that filters on value_type) and
+// kept in lockstep with that function — if a new value_type case is
+// added, the schema enum here must be extended too.
+static const SCP_vector<const char *> sexp_value_type_values = {
+	"operator", "numeric_literal", "numeric_variable",
+	"string_literal", "string_variable",
+	"container_name", "container_data"
+};
+
+// Roles searchable by find_sexp_text.  Excludes "list_wrapper" because
+// list-wrapper nodes are structural — they hold no user-meaningful text
+// — and find_sexp_text skips them unconditionally.
+static const SCP_vector<const char *> sexp_searchable_role_values = { "operator", "argument" };
+
 #define MAX_SEXP_WALK_ENTRIES 500
 
 static json_t *build_sexp_node_json(int n)
@@ -649,18 +664,20 @@ struct walk_entry {
 	int depth;
 };
 
-static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int depth, int max_depth)
+static void collect_walk_entries(int n, SCP_vector<walk_entry> &entries, int depth, int max_depth = -1, int max_entries = -1)
 {
-	if (n < 0 || n >= Num_sexp_nodes || entries.size() >= MAX_SEXP_WALK_ENTRIES)
+	if (n < 0 || n >= Num_sexp_nodes)
 		return;
 	if (Sexp_nodes[n].type == SEXP_NOT_USED)
 		return;
 	if (max_depth >= 0 && depth > max_depth)
 		return;
+	if (max_entries >= 0 && entries.size() >= i2sz(max_entries))
+		return;
 
 	entries.push_back({n, depth});
-	collect_walk_entries(Sexp_nodes[n].first, entries, depth + 1, max_depth);
-	collect_walk_entries(Sexp_nodes[n].rest, entries, depth, max_depth);
+	collect_walk_entries(Sexp_nodes[n].first, entries, depth + 1, max_depth, max_entries);
+	collect_walk_entries(Sexp_nodes[n].rest, entries, depth, max_depth, max_entries);
 }
 
 static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
@@ -683,7 +700,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 
 	// Pass 1: collect entries with depths
 	SCP_vector<walk_entry> entries;
-	collect_walk_entries(n, entries, 0, max_depth);
+	collect_walk_entries(n, entries, 0, max_depth, MAX_SEXP_WALK_ENTRIES);
 
 	// Build node index -> position map
 	SCP_unordered_map<int, int> pos_map;
@@ -712,6 +729,106 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 	json_object_set_new(result, "root", json_integer(n));
 	json_object_set_new(result, "nodes", arr);
 	if (entries.size() >= MAX_SEXP_WALK_ENTRIES)
+		json_object_set_new(result, "truncated", json_true());
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// SEXP text search
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> find_match_mode_values = { "substring", "exact" };
+
+static bool node_text_matches(int n, const char *needle, bool exact)
+{
+	const char *hay = Sexp_nodes[n].text;
+	if (exact)
+		return stricmp(hay, needle) == 0;
+	return stristr(hay, needle) != nullptr;
+}
+
+static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	auto needle = get_required_string(input, "text", sink, true);
+	if (!needle) return;
+
+	const char *match_mode_str = get_optional_string(input, "match_mode", sink);
+	if (sink.has_error()) return;
+	bool exact = false;
+	if (match_mode_str) {
+		if (!check_string_enum(match_mode_str, find_match_mode_values, "match_mode", sink))
+			return;
+		exact = (stricmp(match_mode_str, "exact") == 0);
+	}
+
+	const char *role_filter = get_optional_string(input, "role", sink);
+	if (sink.has_error()) return;
+	if (role_filter && !check_string_enum(role_filter, sexp_searchable_role_values, "role", sink))
+		return;
+
+	const char *value_type_filter = get_optional_string(input, "value_type", sink);
+	if (sink.has_error()) return;
+	if (value_type_filter && !check_string_enum(value_type_filter, sexp_value_type_values, "value_type", sink))
+		return;
+
+	auto root_node_opt = get_optional_integer(input, "root_node", sink);
+	if (sink.has_error()) return;
+
+	// Build the candidate list: either every live node (mission-wide) or the
+	// subtree rooted at the supplied node.
+	SCP_vector<walk_entry> candidates;
+	if (root_node_opt.has_value()) {
+		int root = *root_node_opt;
+		if (!check_int_range(root, 0, Num_sexp_nodes - 1, "root_node", sink)) return;
+		if (Sexp_nodes[root].type == SEXP_NOT_USED) {
+			sink.set_error("root_node %d is not in use", root);
+			return;
+		}
+		collect_walk_entries(root, candidates, 0);
+	} else {
+		candidates.reserve(Num_sexp_nodes);
+		for (int i = 0; i < Num_sexp_nodes; i++) {
+			if (Sexp_nodes[i].type != SEXP_NOT_USED)
+				candidates.push_back({ i, -1 });
+		}
+	}
+
+	// Filter and emit, capped at MAX_SEXP_WALK_ENTRIES.
+	json_t *arr = json_array();
+	bool truncated = false;
+	for (auto candidate : candidates) {
+		int n = candidate.node;
+		// Always skip list-wrapper nodes — their text is not user-facing.
+		if (SEXP_NODE_TYPE(n) == SEXP_LIST)
+			continue;
+		if (role_filter) {
+			const char *role = get_sexp_role(n);
+			if (!role || strcmp(role, role_filter) != 0)
+				continue;
+		}
+		if (value_type_filter) {
+			const char *vt = get_sexp_value_type(n);
+			if (!vt || strcmp(vt, value_type_filter) != 0)
+				continue;
+		}
+		if (!node_text_matches(n, needle, exact))
+			continue;
+
+		if (json_array_size(arr) >= MAX_SEXP_WALK_ENTRIES) {
+			truncated = true;
+			break;
+		}
+		json_array_append_new(arr, build_sexp_node_json(n));
+	}
+
+	json_t *result = json_object();
+	json_object_set_new(result, "nodes", arr);
+	if (truncated)
 		json_object_set_new(result, "truncated", json_true());
 
 	req->result_json = make_json_tool_result(result);
@@ -3108,6 +3225,48 @@ void mcp_register_sexp_tools(json_t *tools)
 			props, req);
 	}
 
+	// find_sexp_text
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "text",
+			"Text to search for in SEXP node values.  Must be non-empty.");
+		add_string_enum_prop(props, "match_mode",
+			"How to compare 'text' against each node's value.  'substring' (default) "
+			"matches if 'text' appears anywhere in the node's value.  'exact' matches "
+			"only when the node's value equals 'text'.  Both modes are case-insensitive.",
+			find_match_mode_values);
+		add_integer_prop(props, "root_node",
+			"Optional root node index.  When provided, the search is restricted to "
+			"the subtree rooted at this node.  When omitted, every live SEXP node in "
+			"the mission is searched.");
+		add_string_enum_prop(props, "role",
+			"Optional role filter.  When provided, only nodes with this role are "
+			"considered.  list_wrapper nodes are structural and are never returned "
+			"regardless of this filter.",
+			sexp_searchable_role_values);
+		add_string_enum_prop(props, "value_type",
+			"Optional value-type filter.  When provided, only nodes whose value_type "
+			"matches are considered.  Mirrors the value_type field returned by "
+			"get_sexp_node and walk_sexp_tree.",
+			sexp_value_type_values);
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("text"));
+		register_tool(tools, "find_sexp_text",
+			"Find SEXP nodes whose text matches a given query.  Useful for locating "
+			"every reference to an entity name (a ship, a wing, a variable, a literal) "
+			"across the mission, or within a single tree.  By default the search is "
+			"mission-wide; pass root_node to restrict to one tree.  Matching is "
+			"case-insensitive; choose substring (default) or exact via match_mode.  "
+			"Optional role and value_type filters narrow the candidate set; "
+			"list_wrapper nodes are always excluded.  The response is "
+			"{nodes: [<node_object>...], truncated?: true}, where each node_object "
+			"matches the shape returned by get_sexp_node.  The result is capped at "
+			SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the "
+			"response includes 'truncated': true and the caller should narrow the "
+			"query (use a more specific text or add filters).",
+			props, req);
+	}
+
 	// text_to_sexp
 	{
 		json_t *props = json_object();
@@ -3540,6 +3699,10 @@ bool mcp_handle_sexp_tool(const char *tool_name, json_t *input_json, McpToolRequ
 	}
 	if (strcmp(tool_name, "walk_sexp_tree") == 0) {
 		handle_walk_sexp_tree(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "find_sexp_text") == 0) {
+		handle_find_sexp_text(input_json, req);
 		return true;
 	}
 	if (strcmp(tool_name, "text_to_sexp") == 0) {
