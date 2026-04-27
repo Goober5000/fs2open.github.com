@@ -590,7 +590,7 @@ static json_t *handle_list_ship_types()
 	for (size_t i = 0; i < Ship_types.size(); i++) {
 		const auto &st = Ship_types[i];
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(st.name));
+		json_object_set_new(item, "name", json_safe_string(st.name));
 		json_object_set_new(item, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
 		json_array_append_new(arr, item);
 	}
@@ -611,7 +611,7 @@ static json_t *handle_get_ship_type(json_t *arguments)
 
 	const auto &st = Ship_types[idx];
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(st.name));
+	json_object_set_new(obj, "name", json_safe_string(st.name));
 
 	// Flags
 	json_t *flags = json_object();
@@ -665,15 +665,15 @@ static json_t *handle_list_ship_classes(json_t *arguments)
 			continue;
 
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(sip.name));
+		json_object_set_new(item, "name", json_safe_string(sip.name));
 		if (sip.has_display_name())
-			json_object_set_new(item, "display_name", json_string(sip.get_display_name()));
+			json_object_set_new(item, "display_name", json_safe_string(sip.get_display_name()));
 
 		if (sip.species >= 0 && sip.species < (int)Species_info.size())
-			json_object_set_new(item, "species", json_string(Species_info[sip.species].species_name));
+			json_object_set_new(item, "species", json_safe_string(Species_info[sip.species].species_name));
 
 		if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
-			json_object_set_new(item, "ship_type", json_string(Ship_types[sip.class_type].name));
+			json_object_set_new(item, "ship_type", json_safe_string(Ship_types[sip.class_type].name));
 
 		json_array_append_new(arr, item);
 	}
@@ -694,7 +694,7 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 
 		int wi = bank_weapons[b];
 		if (wi >= 0 && wi < weapon_info_size())
-			json_object_set_new(bank_obj, "default_weapon", json_string(Weapon_info[wi].name));
+			json_object_set_new(bank_obj, "default_weapon", json_safe_string(Weapon_info[wi].name));
 		else
 			json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
 
@@ -715,7 +715,7 @@ static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
 				json_t *rw = json_array();
 				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
 					if ((wf.second & flag) && wf.first >= 0 && wf.first < weapon_info_size())
-						json_array_append_new(rw, json_string(Weapon_info[wf.first].name));
+						json_array_append_new(rw, json_safe_string(Weapon_info[wf.first].name));
 				}
 				json_object_set_new(bank_obj, bag, rw);
 			}
@@ -741,14 +741,14 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	json_t *obj = json_object();
 
 	// Identity
-	json_object_set_new(obj, "name", json_string(sip.name));
+	json_object_set_new(obj, "name", json_safe_string(sip.name));
 	if (sip.has_display_name())
-		json_object_set_new(obj, "display_name", json_string(sip.get_display_name()));
+		json_object_set_new(obj, "display_name", json_safe_string(sip.get_display_name()));
 
 	if (sip.species >= 0 && sip.species < (int)Species_info.size())
-		json_object_set_new(obj, "species", json_string(Species_info[sip.species].species_name));
+		json_object_set_new(obj, "species", json_safe_string(Species_info[sip.species].species_name));
 	if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
-		json_object_set_new(obj, "ship_type", json_string(Ship_types[sip.class_type].name));
+		json_object_set_new(obj, "ship_type", json_safe_string(Ship_types[sip.class_type].name));
 
 	// flags
 	json_object_set_new(obj, "allowed_for_player", json_boolean(sip.flags[Ship::Info_Flags::Player_ship]));
@@ -804,9 +804,9 @@ static json_t *handle_get_ship_class(json_t *arguments)
 		for (const auto &wf : sip.allowed_weapons.weapon_and_flags) {
 			if (wf.first >= 0 && wf.first < weapon_info_size()) {
 				if (wf.second & REGULAR_WEAPON)
-					json_array_append_new(aw, json_string(Weapon_info[wf.first].name));
+					json_array_append_new(aw, json_safe_string(Weapon_info[wf.first].name));
 				if (wf.second & DOGFIGHT_WEAPON)
-					json_array_append_new(daw, json_string(Weapon_info[wf.first].name));
+					json_array_append_new(daw, json_safe_string(Weapon_info[wf.first].name));
 			}
 		}
 		json_object_set_new(obj, "allowed_weapons", aw);
@@ -815,7 +815,7 @@ static json_t *handle_get_ship_class(json_t *arguments)
 
 	// Countermeasures
 	if (sip.cmeasure_type >= 0 && sip.cmeasure_type < weapon_info_size())
-		json_object_set_new(obj, "countermeasure_type", json_string(Weapon_info[sip.cmeasure_type].name));
+		json_object_set_new(obj, "countermeasure_type", json_safe_string(Weapon_info[sip.cmeasure_type].name));
 	json_object_set_new(obj, "countermeasure_max", json_integer(sip.cmeasure_max));
 
 	// Score
@@ -868,9 +868,9 @@ static json_t *handle_list_weapon_classes(json_t *arguments)
 			continue;
 
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(wip.name));
+		json_object_set_new(item, "name", json_safe_string(wip.name));
 		if (wip.has_display_name())
-			json_object_set_new(item, "display_name", json_string(wip.get_display_name()));
+			json_object_set_new(item, "display_name", json_safe_string(wip.get_display_name()));
 		json_object_set_new(item, "subtype", json_string(weapon_category_str(wip)));
 
 		json_array_append_new(arr, item);
@@ -894,9 +894,9 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	json_t *obj = json_object();
 
 	// Identity
-	json_object_set_new(obj, "name", json_string(wip.name));
+	json_object_set_new(obj, "name", json_safe_string(wip.name));
 	if (wip.has_display_name())
-		json_object_set_new(obj, "display_name", json_string(wip.get_display_name()));
+		json_object_set_new(obj, "display_name", json_safe_string(wip.get_display_name()));
 	json_object_set_new(obj, "subtype", json_string(weapon_category_str(wip)));
 
 	// Loadout and Tech screen strings
@@ -989,10 +989,10 @@ static json_t *handle_list_species()
 	for (size_t i = 0; i < Species_info.size(); i++) {
 		const auto &sp = Species_info[i];
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(sp.species_name));
+		json_object_set_new(item, "name", json_safe_string(sp.species_name));
 
 		if (sp.default_iff >= 0 && sp.default_iff < (int)Iff_info.size())
-			json_object_set_new(item, "default_iff", json_string(Iff_info[sp.default_iff].iff_name));
+			json_object_set_new(item, "default_iff", json_safe_string(Iff_info[sp.default_iff].iff_name));
 
 		json_object_set_new(item, "awacs_multiplier", json_real(sp.awacs_multiplier));
 		set_optional_string(item, "countermeasure", sp.cmeasure_name, true);
@@ -1010,7 +1010,7 @@ static json_t *handle_list_iffs()
 
 	for (size_t i = 0; i < Iff_info.size(); i++) {
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(Iff_info[i].iff_name));
+		json_object_set_new(item, "name", json_safe_string(Iff_info[i].iff_name));
 		json_array_append_new(arr, item);
 	}
 
@@ -1032,7 +1032,7 @@ static json_t *handle_get_iff(json_t *arguments)
 	json_t *obj = json_object();
 
 	// Identity
-	json_object_set_new(obj, "name", json_string(iff.iff_name));
+	json_object_set_new(obj, "name", json_safe_string(iff.iff_name));
 
 	// Color (RGB from the non-bright variant)
 	{
@@ -1045,7 +1045,7 @@ static json_t *handle_get_iff(json_t *arguments)
 		json_t *attacks = json_array();
 		for (int j = 0; j < (int)Iff_info.size(); j++) {
 			if (iff_x_attacks_y(idx, j))
-				json_array_append_new(attacks, json_string(Iff_info[j].iff_name));
+				json_array_append_new(attacks, json_safe_string(Iff_info[j].iff_name));
 		}
 		json_object_set_new(obj, "attacks", attacks);
 	}
@@ -1064,7 +1064,7 @@ static json_t *handle_list_intel_entries()
 	for (int i = 0; i < intel_info_size(); i++) {
 		const auto &entry = Intel_info[i];
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(entry.name));
+		json_object_set_new(item, "name", json_safe_string(entry.name));
 
 		json_array_append_new(arr, item);
 	}
@@ -1085,14 +1085,14 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 
 	const auto &entry = Intel_info[idx];
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(entry.name));
-	json_object_set_new(obj, "lore", json_string(entry.desc.c_str()));
+	json_object_set_new(obj, "name", json_safe_string(entry.name));
+	json_object_set_new(obj, "lore", json_safe_string(entry.desc.c_str()));
 
 	// Custom data
 	if (!entry.custom_data.empty()) {
 		json_t *cd = json_object();
 		for (const auto &kv : entry.custom_data) {
-			json_object_set_new(cd, kv.first.c_str(), json_string(kv.second.c_str()));
+			json_object_set_new(cd, kv.first.c_str(), json_safe_string(kv.second.c_str()));
 		}
 		json_object_set_new(obj, "custom_data", cd);
 	}
@@ -1106,7 +1106,7 @@ static json_t *handle_list_sexp_categories()
 
 	for (size_t m = 0; m < op_menu.size(); m++) {
 		json_t *cat = json_object();
-		json_object_set_new(cat, "name", json_string(op_menu[m].name.c_str()));
+		json_object_set_new(cat, "name", json_safe_string(op_menu[m].name.c_str()));
 
 		const char *desc = mcp_get_sexp_category_description(op_menu[m].id);
 		if (desc)
@@ -1116,7 +1116,7 @@ static json_t *handle_list_sexp_categories()
 		json_t *subcats = json_array();
 		for (size_t s = 0; s < op_submenu.size(); s++) {
 			if (category_of_subcategory(op_submenu[s].id) == op_menu[m].id)
-				json_array_append_new(subcats, json_string(op_submenu[s].name.c_str()));
+				json_array_append_new(subcats, json_safe_string(op_submenu[s].name.c_str()));
 		}
 		json_object_set_new(cat, "subcategories", subcats);
 
@@ -1220,7 +1220,7 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 	for (const auto &match : matches) {
 		const auto &op = Operators[match.first];
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(op.text.c_str()));
+		json_object_set_new(item, "name", json_safe_string(op.text.c_str()));
 		json_object_set_new(item, "min_args", json_integer(op.min));
 		json_object_set_new(item, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
 
@@ -1380,7 +1380,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	const auto &op = Operators[op_index];
 	json_t *obj = json_object();
 
-	json_object_set_new(obj, "name", json_string(op.text.c_str()));
+	json_object_set_new(obj, "name", json_safe_string(op.text.c_str()));
 	json_object_set_new(obj, "min_args", json_integer(op.min));
 	json_object_set_new(obj, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
 
@@ -1393,7 +1393,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 		// Find subcategory name in op_submenu
 		int found_idx = find_item_with_field(op_submenu, &op_menu_struct::id, subcat_id);
 		if (found_idx >= 0)
-			json_object_set_new(obj, "subcategory", json_string(op_submenu[found_idx].name.c_str()));
+			json_object_set_new(obj, "subcategory", json_safe_string(op_submenu[found_idx].name.c_str()));
 	}
 
 	// Dynamic SEXP flag
@@ -1406,7 +1406,7 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	// Help text
 	int help_idx = find_item_with_field(Sexp_help, &sexp_help_struct::id, op.value);
 	if (help_idx >= 0)
-		json_object_set_new(obj, "help", json_string(Sexp_help[help_idx].help.c_str()));
+		json_object_set_new(obj, "help", json_safe_string(Sexp_help[help_idx].help.c_str()));
 
 	// Argument types
 	build_argument_types_json(obj, op_index, op.min, op.max);
@@ -1725,7 +1725,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 		return make_tool_result("Model data unavailable", true);
 
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(sip.name));
+	json_object_set_new(obj, "name", json_safe_string(sip.name));
 
 	// Bounding box dimensions
 	json_object_set_new(obj, "bounding_box_min", build_vec3d_json(pm->mins));
@@ -1780,7 +1780,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			const auto &bay = pm->docking_bays[d];
 			json_t *dock_obj = json_object();
 
-			json_object_set_new(dock_obj, "name", json_string(bay.name));
+			json_object_set_new(dock_obj, "name", json_safe_string(bay.name));
 
 			// Type flags as array of strings
 			json_t *type_arr = json_array();
@@ -1804,7 +1804,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			for (int sp = 0; sp < bay.num_spline_paths; sp++) {
 				int spline_idx = bay.splines[sp];
 				if (spline_idx >= 0 && spline_idx < pm->n_paths)
-					json_array_append_new(spline_names, json_string(pm->paths[spline_idx].name));
+					json_array_append_new(spline_names, json_safe_string(pm->paths[spline_idx].name));
 			}
 			json_object_set_new(dock_obj, "path_names", spline_names);
 
@@ -1820,7 +1820,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			const auto &path = pm->paths[p];
 			json_t *path_obj = json_object();
 
-			json_object_set_new(path_obj, "name", json_string(path.name));
+			json_object_set_new(path_obj, "name", json_safe_string(path.name));
 
 			// Build used_by object identifying which consumer(s) use this path
 			{
@@ -1829,7 +1829,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				// Check subsystems
 				for (int s = 0; s < sip.n_subsystems; s++) {
 					if (sip.subsystems[s].path_num == p) {
-						json_object_set_new(used_by, "subsystem", json_string(sip.subsystems[s].subobj_name));
+						json_object_set_new(used_by, "subsystem", json_safe_string(sip.subsystems[s].subobj_name));
 						break;
 					}
 				}
@@ -1839,7 +1839,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 					const auto &bay = pm->docking_bays[d];
 					for (int sp = 0; sp < bay.num_spline_paths; sp++) {
 						if (bay.splines[sp] == p) {
-							json_object_set_new(used_by, "dockpoint", json_string(bay.name));
+							json_object_set_new(used_by, "dockpoint", json_safe_string(bay.name));
 							break;
 						}
 					}
@@ -1886,7 +1886,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 		for (int b = 0; b < pm->ship_bay->num_paths; b++) {
 			int path_idx = pm->ship_bay->path_indexes[b];
 			if (path_idx >= 0 && path_idx < pm->n_paths)
-				json_array_append_new(bay_path_names, json_string(pm->paths[path_idx].name));
+				json_array_append_new(bay_path_names, json_safe_string(pm->paths[path_idx].name));
 		}
 		json_object_set_new(obj, "hangar_bay_path_names", bay_path_names);
 	}
@@ -1898,7 +1898,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			const auto &ss = sip.subsystems[s];
 			json_t *ss_obj = json_object();
 
-			json_object_set_new(ss_obj, "name", json_string(ss.subobj_name));
+			json_object_set_new(ss_obj, "name", json_safe_string(ss.subobj_name));
 			if (ss.type != SUBSYSTEM_NONE)
 				json_object_set_new(ss_obj, "subsystem_type", json_string(subsystem_type_str(ss.type)));
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
@@ -1906,7 +1906,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 			json_object_set_new(ss_obj, "radius", json_real(ss.radius));
 
 			if (ss.path_num >= 0 && ss.path_num < pm->n_paths)
-				json_object_set_new(ss_obj, "path_name", json_string(pm->paths[ss.path_num].name));
+				json_object_set_new(ss_obj, "path_name", json_safe_string(pm->paths[ss.path_num].name));
 
 			// Turret-specific info
 			bool has_turret_data = (ss.type == SUBSYSTEM_TURRET) ||
@@ -1931,7 +1931,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				json_t *t_pri = json_array();
 				for (int b = 0; b < MAX_SHIP_PRIMARY_BANKS; b++) {
 					if (ss.primary_banks[b] >= 0 && ss.primary_banks[b] < weapon_info_size())
-						json_array_append_new(t_pri, json_string(Weapon_info[ss.primary_banks[b]].name));
+						json_array_append_new(t_pri, json_safe_string(Weapon_info[ss.primary_banks[b]].name));
 				}
 				json_object_set_new(ss_obj, "primary_weapons", t_pri);
 
@@ -1939,7 +1939,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 				json_t *t_sec = json_array();
 				for (int b = 0; b < MAX_SHIP_SECONDARY_BANKS; b++) {
 					if (ss.secondary_banks[b] >= 0 && ss.secondary_banks[b] < weapon_info_size())
-						json_array_append_new(t_sec, json_string(Weapon_info[ss.secondary_banks[b]].name));
+						json_array_append_new(t_sec, json_safe_string(Weapon_info[ss.secondary_banks[b]].name));
 				}
 				json_object_set_new(ss_obj, "secondary_weapons", t_sec);
 			}
@@ -2111,7 +2111,7 @@ static json_t *handle_list_personas()
 
 	for (const auto &p : Personas) {
 		json_t *entry = json_object();
-		json_object_set_new(entry, "name", json_string(p.name));
+		json_object_set_new(entry, "name", json_safe_string(p.name));
 
 		// Derive persona_type from type flag bits
 		const char *persona_type = "unknown";
@@ -2127,7 +2127,7 @@ static json_t *handle_list_personas()
 		json_t *species_arr = json_array();
 		for (int j = 0; j < (int)Species_info.size() && j < 32; j++) {
 			if (p.species_bitfield & (1 << j))
-				json_array_append_new(species_arr, json_string(Species_info[j].species_name));
+				json_array_append_new(species_arr, json_safe_string(Species_info[j].species_name));
 		}
 		json_object_set_new(entry, "species", species_arr);
 
@@ -2170,7 +2170,7 @@ static json_t *handle_list_talking_heads()
 
 	json_t *arr = json_array();
 	for (const auto &h : heads)
-		json_array_append_new(arr, json_string(h.c_str()));
+		json_array_append_new(arr, json_safe_string(h.c_str()));
 
 	return make_json_tool_result(arr);
 }
@@ -2190,8 +2190,8 @@ static json_t *handle_list_fonts()
 			continue;
 
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(f->getName().c_str()));
-		json_object_set_new(item, "filename", json_string(f->getFilename().c_str()));
+		json_object_set_new(item, "name", json_safe_string(f->getName().c_str()));
+		json_object_set_new(item, "filename", json_safe_string(f->getFilename().c_str()));
 
 		const char *type_str;
 		switch (f->getType()) {
@@ -2212,7 +2212,7 @@ static json_t *handle_list_ai_profiles()
 	json_t *arr = json_array();
 	for (int i = 0; i < Num_ai_profiles; i++) {
 		json_t *item = json_object();
-		json_object_set_new(item, "name", json_string(Ai_profiles[i].profile_name));
+		json_object_set_new(item, "name", json_safe_string(Ai_profiles[i].profile_name));
 		if (i == Default_ai_profile)
 			json_object_set_new(item, "is_default", json_true());
 		json_array_append_new(arr, item);
@@ -2228,7 +2228,7 @@ static json_t *handle_list_names(const Container &items, GetName get_name)
 {
 	json_t *arr = json_array();
 	for (const auto &item : items) {
-		json_array_append_new(arr, json_string(get_name(item)));
+		json_array_append_new(arr, json_safe_string(get_name(item)));
 	}
 	return make_json_tool_result(arr);
 }
@@ -2667,7 +2667,7 @@ static json_t *handle_list_missions()
 	json_t *arr = json_array();
 	for (size_t i = 0; i < names.size(); i++) {
 		json_t *entry = json_object();
-		json_object_set_new(entry, "filename", json_string((names[i] + ".fs2").c_str()));
+		json_object_set_new(entry, "filename", json_safe_string((names[i] + ".fs2").c_str()));
 
 		// Format write_time as ISO 8601
 		char timebuf[32];
@@ -2687,7 +2687,7 @@ static json_t *handle_list_missions()
 	}
 
 	json_t *obj = json_object();
-	json_object_set_new(obj, "directory", json_string(directory.c_str()));
+	json_object_set_new(obj, "directory", json_safe_string(directory.c_str()));
 	json_object_set_new(obj, "missions", arr);
 	return make_json_tool_result(obj);
 }
@@ -2720,7 +2720,7 @@ static json_t *handle_get_root_paths()
 			if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
 				json_t *entry = json_object();
 				json_object_set_new(entry, "label", json_string(q.label));
-				json_object_set_new(entry, "path", json_string(buf.c_str()));
+				json_object_set_new(entry, "path", json_safe_string(buf.c_str()));
 				json_array_append_new(arr, entry);
 			}
 		}

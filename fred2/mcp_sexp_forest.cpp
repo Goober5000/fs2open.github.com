@@ -1,4 +1,5 @@
 #include "stdafx.h"
+#include "mcp_json.h"
 #include "mcp_sexp_forest.h"
 #include "sexp_tree.h"
 #include "parse/sexp.h"
@@ -163,7 +164,7 @@ json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int
 
 	json_t *values = json_array();
 	for (sexp_list_item *item = list; item != nullptr; item = item->next)
-		json_array_append_new(values, json_string(item->text.c_str()));
+		json_array_append_new(values, json_safe_string(item->text.c_str()));
 
 	if (list)
 		list->destroy();
