@@ -3032,11 +3032,11 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	auto default_value = get_optional_string(input, "default_value", sink, TOKEN_LENGTH - 1);
 	auto type_str = get_optional_string(input, "variable_type", sink);
 	if (sink.has_error()) return;
-	if (!default_value[0]) {
+
+	if (default_value && !default_value[0]) {
 		sink.set_error("SEXP variable default value cannot be blank");
 		return;
 	}
-
 	if (new_name) {
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
 	}
