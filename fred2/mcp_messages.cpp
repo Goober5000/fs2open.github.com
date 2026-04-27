@@ -219,7 +219,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	auto new_head     = get_optional_filename(input, "talking_head", sink, false);
 	auto new_voice    = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_team_str = get_optional_string(input, "team", sink);
-	auto new_name     = get_optional_string(input, "new_name", sink);
+	auto new_name     = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	std::optional<int> persona_index = std::nullopt;
