@@ -50,17 +50,17 @@ static const SCP_vector<const char *> message_enum_values = { "mission", "builti
 static json_t *build_message_json(const MMessage &msg, int msg_absolute_index, bool include_details = false)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(msg.name));
+	json_object_set_new(obj, "name", json_safe_string(msg.name));
 	if (msg_absolute_index >= Num_builtin_messages)
 		json_object_set_new(obj, "index", json_integer(msg_absolute_index - Num_builtin_messages + 1));
-	json_object_set_new(obj, "message", json_string(msg.message));
+	json_object_set_new(obj, "message", json_safe_string(msg.message));
 
 	const char *persona = persona_name_from_index(msg.persona_index);
 	if (persona)
-		json_object_set_new(obj, "persona", json_string(persona));
+		json_object_set_new(obj, "persona", json_safe_string(persona));
 
 	if (include_details) {
-		json_object_set_new(obj, "team", json_string(team_name_from_index(msg.multi_team)));
+		json_object_set_new(obj, "team", json_safe_string(team_name_from_index(msg.multi_team)));
 		set_optional_filename(obj, "talking_head", msg.avi_info.name);
 		set_optional_filename(obj, "voice_filename", msg.wave_info.name);
 	}

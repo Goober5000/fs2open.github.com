@@ -61,7 +61,7 @@ static void reindex_waypoint_instances()
 static json_t *build_waypoint_list_json(const waypoint_list &wl, int index, bool include_points = false)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(wl.get_name()));
+	json_object_set_new(obj, "name", json_safe_string(wl.get_name()));
 	json_object_set_new(obj, "index", json_integer(index + 1));
 
 	if (include_points) {
@@ -82,9 +82,9 @@ static json_t *build_waypoint_json(const char *list_name, int one_based_index, c
 	waypoint_stuff_name(wpt_name, list_name, one_based_index);
 
 	json_t *obj = json_object();
-	json_object_set_new(obj, "list", json_string(list_name));
+	json_object_set_new(obj, "list", json_safe_string(list_name));
 	json_object_set_new(obj, "index", json_integer(one_based_index));
-	json_object_set_new(obj, "name", json_string(wpt_name));
+	json_object_set_new(obj, "name", json_safe_string(wpt_name));
 	json_object_set_new(obj, "position", build_vec3d_json(pos));
 	return obj;
 }

@@ -66,7 +66,7 @@ static json_t *build_syntax_error_json(int node)
 	json_object_set_new(obj, "error_message", json_string(sexp_error_message(syntax_result)));
 	if (bad_node >= 0) {
 		json_object_set_new(obj, "bad_node", json_integer(bad_node));
-		json_object_set_new(obj, "bad_node_text", json_string(Sexp_nodes[bad_node].text));
+		json_object_set_new(obj, "bad_node_text", json_safe_string(Sexp_nodes[bad_node].text));
 	}
 	return obj;
 }
@@ -460,7 +460,7 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 
 		if (std::holds_alternative<const char *>(info.attached_id))
 			json_object_set_new(result, "entity_id",
-				json_string(std::get<const char *>(info.attached_id)));
+				json_safe_string(std::get<const char *>(info.attached_id)));
 		else
 			json_object_set_new(result, "entity_id",
 				json_integer(std::get<int>(info.attached_id)));
@@ -552,7 +552,7 @@ static void handle_sexp_to_text(json_t *input, McpToolRequest *req)
 
 	json_t *result = make_tool_result(text.c_str());
 	json_t *sc = json_object();
-	json_object_set_new(sc, "text", json_string(text.c_str()));
+	json_object_set_new(sc, "text", json_safe_string(text.c_str()));
 	json_object_set_new(result, "structuredContent", sc);
 
 	req->result_json = result;
@@ -945,7 +945,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 			json_t *entry = json_object();
 			json_object_set_new(entry, "level", json_string(e.level == 0 ? "warning" : "error"));
 			json_object_set_new(entry, "line", json_integer(e.line));
-			json_object_set_new(entry, "message", json_string(e.message.c_str()));
+			json_object_set_new(entry, "message", json_safe_string(e.message.c_str()));
 			json_array_append_new(errors, entry);
 		}
 		json_object_set_new(result, "parse_errors", errors);
@@ -973,7 +973,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 	// Round-trip the text for verification
 	SCP_string round_tripped;
 	convert_sexp_to_string(round_tripped, n, SEXP_SAVE_MODE);
-	json_object_set_new(result, "parsed_text", json_string(round_tripped.c_str()));
+	json_object_set_new(result, "parsed_text", json_safe_string(round_tripped.c_str()));
 
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
@@ -2544,7 +2544,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 				if (!warnings) warnings = json_array();
 				SCP_string wmsg;
 				sprintf(wmsg, "Argument %d exceeds expected argument count for '%s'; type not checked", i, op_name);
-				json_array_append_new(warnings, json_string(wmsg.c_str()));
+				json_array_append_new(warnings, json_safe_string(wmsg.c_str()));
 			} else {
 				bool is_variable = (!stricmp(result.type_str, "number") || !stricmp(result.type_str, "string")) && result.value_str[0] == '@';
 				int node_opr = -1;
@@ -2606,7 +2606,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 			if (!warnings) warnings = json_array();
 			SCP_string wmsg;
 			sprintf(wmsg, "Operator '%s' expects at least %d argument(s), but only " SIZE_T_ARG " provided", op_name, Operators[op_idx].min, num_args);
-			json_array_append_new(warnings, json_string(wmsg.c_str()));
+			json_array_append_new(warnings, json_safe_string(wmsg.c_str()));
 		}
 
 		// Link arguments to operator
@@ -2616,7 +2616,7 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 		warnings = json_array();
 		SCP_string wmsg;
 		sprintf(wmsg, "Operator '%s' expects at least %d argument(s), but none were provided", op_name, Operators[op_idx].min);
-		json_array_append_new(warnings, json_string(wmsg.c_str()));
+		json_array_append_new(warnings, json_safe_string(wmsg.c_str()));
 	}
 
 	mcp_sexp_forest_mark_dirty({ op_node });
@@ -2774,8 +2774,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 static json_t *build_sexp_variable_json(int index)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(Sexp_variables[index].variable_name));
-	json_object_set_new(obj, "default_value", json_string(Sexp_variables[index].text));
+	json_object_set_new(obj, "name", json_safe_string(Sexp_variables[index].variable_name));
+	json_object_set_new(obj, "default_value", json_safe_string(Sexp_variables[index].text));
 
 	if (Sexp_variables[index].type & SEXP_VARIABLE_NUMBER)
 		json_object_set_new(obj, "variable_type", json_string("number"));
