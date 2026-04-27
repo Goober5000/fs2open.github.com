@@ -110,7 +110,7 @@ static void update_annotation_paths_for_delete(int index)
 static json_t *build_event_json(const mission_event &evt, int evt_index, bool include_details = false)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(evt.name.c_str()));
+	json_object_set_new(obj, "name", json_safe_string(evt.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(evt_index + 1));
 	json_object_set_new(obj, "formula", json_integer(evt.formula));
 
@@ -130,7 +130,7 @@ static json_t *build_event_json(const mission_event &evt, int evt_index, bool in
 		json_object_set_new(obj, "score", json_integer(evt.score));
 		if (is_chained)
 			json_object_set_new(obj, "chain_delay", json_integer(evt.chain_delay));
-		json_object_set_new(obj, "team", json_string(team_name_from_index(evt.team)));
+		json_object_set_new(obj, "team", json_safe_string(team_name_from_index(evt.team)));
 
 		set_optional_string(obj, "objective_text", evt.objective_text.c_str(), true);
 		set_optional_string(obj, "objective_key_text", evt.objective_key_text.c_str(), true);

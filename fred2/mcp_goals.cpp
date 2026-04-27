@@ -53,16 +53,16 @@ static int goal_type_from_name(const char *name)
 static json_t *build_goal_json(const mission_goal &goal, int index, bool include_details = false)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(goal.name.c_str()));
+	json_object_set_new(obj, "name", json_safe_string(goal.name.c_str()));
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "goal_type", json_string(goal_type_name(goal.type)));
 	json_object_set_new(obj, "formula", json_integer(goal.formula));
 
 	if (include_details) {
 		json_object_set_new(obj, "is_valid", json_boolean(!(goal.type & INVALID_GOAL)));
-		json_object_set_new(obj, "message", json_string(goal.message.c_str()));
+		json_object_set_new(obj, "message", json_safe_string(goal.message.c_str()));
 		json_object_set_new(obj, "score", json_integer(goal.score));
-		json_object_set_new(obj, "team", json_string(team_name_from_index(goal.team)));
+		json_object_set_new(obj, "team", json_safe_string(team_name_from_index(goal.team)));
 		json_object_set_new(obj, "no_music", json_boolean(goal.flags & MGF_NO_MUSIC));
 	}
 

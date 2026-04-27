@@ -154,7 +154,7 @@ void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfi
 
 	if (from_index == to_index) {
 		json_t *data = json_object();
-		json_object_set_new(data, "name", json_string(cfg.get_name(*from_index).c_str()));
+		json_object_set_new(data, "name", json_safe_string(cfg.get_name(*from_index).c_str()));
 		json_object_set_new(data, "index", json_integer(*from_index));
 		req->result_json = make_json_tool_result(data);
 		req->success = true;
@@ -166,7 +166,7 @@ void handle_generic_move(json_t *input, McpToolRequest *req, const MoveSwapConfi
 	mark_modified("MCP: move %s %s from %d to %d", cfg.entity_name, cfg.get_name(*to_index).c_str(), *from_index, *to_index);
 
 	json_t *data = json_object();
-	json_object_set_new(data, "name", json_string(cfg.get_name(*to_index).c_str()));
+	json_object_set_new(data, "name", json_safe_string(cfg.get_name(*to_index).c_str()));
 	json_object_set_new(data, "index", json_integer(*to_index));
 	req->result_json = make_json_tool_result(data);
 	req->success = true;
@@ -190,10 +190,10 @@ void handle_generic_swap(json_t *input, McpToolRequest *req, const MoveSwapConfi
 
 	json_t *data = json_object();
 	json_t *a_obj = json_object();
-	json_object_set_new(a_obj, "name", json_string(cfg.get_name(*index_a).c_str()));
+	json_object_set_new(a_obj, "name", json_safe_string(cfg.get_name(*index_a).c_str()));
 	json_object_set_new(a_obj, "index", json_integer(*index_a));
 	json_t *b_obj = json_object();
-	json_object_set_new(b_obj, "name", json_string(cfg.get_name(*index_b).c_str()));
+	json_object_set_new(b_obj, "name", json_safe_string(cfg.get_name(*index_b).c_str()));
 	json_object_set_new(b_obj, "index", json_integer(*index_b));
 	json_object_set_new(data, "a", a_obj);
 	json_object_set_new(data, "b", b_obj);
@@ -231,7 +231,7 @@ static json_t *build_cmd_brief_stage_json(const cmd_brief_stage &stage, int inde
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index + 1));
-	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
+	json_object_set_new(obj, "text", json_safe_string(stage.text.c_str()));
 	if (stage.ani_filename && stricmp(stage.ani_filename, "<default>") != 0)
 		set_optional_filename(obj, "animation_filename", stage.ani_filename);
 	set_optional_filename(obj, "voice_filename", stage.wave_filename);
@@ -678,9 +678,9 @@ static json_t *build_debrief_stage_json(const debrief_stage &stage, int index)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index + 1));
-	json_object_set_new(obj, "text", json_string(stage.text.c_str()));
+	json_object_set_new(obj, "text", json_safe_string(stage.text.c_str()));
 	set_optional_filename(obj, "voice_filename", stage.voice);
-	json_object_set_new(obj, "recommendation_text", json_string(stage.recommendation_text.c_str()));
+	json_object_set_new(obj, "recommendation_text", json_safe_string(stage.recommendation_text.c_str()));
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
 	return obj;
 }
@@ -894,13 +894,13 @@ static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 static json_t *build_jump_node_json(const CJumpNode &jn, int index, bool include_details = false)
 {
 	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_string(jn.GetName()));
+	json_object_set_new(obj, "name", json_safe_string(jn.GetName()));
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "position", build_vec3d_json(*jn.GetPosition()));
 
 	if (include_details) {
 		if (jn.HasDisplayName())
-			json_object_set_new(obj, "display_name", json_string(jn.GetDisplayName()));
+			json_object_set_new(obj, "display_name", json_safe_string(jn.GetDisplayName()));
 		if (jn.IsColored())
 			json_object_set_new(obj, "color", build_color_json(jn.GetColor(), true));
 		if (jn.IsSpecialModel()) {
@@ -1201,11 +1201,11 @@ static json_t *build_mission_music_json()
 	};
 	for (auto &s : scores) {
 		int idx = Mission_music[s.score];
-		json_object_set_new(m, s.key, json_string(Spooled_music.in_bounds(idx) ? Spooled_music[idx].name : "None"));
+		json_object_set_new(m, s.key, json_safe_string(Spooled_music.in_bounds(idx) ? Spooled_music[idx].name : "None"));
 	}
 
 	// Event music
-	json_object_set_new(m, "event_music", json_string(Soundtracks.in_bounds(Current_soundtrack_num) ? Soundtracks[Current_soundtrack_num].name : "None"));
+	json_object_set_new(m, "event_music", json_safe_string(Soundtracks.in_bounds(Current_soundtrack_num) ? Soundtracks[Current_soundtrack_num].name : "None"));
 
 	// Substitute music
 	struct { const char *key; const char *ref; } substitutes[] = {
@@ -1214,7 +1214,7 @@ static json_t *build_mission_music_json()
 	};
 	for (auto &s : substitutes) {
 		if (s.ref[0] && stricmp(s.ref, "None") != 0)
-			json_object_set_new(m, s.key, json_string(s.ref));
+			json_object_set_new(m, s.key, json_safe_string(s.ref));
 		else
 			json_object_set_new(m, s.key, json_string("None"));
 	}

@@ -70,17 +70,17 @@ static json_t *build_mission_info_json()
 	if (Mission_filename[0] != '\0') {
 		SCP_string full_name;
 		sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
-		json_object_set_new(info, "filename", json_string(full_name.c_str()));
+		json_object_set_new(info, "filename", json_safe_string(full_name.c_str()));
 	} else {
 		json_object_set_new(info, "filename", json_string(""));
 	}
 
-	json_object_set_new(info, "title", json_string(The_mission.name));
-	json_object_set_new(info, "author", json_string(The_mission.author.c_str()));
-	json_object_set_new(info, "created", json_string(The_mission.created));
-	json_object_set_new(info, "modified", json_string(The_mission.modified));
-	json_object_set_new(info, "notes", json_string(The_mission.notes));
-	json_object_set_new(info, "mission_desc", json_string(The_mission.mission_desc));
+	json_object_set_new(info, "title", json_safe_string(The_mission.name));
+	json_object_set_new(info, "author", json_safe_string(The_mission.author.c_str()));
+	json_object_set_new(info, "created", json_safe_string(The_mission.created));
+	json_object_set_new(info, "modified", json_safe_string(The_mission.modified));
+	json_object_set_new(info, "notes", json_safe_string(The_mission.notes));
+	json_object_set_new(info, "mission_desc", json_safe_string(The_mission.mission_desc));
 
 	// Game type as human-readable string
 	{
@@ -132,9 +132,9 @@ static json_t *build_mission_info_json()
 	json_object_set_new(info, "contrail_threshold", json_integer(The_mission.contrail_threshold));
 
 	// Command messages
-	json_object_set_new(info, "command_sender", json_string(The_mission.command_sender));
+	json_object_set_new(info, "command_sender", json_safe_string(The_mission.command_sender));
 	if (The_mission.command_persona >= 0 && The_mission.command_persona < (int)Personas.size())
-		json_object_set_new(info, "command_persona", json_string(Personas[The_mission.command_persona].name));
+		json_object_set_new(info, "command_persona", json_safe_string(Personas[The_mission.command_persona].name));
 	else
 		json_object_set_new(info, "command_persona", json_null());
 
@@ -148,7 +148,7 @@ static json_t *build_mission_info_json()
 
 	// AI profile
 	if (The_mission.ai_profile != nullptr)
-		json_object_set_new(info, "ai_profile", json_string(The_mission.ai_profile->profile_name));
+		json_object_set_new(info, "ai_profile", json_safe_string(The_mission.ai_profile->profile_name));
 	else
 		json_object_set_new(info, "ai_profile", json_null());
 
@@ -157,7 +157,7 @@ static json_t *build_mission_info_json()
 		const sound_env &env = The_mission.sound_environment;
 		if (env.id >= 0 && env.id < (int)EFX_presets.size()) {
 			json_t *env_obj = json_object();
-			json_object_set_new(env_obj, "preset", json_string(EFX_presets[env.id].name.c_str()));
+			json_object_set_new(env_obj, "preset", json_safe_string(EFX_presets[env.id].name.c_str()));
 			json_object_set_new(env_obj, "volume", json_real(env.volume));
 			json_object_set_new(env_obj, "damping", json_real(env.damping));
 			json_object_set_new(env_obj, "decay", json_real(env.decay));
@@ -171,7 +171,7 @@ static json_t *build_mission_info_json()
 	if (!The_mission.custom_data.empty()) {
 		json_t *data_obj = json_object();
 		for (const auto &kv : The_mission.custom_data) {
-			json_object_set_new(data_obj, kv.first.c_str(), json_string(kv.second.c_str()));
+			json_object_set_new(data_obj, kv.first.c_str(), json_safe_string(kv.second.c_str()));
 		}
 		json_object_set_new(info, "custom_data", data_obj);
 	}
@@ -181,9 +181,9 @@ static json_t *build_mission_info_json()
 		json_t *strings_arr = json_array();
 		for (const auto &cs : The_mission.custom_strings) {
 			json_t *cs_obj = json_object();
-			json_object_set_new(cs_obj, "name", json_string(cs.name.c_str()));
-			json_object_set_new(cs_obj, "value", json_string(cs.value.c_str()));
-			json_object_set_new(cs_obj, "text", json_string(cs.text.c_str()));
+			json_object_set_new(cs_obj, "name", json_safe_string(cs.name.c_str()));
+			json_object_set_new(cs_obj, "value", json_safe_string(cs.value.c_str()));
+			json_object_set_new(cs_obj, "text", json_safe_string(cs.text.c_str()));
 			json_array_append_new(strings_arr, cs_obj);
 		}
 		json_object_set_new(info, "custom_strings", strings_arr);

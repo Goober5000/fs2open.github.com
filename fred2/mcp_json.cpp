@@ -94,13 +94,13 @@ json_t *make_json_tool_result(json_t *data)
 void set_optional_string(json_t *obj, const char *key, const char *value, bool omit_if_empty)
 {
 	if (value && (value[0] || !omit_if_empty))
-		json_object_set_new(obj, key, json_string(value));
+		json_object_set_new(obj, key, json_safe_string(value));
 }
 
 void set_optional_filename(json_t *obj, const char *key, const char *value)
 {
 	if (value && VALID_FNAME(value))
-		json_object_set_new(obj, key, json_string(value));
+		json_object_set_new(obj, key, json_safe_string(value));
 }
 
 static void add_typed_prop(json_t *props, const char *name, const char *description, const char *type)
