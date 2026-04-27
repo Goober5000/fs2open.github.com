@@ -620,7 +620,7 @@ static json_t *build_sexp_node_json(int n)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "node", json_integer(n));
-	json_object_set_new(obj, "value", json_string(Sexp_nodes[n].text));
+	json_object_set_new(obj, "value", json_safe_string(Sexp_nodes[n].text));
 
 	json_object_set_new(obj, "kind", json_string(get_sexp_kind(n)));
 	json_object_set_new(obj, "role", json_string(get_sexp_role(n)));
@@ -755,7 +755,7 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
-	auto needle = get_required_string(input, "text", sink, true);
+	auto needle = get_required_string(input, "text", sink, true, MESSAGE_LENGTH - 1);
 	if (!needle) return;
 
 	// The '@' prefix is a SEXP display convention for variable references
@@ -931,7 +931,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
-	auto text = get_required_string(input, "text", sink, true);
+	auto text = get_required_string(input, "text", sink, true, MULTITEXT_LENGTH - 1);
 	if (!text)
 		return;
 
@@ -2797,9 +2797,16 @@ static bool validate_sexp_variable_name(const char *name, McpErrorSink &sink, in
 		return false;
 	}
 
-	auto rval = strcspn(name, "@()[] ;\"\\/");
-	if (rval != strlen(name)) {
+	auto name_len = strlen(name);
+
+	auto rval = strcspn(name, "@()[];\"\\/");
+	if (rval != name_len) {
 		sink.set_error("Invalid character '%c' in variable name", name[rval]);
+		return false;
+	}
+	auto rval2 = find_white_space(name);
+	if (rval2 != name_len) {
+		sink.set_error("Variable names cannot contain whitespace");
 		return false;
 	}
 
