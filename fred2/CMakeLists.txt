@@ -183,6 +183,8 @@ set(FRED2_SOURCES
 	mcp_waypoints.h
 	mcp_cmd_brief.cpp
 	mcp_cmd_brief.h
+	mcp_debrief.cpp
+	mcp_debrief.h
 	mcp_sexp.cpp
 	mcp_sexp.h
 	mcp_sexp_forest.cpp
