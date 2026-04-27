@@ -120,7 +120,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink);
+	auto message    = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
@@ -202,7 +202,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	mission_goal &goal = Mission_goals[idx];
 
 	// Validate new_name
-	auto new_name = get_optional_string(input, "new_name", sink);
+	auto new_name = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	if (new_name) {
 		if (!check_general_rename(new_name, goal.name.c_str(),
 			[](const char *n) { return mission_goal_lookup(n) >= 0; },
@@ -213,7 +213,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink);
+	auto message    = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
