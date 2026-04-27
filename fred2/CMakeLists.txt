@@ -185,6 +185,8 @@ set(FRED2_SOURCES
 	mcp_cmd_brief.h
 	mcp_debrief.cpp
 	mcp_debrief.h
+	mcp_fiction_viewer.cpp
+	mcp_fiction_viewer.h
 	mcp_sexp.cpp
 	mcp_sexp.h
 	mcp_sexp_forest.cpp
