@@ -215,7 +215,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 
 	// --- Phase 1: extract and validate all fields (no mutations yet) ---
 	auto title             = get_optional_string(input, "title", sink, NAME_LENGTH - 1);
-	auto author            = get_optional_string(input, "author", sink);
+	auto author            = get_optional_string(input, "author", sink, MISSION_DESC_LENGTH - 1);
 	auto notes             = get_optional_string(input, "notes", sink, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
 	auto mission_desc      = get_optional_string(input, "mission_desc", sink, MISSION_DESC_LENGTH - 1);
 	auto game_type_str     = get_optional_string(input, "game_type", sink);

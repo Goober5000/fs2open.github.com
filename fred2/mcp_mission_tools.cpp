@@ -283,7 +283,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", sink, false);
+	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
 	auto ani = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
@@ -333,7 +333,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink);
+	auto new_text = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
 	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
 	auto new_wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
 	if (sink.has_error()) return;
@@ -730,11 +730,11 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", sink, false);
+	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
 	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto rec_text = get_optional_string(input, "recommendation_text", sink);
+	auto rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -784,9 +784,9 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink);
+	auto new_text = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
 	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_rec_text = get_optional_string(input, "recommendation_text", sink);
+	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
