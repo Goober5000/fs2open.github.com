@@ -2792,6 +2792,10 @@ static bool validate_sexp_variable_name(const char *name, McpErrorSink &sink, in
 {
 	if (!check_string_length(name, TOKEN_LENGTH - 1, "name", sink))
 		return false;
+	if (!name[0]) {
+		sink.set_error("SEXP variable name cannot be blank");
+		return false;
+	}
 
 	auto rval = strcspn(name, "@()[] ;\"\\/");
 	if (rval != strlen(name)) {
@@ -2928,7 +2932,7 @@ static void handle_get_sexp_variable(json_t *input, McpToolRequest *req)
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(sink,"SEXP variable", name);
+		set_not_found_error(sink, "SEXP variable", name);
 		return;
 	}
 
@@ -2947,6 +2951,10 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 	auto default_value = get_required_string(input, "default_value", sink, false, TOKEN_LENGTH - 1);
 	if (!default_value) return;
+	if (!default_value[0]) {
+		sink.set_error("SEXP variable default value cannot be blank");
+		return;
+	}
 
 	auto type_str = get_required_string(input, "variable_type", sink, true);
 	if (!type_str) return;
@@ -3002,7 +3010,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(sink,"SEXP variable", name);
+		set_not_found_error(sink, "SEXP variable", name);
 		return;
 	}
 
@@ -3016,6 +3024,10 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 	auto default_value = get_optional_string(input, "default_value", sink, TOKEN_LENGTH - 1);
 	auto type_str = get_optional_string(input, "variable_type", sink);
 	if (sink.has_error()) return;
+	if (!default_value[0]) {
+		sink.set_error("SEXP variable default value cannot be blank");
+		return;
+	}
 
 	if (new_name) {
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
@@ -3101,7 +3113,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
-		set_not_found_error(sink,"SEXP variable", name);
+		set_not_found_error(sink, "SEXP variable", name);
 		return;
 	}
 
