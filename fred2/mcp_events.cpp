@@ -217,8 +217,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		multi_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text = get_optional_string(input, "objective_text", sink);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink);
+	auto objective_text = get_optional_string(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	// Range validation
@@ -313,7 +313,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	mission_event &evt = Mission_events[idx];
 
 	// Validate new_name
-	auto new_name      = get_optional_string(input, "new_name", sink);
+	auto new_name      = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	if (new_name) {
 		if (!check_general_rename(new_name, evt.name.c_str(),
 			[](const char *n) { return mission_event_lookup(n) >= 0; },
@@ -348,8 +348,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text     = get_optional_string(input, "objective_text", sink);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink);
+	auto objective_text     = get_optional_string(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	// Range validation

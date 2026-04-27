@@ -879,3 +879,18 @@ size_t json_array_max_string_length(json_t *arr, const char *field)
 	}
 	return max_len;
 }
+
+json_t *json_safe_string(const char *text)
+{
+	if (!text)
+		return json_string("");
+
+	json_t *result = json_string(text);
+	if (result)
+		return result;
+
+	// json_string rejected the input due to invalid UTF-8.  Try converting it.
+	SCP_string utf8;
+	coerce_to_utf8(utf8, text);
+	return json_string(utf8.c_str());
+}

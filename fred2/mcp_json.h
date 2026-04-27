@@ -234,4 +234,7 @@ json_t *make_not_found_error(const char *entity_type, const char *name);
 // Compute max string length for a named field across a jansson array.
 size_t json_array_max_string_length(json_t *arr, const char *field);
 
+// Return a guaranteed UTF-8 string even if the text may include invalid UTF-8 characters.
+json_t *json_safe_string(const char *text);
+
 #endif // _MCP_JSON_H
