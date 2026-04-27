@@ -2866,13 +2866,14 @@ static void update_sexp_node_variable_references(const char *old_name, const cha
 	}
 }
 
-static int reset_sexp_node_variable_references(const char *var_name, int var_type)
+static int reset_sexp_node_variable_references(const char *var_name)
 {
 	int count = 0;
 
 	for (int i = 0; i < Num_sexp_nodes; i++) {
 		if ((Sexp_nodes[i].type != SEXP_NOT_USED) && (Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name)) {
 			Sexp_nodes[i].type &= ~SEXP_FLAG_VARIABLE;
+			Sexp_nodes[i].subtype = SEXP_ATOM_STRING;
 			strcpy_s(Sexp_nodes[i].text, PLACEHOLDER_STRING);
 			count++;
 		}
@@ -3136,10 +3137,8 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	int var_type = Sexp_variables[idx].type;
-
 	// Reset any SEXP node references
-	reset_sexp_node_variable_references(name, var_type);
+	reset_sexp_node_variable_references(name);
 
 	sexp_variable_delete(idx);
 	sexp_variable_sort();
