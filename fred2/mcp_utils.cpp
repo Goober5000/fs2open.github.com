@@ -64,7 +64,7 @@ SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 
 const std::pair<int, const char *> Opf_types_to_names[] = {
 	{ OPF_NONE,                        "none"                           },
-	{ OPF_NULL,                        "null"                           },
+	{ OPF_NULL,                        "void"                           },
 	{ OPF_BOOL,                        "boolean"                        },
 	{ OPF_NUMBER,                      "number"                         },
 	{ OPF_SHIP,                        "ship"                           },
@@ -384,7 +384,7 @@ const opf_type_info Opf_type_info[] = {
 
 	// Special
 	{ "none",               "No argument expected at this position", ac_none, nullptr },
-	{ "null",               "Null type (used for type matching)", ac_none, nullptr },
+	{ "void",               "Void type (used for type matching)", ac_none, nullptr },
 
 	// sentinel
 	{ nullptr, nullptr, nullptr, nullptr }
