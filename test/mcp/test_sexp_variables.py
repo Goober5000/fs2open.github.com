@@ -258,15 +258,14 @@ def register(suite, client):
             assert_success(r)
             vars_.remove("tsv_score")  # already gone
 
-            # Reference node text is now <placeholder> and the
-            # SEXP_FLAG_VARIABLE bit has been cleared.  The subtype is
-            # left as SEXP_ATOM_NUMBER, so value_type reads as
-            # "numeric_literal" — a known oddity (a non-numeric string in
-            # a number-typed atom) tracked separately from this test.
+            # Reference node text is now <placeholder>, SEXP_FLAG_VARIABLE
+            # is cleared, and the subtype is normalized to SEXP_ATOM_STRING
+            # so value_type reads as "string_literal" rather than the
+            # misleading "numeric_literal".
             nodes = _walk_nodes(client, root)
             ref = find_node_by_value(nodes, "<placeholder>", role="argument")
-            assert_equal(ref.get("value_type"), "numeric_literal",
-                         "after force-delete the variable bit should be cleared")
+            assert_equal(ref.get("value_type"), "string_literal",
+                         "after force-delete the subtype should be normalized to string")
 
             assert_true("tsv_score" not in _list_var_names(client),
                         "variable should be gone after force-delete")
