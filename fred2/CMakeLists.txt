@@ -179,6 +179,8 @@ set(FRED2_SOURCES
 	mcp_goals.h
 	mcp_waypoints.cpp
 	mcp_waypoints.h
+	mcp_cmd_brief.cpp
+	mcp_cmd_brief.h
 	mcp_sexp.cpp
 	mcp_sexp.h
 	mcp_sexp_forest.cpp

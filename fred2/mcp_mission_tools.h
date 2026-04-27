@@ -39,6 +39,10 @@ extern const SCP_vector<const char *> team_enum_values;
 const char *team_name_from_index(int multi_team);
 int team_index_from_name(const char *name);
 
+// Returns true (and sets sink error) if team_str equals "none"; rejects "none"
+// for entities that don't allow it (e.g. command briefings, debriefings).
+bool reject_team_none(const char *team_str, const char *entity_name, McpErrorSink &sink);
+
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
 struct MoveSwapConfig
