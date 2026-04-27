@@ -740,7 +740,7 @@ static void handle_walk_sexp_tree(json_t *input, McpToolRequest *req)
 // SEXP text search
 // ---------------------------------------------------------------------------
 
-static const SCP_vector<const char *> find_match_mode_values = { "substring", "exact" };
+static const SCP_vector<const char *> find_match_mode_values = { "substring", "exact", "fuzzy" };
 
 static bool node_text_matches(int n, const char *needle, bool exact)
 {
@@ -771,10 +771,12 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 	const char *match_mode_str = get_optional_string(input, "match_mode", sink);
 	if (sink.has_error()) return;
 	bool exact = false;
+	bool fuzzy = false;
 	if (match_mode_str) {
 		if (!check_string_enum(match_mode_str, find_match_mode_values, "match_mode", sink))
 			return;
 		exact = (stricmp(match_mode_str, "exact") == 0);
+		fuzzy = (stricmp(match_mode_str, "fuzzy") == 0);
 	}
 
 	const char *role_filter = get_optional_string(input, "role", sink);
@@ -809,33 +811,76 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Filter and emit, capped at MAX_SEXP_WALK_ENTRIES.
-	json_t *arr = json_array();
-	bool truncated = false;
-	for (auto candidate : candidates) {
-		int n = candidate.node;
-		// Always skip list-wrapper nodes — their text is not user-facing.
+	// list_wrapper nodes are structural — their text is not user-facing —
+	// and the role/value_type filters apply identically to all match modes.
+	auto passes_filters = [&](int n) -> bool {
 		if (SEXP_NODE_TYPE(n) == SEXP_LIST)
-			continue;
+			return false;
 		if (role_filter) {
 			const char *role = get_sexp_role(n);
 			if (!role || strcmp(role, role_filter) != 0)
-				continue;
+				return false;
 		}
 		if (value_type_filter) {
 			const char *vt = get_sexp_value_type(n);
 			if (!vt || strcmp(vt, value_type_filter) != 0)
-				continue;
+				return false;
 		}
-		if (!node_text_matches(n, needle, exact))
-			continue;
+		return true;
+	};
 
-		if (json_array_size(arr) >= MAX_SEXP_WALK_ENTRIES) {
-			truncated = true;
-			break;
+	bool truncated = false;
+	SCP_vector<int> result_nodes;
+
+	if (fuzzy) {
+		// Fuzzy must score every candidate before truncating, since the best
+		// matches may sit at the tail of the candidate list.  Compute
+		// max_text_length over post-filter candidates so the cost threshold
+		// scales with the actual data (matches the convention in
+		// mcp_reference_tools); fall back to TOKEN_LENGTH-1 if the candidate
+		// set is empty or contains only zero-length text.
+		SCP_string needle_str(needle);
+		size_t max_text_length = 0;
+		for (const auto &c : candidates) {
+			if (!passes_filters(c.node)) continue;
+			size_t len = strlen(Sexp_nodes[c.node].text);
+			if (len > max_text_length) max_text_length = len;
 		}
-		json_array_append_new(arr, build_sexp_node_json(n));
+		if (max_text_length == 0)
+			max_text_length = TOKEN_LENGTH - 1;
+
+		auto fuzzy_matches = fuzzy_search_and_sort(candidates.size(), needle,
+			[&](size_t i) -> size_t {
+				int n = candidates[i].node;
+				if (!passes_filters(n)) return SCP_string::npos;
+				return fuzzy_match_cost(Sexp_nodes[n].text, needle_str, max_text_length);
+			});
+
+		if (fuzzy_matches.size() > MAX_SEXP_WALK_ENTRIES) {
+			fuzzy_matches.resize(MAX_SEXP_WALK_ENTRIES);
+			truncated = true;
+		}
+		result_nodes.reserve(fuzzy_matches.size());
+		for (const auto &m : fuzzy_matches)
+			result_nodes.push_back(candidates[m.first].node);
+	} else {
+		// Substring/exact preserve traversal order, so we can early-break at
+		// the cap without losing any meaningful results.
+		for (const auto &c : candidates) {
+			int n = c.node;
+			if (!passes_filters(n)) continue;
+			if (!node_text_matches(n, needle, exact)) continue;
+			if (result_nodes.size() >= MAX_SEXP_WALK_ENTRIES) {
+				truncated = true;
+				break;
+			}
+			result_nodes.push_back(n);
+		}
 	}
+
+	json_t *arr = json_array();
+	for (int n : result_nodes)
+		json_array_append_new(arr, build_sexp_node_json(n));
 
 	json_t *result = json_object();
 	json_object_set_new(result, "nodes", arr);
@@ -3247,7 +3292,10 @@ void mcp_register_sexp_tools(json_t *tools)
 		add_string_enum_prop(props, "match_mode",
 			"How to compare 'text' against each node's value.  'substring' (default) "
 			"matches if 'text' appears anywhere in the node's value.  'exact' matches "
-			"only when the node's value equals 'text'.  Both modes are case-insensitive.",
+			"only when the node's value equals 'text'.  'fuzzy' allows typos and "
+			"missing characters via a Levenshtein-style cost; fuzzy results are "
+			"returned ordered by relevance (best match first), unlike substring and "
+			"exact which preserve traversal order.  All three modes are case-insensitive.",
 			find_match_mode_values);
 		add_integer_prop(props, "root_node",
 			"Optional root node index.  When provided, the search is restricted to "

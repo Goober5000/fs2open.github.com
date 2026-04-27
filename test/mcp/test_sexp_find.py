@@ -246,6 +246,68 @@ def register(suite, client):
         assert_error(r)
 
     # =================================================================
+    # Fuzzy match
+    # =================================================================
+
+    def test_fuzzy_recovers_typo():
+        # The simple-tree fixture has 'do-nothing'.  A query missing the hyphen
+        # is a substring miss but a clear fuzzy hit.
+        r = client.call_tool("find_sexp_text", {
+            "text": "donothing", "match_mode": "fuzzy",
+        })
+        assert_success(r)
+        d = tool_data(r)
+        assert_true(len(d["nodes"]) >= 1, "fuzzy should match 'donothing' against 'do-nothing'")
+        values = [e["value"].lower() for e in d["nodes"]]
+        assert_in("do-nothing", values, "expected 'do-nothing' among fuzzy matches")
+
+    def test_fuzzy_orders_by_relevance():
+        # Build a second tree with a less-similar operator so we can verify
+        # ordering: 'do-nothing' should rank above 'is-destroyed-delay' for
+        # the query 'donothing'.
+        r = client.call_tool("text_to_sexp",
+                              {"text": '( when ( is-destroyed-delay 0 "x" ) ( do-nothing ) )'})
+        assert_success(r)
+        other_root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("find_sexp_text", {
+                "text": "donothing", "match_mode": "fuzzy",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            values = [e["value"].lower() for e in d["nodes"]]
+            assert_in("do-nothing", values, "fuzzy missed 'do-nothing'")
+            # 'do-nothing' must appear before any 'is-destroyed-delay' result
+            # (if the latter even matched at all — it might be filtered by
+            # the threshold, which is also fine).
+            do_nothing_pos = values.index("do-nothing")
+            if "is-destroyed-delay" in values:
+                idd_pos = values.index("is-destroyed-delay")
+                assert_true(do_nothing_pos < idd_pos,
+                            f"'do-nothing' should rank above 'is-destroyed-delay'; "
+                            f"got order {values}")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": other_root, "delete": True})
+
+    def test_fuzzy_with_role_filter():
+        r = client.call_tool("find_sexp_text", {
+            "text": "donothing", "match_mode": "fuzzy", "role": "operator",
+        })
+        assert_success(r)
+        d = tool_data(r)
+        for entry in d["nodes"]:
+            assert_equal(entry["role"], "operator")
+
+    def test_fuzzy_no_match_returns_empty():
+        r = client.call_tool("find_sexp_text", {
+            "text": "zzzzznevermatchanything", "match_mode": "fuzzy",
+        })
+        assert_success(r)
+        d = tool_data(r)
+        assert_equal(d.get("nodes"), [], "expected empty nodes array for unrelated query")
+        assert_true("truncated" not in d, "should not be marked truncated")
+
+    # =================================================================
     # Schema rejections
     # =================================================================
 
@@ -302,6 +364,10 @@ def register(suite, client):
         ("sexp_find_root_node_restricts_results", test_root_node_restricts_results),
         ("sexp_find_root_node_out_of_range", test_root_node_out_of_range),
         ("sexp_find_root_node_negative", test_root_node_negative),
+        ("sexp_find_fuzzy_recovers_typo", test_fuzzy_recovers_typo),
+        ("sexp_find_fuzzy_orders_by_relevance", test_fuzzy_orders_by_relevance),
+        ("sexp_find_fuzzy_with_role_filter", test_fuzzy_with_role_filter),
+        ("sexp_find_fuzzy_no_match_returns_empty", test_fuzzy_no_match_returns_empty),
         ("sexp_find_bad_match_mode", test_bad_match_mode),
         ("sexp_find_role_list_wrapper_rejected_by_schema",
          test_role_list_wrapper_rejected_by_schema),
