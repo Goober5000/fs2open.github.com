@@ -62,7 +62,7 @@ def _find_node_or_none(nodes, value, role=None):
     """find_node_by_value but returns None instead of raising when absent."""
     try:
         return find_node_by_value(nodes, value, role=role)
-    except Exception:
+    except AssertionError:
         return None
 
 
@@ -488,11 +488,12 @@ def register(suite, client):
             wrapper_node = wrapper["node"]
 
             # First set to false
-            client.call_tool("update_sexp_node", {
+            r_false = client.call_tool("update_sexp_node", {
                 "node": wrapper_node,
                 "argument_type": "boolean",
                 "argument_value": "false",
             })
+            assert_success(r_false)
 
             # Now toggle back to true
             r2 = client.call_tool("update_sexp_node", {
