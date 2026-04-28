@@ -147,16 +147,6 @@ struct FormulaRootInfo
 	std::variant<const char *, int> attached_id;    // if attached, the entity name or index that holds the formula
 	entity_specific_tag attached_tag;               // if attached, additional relevant information about the formula holder
 
-	static bool valid_tag(const char *entity_type, entity_specific_tag tag) {
-		if (!stricmp(entity_type, "ship") || !stricmp(entity_type, "wing")) {
-			return tag == entity_specific_tag::ARRIVAL_CUE || tag == entity_specific_tag::DEPARTURE_CUE;
-		}
-		if (!stricmp(entity_type, "briefing_stage") || !stricmp(entity_type, "debriefing_stage")) {
-			return tag == entity_specific_tag::TEAM_1 || tag == entity_specific_tag::TEAM_2;
-		}
-		return tag == entity_specific_tag::NONE;
-	}
-
 	SCP_string to_string() const
 	{
 		SCP_string str(attached_type);
@@ -430,22 +420,23 @@ struct FormulaEntityDesc {
 	const char          *dialog_name;    // passed to validate_single_dialog
 	sexp_opr_t           return_type;
 	entity_specific_tag  default_tag;    // applied when caller omits the tag parameter
+	entity_specific_tag  valid_tags[2];
+	int                  num_valid_tags;
 
-	bool            (*lookup)(const char *entity_id, entity_specific_tag tag,
-	                          FormulaRootInfo &info, int &out_root, McpErrorSink &sink);
-	FormulaRootInfo (*scan)(int root);
-	void            (*write)(const FormulaRootInfo &info, int new_root);
+	bool            (*lookup)(const char *entity_id, entity_specific_tag tag, FormulaRootInfo &info, int &out_root, McpErrorSink &sink);
+	FormulaRootInfo   (*scan)(int root);
+	void             (*write)(const FormulaRootInfo &info, int new_root);
 };
 
 static const FormulaEntityDesc entity_type_table[] = {
-	{ "cutscene",            "cutscene",      OPR_BOOL, entity_specific_tag::NONE,        cutscene_lookup,   cutscene_scan,   cutscene_write   },
-	{ "fiction_viewer_stage","fiction viewer", OPR_BOOL, entity_specific_tag::NONE,        fvs_lookup,        fvs_scan,        fvs_write        },
-	{ "briefing_stage",      "briefing",      OPR_BOOL, entity_specific_tag::TEAM_1,      briefing_lookup,   briefing_scan,   briefing_write   },
-	{ "debriefing_stage",    "debriefing",    OPR_BOOL, entity_specific_tag::TEAM_1,      debriefing_lookup, debriefing_scan, debriefing_write },
-	{ "ship",                "ship",          OPR_BOOL, entity_specific_tag::ARRIVAL_CUE, ship_lookup,       ship_scan,       ship_write       },
-	{ "wing",                "wing",          OPR_BOOL, entity_specific_tag::ARRIVAL_CUE, wing_lookup,       wing_scan,       wing_write       },
-	{ "event",               "event",         OPR_NULL, entity_specific_tag::NONE,        event_lookup,      event_scan,      event_write      },
-	{ "goal",                "goal",          OPR_BOOL, entity_specific_tag::NONE,        goal_lookup,       goal_scan,       goal_write       },
+	{ "cutscene",             "cutscene",       OPR_BOOL, entity_specific_tag::NONE,        {entity_specific_tag::NONE},                                            1, cutscene_lookup,   cutscene_scan,   cutscene_write   },
+	{ "fiction_viewer_stage", "fiction viewer", OPR_BOOL, entity_specific_tag::NONE,        {entity_specific_tag::NONE},                                            1, fvs_lookup,        fvs_scan,        fvs_write        },
+	{ "briefing_stage",       "briefing",       OPR_BOOL, entity_specific_tag::TEAM_1,      {entity_specific_tag::TEAM_1, entity_specific_tag::TEAM_2},             2, briefing_lookup,   briefing_scan,   briefing_write   },
+	{ "debriefing_stage",     "debriefing",     OPR_BOOL, entity_specific_tag::TEAM_1,      {entity_specific_tag::TEAM_1, entity_specific_tag::TEAM_2},             2, debriefing_lookup, debriefing_scan, debriefing_write },
+	{ "ship",                 "ship",           OPR_BOOL, entity_specific_tag::ARRIVAL_CUE, {entity_specific_tag::ARRIVAL_CUE, entity_specific_tag::DEPARTURE_CUE}, 2, ship_lookup,       ship_scan,       ship_write       },
+	{ "wing",                 "wing",           OPR_BOOL, entity_specific_tag::ARRIVAL_CUE, {entity_specific_tag::ARRIVAL_CUE, entity_specific_tag::DEPARTURE_CUE}, 2, wing_lookup,       wing_scan,       wing_write       },
+	{ "event",                "event",          OPR_NULL, entity_specific_tag::NONE,        {entity_specific_tag::NONE},                                            1, event_lookup,      event_scan,      event_write      },
+	{ "goal",                 "goal",           OPR_BOOL, entity_specific_tag::NONE,        {entity_specific_tag::NONE},                                            1, goal_lookup,       goal_scan,       goal_write       },
 };
 
 // Entity-type string list derived from the table (used for schema enums and parameter validation).
@@ -476,7 +467,8 @@ static FormulaRootInfo build_formula_root_info_for_entity(
 			entity_specific_tag tag = entity_tag ? enum_from_tag(entity_tag) : entity_specific_tag::NONE;
 			if (tag == entity_specific_tag::NONE)
 				tag = e.default_tag;
-			if (!FormulaRootInfo::valid_tag(entity_type, tag)) {
+			auto tag_end = e.valid_tags + e.num_valid_tags;
+			if (std::find(e.valid_tags, tag_end, tag) == tag_end) {
 				sink.set_error("Tag '%s' is not valid for entity type '%s'", entity_tag, entity_type);
 				return {};
 			}
