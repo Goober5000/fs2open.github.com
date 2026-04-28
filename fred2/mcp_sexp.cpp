@@ -33,6 +33,7 @@
 #include "mainfrm.h"
 
 #define PLACEHOLDER_STRING "<placeholder>"
+#define MAX_MCP_SEXP_LENGTH	65535
 
 static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg)
 {
@@ -931,7 +932,7 @@ static void handle_text_to_sexp(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
-	auto text = get_required_string(input, "text", sink, true, MULTITEXT_LENGTH - 1);
+	auto text = get_required_string(input, "text", sink, true, MAX_MCP_SEXP_LENGTH);
 	if (!text)
 		return;
 
@@ -1240,7 +1241,7 @@ static bool parse_general_sexp_reference(json_t *input, const char *field_prefix
 		out.entity_info = build_formula_root_info_for_entity(entity_type, entity_id, entity_tag,
 			out.entity_current_root, sink);
 		if (sink.has_error()) return false;
-		if (out.entity_current_root >= Num_sexp_nodes) {
+		if (out.entity_current_root < 0 || out.entity_current_root >= Num_sexp_nodes) {
 			sink.set_error("Entity formula root index %d is out of range", out.entity_current_root);
 			return false;
 		}
@@ -3138,11 +3139,12 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 	}
 
 	// Reset any SEXP node references
-	reset_sexp_node_variable_references(name);
+	int num_reset = reset_sexp_node_variable_references(name);
 
 	sexp_variable_delete(idx);
 	sexp_variable_sort();
-	mcp_sexp_forest_mark_dirty();
+	if (num_reset > 0)
+		mcp_sexp_forest_mark_dirty();
 	mark_modified("MCP: delete SEXP variable %s", name);
 
 	sprintf(req->result_message, "Deleted SEXP variable: %s", name);
@@ -3351,7 +3353,8 @@ void mcp_register_sexp_tools(json_t *tools)
 	{
 		json_t *props = json_object();
 		add_string_prop(props, "text",
-			"SEXP text to parse, e.g. \"( when ( true ) ( do-nothing ) )\"");
+			"SEXP text to parse, e.g. \"( when ( true ) ( do-nothing ) )\". Maximum "
+			SCP_TOKEN_TO_STR(MAX_MCP_SEXP_LENGTH) " characters.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
 		register_tool(tools, "text_to_sexp",
