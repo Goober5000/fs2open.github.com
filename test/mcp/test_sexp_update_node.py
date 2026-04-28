@@ -58,13 +58,21 @@ def _safe_delete_event(client, name):
         pass
 
 
+def _find_node_or_none(nodes, value, role=None):
+    """find_node_by_value but returns None instead of raising when absent."""
+    try:
+        return find_node_by_value(nodes, value, role=role)
+    except Exception:
+        return None
+
+
 def _find_bool_wrapper(nodes, bool_value):
     """Find the list_wrapper whose first child is the named boolean operator.
 
     bool_value should be "true" or "false".  Returns the node dict, or None.
     """
-    locked_op = find_node_by_value(nodes, bool_value, role="operator")
-    if not locked_op:
+    locked_op = _find_node_or_none(nodes, bool_value, role="operator")
+    if locked_op is None:
         return None
     locked_idx = locked_op["node"]
     for n in nodes:
@@ -117,7 +125,7 @@ def register(suite, client):
             nodes2 = _walk_nodes(client, root)
             assert_true(find_node_by_value(nodes2, "-", role="operator") is not None,
                         "walked tree should contain '-' operator after rename")
-            assert_true(find_node_by_value(nodes2, "+", role="operator") is None,
+            assert_true(_find_node_or_none(nodes2, "+", role="operator") is None,
                         "'+' should no longer appear in tree after rename")
         finally:
             for n in trees:
@@ -609,14 +617,29 @@ def register(suite, client):
     def test_non_boolean_list_wrapper_rejected():
         trees = []
         try:
-            r = client.call_tool("text_to_sexp", {"text": "( + 1 2 )"})
+            # ( when ( true ) ( do-nothing ) ) contains two inner list_wrappers:
+            # the boolean ( true ) one and the non-boolean ( do-nothing ) one.
+            r = client.call_tool("text_to_sexp",
+                                 {"text": "( when ( true ) ( do-nothing ) )"})
             assert_success(r)
             root = tool_data(r)["node"]
             trees.append(root)
 
-            # root is the list wrapper for (+ 1 2); it is not a boolean wrapper
+            nodes = _walk_nodes(client, root)
+            # Locate the do-nothing operator atom, then find its list_wrapper parent
+            do_nothing_op = find_node_by_value(nodes, "do-nothing", role="operator")
+            do_nothing_idx = do_nothing_op["node"]
+            wrapper = None
+            for n in nodes:
+                if n.get("role") == "list_wrapper" and n.get("node_first") == do_nothing_idx:
+                    wrapper = n
+                    break
+            assert_true(wrapper is not None,
+                        "should find a non-boolean list_wrapper in tree")
+            wrapper_node = wrapper["node"]
+
             r2 = client.call_tool("update_sexp_node", {
-                "node": root,
+                "node": wrapper_node,
                 "argument_type": "number",
                 "argument_value": "5",
             })
@@ -703,7 +726,7 @@ def register(suite, client):
             nodes2 = _walk_nodes(client, formula)
             assert_true(find_node_by_value(nodes2, "=", role="operator") is not None,
                         "'=' should be restored after rollback")
-            assert_true(find_node_by_value(nodes2, "+", role="operator") is None,
+            assert_true(_find_node_or_none(nodes2, "+", role="operator") is None,
                         "'+' must not appear in the formula after rollback")
         finally:
             for name in events:
