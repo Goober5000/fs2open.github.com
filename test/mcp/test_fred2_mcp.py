@@ -37,6 +37,7 @@ import test_sexp_attach
 import test_sexp_move_swap
 import test_sexp_find
 import test_sexp_variables
+import test_sexp_update_node
 import test_negative
 
 
@@ -55,6 +56,7 @@ AREAS = [
     test_sexp_move_swap,
     test_sexp_find,
     test_sexp_variables,
+    test_sexp_update_node,
     test_negative,
 ]
 
