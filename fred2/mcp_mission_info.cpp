@@ -75,7 +75,7 @@ static json_t *build_mission_info_json()
 		json_object_set_new(info, "filename", json_string(""));
 	}
 
-	json_object_set_new(info, "title", json_safe_string(The_mission.name));
+	json_object_set_new(info, "title", json_safe_string(The_mission.name.c_str()));
 	json_object_set_new(info, "author", json_safe_string(The_mission.author.c_str()));
 	json_object_set_new(info, "created", json_safe_string(The_mission.created));
 	json_object_set_new(info, "modified", json_safe_string(The_mission.modified));
@@ -214,8 +214,8 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		return;
 
 	// --- Phase 1: extract and validate all fields (no mutations yet) ---
-	auto title             = get_optional_string(input, "title", sink, NAME_LENGTH - 1);
-	auto author            = get_optional_string(input, "author", sink, MISSION_DESC_LENGTH - 1);
+	auto title             = get_optional_string(input, "title", sink);
+	auto author            = get_optional_string(input, "author", sink);
 	auto notes             = get_optional_string(input, "notes", sink, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
 	auto mission_desc      = get_optional_string(input, "mission_desc", sink, MISSION_DESC_LENGTH - 1);
 	auto game_type_str     = get_optional_string(input, "game_type", sink);
@@ -409,8 +409,8 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	// --- Phase 2: apply all changes ---
 	bool changed = false;
 
-	if (title && strcmp(The_mission.name, title) != 0) {
-		strcpy_s(The_mission.name, title);
+	if (title && The_mission.name != title) {
+		The_mission.name = title;
 		changed = true;
 	}
 	if (author && The_mission.author != author) {

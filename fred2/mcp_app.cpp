@@ -45,7 +45,7 @@ static void handle_get_server_info(McpToolRequest *req)
 		SCP_string full_name;
 		sprintf(full_name, "%s%s", Mission_filename, FS_MISSION_FILE_EXT);
 		json_object_set_new(info, "mission_filename", json_safe_string(full_name.c_str()));
-		json_object_set_new(info, "mission_title", json_safe_string(The_mission.name));
+		json_object_set_new(info, "mission_title", json_safe_string(The_mission.name.c_str()));
 	}
 
 	// Mod context (if available)
