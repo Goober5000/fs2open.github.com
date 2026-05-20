@@ -38,7 +38,8 @@ static void handle_get_server_info(McpToolRequest *req)
 {
 	json_t *info = json_object();
 	json_object_set_new(info, "status", json_string("running"));
-	json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, and get_ui_status for UI state."));
+	json_object_set_new(info, "hint", json_string("Use get_mod_info for mod details, get_mission_info for mission details, "
+		"and get_ui_status for UI state. Use list_reference_notes and get_reference_note for domain-specific knowledge."));
 
 	// Mission context (if loaded)
 	if (Mission_filename[0] != '\0') {
