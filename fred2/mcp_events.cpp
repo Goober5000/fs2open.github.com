@@ -240,14 +240,15 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Auto-set MEF_ flags if parameters provided
+	// (a trigger_count of 1 is the default, so the field only has runtime effect when it's something else)
 	int mef_flags = 0;
-	if (trigger_count.has_value() && *trigger_count > 0)
+	if (trigger_count.has_value() && *trigger_count != 1)
 		mef_flags |= MEF_USING_TRIGGER_COUNT;
 	if (units && !stricmp(units, "milliseconds"))
 		mef_flags |= MEF_USE_MSECS;
 
 	// if we have a trigger count but no repeat count, set an infinite repeat count (see also parse_event in missionparse.cpp)
-	if ((trigger_count.has_value() && *trigger_count > 0) && (!repeat_count.has_value() || *repeat_count == 1))
+	if ((trigger_count.has_value() && *trigger_count != 1) && (!repeat_count.has_value() || *repeat_count == 1))
 		repeat_count = -1;
 
 	// Validate insert index
@@ -375,12 +376,13 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 
 	// Auto-set MEF_ flags if parameters provided
+	// (a trigger_count of 1 is the default, so the field only has runtime effect when it's something else)
 	std::optional<int> new_mef_flags;
 	if (trigger_count.has_value()) {
 		if (!new_mef_flags.has_value()) {
 			new_mef_flags = evt.flags;
 		}
-		if (*trigger_count > 0)
+		if (*trigger_count != 1)
 			*new_mef_flags |= MEF_USING_TRIGGER_COUNT;
 		else
 			*new_mef_flags &= ~MEF_USING_TRIGGER_COUNT;
@@ -396,7 +398,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 	}
 
 	// if we have a trigger count but no repeat count, set an infinite repeat count (see also parse_event in missionparse.cpp)
-	if ((trigger_count.has_value() && *trigger_count > 0) && ((!repeat_count.has_value() && evt.repeat_count == 1) || (repeat_count.has_value() && *repeat_count == 1)))
+	if ((trigger_count.has_value() && *trigger_count != 1) && ((!repeat_count.has_value() && evt.repeat_count == 1) || (repeat_count.has_value() && *repeat_count == 1)))
 		repeat_count = -1;
 
 	bool changed = false;
