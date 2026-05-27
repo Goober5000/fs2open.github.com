@@ -246,6 +246,10 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	if (units && !stricmp(units, "milliseconds"))
 		mef_flags |= MEF_USE_MSECS;
 
+	// if we have a trigger count but no repeat count, set an infinite repeat count (see also parse_event in missionparse.cpp)
+	if ((trigger_count.has_value() && *trigger_count > 0) && (!repeat_count.has_value() || *repeat_count == 1))
+		repeat_count = -1;
+
 	// Validate insert index
 	int target_index;
 	if (!insert_index.has_value()) {
@@ -390,6 +394,10 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		else
 			*new_mef_flags &= ~MEF_USE_MSECS;
 	}
+
+	// if we have a trigger count but no repeat count, set an infinite repeat count (see also parse_event in missionparse.cpp)
+	if ((trigger_count.has_value() && *trigger_count > 0) && ((!repeat_count.has_value() && evt.repeat_count == 1) || (repeat_count.has_value() && *repeat_count == 1)))
+		repeat_count = -1;
 
 	bool changed = false;
 
