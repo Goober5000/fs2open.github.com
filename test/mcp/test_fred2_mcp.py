@@ -31,6 +31,7 @@ import test_server_utility
 import test_reference
 import test_mission_setup
 import test_crud
+import test_ships
 import test_sexp_roundtrip
 import test_sexp_detach
 import test_sexp_attach
@@ -50,6 +51,7 @@ AREAS = [
     test_reference,
     test_mission_setup,
     test_crud,
+    test_ships,
     test_sexp_roundtrip,
     test_sexp_detach,
     test_sexp_attach,

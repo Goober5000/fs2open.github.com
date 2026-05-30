@@ -78,6 +78,7 @@ void set_cur_object_index(int obj = -1);
 int delete_object(int obj);
 int delete_object(object* ptr);
 int delete_ship(int ship);
+int create_ship(matrix* orient, vec3d* pos, int ship_type);
 void delete_marked();
 void delete_reinforcement(const char *name);
 int delete_ship_from_wing(int ship = cur_ship);
