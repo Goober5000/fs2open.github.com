@@ -97,3 +97,13 @@ void swap_wing_slots(int a, int b, const FredWingSlotConfig& cfg);
 // Restore the obj_used_list invariant for the OBJ_SHIP/OBJ_START subset:
 // among ship-type entries, list order matches Ships[] index order.
 void resort_ships_in_obj_used_list();
+
+// Restore the OBJ_WAYPOINT subset invariant: list order matches the composite
+// (waypoint_list_index, waypoint_index) order encoded in Objects[].instance
+// via calc_waypoint_instance.
+void resort_waypoints_in_obj_used_list();
+
+// Restore the OBJ_JUMP_NODE subset invariant: list order matches Jump_nodes[]
+// vector order.  Lookup is by CJumpNode::GetSCPObjectNumber() since
+// Objects[].instance is unused for jump nodes.
+void resort_jump_nodes_in_obj_used_list();
