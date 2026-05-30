@@ -1,8 +1,14 @@
 // methods and members common to any mission editor FSO may have
 #include "common.h"
+#include "ai/ai.h"
+#include "globalincs/linklist.h"
 #include "mission/missionparse.h"
 #include "iff_defs/iff_defs.h"
+#include "object/object.h"
 #include "ship/ship.h"
+
+#include <algorithm>
+#include <climits>
 
 // to keep track of data
 char Voice_abbrev_briefing[NAME_LENGTH];
@@ -144,4 +150,163 @@ void generate_weaponry_usage_list_wing(int wing_num, int* arr)
 			}
 		}
 	}
+}
+
+void reassign_ship_slot(int from, int to, const FredShipSlotConfig& cfg)
+{
+	Assertion(from != to, "reassign_ship_slot: from == to (%d)", from);
+	Assertion(from >= 0 && from < MAX_SHIPS, "reassign_ship_slot: 'from' slot %d out of range", from);
+	Assertion(to >= 0 && to < MAX_SHIPS, "reassign_ship_slot: 'to' slot %d out of range", to);
+	Assertion(Ships[from].objnum >= 0, "reassign_ship_slot: source slot %d is empty", from);
+	Assertion(Ships[to].objnum < 0, "reassign_ship_slot: destination slot %d is occupied", to);
+
+	// Move the ship struct itself.  Per the engine's convention, a slot with
+	// objnum < 0 is considered empty; other fields in the vacated slot are
+	// left as-is (unreachable through the "is this slot used" guard).
+	// Move (not copy) because ship contains a unique_ptr member.
+	Ships[to] = std::move(Ships[from]);
+	Ships[from].objnum = -1;
+
+	// subsys_list is an intrusive doubly-linked list whose head sentinel's
+	// address is meaningful: real nodes' prev/next bookend back to &head, and
+	// an empty list is self-referential.  The move copied those pointers
+	// verbatim, so they still reference the old (vacated) sentinel address.
+	{
+		auto old_head = &Ships[from].subsys_list;
+		auto new_head = &Ships[to].subsys_list;
+		if (new_head->next == old_head)
+		{
+			// Empty list: re-init self-referential on the new head.
+			new_head->next = new_head;
+			new_head->prev = new_head;
+		}
+		else
+		{
+			// Non-empty: repoint the first node's prev and the last node's next.
+			new_head->next->prev = new_head;
+			new_head->prev->next = new_head;
+		}
+	}
+
+	// Move FRED-side parallel arrays if the caller supplied them.
+	if (cfg.fred_alt_names != nullptr)
+	{
+		strcpy_s(cfg.fred_alt_names[to], cfg.fred_alt_names[from]);
+		cfg.fred_alt_names[from][0] = '\0';
+	}
+	if (cfg.fred_callsigns != nullptr)
+	{
+		strcpy_s(cfg.fred_callsigns[to], cfg.fred_callsigns[from]);
+		cfg.fred_callsigns[from][0] = '\0';
+	}
+
+	// Object back-reference.
+	Objects[Ships[to].objnum].instance = to;
+
+	// Keep obj_used_list iteration order in sync with Ships[] slot order.
+	resort_ships_in_obj_used_list();
+
+	// AI back-reference (the one invariant codified by internal_integrity_check).
+	Ai_info[Ships[to].ai_index].shipnum = to;
+	Assertion(Ai_info[Ships[to].ai_index].shipnum == to,
+		"reassign_ship_slot: Ai_info[%d].shipnum invariant broken after fixup", Ships[to].ai_index);
+
+	// Wing membership: scan every wing and re-point any reference to the old slot.
+	// (wing.special_ship is wing-relative, NOT a Ships[] index, so it is intentionally
+	// not touched here.)
+	for (int w = 0; w < MAX_WINGS; ++w)
+	{
+		if (Wings[w].wave_count == 0)
+			continue;
+		for (int k = 0; k < Wings[w].wave_count; ++k)
+		{
+			if (Wings[w].ship_index[k] == from)
+				Wings[w].ship_index[k] = to;
+		}
+	}
+
+	// Single-player start.
+	if (Player_start_shipnum == from)
+		Player_start_shipnum = to;
+
+	// Ship_registry caches the shipnum on its entries (lookup is by name, but the
+	// cached integer would otherwise go stale).
+	int reg = ship_registry_get_index(Ships[to].ship_name);
+	if (reg >= 0)
+		Ship_registry[reg].shipnum = to;
+
+	// FRED's current-ship pointer, if the caller is tracking one.
+	if (cfg.cur_ship != nullptr && *cfg.cur_ship == from)
+		*cfg.cur_ship = to;
+}
+
+void swap_ship_slots(int a, int b, const FredShipSlotConfig& cfg)
+{
+	if (a == b)
+		return;
+
+	Assertion(a >= 0 && a < MAX_SHIPS, "swap_ship_slots: slot 'a' %d out of range", a);
+	Assertion(b >= 0 && b < MAX_SHIPS, "swap_ship_slots: slot 'b' %d out of range", b);
+	Assertion(Ships[a].objnum >= 0 && Ships[b].objnum >= 0,
+		"swap_ship_slots: both slots must be valid (a=%d, b=%d)", a, b);
+
+	// Find a free temporary slot.
+	int tmp = -1;
+	for (int i = 0; i < MAX_SHIPS; ++i)
+	{
+		if (Ships[i].objnum < 0)
+		{
+			tmp = i;
+			break;
+		}
+	}
+	Assertion(tmp >= 0, "swap_ship_slots: no free Ships[] slot available for the temporary leg");
+
+	// Three-leg swap; each call's preconditions hold by construction.
+	reassign_ship_slot(a, tmp, cfg);
+	reassign_ship_slot(b, a, cfg);
+	reassign_ship_slot(tmp, b, cfg);
+}
+
+// Bulk-re-sort one type's subset of obj_used_list while keeping non-matching
+// entries in their original relative positions.  Each callsite supplies a
+// type matcher and a key function; the i-th matching slot (in original list
+// order) receives the i-th smallest matching node by key.
+static void resort_obj_used_list_subset(
+	bool (*matches_type)(int),
+	int (*key)(const object*))
+{
+	SCP_vector<object*> all;
+	for (auto o : list_range(&obj_used_list))
+		all.push_back(o);
+
+	SCP_vector<object*> matched;
+	for (auto o : all)
+		if (matches_type(o->type))
+			matched.push_back(o);
+
+	std::sort(matched.begin(), matched.end(),
+		[&](const object* a, const object* b) { return key(a) < key(b); });
+
+	list_init(&obj_used_list);
+	auto it = matched.begin();
+	for (auto o : all)
+	{
+		if (matches_type(o->type))
+		{
+			list_append(&obj_used_list, *it);
+			++it;
+		}
+		else
+		{
+			list_append(&obj_used_list, o);
+		}
+	}
+}
+
+void resort_ships_in_obj_used_list()
+{
+	resort_obj_used_list_subset(
+		[](int t) { return t == OBJ_SHIP || t == OBJ_START; },
+		[](const object* o) { return o->instance; });
 }
