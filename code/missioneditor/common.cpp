@@ -98,6 +98,20 @@ anchor_t target_to_anchor(int target)
 		return anchor_t(target);
 }
 
+void update_custom_wing_indexes()
+{
+	int i;
+
+	for (i = 0; i < MAX_STARTING_WINGS; i++)
+		Starting_wings[i] = wing_name_lookup(Starting_wing_names[i], 1);
+
+	for (i = 0; i < MAX_SQUADRON_WINGS; i++)
+		Squadron_wings[i] = wing_name_lookup(Squadron_wing_names[i], 1);
+
+	for (i = 0; i < MAX_TVT_WINGS; i++)
+		TVT_wings[i] = wing_name_lookup(TVT_wing_names[i], 1);
+}
+
 void generate_weaponry_usage_list_team(int team, int* arr)
 {
 	int i;
@@ -266,6 +280,74 @@ void swap_ship_slots(int a, int b, const FredShipSlotConfig& cfg)
 	reassign_ship_slot(a, tmp, cfg);
 	reassign_ship_slot(b, a, cfg);
 	reassign_ship_slot(tmp, b, cfg);
+}
+
+void reassign_wing_slot(int from, int to, const FredWingSlotConfig& cfg)
+{
+	Assertion(from != to, "reassign_wing_slot: from == to (%d)", from);
+	Assertion(from >= 0 && from < MAX_WINGS, "reassign_wing_slot: 'from' slot %d out of range", from);
+	Assertion(to >= 0 && to < MAX_WINGS, "reassign_wing_slot: 'to' slot %d out of range", to);
+	Assertion(Wings[from].wave_count > 0, "reassign_wing_slot: source slot %d is empty", from);
+	Assertion(Wings[to].wave_count == 0, "reassign_wing_slot: destination slot %d is occupied", to);
+
+	// Move the wing struct itself.  wing::clear() is the engine's canonical
+	// empty-slot state (matches ship_level_init); wave_count == 0 is the sentinel.
+	Wings[to] = Wings[from];
+	Wings[from].clear();
+
+	// Move FRED-side parallel array if the caller supplied it.
+	if (cfg.wing_objects != nullptr)
+	{
+		for (int k = 0; k < MAX_SHIPS_PER_WING; ++k)
+		{
+			cfg.wing_objects[to][k] = cfg.wing_objects[from][k];
+			cfg.wing_objects[from][k] = -1;
+		}
+	}
+
+	// Per-ship parent-wing back-reference.
+	for (int i = 0; i < MAX_SHIPS; ++i)
+	{
+		if (Ships[i].objnum < 0)
+			continue;
+		if (Ships[i].wingnum == from)
+			Ships[i].wingnum = to;
+	}
+
+	// FRED's current-wing pointer, if the caller is tracking one.
+	if (cfg.cur_wing != nullptr && *cfg.cur_wing == from)
+		*cfg.cur_wing = to;
+
+	// Rebuild Starting/Squadron/TVT_wings caches from the parallel name arrays.
+	update_custom_wing_indexes();
+}
+
+void swap_wing_slots(int a, int b, const FredWingSlotConfig& cfg)
+{
+	if (a == b)
+		return;
+
+	Assertion(a >= 0 && a < MAX_WINGS, "swap_wing_slots: slot 'a' %d out of range", a);
+	Assertion(b >= 0 && b < MAX_WINGS, "swap_wing_slots: slot 'b' %d out of range", b);
+	Assertion(Wings[a].wave_count > 0 && Wings[b].wave_count > 0,
+		"swap_wing_slots: both slots must be valid (a=%d, b=%d)", a, b);
+
+	// Find a free temporary slot.
+	int tmp = -1;
+	for (int i = 0; i < MAX_WINGS; ++i)
+	{
+		if (Wings[i].wave_count == 0)
+		{
+			tmp = i;
+			break;
+		}
+	}
+	Assertion(tmp >= 0, "swap_wing_slots: no free Wings[] slot available for the temporary leg");
+
+	// Three-leg swap; each call's preconditions hold by construction.
+	reassign_wing_slot(a, tmp, cfg);
+	reassign_wing_slot(b, a, cfg);
+	reassign_wing_slot(tmp, b, cfg);
 }
 
 // Bulk-re-sort one type's subset of obj_used_list while keeping non-matching
