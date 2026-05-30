@@ -193,6 +193,8 @@ set(FRED2_SOURCES
 	mcp_sexp.h
 	mcp_sexp_forest.cpp
 	mcp_sexp_forest.h
+	mcp_ships.cpp
+	mcp_ships.h
 	fred.rc
 	version.rc2
 )
