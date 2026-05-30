@@ -14,6 +14,7 @@
 #include "globalincs/utility.h"
 
 #include "ai/aigoals.h"
+#include "missioneditor/common.h"
 #include "object/object.h"
 #include "object/waypoint.h"
 #include "parse/parselo.h"
@@ -368,10 +369,12 @@ static MoveSwapConfig make_waypoint_list_move_swap_config()
 	cfg.do_move = [](int from, int to) {
 		array_move_element(Waypoint_lists, from - 1, to - 1);
 		reindex_waypoint_instances();
+		resort_waypoints_in_obj_used_list();
 	};
 	cfg.do_swap = [](int a, int b) {
 		std::swap(Waypoint_lists[a - 1], Waypoint_lists[b - 1]);
 		reindex_waypoint_instances();
+		resort_waypoints_in_obj_used_list();
 	};
 	return cfg;
 }

@@ -2,9 +2,11 @@
 #include "common.h"
 #include "ai/ai.h"
 #include "globalincs/linklist.h"
+#include "jumpnode/jumpnode.h"
 #include "mission/missionparse.h"
 #include "iff_defs/iff_defs.h"
 #include "object/object.h"
+#include "object/waypoint.h"
 #include "ship/ship.h"
 
 #include <algorithm>
@@ -426,4 +428,25 @@ void resort_ships_in_obj_used_list()
 	resort_obj_used_list_subset(
 		[](int t) { return t == OBJ_SHIP || t == OBJ_START; },
 		[](const object* o) { return o->instance; });
+}
+
+void resort_waypoints_in_obj_used_list()
+{
+	resort_obj_used_list_subset(
+		[](int t) { return t == OBJ_WAYPOINT; },
+		[](const object* o) { return o->instance; });
+}
+
+void resort_jump_nodes_in_obj_used_list()
+{
+	resort_obj_used_list_subset(
+		[](int t) { return t == OBJ_JUMP_NODE; },
+		[](const object* o)
+		{
+			for (int i = 0; i < (int)Jump_nodes.size(); ++i)
+				if (Jump_nodes[i].GetSCPObjectNumber() == OBJ_INDEX(o))
+					return i;
+
+			return INT_MAX;
+		});
 }
