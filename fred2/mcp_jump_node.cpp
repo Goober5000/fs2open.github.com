@@ -305,9 +305,11 @@ static MoveSwapConfig make_jump_node_move_swap_config()
 	};
 	cfg.do_move = [](int from, int to) {
 		array_move_element(Jump_nodes, from - 1, to - 1);
+		resort_jump_nodes_in_obj_used_list();
 	};
 	cfg.do_swap = [](int a, int b) {
 		std::swap(Jump_nodes[a - 1], Jump_nodes[b - 1]);
+		resort_jump_nodes_in_obj_used_list();
 	};
 	return cfg;
 }
