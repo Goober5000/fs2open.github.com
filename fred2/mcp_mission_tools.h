@@ -9,6 +9,7 @@
 struct McpToolRequest;
 class McpErrorSink;
 enum class sexp_ref_type;
+class anchor_t;
 
 // Sets the mission as modified and autosaves it.
 void mark_modified(const char *fmt, ...);
@@ -42,6 +43,42 @@ int team_index_from_name(const char *name);
 // Returns true (and sets sink error) if team_str equals "none"; rejects "none"
 // for entities that don't allow it (e.g. command briefings, debriefings).
 bool reject_team_none(const char *team_str, const char *entity_name, McpErrorSink &sink);
+
+// ---------------------------------------------------------------------------
+// Arrival/departure location enums (shared by ships and wings)
+//
+// Built once from the engine's Arrival_location_names / Departure_location_names
+// arrays so handlers can pass them to check_lookup and add_string_enum_prop
+// without duplicating the literal strings.
+// ---------------------------------------------------------------------------
+
+extern const SCP_vector<const char *> arrival_location_enum_values;
+extern const SCP_vector<const char *> departure_location_enum_values;
+
+// ---------------------------------------------------------------------------
+// Anchor encoding (shared by ships and wings)
+//
+// Wings and ships both store arrival/departure targets as anchor_t.  The
+// MCP-facing representation is a single string -- either a ship name or a
+// special token like "<any friendly>".
+// ---------------------------------------------------------------------------
+
+// Resolve a target name to an anchor.  Empty/null name => anchor_t::invalid().
+// Returns true on success, false (with error set) on unknown name.
+bool resolve_target_name_to_anchor(const char *name, anchor_t &out, McpErrorSink &sink);
+
+// Decode an anchor value back to a human-readable name.  Returns an empty
+// string for invalid anchors or unresolved references.
+SCP_string anchor_to_name(anchor_t anchor);
+
+// ---------------------------------------------------------------------------
+// SEXP cue replacement (shared by ships and wings)
+//
+// Frees the previous user-allocated tree (skipping the Locked_sexp_true/false
+// sentinels), assigns the new node, and marks the SEXP forest dirty.
+// ---------------------------------------------------------------------------
+
+void replace_cue(int &cue_slot, int new_cue);
 
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.

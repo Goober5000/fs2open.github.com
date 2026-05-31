@@ -33,9 +33,11 @@
 #include "gamesnd/eventmusic.h"
 #include "mission/missionmessage.h"
 #include "mission/missiongoals.h"
+#include "missioneditor/common.h"     // target_to_anchor, stuff_special_arrival_anchor_name
 #include "missionui/missioncmdbrief.h"
 #include "mission/missionbriefcommon.h"
 #include "mission/missionparse.h"
+#include "ship/anchor_t.h"            // ANCHOR_SPECIAL_ARRIVAL
 #include "ship/ship.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
@@ -96,6 +98,79 @@ bool reject_team_none(const char *team_str, const char *entity_name, McpErrorSin
 		return true;
 	}
 	return false;
+}
+
+// ---------------------------------------------------------------------------
+// Arrival/departure location enums (shared by ships and wings)
+// ---------------------------------------------------------------------------
+
+const SCP_vector<const char *> arrival_location_enum_values =
+	SCP_vector<const char *>(std::begin(Arrival_location_names), std::end(Arrival_location_names));
+
+const SCP_vector<const char *> departure_location_enum_values =
+	SCP_vector<const char *>(std::begin(Departure_location_names), std::end(Departure_location_names));
+
+// ---------------------------------------------------------------------------
+// Anchor encoding (shared by ships and wings)
+// ---------------------------------------------------------------------------
+
+bool resolve_target_name_to_anchor(const char *name, anchor_t &out, McpErrorSink &sink)
+{
+	if (!name || !*name) {
+		out = anchor_t::invalid();
+		return true;
+	}
+
+	auto special = get_special_anchor(name);
+	if (special.isValid()) {
+		out = special;
+		return true;
+	}
+
+	int ship_idx = ship_name_lookup(name, 1);
+	if (ship_idx >= 0) {
+		out = target_to_anchor(ship_idx);
+		return true;
+	}
+
+	sink.set_error("Unknown arrival/departure target: '%s' "
+		"(not a known ship name or special anchor like '<any friendly>')", name);
+	return false;
+}
+
+SCP_string anchor_to_name(anchor_t anchor)
+{
+	int raw = anchor.value();
+	if (raw < 0)
+		return "";
+
+	if (raw & ANCHOR_SPECIAL_ARRIVAL) {
+		char buf[NAME_LENGTH + 15];
+		stuff_special_arrival_anchor_name(buf, raw, false);
+		return buf;
+	}
+
+	auto entry = ship_registry_get(anchor);
+	if (entry)
+		return entry->name;
+
+	return "";	// unresolved (e.g. dangling reference)
+}
+
+// ---------------------------------------------------------------------------
+// SEXP cue replacement (shared by ships and wings)
+// ---------------------------------------------------------------------------
+
+void replace_cue(int &cue_slot, int new_cue)
+{
+	SCP_vector<int> dirty;
+	if (cue_slot >= 0 && cue_slot != Locked_sexp_true && cue_slot != Locked_sexp_false) {
+		free_sexp2(cue_slot);
+		dirty.push_back(cue_slot);
+	}
+	cue_slot = new_cue;
+	dirty.push_back(new_cue);
+	mcp_sexp_forest_mark_dirty(dirty);
 }
 
 // ---------------------------------------------------------------------------
@@ -378,6 +453,12 @@ static const char *mission_tool_names[] = {
 	"delete_ship",
 	"move_ship",
 	"swap_ships",
+	"list_wings",
+	"get_wing",
+	"form_wing",
+	"update_wing",
+	"delete_wing",
+	"disband_wing",
 	"move_wing",
 	"swap_wings",
 	"get_mission_music",
