@@ -82,12 +82,11 @@ int check_wing_dependencies(int wing_num) {
 	return reference_handler(name, sexp_ref_type::WING, -1);
 }
 
-int create_wing() {
+int create_wing(const char *wing_name) {
 	char msg[1024];
 	int i, ship, wing = -1, waypoints = 0, count = 0, illegal_ships = 0;
 	int leader, leader_team;
 	object *ptr;
-	create_wing_dlg dlg;
 
 	if (!query_valid_object())
 		return -1;
@@ -171,12 +170,18 @@ int create_wing() {
 		Wings[wing].arrival_cue = Locked_sexp_true;
 		Wings[wing].departure_cue = Locked_sexp_false;
 
-		if (dlg.DoModal() == IDCANCEL)
-			return -1;
+		if (wing_name == nullptr) {
+			create_wing_dlg dlg;
 
-		dlg.m_name.TrimLeft();
-		dlg.m_name.TrimRight();
-		string_copy(Wings[wing].name, dlg.m_name, NAME_LENGTH - 1);
+			if (dlg.DoModal() == IDCANCEL)
+				return -1;
+
+			dlg.m_name.TrimLeft();
+			dlg.m_name.TrimRight();
+
+			wing_name = (LPCTSTR)dlg.m_name;
+		}
+		string_copy(Wings[wing].name, wing_name, NAME_LENGTH - 1);
 
 		// if this name has a hash, create a default display name
 		if (get_pointer_to_first_hash_symbol(Wings[wing].name))
