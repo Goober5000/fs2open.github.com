@@ -15,12 +15,14 @@
 
 
 /**
- * @brief Forms a wing from marked objects
+ * @brief Forms a wing from marked objects, optionally specifying a name
+ *
+ * @param[in] wing_name Optional. If null, prompts the user via create_wing_dlg.
  *
  * @returns  0 If successful, or
  * @returns -1 If an error occured
  */
-int create_wing();
+int create_wing(const char *wing_name = nullptr);
 
 /**
  * @brief Delete a whole wing, leaving ships intact but wingless.
