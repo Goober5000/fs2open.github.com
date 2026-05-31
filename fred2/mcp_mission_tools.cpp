@@ -43,6 +43,7 @@
 #include "parse/sexp.h"
 #include "object/waypoint.h"
 #include "freddoc.h"
+#include "fredrender.h"               // view_pos, view_orient
 #include "mainfrm.h"
 
 
@@ -362,6 +363,46 @@ static void handle_update_mission_music(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Editor view tool handlers
+// ---------------------------------------------------------------------------
+
+static json_t *build_editor_view_json()
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "position", build_vec3d_json(view_pos));
+	json_object_set_new(obj, "orientation", build_matrix_json(view_orient));
+	return obj;
+}
+
+static void handle_get_editor_view(json_t * /*input*/, McpToolRequest *req)
+{
+	req->result_json = make_json_tool_result(build_editor_view_json());
+	req->success = true;
+}
+
+static void handle_set_editor_view(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+
+	auto pos = get_optional_vec3d(input, "position", sink);
+	if (sink.has_error()) return;
+	auto orient = get_optional_matrix(input, "orientation", sink);
+	if (sink.has_error()) return;
+
+	if (pos.has_value())
+		view_pos = *pos;
+	if (orient.has_value())
+		view_orient = *orient;
+
+	// do not mark the mission modified; these are transient values
+	// (they are saved in the mission file, but only to let the mission designer
+	// pick up where he left off)
+
+	req->result_json = make_json_tool_result(build_editor_view_json());
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Known mission tool names (for routing)
 // ---------------------------------------------------------------------------
 
@@ -463,6 +504,8 @@ static const char *mission_tool_names[] = {
 	"swap_wings",
 	"get_mission_music",
 	"update_mission_music",
+	"get_editor_view",
+	"set_editor_view",
 	nullptr
 };
 
@@ -516,6 +559,25 @@ void mcp_register_mission_tools(json_t *tools)
 			"only provided fields are changed. Returns the full updated music state.",
 			props);
 	}
+
+	// get_editor_view
+	register_tool(tools, "get_editor_view",
+		"Returns the FRED editor camera's current position and orientation.",
+		nullptr);
+
+	// set_editor_view
+	{
+		json_t *props = json_object();
+		add_vec3d_prop(props, "position",
+			"New camera world position. Omit to leave position unchanged.");
+		add_matrix_prop(props, "orientation",
+			"New camera orientation matrix (rvec/uvec/fvec). Omit to leave orientation unchanged.");
+		register_tool(tools, "set_editor_view",
+			"Update the FRED editor camera's position and/or orientation. "
+			"Both parameters are optional; only provided fields are changed. "
+			"Returns the full updated view state.",
+			props);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -565,6 +627,10 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_get_mission_music(input_json, req);
 	} else if (strcmp(tool_name, "update_mission_music") == 0) {
 		handle_update_mission_music(input_json, req);
+	} else if (strcmp(tool_name, "get_editor_view") == 0) {
+		handle_get_editor_view(input_json, req);
+	} else if (strcmp(tool_name, "set_editor_view") == 0) {
+		handle_set_editor_view(input_json, req);
 	} else {
 		McpErrorSink sink(req);
 		sink.set_error("Unknown mission tool: %s", tool_name);
