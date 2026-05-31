@@ -37,69 +37,6 @@ static bool validate_dialog_for_ships(SCP_string &error_msg)
 }
 
 // ---------------------------------------------------------------------------
-// String <-> enum mappings
-// ---------------------------------------------------------------------------
-
-static const auto arrival_location_enum_values =
-	SCP_vector<const char*>(std::begin(Arrival_location_names), std::end(Arrival_location_names));
-
-static const auto departure_location_enum_values =
-	SCP_vector<const char*>(std::begin(Departure_location_names), std::end(Departure_location_names));
-
-// ---------------------------------------------------------------------------
-// Anchor (arrival/departure target) encoding
-// ---------------------------------------------------------------------------
-
-// Resolve a target name (ship name or special anchor like "<any friendly>")
-// to the encoded anchor value stored in Ships[].arrival_anchor /
-// departure_anchor.  Empty/null name => anchor_t::invalid().  Returns true on
-// success, false (with error set) on unknown name.
-static bool resolve_target_name_to_anchor(const char *name, anchor_t &out, McpErrorSink &sink)
-{
-	if (!name || !*name) {
-		out = anchor_t::invalid();
-		return true;
-	}
-
-	auto special = get_special_anchor(name);
-	if (special.isValid()) {
-		out = special;
-		return true;
-	}
-
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx >= 0) {
-		out = target_to_anchor(ship_idx);
-		return true;
-	}
-
-	sink.set_error("Unknown arrival/departure target: '%s' "
-		"(not a known ship name or special anchor like '<any friendly>')", name);
-	return false;
-}
-
-// Decode an anchor value back to a human-readable name.  Returns an empty
-// string for invalid anchors.
-static SCP_string anchor_to_name(anchor_t anchor)
-{
-	int raw = anchor.value();
-	if (raw < 0)
-		return "";
-
-	if (raw & ANCHOR_SPECIAL_ARRIVAL) {
-		char buf[NAME_LENGTH + 15];
-		stuff_special_arrival_anchor_name(buf, raw, false);
-		return buf;
-	}
-
-	auto entry = ship_registry_get(anchor);
-	if (entry)
-		return entry->name;
-
-	return "";	// unresolved (e.g. dangling reference)
-}
-
-// ---------------------------------------------------------------------------
 // Ship JSON serialization
 // ---------------------------------------------------------------------------
 
@@ -184,23 +121,6 @@ static void apply_display_name(ship &shipp, const char *display_name)
 		shipp.display_name = display_name;
 		shipp.flags.set(Ship::Ship_Flags::Has_display_name);
 	}
-}
-
-// ---------------------------------------------------------------------------
-// SEXP cue replacement - frees the previous user-allocated tree (skipping
-// the Locked_sexp_true/false sentinels) and marks the forest dirty.
-// ---------------------------------------------------------------------------
-
-static void replace_cue(int &cue_slot, int new_cue)
-{
-	SCP_vector<int> dirty;
-	if (cue_slot >= 0 && cue_slot != Locked_sexp_true && cue_slot != Locked_sexp_false) {
-		free_sexp2(cue_slot);
-		dirty.push_back(cue_slot);
-	}
-	cue_slot = new_cue;
-	dirty.push_back(new_cue);
-	mcp_sexp_forest_mark_dirty(dirty);
 }
 
 // ---------------------------------------------------------------------------
