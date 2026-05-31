@@ -10,6 +10,7 @@
 #include "mcp_jump_node.h"
 #include "mcp_mission_info.h"
 #include "mcp_ships.h"
+#include "mcp_wings.h"
 #include "mcp_sexp.h"
 #include "mcpserver.h"
 #include "mcp_app.h"
@@ -375,6 +376,10 @@ static const char *mission_tool_names[] = {
 	"create_ship",
 	"update_ship",
 	"delete_ship",
+	"move_ship",
+	"swap_ships",
+	"move_wing",
+	"swap_wings",
 	"get_mission_music",
 	"update_mission_music",
 	nullptr
@@ -397,6 +402,7 @@ void mcp_register_mission_tools(json_t *tools)
 	mcp_register_waypoint_tools(tools);
 	mcp_register_jump_node_tools(tools);
 	mcp_register_ship_tools(tools);
+	mcp_register_wing_tools(tools);
 
 	// get_mission_music
 	register_tool(tools, "get_mission_music",
@@ -472,6 +478,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		// handled by jump_node unit
 	} else if (mcp_handle_ship_tool(tool_name, input_json, req)) {
 		// handled by ships unit
+	} else if (mcp_handle_wing_tool(tool_name, input_json, req)) {
+		// handled by wings unit
 	} else if (strcmp(tool_name, "get_mission_music") == 0) {
 		handle_get_mission_music(input_json, req);
 	} else if (strcmp(tool_name, "update_mission_music") == 0) {

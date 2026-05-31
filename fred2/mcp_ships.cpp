@@ -817,6 +817,87 @@ static void handle_delete_ship(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Move / swap
+// ---------------------------------------------------------------------------
+
+// Sentinel matching the engine convention in code/scripting/api/libs/mission.cpp.
+static constexpr int COUNT_SHIPS = -1000;
+
+// Modeled on object_subclass_at_index in code/scripting/api/libs/mission.cpp.
+// Walks Ships[] in slot order, skips empty slots, and returns
+// the internal Ships[] slot of the index-th occupied ship (1-based).  When
+// index == COUNT_SHIPS, returns the total count instead; returns -1 if the
+// requested index doesn't exist.
+static int ship_slot_at_public_index(int index)
+{
+	int count = 0;
+	for (int i = 0; i < MAX_SHIPS; ++i) {
+		if (Ships[i].objnum < 0)
+			continue;
+		++count;
+		if (count == index)
+			return i;
+	}
+	return (index == COUNT_SHIPS) ? count : -1;
+}
+
+static int ship_slot_count()
+{
+	return ship_slot_at_public_index(COUNT_SHIPS);
+}
+
+static FredShipSlotConfig make_ship_slot_config()
+{
+	FredShipSlotConfig scfg;
+	scfg.fred_alt_names = Fred_alt_names;
+	scfg.fred_callsigns = Fred_callsigns;
+	scfg.cur_ship = &cur_ship;
+	return scfg;
+}
+
+static MoveSwapConfig make_ship_move_swap_config()
+{
+	MoveSwapConfig cfg;
+	cfg.entity_name = "ship";
+	cfg.count = ship_slot_count();
+	cfg.one_based = true;
+	cfg.validate_dialog = validate_dialog_for_ships;
+	cfg.get_name = [](int i) {
+		return SCP_string(Ships[ship_slot_at_public_index(i)].ship_name);
+	};
+	cfg.do_move = [](int from, int to) {
+		// Walk the moving element via adjacent swaps.  After each swap the
+		// sparse positions of *other* occupied slots are unchanged, so
+		// ship_slot_at_public_index remains correct for the next step.
+		auto scfg = make_ship_slot_config();
+		int step = (from < to) ? 1 : -1;
+		for (int pos = from; pos != to; pos += step) {
+			int a = ship_slot_at_public_index(pos);
+			int b = ship_slot_at_public_index(pos + step);
+			swap_ship_slots(a, b, scfg);
+		}
+	};
+	cfg.do_swap = [](int a, int b) {
+		int sa = ship_slot_at_public_index(a);
+		int sb = ship_slot_at_public_index(b);
+		swap_ship_slots(sa, sb, make_ship_slot_config());
+	};
+	return cfg;
+}
+
+static void handle_move_ship(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_ship_move_swap_config();
+	handle_generic_move(input, req, cfg);
+}
+
+static void handle_swap_ships(json_t *input, McpToolRequest *req)
+{
+	auto cfg = make_ship_move_swap_config();
+	handle_generic_swap(input, req, cfg);
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -958,6 +1039,36 @@ void mcp_register_ship_tools(json_t *tools)
 			"or if it is referenced in SEXPs unless force=true. Wing membership and docking are cleaned up automatically.",
 			props, req);
 	}
+
+	// move_ship
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "from_index",
+			"1-based index of the ship to move");
+		add_integer_prop(props, "to_index",
+			"1-based destination index");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("from_index"));
+		json_array_append_new(req, json_string("to_index"));
+		register_tool(tools, "move_ship",
+			"Move a ship from one list position to another.  Indices are 1-based.",
+			props, req);
+	}
+
+	// swap_ships
+	{
+		json_t *props = json_object();
+		add_integer_prop(props, "index_a",
+			"1-based index of the first ship");
+		add_integer_prop(props, "index_b",
+			"1-based index of the second ship");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("index_a"));
+		json_array_append_new(req, json_string("index_b"));
+		register_tool(tools, "swap_ships",
+			"Swap two ships at the given list positions.  Indices are 1-based.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -976,6 +1087,10 @@ bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_update_ship(input_json, req);
 	} else if (strcmp(tool_name, "delete_ship") == 0) {
 		handle_delete_ship(input_json, req);
+	} else if (strcmp(tool_name, "move_ship") == 0) {
+		handle_move_ship(input_json, req);
+	} else if (strcmp(tool_name, "swap_ships") == 0) {
+		handle_swap_ships(input_json, req);
 	} else {
 		return false;
 	}
