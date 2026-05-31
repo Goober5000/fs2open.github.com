@@ -610,16 +610,24 @@ static json_t *make_vec3d_schema()
 	return p;
 }
 
-static std::optional<vec3d> parse_vec3d_json(json_t *obj)
+static std::optional<vec3d> parse_vec3d_json(json_t *obj, bool &failed_finite_check)
 {
 	if (!obj || !json_is_object(obj))
 		return std::nullopt;
+
 	json_t *x = json_object_get(obj, "x");
 	json_t *y = json_object_get(obj, "y");
 	json_t *z = json_object_get(obj, "z");
 	if (!x || !json_is_number(x) || !y || !json_is_number(y) || !z || !json_is_number(z))
 		return std::nullopt;
-	return vec3d{ (float)json_number_value(x), (float)json_number_value(y), (float)json_number_value(z) };
+
+	vec3d v{ (float)json_number_value(x), (float)json_number_value(y), (float)json_number_value(z) };
+	if (!std::isfinite(v.xyz.x) || !std::isfinite(v.xyz.y) || !std::isfinite(v.xyz.z)) {
+		failed_finite_check = true;
+		return std::nullopt;
+	}
+
+	return v;
 }
 
 json_t *build_vec3d_json(const vec3d &v)
@@ -671,7 +679,12 @@ std::optional<SCP_vector<vec3d>> get_required_vec3d_array(json_t *input, const c
 	size_t index;
 	json_t *item;
 	json_array_foreach(val, index, item) {
-		auto v = parse_vec3d_json(item);
+		bool failed_finite_check = false;
+		auto v = parse_vec3d_json(item, failed_finite_check);
+		if (failed_finite_check) {
+			sink.set_error("Parameter '%s[%d]' has components that are not finite numbers", param_name, (int)index);
+			return std::nullopt;
+		}
 		if (!v.has_value()) {
 			sink.set_error("Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
 			return std::nullopt;
@@ -790,9 +803,15 @@ void add_color_prop(json_t *props, const char *name, const char *description)
 std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
-	auto result = parse_vec3d_json(val);
+	bool failed_finite_check = false;
+	auto result = parse_vec3d_json(val, failed_finite_check);
+	if (failed_finite_check) {
+		sink.set_error("Parameter '%s' has components that are not finite numbers", param_name);
+		return std::nullopt;
+	}
 	if (!result.has_value() && val && !json_is_null(val)) {
 		sink.set_error("Parameter '%s' must be a vec3d object", param_name);
+		return std::nullopt;
 	}
 	return result;
 }
@@ -807,14 +826,27 @@ std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_n
 			sink.set_error("Parameter '%s' must be a matrix object", param_name);
 		return std::nullopt;
 	}
-	auto rvec = parse_vec3d_json(json_object_get(val, "rvec"));
-	auto uvec = parse_vec3d_json(json_object_get(val, "uvec"));
-	auto fvec = parse_vec3d_json(json_object_get(val, "fvec"));
+	bool failed_finite_check = false;
+	auto rvec = parse_vec3d_json(json_object_get(val, "rvec"), failed_finite_check);
+	auto uvec = parse_vec3d_json(json_object_get(val, "uvec"), failed_finite_check);
+	auto fvec = parse_vec3d_json(json_object_get(val, "fvec"), failed_finite_check);
+
+	if (failed_finite_check) {
+		sink.set_error("Parameter '%s' has components that are not finite numbers", param_name);
+		return std::nullopt;
+	}
 	if (!rvec.has_value() || !uvec.has_value() || !fvec.has_value()) {
 		sink.set_error("Parameter '%s' must be a matrix object", param_name);
 		return std::nullopt;
 	}
-	return matrix{ *rvec, *uvec, *fvec };
+	if (IS_VEC_NULL(&*rvec) || IS_VEC_NULL(&*uvec) || IS_VEC_NULL(&*fvec)) {
+		sink.set_error("Parameter '%s' has a zero-magnitude basis vector", param_name);
+		return std::nullopt;
+	}
+
+	matrix m;
+	vm_vector_2_matrix(&m, &*fvec, &*uvec, &*rvec);		// we may need to normalize the vectors
+	return m;
 }
 
 std::optional<vec3d> get_required_vec3d(json_t *input, const char *param_name, McpErrorSink &sink)
