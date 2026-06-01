@@ -58,11 +58,10 @@ static json_t *build_wing_json(int wing_idx, bool include_details)
 		json_object_set_new(obj, "display_name", json_safe_string(wingp.display_name.c_str()));
 	if (wingp.hotkey >= 0)
 		json_object_set_new(obj, "hotkey", json_integer(wingp.hotkey));
-	if (wingp.wing_squad_filename[0])
-		json_object_set_new(obj, "wing_squad_filename", json_safe_string(wingp.wing_squad_filename));
+	set_optional_filename(obj, "wing_squad_logo_filename", wingp.wing_squad_filename);
 
 	// Waves
-	json_object_set_new(obj, "threshold", json_integer(wingp.threshold));
+	json_object_set_new(obj, "new_wave_threshold", json_integer(wingp.threshold));
 	json_object_set_new(obj, "wave_delay_min", json_integer(wingp.wave_delay_min));
 	json_object_set_new(obj, "wave_delay_max", json_integer(wingp.wave_delay_max));
 
@@ -256,9 +255,9 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	// Optional
 	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
-	auto wing_squad_filename = get_optional_filename(input, "wing_squad_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
-	auto threshold           = get_optional_integer(input, "threshold", sink);
+	auto threshold           = get_optional_integer(input, "new_wave_threshold", sink);
 	auto wave_delay_min      = get_optional_integer(input, "wave_delay_min", sink);
 	auto wave_delay_max      = get_optional_integer(input, "wave_delay_max", sink);
 
@@ -322,9 +321,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 		if (!*formation_str || !stricmp(formation_str, "<none>")) {
 			formation_idx = -1;	// retail formation
 		} else {
-			formation_idx = check_lookup(formation_str,
-				[](const char *s) { return wing_formation_lookup(s); },
-				"formation", sink);
+			formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
 			if (formation_idx < 0) return;
 		}
 	}
@@ -426,9 +423,9 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	auto new_name            = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
-	auto wing_squad_filename = get_optional_filename(input, "wing_squad_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true, MAX_FILENAME_LEN - 1);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
-	auto threshold           = get_optional_integer(input, "threshold", sink);
+	auto threshold           = get_optional_integer(input, "new_wave_threshold", sink);
 	auto wave_delay_min      = get_optional_integer(input, "wave_delay_min", sink);
 	auto wave_delay_max      = get_optional_integer(input, "wave_delay_max", sink);
 
@@ -517,9 +514,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 		if (!*formation_str || !stricmp(formation_str, "<none>")) {
 			wingp.formation = -1;
 		} else {
-			int formation_idx = check_lookup(formation_str,
-				[](const char *s) { return wing_formation_lookup(s); },
-				"formation", sink);
+			int formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
 			if (formation_idx < 0) return;
 			wingp.formation = formation_idx;
 		}
@@ -699,7 +694,7 @@ void mcp_register_wing_tools(json_t *tools)
 	// list_wings
 	register_tool(tools, "list_wings",
 		"List all wings in the mission.  Each entry has the wing's name, "
-		"display name (if any), wave_count (current ship count), num_waves, "
+		"wave_count (current ship count), num_waves, "
 		"and the names of its member ships in slot order.",
 		json_object());
 
@@ -724,10 +719,10 @@ void mcp_register_wing_tools(json_t *tools)
 			"Optional display name. Empty/\"<none>\" clears.");
 		add_integer_prop(props, "hotkey",
 			"Hotkey assignment 0-9, or omit for no hotkey.");
-		add_string_prop(props, "wing_squad_filename",
+		add_string_prop(props, "wing_squad_logo_filename",
 			"Squadron logo filename, or omit.");
 		add_integer_prop(props, "num_waves", "Number of waves for the wing.");
-		add_integer_prop(props, "threshold", "Wave-respawn threshold.");
+		add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
 		add_integer_prop(props, "wave_delay_min", "Minimum delay between waves (seconds).");
 		add_integer_prop(props, "wave_delay_max", "Maximum delay between waves (seconds).");
 		add_string_enum_prop(props, "arrival_location",
@@ -768,9 +763,9 @@ void mcp_register_wing_tools(json_t *tools)
 			"member ship names are updated automatically (each member is re-bashed to \"<new_name> N\").");
 		add_string_prop(props, "display_name", "Display name. Empty/\"<none>\" clears.");
 		add_integer_prop(props, "hotkey", "Hotkey 0-9.");
-		add_string_prop(props, "wing_squad_filename", "Squadron logo filename.");
+		add_string_prop(props, "wing_squad_logo_filename", "Squadron logo filename.");
 		add_integer_prop(props, "num_waves", "Number of waves.");
-		add_integer_prop(props, "threshold", "Wave-respawn threshold.");
+		add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
 		add_integer_prop(props, "wave_delay_min", "Minimum delay between waves.");
 		add_integer_prop(props, "wave_delay_max", "Maximum delay between waves.");
 		add_string_enum_prop(props, "arrival_location", "Arrival mode.", arrival_location_enum_values);
@@ -819,7 +814,7 @@ void mcp_register_wing_tools(json_t *tools)
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "disband_wing",
 			"Dissolve a wing slot but leave its member ships intact.  The ships have their "
-			"wingnum reset and are renamed back to default class names by the engine. "
+			"wingnum reset and are renamed back to default names by the engine. "
 			"Refuses if the wing is referenced in SEXPs or AI goals unless force=true.",
 			props, req);
 	}
