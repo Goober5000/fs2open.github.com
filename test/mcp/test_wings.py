@@ -297,7 +297,7 @@ def register(suite, client):
             r = client.call_tool("update_wing", {
                 "name": wing_name,
                 "num_waves": 3,
-                "threshold": 1,
+                "new_wave_threshold": 1,
                 "hotkey": 5,
             })
             assert_success(r)
@@ -305,7 +305,7 @@ def register(suite, client):
             assert_success(r)
             d = tool_data(r)
             assert_equal(d.get("num_waves"), 3, "num_waves round-trip")
-            assert_equal(d.get("threshold"), 1, "threshold round-trip")
+            assert_equal(d.get("new_wave_threshold"), 1, "new_wave_threshold round-trip")
             assert_equal(d.get("hotkey"), 5, "hotkey round-trip")
         finally:
             if created_wing:
