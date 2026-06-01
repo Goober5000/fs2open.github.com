@@ -192,18 +192,15 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Display name
+	// Display name -- CJumpNode::SetDisplayName handles the "<none>" and
+	// matches-the-regular-name clearing tokens internally, so we just call
+	// it and compare pre/post state to know whether anything actually moved.
 	if (display_name) {
-		if (!display_name[0]) {
-			// Empty string clears display name
-			if (jn.HasDisplayName()) {
-				jn.SetDisplayName("");
-				changed = true;
-			}
-		} else if (strcmp(jn.GetDisplayName(), display_name) != 0) {
-			jn.SetDisplayName(display_name);
+		bool pre_has = jn.HasDisplayName();
+		SCP_string pre_name = jn.GetDisplayName();
+		jn.SetDisplayName(display_name);
+		if ((pre_has != jn.HasDisplayName()) || (pre_name != jn.GetDisplayName()))
 			changed = true;
-		}
 	}
 
 	// Color
@@ -381,7 +378,9 @@ void mcp_register_jump_node_tools(json_t *tools)
 		add_string_prop(props, "new_name", "New name for the jump node");
 		add_vec3d_prop(props, "position", "New world position");
 		add_string_prop(props, "display_name",
-			"New display name (empty string to clear)");
+			"New display name. Pass \"<none>\" or a string matching the jump node's "
+			"regular name to clear; a blank string is a valid display name and will "
+			"be stored as-is.");
 		add_color_prop(props, "color", "New RGBA display color");
 		add_string_prop(props, "model_filename",
 			"New model filename (POF)");
