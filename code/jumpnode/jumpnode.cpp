@@ -314,7 +314,7 @@ void CJumpNode::SetDisplayName(const char *new_display_name)
 	Assert(new_display_name != NULL);
 
 	// if display name matches the actual name, clear it
-	if (stricmp(new_display_name, m_name) == 0)
+	if (stricmp(new_display_name, "<none>") == 0 || stricmp(new_display_name, m_name) == 0)
 	{
 		*m_display = '\0';
 		m_flags &= ~JN_HAS_DISPLAY_NAME;
