@@ -498,6 +498,7 @@ static const char *mission_tool_names[] = {
 	"get_wing",
 	"form_wing",
 	"update_wing",
+	"arrange_in_formation",
 	"delete_wing",
 	"disband_wing",
 	"move_wing",
