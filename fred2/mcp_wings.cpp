@@ -11,6 +11,7 @@
 #include <cstring>
 #include <optional>
 
+#include "ai/ai.h"                    // get_absolute_wing_pos
 #include "mission/missionparse.h"
 #include "missioneditor/common.h"     // FredWingSlotConfig, reassign_wing_slot, swap_wing_slots, update_custom_wing_indexes
 #include "object/object.h"
@@ -530,6 +531,67 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+// ---------------------------------------------------------------------------
+// arrange_in_formation — mirrors FRED's "Align" button (OnWingFormationAlign).
+// Optional formation/formation_scale are temporary overrides for this call only;
+// the wing's persistent values are restored after the arrangement loop.
+// ---------------------------------------------------------------------------
+
+static void handle_arrange_in_formation(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_wings, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int wing_idx = wing_name_lookup(name);
+	if (wing_idx < 0) {
+		set_not_found_error(sink, "Wing", name);
+		return;
+	}
+
+	auto formation_str   = get_optional_string(input, "formation", sink);
+	auto formation_scale = get_optional_float(input, "formation_scale", sink);
+	if (sink.has_error()) return;
+
+	wing &wingp = Wings[wing_idx];
+
+	// Save current formation/scale so we can restore after arrangement.
+	int old_formation = wingp.formation;
+	float old_formation_scale = wingp.formation_scale;
+
+	// Temporarily apply optional overrides.  Validation happens before mutation,
+	// so if a bad formation name is given we return without touching the wing.
+	if (formation_str) {
+		if (!*formation_str || !stricmp(formation_str, "default")) {
+			wingp.formation = -1;
+		} else {
+			int formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
+			if (formation_idx < 0) return;
+			wingp.formation = formation_idx;
+		}
+	}
+	if (formation_scale.has_value())
+		wingp.formation_scale = *formation_scale;
+
+	object *leader_objp = &Objects[Ships[wingp.ship_index[0]].objnum];
+	for (int i = 1; i < wingp.wave_count; i++) {
+		object *objp = &Objects[Ships[wingp.ship_index[i]].objnum];
+		get_absolute_wing_pos(&objp->pos, leader_objp, wing_idx, i, false);
+		objp->orient = leader_objp->orient;
+	}
+
+	// Restore the wing's persistent formation/scale; overrides applied only to this call.
+	wingp.formation = old_formation;
+	wingp.formation_scale = old_formation_scale;
+
+	mark_modified("MCP: arrange wing %s", wingp.name);
+
+	req->result_json = make_json_tool_result(build_wing_json(wing_idx, true));
+	req->success = true;
+}
+
 // Shared pre-check for delete_wing / disband_wing.  Returns true on success
 // (caller may proceed); false if blocked or if the caller-supplied error path
 // was already populated.
@@ -792,6 +854,29 @@ void mcp_register_wing_tools(json_t *tools)
 			props, req);
 	}
 
+	// arrange_in_formation
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Wing name.");
+		add_string_prop(props, "formation",
+			"Optional formation name to override the wing's current formation for this arrangement only. "
+			"The wing's persistent formation is not changed. "
+			"See list_wing_formations for valid values.");
+		add_number_prop(props, "formation_scale",
+			"Optional formation scale to override the wing's current scale for this arrangement only. "
+			"The wing's persistent scale is not changed.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "arrange_in_formation",
+			"Arrange the members of a wing into their formation positions, relative to the wing leader "
+			"(the first ship in the member list). Each non-leader member is moved to its formation position "
+			"and reoriented to match the leader. The 'formation' and 'formation_scale' parameters are optional "
+			"temporary overrides applied only to this arrangement; the wing's persistent formation settings "
+			"are not modified (use update_wing for that). Mirrors the \"Align\" button on FRED's wing editor "
+			"dialog. Wings with only a leader (wave_count == 1) are a no-op.",
+			props, req);
+	}
+
 	// delete_wing
 	{
 		json_t *props = json_object();
@@ -869,6 +954,8 @@ bool mcp_handle_wing_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_form_wing(input_json, req);
 	} else if (strcmp(tool_name, "update_wing") == 0) {
 		handle_update_wing(input_json, req);
+	} else if (strcmp(tool_name, "arrange_in_formation") == 0) {
+		handle_arrange_in_formation(input_json, req);
 	} else if (strcmp(tool_name, "delete_wing") == 0) {
 		handle_delete_wing(input_json, req);
 	} else if (strcmp(tool_name, "disband_wing") == 0) {
