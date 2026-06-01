@@ -536,7 +536,12 @@ std::optional<double> get_optional_double(json_t *arguments, const char *param_n
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
-		return json_number_value(val);
+		double d = json_number_value(val);
+		if (!std::isfinite(d)) {
+			sink.set_error("Parameter '%s' must be a finite number", param_name);
+			return std::nullopt;
+		}
+		return d;
 	}
 	if (val && !json_is_null(val)) {
 		sink.set_error("Parameter '%s' must be a number", param_name);
@@ -548,7 +553,14 @@ std::optional<float> get_optional_float(json_t *arguments, const char *param_nam
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
 	if (val && json_is_number(val)) {
-		return (float)json_number_value(val);
+		// Cast first so that a finite double which overflows the float range
+		// (e.g. 1e40) is rejected as non-finite rather than silently becoming Inf.
+		float f = (float)json_number_value(val);
+		if (!std::isfinite(f)) {
+			sink.set_error("Parameter '%s' must be a finite number", param_name);
+			return std::nullopt;
+		}
+		return f;
 	}
 	if (val && !json_is_null(val)) {
 		sink.set_error("Parameter '%s' must be a number", param_name);
