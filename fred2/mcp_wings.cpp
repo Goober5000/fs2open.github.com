@@ -275,7 +275,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	auto departure_cue       = get_optional_integer(input, "departure_cue", sink);
 
 	auto formation_str       = get_optional_string(input, "formation", sink);
-	auto formation_scale     = get_optional_double(input, "formation_scale", sink);
+	auto formation_scale     = get_optional_float(input, "formation_scale", sink);
 
 	if (sink.has_error()) return;
 
@@ -400,7 +400,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	if (formation_str)
 		wingp.formation = formation_idx;
 	if (formation_scale.has_value())
-		wingp.formation_scale = (float)*formation_scale;
+		wingp.formation_scale = *formation_scale;
 
 	mark_modified("MCP: form wing %s", name);
 
@@ -443,7 +443,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	auto departure_cue       = get_optional_integer(input, "departure_cue", sink);
 
 	auto formation_str       = get_optional_string(input, "formation", sink);
-	auto formation_scale     = get_optional_double(input, "formation_scale", sink);
+	auto formation_scale     = get_optional_float(input, "formation_scale", sink);
 
 	if (sink.has_error()) return;
 
@@ -522,7 +522,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 		}
 	}
 	if (formation_scale.has_value())
-		wingp.formation_scale = (float)*formation_scale;
+		wingp.formation_scale = *formation_scale;
 
 	mark_modified("MCP: update wing %s", wingp.name);
 

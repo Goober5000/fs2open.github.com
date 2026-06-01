@@ -283,7 +283,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto callsign          = get_optional_string(input, "callsign", sink, NAME_LENGTH - 1);
 	auto is_player         = get_optional_bool(input, "is_player_start", sink);
 	auto score             = get_optional_integer(input, "score", sink);
-	auto assist_pct        = get_optional_double(input, "assist_score_fraction", sink);
+	auto assist_pct        = get_optional_float(input, "assist_score_fraction", sink);
 
 	auto arrival_loc_str   = get_optional_string(input, "arrival_location", sink);
 	auto arrival_tgt_str   = get_optional_string(input, "arrival_target", sink);
@@ -411,7 +411,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	if (score.has_value())
 		shipp.score = *score;
 	if (assist_pct.has_value()) {
-		shipp.assist_score_pct = std::clamp((float)(*assist_pct), 0.0f, 1.0f);
+		shipp.assist_score_pct = std::clamp((*assist_pct), 0.0f, 1.0f);
 	}
 
 	if (arr_loc >= 0)
@@ -475,7 +475,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto callsign          = get_optional_string(input, "callsign", sink, NAME_LENGTH - 1);
 	auto is_player         = get_optional_bool(input, "is_player_start", sink);
 	auto score             = get_optional_integer(input, "score", sink);
-	auto assist_pct        = get_optional_double(input, "assist_score_fraction", sink);
+	auto assist_pct        = get_optional_float(input, "assist_score_fraction", sink);
 	auto new_pos           = get_optional_vec3d(input, "position", sink);
 	auto new_orient        = get_optional_matrix(input, "orientation", sink);
 
@@ -556,7 +556,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	if (score.has_value())
 		shipp.score = *score;
 	if (assist_pct.has_value()) {
-		shipp.assist_score_pct = std::clamp((float)*assist_pct, 0.0f, 1.0f);
+		shipp.assist_score_pct = std::clamp(*assist_pct, 0.0f, 1.0f);
 	}
 
 	if (new_pos.has_value())
