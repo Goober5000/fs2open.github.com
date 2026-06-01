@@ -3,15 +3,15 @@
     "category": "game_concepts",
     "topic": "species",
     "description": "Terran, Vasudan, Shivan, Ancient — factions and their defaults",
-    "see_also": ["iff", "ship_class_names"],
+    "see_also": ["iff_and_team", "ship_class_names"],
     "text": "Species define the major factions in the FreeSpace universe. The four canonical species are:\n\n- **Terran**: Humanity, part of the Galactic Terran-Vasudan Alliance (GTVA).\n- **Vasudan**: An alien race, allied with Terrans in the GTVA after the Terran-Vasudan War.\n- **Shivan**: A mysterious and hostile alien race, the primary antagonist.\n\n- **Ancient**: An extinct civilization wiped out by the Shivans 8000 years before the events of FreeSpace.\n\nEach species has default settings for IFF (identification friend-or-foe), AWACS multipliers, countermeasures, and support ships. Mods may add additional species, or may even use the species system for custom category distinctions such as Civilian or Pirate."
   },
   {
     "category": "game_concepts",
-    "topic": "iff",
+    "topic": "iff_and_team",
     "description": "Team allegiances: friend, foe, and neutral relationships",
     "see_also": ["species"],
-    "text": "IFF determines team allegiances in a mission. Standard IFF teams include \"Friendly\", \"Hostile\", and \"Unknown\", but custom IFF entries can be defined. Each IFF has an associated color for HUD display and relationships with other IFF teams (friend, foe, or neutral). Ships on the same IFF team are almost always allies; ships on different IFF teams may be allies, enemies, or indifferent. Each IFF entry specifies a list of IFFs to be attacked. SEXPs can change IFF allegiances mid-mission."
+    "text": "A ship's IFF determines its allegiances in a mission. Standard IFFs include \"Friendly\", \"Hostile\", and \"Unknown\", but custom IFF entries can be defined. Each IFF has an associated color for HUD display and relationships with other IFF teams (friend, foe, or neutral). Ships with the same IFF are almost always allies; ships with different IFFs may be allies, enemies, or indifferent. Each IFF entry specifies a list of IFFs to be attacked. SEXPs can change IFF allegiances mid-mission.\n\n**Terminology**: \"Team\" and \"IFF\" are almost always synonymous. The two terms are used interchangeably even within function definitions in the source code. A ship's team membership *is* its IFF; the \"team\" field contains the name of an IFF definition. Probably the only situation where a team is *not* an IFF is the multiplayer team-versus-team mode. Here, mission data structures such as briefings and loadouts are assigned to either \"team 1\" or \"team 2\" to set up the multiplayer competition."
   },
   {
     "category": "game_concepts",
