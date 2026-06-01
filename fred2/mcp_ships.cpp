@@ -109,12 +109,14 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 }
 
 // ---------------------------------------------------------------------------
-// Display name helper - empty / "<none>" / matches ship name => clear the flag
+// Display name helper - "<none>" / matches ship name => clear the flag
 // ---------------------------------------------------------------------------
 
 static void apply_display_name(ship &shipp, const char *display_name)
 {
-	if (!*display_name || !stricmp(display_name, "<none>") || !strcmp(display_name, shipp.ship_name)) {
+	// A blank display name is a valid display name.  To remove a display
+	// name, pass "<none>" or a string matching the ship's regular name.
+	if (!stricmp(display_name, "<none>") || !strcmp(display_name, shipp.ship_name)) {
 		shipp.display_name = "";
 		shipp.flags.remove(Ship::Ship_Flags::Has_display_name);
 	} else {
@@ -847,7 +849,9 @@ void mcp_register_ship_tools(json_t *tools)
 		add_matrix_prop(props, "orientation",
 			"Orientation matrix (rvec/uvec/fvec) for the ship at placement.");
 		add_string_prop(props, "display_name",
-			"Optional display name shown to the player (if different from `name`). Pass an empty string or \"<none>\" to clear.");
+			"Optional display name shown to the player (if different from `name`). Pass \"<none>\" or "
+			"a string matching the ship's `name` to clear; a blank string is a valid display name and "
+			"will be stored as-is.");
 		add_string_prop(props, "team",
 			"IFF team name (e.g. \"Friendly\", \"Hostile\"). Defaults to the ship class's species default IFF.");
 		add_string_prop(props, "ai_class",
@@ -906,7 +910,8 @@ void mcp_register_ship_tools(json_t *tools)
 			"New name for the ship. SEXP references, AI goals, texture replacements, and reinforcement entries "
 			"are updated automatically. Per FRED convention, renaming may reset the display name.");
 		add_string_prop(props, "display_name",
-			"Display name shown to the player. Empty/\"<none>\" clears.");
+			"Display name shown to the player. Pass \"<none>\" or a string matching the ship's `name` "
+			"to clear; a blank string is a valid display name and will be stored as-is.");
 		add_string_prop(props, "ship_class",
 			"Change the ship's class. Triggers a model/subsystem swap via change_ship_type.");
 		add_string_prop(props, "team", "IFF team name.");

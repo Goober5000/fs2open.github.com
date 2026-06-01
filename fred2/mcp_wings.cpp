@@ -98,7 +98,9 @@ static json_t *build_wing_json(int wing_idx, bool include_details)
 
 static void apply_wing_display_name(wing &wingp, const char *display_name)
 {
-	if (!*display_name || !stricmp(display_name, "<none>") || !strcmp(display_name, wingp.name)) {
+	// A blank display name is a valid display name.  To remove a display
+	// name, pass "<none>" or a string matching the wing's regular name.
+	if (!stricmp(display_name, "<none>") || !strcmp(display_name, wingp.name)) {
 		wingp.display_name = "";
 		wingp.flags.remove(Ship::Wing_Flags::Has_display_name);
 	} else {
@@ -716,7 +718,8 @@ void mcp_register_wing_tools(json_t *tools)
 			"Member ships are renamed to \"<wing_name> 1\", \"<wing_name> 2\", etc.",
 			SCP_vector<const char *>{});
 		add_string_prop(props, "display_name",
-			"Optional display name. Empty/\"<none>\" clears.");
+			"Optional display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
+			"a blank string is a valid display name and will be stored as-is.");
 		add_integer_prop(props, "hotkey",
 			"Hotkey assignment 0-9, or omit for no hotkey.");
 		add_string_prop(props, "wing_squad_logo_filename",
@@ -761,7 +764,9 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_prop(props, "new_name",
 			"New name for the wing.  SEXP references, AI goals, texture replacements, and "
 			"member ship names are updated automatically (each member is re-bashed to \"<new_name> N\").");
-		add_string_prop(props, "display_name", "Display name. Empty/\"<none>\" clears.");
+		add_string_prop(props, "display_name",
+			"Display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
+			"a blank string is a valid display name and will be stored as-is.");
 		add_integer_prop(props, "hotkey", "Hotkey 0-9.");
 		add_string_prop(props, "wing_squad_logo_filename", "Squadron logo filename.");
 		add_integer_prop(props, "num_waves", "Number of waves.");
