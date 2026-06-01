@@ -488,6 +488,15 @@ void mcp_register_reference_tools(json_t *tools)
 		"Returns each flag's name (as used in the mission file) and description.",
 		json_object());
 
+	// list_wing_formations
+	register_tool(tools, "list_wing_formations",
+		"List all wing formations that can be set in the mission file. "
+		"A wing formation describes the relative positions of wingmen around the wing "
+		"leader (who is implicitly at the origin and therefore not listed: the first "
+		"formation position refers to the second ship, the second formation position "
+		"refers to the third ship, etc).",
+		json_object());
+
 	// list_scripting_elements
 	{
 		json_t *props = json_object();
@@ -2225,6 +2234,35 @@ static json_t *handle_list_ai_classes()
 	return make_json_tool_result(arr);
 }
 
+extern void get_wing_delta(vec3d *delta, int wing_index);
+
+static json_t *handle_list_wing_formations()
+{
+	auto build_entry = [](const char *name, const vec3d *positions, size_t n) {
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_safe_string(name));
+		json_t *arr = json_array();
+		for (size_t i = 0; i < n; i++)
+			json_array_append_new(arr, build_vec3d_json(positions[i]));
+		json_object_set_new(item, "positions", arr);
+		return item;
+	};
+
+	json_t *arr = json_array();
+
+	// Engine's built-in retail formation
+	std::array<vec3d, MAX_SHIPS_PER_WING - 1> default_positions;
+	for (int i = 0; i < MAX_SHIPS_PER_WING - 1; i++)
+		get_wing_delta(&default_positions[i], i + 1);  // wing_index 0 is the leader
+	json_array_append_new(arr, build_entry("default", default_positions.data(), default_positions.size()));
+
+	// Modder-defined formations
+	for (const auto &f : Wing_formations)
+		json_array_append_new(arr, build_entry(f.name, f.positions.data(), f.positions.size()));
+
+	return make_json_tool_result(arr);
+}
+
 static json_t *handle_list_ai_profiles()
 {
 	json_t *arr = json_array();
@@ -2876,6 +2914,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
 	if (strcmp(tool_name, "list_ship_flags") == 0)
 		return handle_list_flags(Parse_object_flags, Parse_object_flag_descriptions, Num_parse_object_flags);
+	if (strcmp(tool_name, "list_wing_formations") == 0)
+		return handle_list_wing_formations();
 	if (strcmp(tool_name, "list_wing_flags") == 0)
 		return handle_list_flags(Parse_wing_flags, Parse_wing_flag_descriptions, Num_parse_wing_flags);
 	if (strcmp(tool_name, "list_scripting_elements") == 0)

@@ -320,8 +320,8 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 
 	int formation_idx = -1;
 	if (formation_str) {
-		if (!*formation_str || !stricmp(formation_str, "<none>")) {
-			formation_idx = -1;	// retail formation
+		if (!*formation_str || !stricmp(formation_str, "default")) {
+			formation_idx = -1;	// default retail formation
 		} else {
 			formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
 			if (formation_idx < 0) return;
@@ -513,7 +513,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	}
 
 	if (formation_str) {
-		if (!*formation_str || !stricmp(formation_str, "<none>")) {
+		if (!*formation_str || !stricmp(formation_str, "default")) {
 			wingp.formation = -1;
 		} else {
 			int formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
@@ -744,7 +744,7 @@ void mcp_register_wing_tools(json_t *tools)
 		add_integer_prop(props, "departure_cue",
 			"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
 		add_string_prop(props, "formation",
-			"Formation name from ships.tbl, or \"<none>\" for retail (no formation).");
+			"Formation name. See list_wing_formations for valid values.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale (default 1.0).");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
@@ -782,7 +782,7 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_prop(props, "departure_target", "Departure anchor.");
 		add_integer_prop(props, "departure_delay", "Departure delay.");
 		add_integer_prop(props, "departure_cue", "SEXP node ID for the departure cue.");
-		add_string_prop(props, "formation", "Formation name or \"<none>\" for retail.");
+		add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
