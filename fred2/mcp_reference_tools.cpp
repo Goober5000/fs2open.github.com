@@ -34,6 +34,7 @@
 #include "graphics/software/FSFont.h"
 #include "scripting/doc_json.h"
 #include "scripting/scripting.h"
+#include "ai/ai.h"
 #include "ai/ai_profiles.h"
 #include "sound/ds.h"
 #include "mission/missionparse.h"
@@ -433,6 +434,12 @@ void mcp_register_reference_tools(json_t *tools)
 		"List all fonts loaded from fonts.tbl and modular font tables (*-fnt.tbm). "
 		"Returns each font's name, filename, and type (volition_font or truetype). "
 		"Font names are used in fiction viewer stages and other UI references.",
+		json_object());
+
+	// list_ai_classes
+	register_tool(tools, "list_ai_classes",
+		"List all AI classes defined in ai.tbl. "
+		"AI classes control per-ship AI behavior (accuracy, evasion, courage, etc.).",
 		json_object());
 
 	// list_ai_profiles
@@ -2207,6 +2214,17 @@ static json_t *handle_list_fonts()
 	return make_json_tool_result(arr);
 }
 
+static json_t *handle_list_ai_classes()
+{
+	json_t *arr = json_array();
+	for (int i = 0; i < Num_ai_classes; i++) {
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_safe_string(Ai_classes[i].name));
+		json_array_append_new(arr, item);
+	}
+	return make_json_tool_result(arr);
+}
+
 static json_t *handle_list_ai_profiles()
 {
 	json_t *arr = json_array();
@@ -2844,6 +2862,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_talking_heads();
 	if (strcmp(tool_name, "list_fonts") == 0)
 		return handle_list_fonts();
+	if (strcmp(tool_name, "list_ai_classes") == 0)
+		return handle_list_ai_classes();
 	if (strcmp(tool_name, "list_ai_profiles") == 0)
 		return handle_list_ai_profiles();
 	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
