@@ -1,5 +1,6 @@
 #include "stdafx.h"
 #include "mcp_reference_tools.h"
+#include "mcp_ships.h"      // mcp_ship_flag_excluded
 #include "mcpserver.h"
 #include "mcp_array_utils.h"
 #include "mcp_json.h"
@@ -2308,6 +2309,30 @@ static json_t *handle_list_flags(const flag_def_list_new<FlagEnum> *flags,
 	return make_json_tool_result(arr);
 }
 
+// MCP-visible subset of Parse_object_flags.  Filters out flags that the MCP
+// surface excludes (see mcp_ship_flag_excluded in mcp_ships.h), keeping the flag and
+// description arrays parallel so handle_list_flags can index both with the
+// same i.
+struct mcp_visible_ship_flags
+{
+	SCP_vector<flag_def_list_new<Mission::Parse_Object_Flags>>             flags;
+	SCP_vector<parse_object_flag_description<Mission::Parse_Object_Flags>> descs;
+};
+
+static mcp_visible_ship_flags get_mcp_visible_ship_flags()
+{
+	mcp_visible_ship_flags out;
+	out.flags.reserve(Num_parse_object_flags);
+	out.descs.reserve(Num_parse_object_flags);
+	for (size_t i = 0; i < Num_parse_object_flags; i++) {
+		if (mcp_ship_flag_excluded(Parse_object_flags[i].def))
+			continue;
+		out.flags.push_back(Parse_object_flags[i]);
+		out.descs.push_back(Parse_object_flag_descriptions[i]);
+	}
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // Scripting API documentation
 // ---------------------------------------------------------------------------
@@ -2912,8 +2937,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_names(Spooled_music, [](const auto &e) -> const char* { return e.name; });
 	if (strcmp(tool_name, "list_mission_flags") == 0)
 		return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
-	if (strcmp(tool_name, "list_ship_flags") == 0)
-		return handle_list_flags(Parse_object_flags, Parse_object_flag_descriptions, Num_parse_object_flags);
+	if (strcmp(tool_name, "list_ship_flags") == 0) {
+		const static auto v = get_mcp_visible_ship_flags();
+		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
+	}
 	if (strcmp(tool_name, "list_wing_formations") == 0)
 		return handle_list_wing_formations();
 	if (strcmp(tool_name, "list_wing_flags") == 0)

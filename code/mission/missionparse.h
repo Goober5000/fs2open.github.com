@@ -598,6 +598,7 @@ p_object *mission_parse_find_parse_object(const char *name);
 int parse_create_object(p_object *objp, bool standalone_ship = false);
 void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, ship &s, bool no_ship_max_shield);
 void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, flagset<Object::Object_Flags> &object_flags, flagset<Ship::Ship_Flags> &ship_flags, flagset<AI::AI_Flags> &ai_flags);
+void inverse_resolve_parse_flags(flagset<Mission::Parse_Object_Flags> &parse_flags, const flagset<Object::Object_Flags> &object_flags, const flagset<Ship::Ship_Flags> &ship_flags, const flagset<AI::AI_Flags> &ai_flags);
 
 void mission_parse_close();
 

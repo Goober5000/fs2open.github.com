@@ -3220,7 +3220,33 @@ void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags
 		object_flags.remove(Object::Object_Flags::Collides);
 }
 
-void fix_old_special_explosions(p_object *p_objp, int variable_index) 
+// Inverse of the flagset-based resolve_parse_flags: derive which parse flags would have been
+// needed to produce the given runtime flag state.  Lossy in the sense that some runtime states
+// have multiple causes (e.g. No_shields can come from OF_No_shields or zero shield strength),
+// so this answers "is the runtime bit set", not "was this specific parse flag the cause".
+void inverse_resolve_parse_flags(flagset<Mission::Parse_Object_Flags> &parse_flags, const flagset<Object::Object_Flags> &object_flags, const flagset<Ship::Ship_Flags> &ship_flags, const flagset<AI::AI_Flags> &ai_flags)
+{
+	parse_flags.reset();
+
+	for (const auto &m : Parse_object_flag_targets) {
+		bool is_set = false;
+		if (m.object_flag != Object::Object_Flags::NUM_VALUES && object_flags[m.object_flag]) is_set = true;
+		if (m.ship_flag   != Ship::Ship_Flags::NUM_VALUES     && ship_flags[m.ship_flag])    is_set = true;
+		if (m.ai_flag     != AI::AI_Flags::NUM_VALUES         && ai_flags[m.ai_flag])        is_set = true;
+		if (is_set)
+			parse_flags.set(m.parse_flag);
+	}
+
+	// SF_Locked: shorthand for both lock flags being set
+	if (ship_flags[Ship::Ship_Flags::Ship_locked] && ship_flags[Ship::Ship_Flags::Weapons_locked])
+		parse_flags.set(Mission::Parse_Object_Flags::SF_Locked);
+
+	// OF_No_collide: set iff Collides bit is clear
+	if (!object_flags[Object::Object_Flags::Collides])
+		parse_flags.set(Mission::Parse_Object_Flags::OF_No_collide);
+}
+
+void fix_old_special_explosions(p_object *p_objp, int variable_index)
 {
 	int i;
 
