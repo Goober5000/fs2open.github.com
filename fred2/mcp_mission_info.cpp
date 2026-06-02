@@ -572,18 +572,9 @@ void mcp_register_mission_info_tools(json_t *tools)
 		add_string_prop(props, "ai_profile",
 			"AI profile name. Use list_ai_profiles to see available names.");
 
-		// mission_flags: free-form object of { "<flag name>": bool }
-		{
-			json_t *flags_schema = json_object();
-			json_object_set_new(flags_schema, "type", json_string("object"));
-			json_object_set_new(flags_schema, "description",
-				json_string("Partial update of mission flags. Keys are flag names from list_mission_flags; "
-					"values are booleans. Only provided flags are modified."));
-			json_t *ap = json_object();
-			json_object_set_new(ap, "type", json_string("boolean"));
-			json_object_set_new(flags_schema, "additionalProperties", ap);
-			json_object_set_new(props, "mission_flags", flags_schema);
-		}
+		add_bool_map_prop(props, "mission_flags",
+			"Partial update of mission flags. Keys are flag names from list_mission_flags; "
+			"values are booleans. Only provided flags are modified.");
 
 		// support_ships: nested object with known shape
 		{

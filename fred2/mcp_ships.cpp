@@ -27,6 +27,15 @@
 #include "fred.h"                     // Ship_editor_dialog
 #include "management.h"               // create_ship, delete_ship, rename_ship, invalidate_references, etc.
 
+// Engine helpers used to resolve flag names and apply them across the
+// object/ship/parse/AI flag enums.  Same pattern as scripting/api/objs/ship.cpp.
+extern bool sexp_check_flag_arrays(const char *flag_name,
+	Object::Object_Flags &object_flag, Ship::Ship_Flags &ship_flag,
+	Mission::Parse_Object_Flags &parse_obj_flag, AI::AI_Flags &ai_flag);
+extern void sexp_alter_ship_flag_helper(object_ship_wing_point_team &oswpt,
+	bool future_ships, Object::Object_Flags object_flag, Ship::Ship_Flags ship_flag,
+	Mission::Parse_Object_Flags parse_obj_flag, AI::AI_Flags ai_flag, bool set_flag);
+
 // ---------------------------------------------------------------------------
 // Dialog conflict guard
 // ---------------------------------------------------------------------------
@@ -39,6 +48,8 @@ static bool validate_dialog_for_ships(SCP_string &error_msg)
 // ---------------------------------------------------------------------------
 // Ship JSON serialization
 // ---------------------------------------------------------------------------
+
+static json_t *build_ship_flags_array(int ship_idx);
 
 static json_t *build_ship_json(int ship_idx, bool include_details)
 {
@@ -104,6 +115,9 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 		json_object_set_new(obj, "departure_target", json_safe_string(dep_tgt.c_str()));
 	json_object_set_new(obj, "departure_delay", json_integer(shipp.departure_delay));
 	json_object_set_new(obj, "departure_cue", json_integer(shipp.departure_cue));
+
+	// Flags (cross-enum: object/ship/parse-object/AI; see list_ship_flags)
+	json_object_set_new(obj, "ship_flags", build_ship_flags_array(ship_idx));
 
 	return obj;
 }
@@ -217,6 +231,170 @@ static void apply_helper(int ship_idx, const char *new_text, apply_type type)
 }
 
 // ---------------------------------------------------------------------------
+// Ship flags (cross-enum dispatch via the engine's sexp_check_flag_arrays /
+// sexp_alter_ship_flag_helper -- same helpers used by Ship:getFlag / setFlag).
+// ---------------------------------------------------------------------------
+
+// don't include these in the valid flags for MCP for various reasons:
+//   player-start: edits go through is_player_start (manages Player_starts and OBJ_START)
+//   immobile:     deprecated, callers should set don't-change-position + don't-change-orientation
+//   locked:       deprecated, callers should set ship-locked + weapons-locked
+bool mcp_ship_flag_excluded(const Mission::Parse_Object_Flags &candidate)
+{
+	return candidate == Mission::Parse_Object_Flags::OF_Player_start || candidate == Mission::Parse_Object_Flags::OF_Immobile || candidate == Mission::Parse_Object_Flags::SF_Locked;
+}
+
+// Resolve a flag name to the runtime enum(s) sexp_alter_ship_flag_helper can apply.
+//
+// sexp_check_flag_arrays handles names in the engine's SEXP runtime tables directly.
+// Names that only resolve to a parse-only flag (e.g. "kamikaze", "ignore-count",
+// "reinforcement") would otherwise route through the helper's OSWPT_TYPE_PARSE_OBJECT
+// branch and no-op on live FRED-created ships.  For those, we project the parse flag
+// onto its corresponding runtime enum(s) via resolve_parse_flags.
+//
+// Returns true if at least one enum was resolved.
+static bool resolve_ship_flag_name(const char *name,
+	Object::Object_Flags &object_flag, Ship::Ship_Flags &ship_flag,
+	Mission::Parse_Object_Flags &parse_obj_flag, AI::AI_Flags &ai_flag)
+{
+	object_flag = Object::Object_Flags::NUM_VALUES;
+	ship_flag = Ship::Ship_Flags::NUM_VALUES;
+	parse_obj_flag = Mission::Parse_Object_Flags::NUM_VALUES;
+	ai_flag = AI::AI_Flags::NUM_VALUES;
+
+	sexp_check_flag_arrays(name, object_flag, ship_flag, parse_obj_flag, ai_flag);
+
+	// Honor the MCP exclusion list regardless of which enum tables also matched.
+	// (Object_flag_names contains "immobile" too, so the projection-block guard
+	// alone wouldn't catch it.)
+	if (parse_obj_flag != Mission::Parse_Object_Flags::NUM_VALUES && mcp_ship_flag_excluded(parse_obj_flag)) {
+		object_flag    = Object::Object_Flags::NUM_VALUES;
+		ship_flag      = Ship::Ship_Flags::NUM_VALUES;
+		parse_obj_flag = Mission::Parse_Object_Flags::NUM_VALUES;
+		ai_flag        = AI::AI_Flags::NUM_VALUES;
+		return false;
+	}
+
+	// Runtime enum directly, or OF_No_collide which the helper special-cases.
+	if (object_flag != Object::Object_Flags::NUM_VALUES ||
+		ship_flag != Ship::Ship_Flags::NUM_VALUES ||
+		ai_flag != AI::AI_Flags::NUM_VALUES ||
+		parse_obj_flag == Mission::Parse_Object_Flags::OF_No_collide)
+		return true;
+
+	// Project a parse-only flag onto its runtime enum via resolve_parse_flags.
+	// sexp_alter_ship_flag_helper takes one of each enum, so only single-bit
+	// projections are accepted; multi-bit projections (no parse flag currently
+	// has one outside the mcp_ship_flag_excluded list) would be rejected here.
+	if (parse_obj_flag != Mission::Parse_Object_Flags::NUM_VALUES) {
+		flagset<Mission::Parse_Object_Flags> pf;
+		flagset<Object::Object_Flags> of;
+		flagset<Ship::Ship_Flags> sf;
+		flagset<AI::AI_Flags> af;
+		pf.set(parse_obj_flag);
+		resolve_parse_flags(pf, of, sf, af);
+
+		int total = 0;
+		for (size_t i = 0; i < (size_t)Object::Object_Flags::NUM_VALUES; i++) {
+			auto f = (Object::Object_Flags)i;
+			if (of[f]) { object_flag = f; total++; }
+		}
+		for (size_t i = 0; i < (size_t)Ship::Ship_Flags::NUM_VALUES; i++) {
+			auto f = (Ship::Ship_Flags)i;
+			if (sf[f]) { ship_flag = f; total++; }
+		}
+		for (size_t i = 0; i < (size_t)AI::AI_Flags::NUM_VALUES; i++) {
+			auto f = (AI::AI_Flags)i;
+			if (af[f]) { ai_flag = f; total++; }
+		}
+
+		if (total == 1)
+			return true;
+
+		// Multi-bit projection or no projection at all.
+		object_flag = Object::Object_Flags::NUM_VALUES;
+		ship_flag   = Ship::Ship_Flags::NUM_VALUES;
+		ai_flag     = AI::AI_Flags::NUM_VALUES;
+	}
+
+	return false;
+}
+
+// Return the array of currently-set flag names on the given ship.  Iterates
+// Parse_object_flags so the GET surface matches list_ship_flags;
+// inverse_resolve_parse_flags handles the runtime-bit -> parse-flag projection.
+static json_t *build_ship_flags_array(int ship_idx)
+{
+	const ship &shipp = Ships[ship_idx];
+	const object &objp = Objects[shipp.objnum];
+	const ai_info &aip = Ai_info[shipp.ai_index];
+
+	flagset<Mission::Parse_Object_Flags> parse_flags;
+	inverse_resolve_parse_flags(parse_flags, objp.flags, shipp.flags, aip.ai_flags);
+
+	json_t *arr = json_array();
+	for (size_t i = 0; i < Num_parse_object_flags; i++) {
+		if (Parse_object_flags[i].in_use && parse_flags[Parse_object_flags[i].def] && !mcp_ship_flag_excluded(Parse_object_flags[i].def))
+			json_array_append_new(arr, json_string(Parse_object_flags[i].name));
+	}
+	return arr;
+}
+
+// Validate-only pass: confirm flags_obj is an object of {name: bool} where each
+// name resolves via resolve_ship_flag_name.  Used pre-creation in create_ship so
+// a bad flag name aborts before any mutation.
+static bool validate_ship_flags_only(json_t *flags_obj, McpErrorSink &sink)
+{
+	if (!flags_obj)
+		return true;
+	if (!json_is_object(flags_obj)) {
+		sink.set_error("Parameter 'ship_flags' must be an object of {flag_name: bool}");
+		return false;
+	}
+	const char *key;
+	json_t *val;
+	json_object_foreach(flags_obj, key, val) {
+		if (!json_is_boolean(val)) {
+			sink.set_error("ship_flags.%s must be a boolean", key);
+			return false;
+		}
+		auto object_flag = Object::Object_Flags::NUM_VALUES;
+		auto ship_flag = Ship::Ship_Flags::NUM_VALUES;
+		auto parse_obj_flag = Mission::Parse_Object_Flags::NUM_VALUES;
+		auto ai_flag = AI::AI_Flags::NUM_VALUES;
+		if (!resolve_ship_flag_name(key, object_flag, ship_flag, parse_obj_flag, ai_flag)) {
+			sink.set_error("Unknown ship flag '%s' (use list_ship_flags to see valid names)", key);
+			return false;
+		}
+	}
+	return true;
+}
+
+// Validate and apply a partial ship_flags update.  flags_obj may be null (no-op).
+static bool apply_ship_flags_partial(int ship_idx, json_t *flags_obj, McpErrorSink &sink)
+{
+	if (!flags_obj)
+		return true;
+	if (!validate_ship_flags_only(flags_obj, sink))
+		return false;
+
+	object_ship_wing_point_team oswpt(&Ships[ship_idx]);
+
+	const char *key;
+	json_t *val;
+	json_object_foreach(flags_obj, key, val) {
+		auto object_flag = Object::Object_Flags::NUM_VALUES;
+		auto ship_flag = Ship::Ship_Flags::NUM_VALUES;
+		auto parse_obj_flag = Mission::Parse_Object_Flags::NUM_VALUES;
+		auto ai_flag = AI::AI_Flags::NUM_VALUES;
+		resolve_ship_flag_name(key, object_flag, ship_flag, parse_obj_flag, ai_flag);
+		sexp_alter_ship_flag_helper(oswpt, true, object_flag, ship_flag,
+			parse_obj_flag, ai_flag, json_boolean_value(val));
+	}
+	return true;
+}
+
+// ---------------------------------------------------------------------------
 // Handlers
 // ---------------------------------------------------------------------------
 
@@ -296,7 +474,12 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto departure_delay   = get_optional_integer(input, "departure_delay", sink);
 	auto departure_cue     = get_optional_integer(input, "departure_cue", sink);
 
+	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
+
 	if (sink.has_error()) return;
+
+	// Validate ship_flags up-front so a bad flag name aborts before mutation.
+	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
 
 	// Resolve ship class
 	int class_idx = check_lookup(class_name, ship_info_lookup, "ship_class", sink);
@@ -442,6 +625,9 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 			Player_start_shipnum = ship_idx;
 	}
 
+	// Apply ship_flags (already validated above).
+	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
+
 	obj_merge_created_list();
 	mark_modified("MCP: create ship %s", name);
 
@@ -490,7 +676,12 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto departure_delay   = get_optional_integer(input, "departure_delay", sink);
 	auto departure_cue     = get_optional_integer(input, "departure_cue", sink);
 
+	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
+
 	if (sink.has_error()) return;
+
+	// Validate ship_flags up-front so a bad flag name aborts before mutation.
+	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
 
 	ship &shipp = Ships[ship_idx];
 	object &objp = Objects[shipp.objnum];
@@ -663,6 +854,9 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 			}
 		}
 	}
+
+	// Apply ship_flags (already validated above).
+	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
 
 	mark_modified("MCP: update ship %s", shipp.ship_name);
 
@@ -891,6 +1085,10 @@ void mcp_register_ship_tools(json_t *tools)
 			"Seconds to wait after the departure cue evaluates true before the ship actually departs.");
 		add_integer_prop(props, "departure_cue",
 			"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
+		add_bool_map_prop(props, "ship_flags",
+			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
+			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
+			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("ship_class"));
@@ -922,7 +1120,7 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_prop(props, "alt_class_name", "Alternate ship class name. Empty/\"<none>\" clears.");
 		add_string_prop(props, "callsign", "Pilot callsign. Empty/\"<none>\" clears.");
 		add_bool_prop(props, "is_player_start",
-			"Toggle player-start flag. Refused if turning off would leave zero player starts.");
+			"Toggles whether this is a player ship or not. Refused if turning off would leave zero player ships.");
 		add_integer_prop(props, "score", "Score awarded for destroying this ship.");
 		add_number_prop(props, "assist_score_fraction", "Assist score fraction 0.0-1.0.");
 		add_vec3d_prop(props, "position", "New world position.");
@@ -942,6 +1140,10 @@ void mcp_register_ship_tools(json_t *tools)
 		add_integer_prop(props, "departure_delay", "Departure delay (ignored if ship is in a wing).");
 		add_integer_prop(props, "departure_cue",
 			"SEXP node ID for the departure cue (ignored if ship is in a wing). The previous cue tree is freed.");
+		add_bool_map_prop(props, "ship_flags",
+			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
+			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
+			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_ship",
