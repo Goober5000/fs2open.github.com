@@ -36,6 +36,8 @@ static bool validate_dialog_for_wings(SCP_string &error_msg)
 // Wing JSON serialization
 // ---------------------------------------------------------------------------
 
+static json_t *build_wing_flags_array(int wing_idx);
+
 static json_t *build_wing_json(int wing_idx, bool include_details)
 {
 	const wing &wingp = Wings[wing_idx];
@@ -90,7 +92,82 @@ static json_t *build_wing_json(int wing_idx, bool include_details)
 		json_object_set_new(obj, "formation", json_safe_string(Wing_formations[wingp.formation].name));
 	json_object_set_new(obj, "formation_scale", json_real(wingp.formation_scale));
 
+	// Flags (Wing_Flags; see list_wing_flags)
+	json_object_set_new(obj, "wing_flags", build_wing_flags_array(wing_idx));
+
 	return obj;
+}
+
+// ---------------------------------------------------------------------------
+// Wing flags (single Wing_Flags enum; iterate Parse_wing_flags directly so we
+// cover all 11 mission-parseable wing flags -- the engine's sexp_check_flag_array
+// only reaches 8 of them).
+// ---------------------------------------------------------------------------
+
+static int find_wing_flag_by_name(const char *name)
+{
+	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
+		if (!Parse_wing_flags[i].in_use)
+			continue;
+		if (!stricmp(name, Parse_wing_flags[i].name))
+			return (int)i;
+	}
+	return -1;
+}
+
+static json_t *build_wing_flags_array(int wing_idx)
+{
+	const wing &wingp = Wings[wing_idx];
+	json_t *arr = json_array();
+	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
+		if (!Parse_wing_flags[i].in_use)
+			continue;
+		if (wingp.flags[Parse_wing_flags[i].def])
+			json_array_append_new(arr, json_string(Parse_wing_flags[i].name));
+	}
+	return arr;
+}
+
+// Validate-only pass: confirm flags_obj is an object of {name: bool} where each
+// name resolves to a Parse_wing_flags entry.
+static bool validate_wing_flags_only(json_t *flags_obj, McpErrorSink &sink)
+{
+	if (!flags_obj)
+		return true;
+	if (!json_is_object(flags_obj)) {
+		sink.set_error("Parameter 'wing_flags' must be an object of {flag_name: bool}");
+		return false;
+	}
+	const char *key;
+	json_t *val;
+	json_object_foreach(flags_obj, key, val) {
+		if (!json_is_boolean(val)) {
+			sink.set_error("wing_flags.%s must be a boolean", key);
+			return false;
+		}
+		if (find_wing_flag_by_name(key) < 0) {
+			sink.set_error("Unknown wing flag '%s' (use list_wing_flags to see valid names)", key);
+			return false;
+		}
+	}
+	return true;
+}
+
+static bool apply_wing_flags_partial(int wing_idx, json_t *flags_obj, McpErrorSink &sink)
+{
+	if (!flags_obj)
+		return true;
+	if (!validate_wing_flags_only(flags_obj, sink))
+		return false;
+
+	wing &wingp = Wings[wing_idx];
+	const char *key;
+	json_t *val;
+	json_object_foreach(flags_obj, key, val) {
+		int idx = find_wing_flag_by_name(key);
+		wingp.flags.set(Parse_wing_flags[idx].def, json_boolean_value(val));
+	}
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -278,7 +355,12 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	auto formation_str       = get_optional_string(input, "formation", sink);
 	auto formation_scale     = get_optional_float(input, "formation_scale", sink);
 
+	json_t *wing_flags_in    = json_object_get(input, "wing_flags");
+
 	if (sink.has_error()) return;
+
+	// Validate wing_flags up-front so a bad flag name aborts before mutation.
+	if (!validate_wing_flags_only(wing_flags_in, sink)) return;
 
 	// Validate name and pre-validate members
 	if (!check_object_rename("wing", name, sink)) return;
@@ -403,6 +485,9 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	if (formation_scale.has_value())
 		wingp.formation_scale = *formation_scale;
 
+	// Apply wing_flags (already validated above).
+	apply_wing_flags_partial(wing_idx, wing_flags_in, sink);
+
 	mark_modified("MCP: form wing %s", name);
 
 	req->result_json = make_json_tool_result(build_wing_json(wing_idx, true));
@@ -446,7 +531,12 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	auto formation_str       = get_optional_string(input, "formation", sink);
 	auto formation_scale     = get_optional_float(input, "formation_scale", sink);
 
+	json_t *wing_flags_in    = json_object_get(input, "wing_flags");
+
 	if (sink.has_error()) return;
+
+	// Validate wing_flags up-front so a bad flag name aborts before mutation.
+	if (!validate_wing_flags_only(wing_flags_in, sink)) return;
 
 	wing &wingp = Wings[wing_idx];
 
@@ -524,6 +614,9 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	}
 	if (formation_scale.has_value())
 		wingp.formation_scale = *formation_scale;
+
+	// Apply wing_flags (already validated above).
+	apply_wing_flags_partial(wing_idx, wing_flags_in, sink);
 
 	mark_modified("MCP: update wing %s", wingp.name);
 
@@ -808,6 +901,9 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_prop(props, "formation",
 			"Formation name. See list_wing_formations for valid values.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale (default 1.0).");
+		add_bool_map_prop(props, "wing_flags",
+			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
+			"Only listed keys are touched.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("members"));
@@ -846,6 +942,9 @@ void mcp_register_wing_tools(json_t *tools)
 		add_integer_prop(props, "departure_cue", "SEXP node ID for the departure cue.");
 		add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale.");
+		add_bool_map_prop(props, "wing_flags",
+			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
+			"Only listed keys are touched.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_wing",
