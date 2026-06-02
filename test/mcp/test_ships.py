@@ -313,6 +313,207 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, created)
 
+    # ---------- ship_flags ----------
+    #
+    # ship_flags spans three engine flag enums (Ship_Flags, Object_Flags,
+    # AI_Flags) dispatched via sexp_check_flag_arrays / sexp_alter_ship_flag_helper.
+    # The names come from Parse_object_flags (same source as list_ship_flags).
+    # IFF defaults can pre-seed some flags (e.g. Friendly seeds "cargo-known"),
+    # so tests check inclusion/exclusion rather than exact array equality.
+
+    def test_ship_flags_basic_round_trip():
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            # Create with one flag from each enum:
+            #   cargo-known   -> Ship::Ship_Flags::Cargo_revealed
+            #   protect-ship  -> Object::Object_Flags::Protected
+            #   kamikaze      -> AI::AI_Flags::Kamikaze
+            r = client.call_tool("create_ship", {
+                "name": "MCP Flags Ship",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "ship_flags": {
+                    "cargo-known": True,
+                    "protect-ship": True,
+                    "kamikaze": True,
+                },
+            })
+            assert_success(r)
+            created.append("MCP Flags Ship")
+            d = tool_data(r)
+            flags = d.get("ship_flags", [])
+            assert_is_list(flags, "ship_flags")
+            for n in ("cargo-known", "protect-ship", "kamikaze"):
+                assert_in(n, flags)
+
+            # Partial update: clear one, add one; others untouched.
+            r = client.call_tool("update_ship", {
+                "name": "MCP Flags Ship",
+                "ship_flags": {"cargo-known": False, "ignore-count": True},
+            })
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_true("cargo-known" not in flags, "cargo-known cleared")
+            assert_in("ignore-count", flags)
+            assert_in("protect-ship", flags)
+            assert_in("kamikaze", flags)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_flags_no_collide_inversion():
+        # The Parse_object_flags entry {"no_collide", Object::Object_Flags::Collides, ...}
+        # is inverted: setting "no_collide" true must CLEAR the Collides bit, and GET
+        # must emit "no_collide" when Collides is clear.  sexp_alter_ship_flag_helper
+        # handles the inversion internally; this verifies the GET pairs with it.
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP NoCollide Ship",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP NoCollide Ship")
+            # Baseline: no_collide should be absent (Collides is set by default).
+            flags = tool_data(r).get("ship_flags", [])
+            assert_true("no_collide" not in flags, "no_collide absent at create")
+
+            r = client.call_tool("update_ship", {
+                "name": "MCP NoCollide Ship",
+                "ship_flags": {"no_collide": True},
+            })
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_in("no_collide", flags)
+
+            r = client.call_tool("update_ship", {
+                "name": "MCP NoCollide Ship",
+                "ship_flags": {"no_collide": False},
+            })
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_true("no_collide" not in flags, "no_collide cleared")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_flags_errors_and_atomicity():
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Flag Errs",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Flag Errs")
+
+            # Make sure scannable starts cleared (some IFFs may not preseed it,
+            # but be explicit so the atomicity check is unambiguous).
+            client.call_tool("update_ship", {
+                "name": "MCP Flag Errs",
+                "ship_flags": {"scannable": False},
+            })
+
+            # Unknown flag name -> error mentioning list_ship_flags
+            r = client.call_tool("update_ship", {
+                "name": "MCP Flag Errs",
+                "ship_flags": {"bogus-flag-xyz": True},
+            })
+            assert_error(r)
+
+            # Non-bool value -> error
+            r = client.call_tool("update_ship", {
+                "name": "MCP Flag Errs",
+                "ship_flags": {"cargo-known": "yes"},
+            })
+            assert_error(r)
+
+            # Validate-before-mutate: mix valid + invalid -> error, valid NOT applied
+            r = client.call_tool("update_ship", {
+                "name": "MCP Flag Errs",
+                "ship_flags": {"scannable": True, "bogus-flag-xyz": True},
+            })
+            assert_error(r)
+            r = client.call_tool("get_ship", {"name": "MCP Flag Errs"})
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_true("scannable" not in flags,
+                "scannable must NOT be set when mixed with an invalid flag")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_flags_excluded_names_rejected():
+        # Three parse flags are deliberately scrubbed from the MCP surface
+        # (see flag_excluded in mcp_ships.cpp):
+        #   player-start: edits flow through is_player_start (manages Player_starts and OBJ_START)
+        #   immobile:     deprecated; callers should set don't-change-position + don't-change-orientation
+        #   locked:       deprecated; callers should set ship-locked + weapons-locked
+        # They must error on SET, must never appear in GET, and must be omitted
+        # from list_ship_flags.  "immobile" in particular has a backdoor via
+        # Object_flag_names -- the early flag_excluded check is what blocks it.
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            # list_ship_flags omits all three
+            r = client.call_tool("list_ship_flags")
+            assert_success(r)
+            names = {e.get("name") for e in tool_data(r)}
+            for excluded in ("player-start", "immobile", "locked"):
+                assert_true(excluded not in names,
+                    f"list_ship_flags must omit {excluded!r}")
+
+            r = client.call_tool("create_ship", {
+                "name": "MCP Excluded Flags",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Excluded Flags")
+
+            # SET rejected for each excluded name
+            for excluded in ("player-start", "immobile", "locked"):
+                r = client.call_tool("update_ship", {
+                    "name": "MCP Excluded Flags",
+                    "ship_flags": {excluded: True},
+                })
+                assert_error(r)
+
+            # GET must not surface "immobile" when its two half-flags are set
+            r = client.call_tool("update_ship", {
+                "name": "MCP Excluded Flags",
+                "ship_flags": {
+                    "don't-change-position": True,
+                    "don't-change-orientation": True,
+                },
+            })
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_in("don't-change-position", flags)
+            assert_in("don't-change-orientation", flags)
+            assert_true("immobile" not in flags,
+                "immobile must not surface via the two half-flags")
+
+            # GET must not surface "locked" when both lock half-flags are set
+            r = client.call_tool("update_ship", {
+                "name": "MCP Excluded Flags",
+                "ship_flags": {"ship-locked": True, "weapons-locked": True},
+            })
+            assert_success(r)
+            flags = tool_data(r).get("ship_flags", [])
+            assert_in("ship-locked", flags)
+            assert_in("weapons-locked", flags)
+            assert_true("locked" not in flags,
+                "locked must not surface as a composite of the two lock flags")
+        finally:
+            _delete_all_test_ships(client, created)
+
     # ---------- move / swap ----------
     #
     # The MCP API hides Ships[]'s sparse layout: indices are 1-based over the
@@ -543,6 +744,10 @@ def register(suite, client):
     suite.add("ships_class_change", test_ship_class_change)
     suite.add("ships_error_paths", test_ship_errors)
     suite.add("ships_duplicate_name", test_ship_duplicate_name)
+    suite.add("ships_flags_basic_round_trip", test_ship_flags_basic_round_trip)
+    suite.add("ships_flags_no_collide_inversion", test_ship_flags_no_collide_inversion)
+    suite.add("ships_flags_errors_and_atomicity", test_ship_flags_errors_and_atomicity)
+    suite.add("ships_flags_excluded_names_rejected", test_ship_flags_excluded_names_rejected)
     suite.add("ships_swap_basic", test_ships_swap_basic)
     suite.add("ships_swap_idempotent", test_ships_swap_idempotent)
     suite.add("ships_swap_same_index_noop", test_ships_swap_same_index_noop)

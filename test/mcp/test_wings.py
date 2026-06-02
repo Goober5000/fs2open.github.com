@@ -487,6 +487,96 @@ def register(suite, client):
             for n in (f"{wing_name} 1", ship_name, "MCP Dup Ship 2"):
                 _safe_delete_ship(client, n)
 
+    # ---------- wing_flags ----------
+    #
+    # wing_flags maps directly to Parse_wing_flags (Ship::Wing_Flags), which is
+    # wider than the engine's Wing_flag_names lookup used by alter-ship-flag --
+    # we iterate Parse_wing_flags directly so all 11 mission-parseable flags
+    # are reachable, including ignore-count, reinforcement, no-dynamic.
+
+    def test_wings_flags_basic_round_trip():
+        cls = _pick_ship_class(client)
+        wing_name = "MCP FlagWing"
+        m1 = "MCP FlagShipA"
+        m2 = "MCP FlagShipB"
+        try:
+            _create_ship(client, m1, cls, x=100.0)
+            _create_ship(client, m2, cls, x=200.0)
+
+            # form_wing with flags
+            r = client.call_tool("form_wing", {
+                "name": wing_name,
+                "members": [m1, m2],
+                "wing_flags": {"no-arrival-music": True, "ignore-count": True},
+            })
+            assert_success(r)
+            d = tool_data(r)
+            flags = d.get("wing_flags", [])
+            assert_is_list(flags, "wing_flags")
+            assert_in("no-arrival-music", flags)
+            assert_in("ignore-count", flags)
+
+            # Partial update: clear one, add one outside Wing_flag_names
+            # (no-dynamic is in Parse_wing_flags but NOT in Wing_flag_names).
+            r = client.call_tool("update_wing", {
+                "name": wing_name,
+                "wing_flags": {"no-arrival-music": False, "no-dynamic": True},
+            })
+            assert_success(r)
+            flags = tool_data(r).get("wing_flags", [])
+            assert_true("no-arrival-music" not in flags, "no-arrival-music cleared")
+            assert_in("no-dynamic", flags)
+            assert_in("ignore-count", flags)
+        finally:
+            _safe_delete_wing(client, wing_name)
+            for n in (f"{wing_name} 1", f"{wing_name} 2", m1, m2):
+                _safe_delete_ship(client, n)
+
+    def test_wings_flags_errors_and_atomicity():
+        cls = _pick_ship_class(client)
+        wing_name = "MCP FlagErrWing"
+        m1 = "MCP FlagErrShip"
+        try:
+            _create_ship(client, m1, cls, x=100.0)
+            r = client.call_tool("form_wing", {"name": wing_name, "members": [m1]})
+            assert_success(r)
+
+            # Ensure reinforcement starts cleared so the atomicity check is clean.
+            client.call_tool("update_wing", {
+                "name": wing_name,
+                "wing_flags": {"reinforcement": False},
+            })
+
+            # Unknown flag -> error mentioning list_wing_flags
+            r = client.call_tool("update_wing", {
+                "name": wing_name,
+                "wing_flags": {"bogus-wing-flag": True},
+            })
+            assert_error(r)
+
+            # Non-bool value -> error
+            r = client.call_tool("update_wing", {
+                "name": wing_name,
+                "wing_flags": {"ignore-count": "yes"},
+            })
+            assert_error(r)
+
+            # Validate-before-mutate: mix valid + invalid -> error, valid NOT applied
+            r = client.call_tool("update_wing", {
+                "name": wing_name,
+                "wing_flags": {"reinforcement": True, "bogus-wing-flag": True},
+            })
+            assert_error(r)
+            r = client.call_tool("get_wing", {"name": wing_name})
+            assert_success(r)
+            flags = tool_data(r).get("wing_flags", [])
+            assert_true("reinforcement" not in flags,
+                "reinforcement must NOT be set when mixed with an invalid flag")
+        finally:
+            _safe_delete_wing(client, wing_name)
+            for n in (f"{wing_name} 1", m1):
+                _safe_delete_ship(client, n)
+
     suite.add("wings_basic_crud", test_wings_basic_crud)
     suite.add("wings_member_rename_cascade", test_wings_member_rename_cascade)
     suite.add("wings_arrival_cue_replacement", test_wings_arrival_cue_replacement)
@@ -495,6 +585,8 @@ def register(suite, client):
     suite.add("wings_form_requires_members", test_wings_form_requires_members)
     suite.add("wings_form_member_not_found", test_wings_form_member_not_found)
     suite.add("wings_duplicate_name", test_wings_duplicate_name)
+    suite.add("wings_flags_basic_round_trip", test_wings_flags_basic_round_trip)
+    suite.add("wings_flags_errors_and_atomicity", test_wings_flags_errors_and_atomicity)
 
     suite.add("wings_swap_basic", test_wings_swap_basic)
     suite.add("wings_swap_idempotent", test_wings_swap_idempotent)
