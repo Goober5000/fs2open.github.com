@@ -667,6 +667,8 @@ static json_t *build_ship_class_json(int sip_idx, bool include_details)
 	if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
 		json_object_set_new(obj, "ship_type", json_safe_string(Ship_types[sip.class_type].name));
 
+	json_object_set_new(obj, "selectable_in_editor", json_boolean(!sip.flags[Ship::Info_Flags::No_fred]));
+
 	if (!include_details)
 		return obj;
 
@@ -864,6 +866,8 @@ static json_t *build_weapon_class_json(int wip_idx, bool include_details)
 	if (wip.has_display_name())
 		json_object_set_new(obj, "display_name", json_safe_string(wip.get_display_name()));
 	json_object_set_new(obj, "subtype", json_string(weapon_category_str(wip)));
+
+	json_object_set_new(obj, "selectable_in_editor", json_boolean(!wip.wi_flags[Weapon::Info_Flags::No_fred] && !wip.wi_flags[Weapon::Info_Flags::Child]));
 
 	if (!include_details)
 		return obj;
