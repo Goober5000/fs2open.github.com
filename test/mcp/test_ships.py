@@ -514,6 +514,112 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, created)
 
+    def test_ship_flag_paired_scalars():
+        # Three flag-paired scalars surface as typed top-level fields:
+        #   escort + escort_priority
+        #   kamikaze + kamikaze_damage
+        #   (Kill_before_mission has no flag entry; destroy_before_mission_seconds
+        #    is the single source of truth -- non-null enables it, null clears.)
+        # Scalars are emitted only when the matching flag is set.
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Paired Scalars",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "ship_flags": {"escort": True, "kamikaze": True},
+                "escort_priority": 7,
+                "kamikaze_damage": 250,
+                "destroy_before_mission_seconds": 30,
+            })
+            assert_success(r)
+            created.append("MCP Paired Scalars")
+            d = tool_data(r)
+            flags = d.get("ship_flags", [])
+            assert_in("escort", flags)
+            assert_in("kamikaze", flags)
+            assert_equal(d.get("escort_priority"), 7, "escort_priority echoed")
+            assert_equal(d.get("kamikaze_damage"), 250, "kamikaze_damage echoed")
+            assert_equal(d.get("destroy_before_mission_seconds"), 30,
+                "destroy_before_mission_seconds echoed")
+
+            # Adjust scalars without touching flags.
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Scalars",
+                "escort_priority": 1,
+                "kamikaze_damage": 500,
+                "destroy_before_mission_seconds": 60,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("escort_priority"), 1, "escort_priority updated")
+            assert_equal(d.get("kamikaze_damage"), 500, "kamikaze_damage updated")
+            assert_equal(d.get("destroy_before_mission_seconds"), 60,
+                "destroy_before_mission_seconds updated")
+
+            # Clear flags via ship_flags: scalars are still stored but no longer
+            # surfaced in the response (qtFRED semantics: scalar storage is
+            # independent of flag state).
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Scalars",
+                "ship_flags": {"escort": False, "kamikaze": False},
+                "destroy_before_mission_seconds": None,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            flags = d.get("ship_flags", [])
+            assert_true("escort" not in flags, "escort cleared")
+            assert_true("kamikaze" not in flags, "kamikaze cleared")
+            assert_true("escort_priority" not in d,
+                "escort_priority must not surface when escort is off")
+            assert_true("kamikaze_damage" not in d,
+                "kamikaze_damage must not surface when kamikaze is off")
+            assert_true("destroy_before_mission_seconds" not in d,
+                "destroy_before_mission_seconds must not surface after null-clear")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_flag_paired_scalars_errors():
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Paired Errs",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Paired Errs")
+
+            # Non-negative integer required.
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Errs", "escort_priority": -1,
+            })
+            assert_error(r)
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Errs", "kamikaze_damage": -5,
+            })
+            assert_error(r)
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Errs", "destroy_before_mission_seconds": -1,
+            })
+            assert_error(r)
+
+            # Wrong type.
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Errs", "escort_priority": "five",
+            })
+            assert_error(r)
+            r = client.call_tool("update_ship", {
+                "name": "MCP Paired Errs", "destroy_before_mission_seconds": "thirty",
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
     # ---------- move / swap ----------
     #
     # The MCP API hides Ships[]'s sparse layout: indices are 1-based over the
@@ -748,6 +854,8 @@ def register(suite, client):
     suite.add("ships_flags_no_collide_inversion", test_ship_flags_no_collide_inversion)
     suite.add("ships_flags_errors_and_atomicity", test_ship_flags_errors_and_atomicity)
     suite.add("ships_flags_excluded_names_rejected", test_ship_flags_excluded_names_rejected)
+    suite.add("ships_flag_paired_scalars", test_ship_flag_paired_scalars)
+    suite.add("ships_flag_paired_scalars_errors", test_ship_flag_paired_scalars_errors)
     suite.add("ships_swap_basic", test_ships_swap_basic)
     suite.add("ships_swap_idempotent", test_ships_swap_idempotent)
     suite.add("ships_swap_same_index_noop", test_ships_swap_same_index_noop)
