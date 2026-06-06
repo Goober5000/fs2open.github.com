@@ -431,6 +431,14 @@ bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 	return true;
 }
 
+bool is_parameter_present_and_null(json_t *input, const char *param_name)
+{
+	auto val = json_object_get(input, param_name);
+	if (!val)
+		return false;
+	return json_is_null(val);
+}
+
 const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len)
 {
 	auto value = get_optional_string(input, param_name, sink, max_len);

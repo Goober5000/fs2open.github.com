@@ -143,6 +143,8 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 	return true;
 }
 
+bool is_parameter_present_and_null(json_t *input, const char *param_name);
+
 // Extracts a required string parameter from input JSON.
 // Returns nullptr and reports an error via sink if the parameter is missing, has the wrong type,
 // exceeds max_len, or (with disallow_empty=true) is the empty string.  Returns a non-null string
