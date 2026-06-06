@@ -8,6 +8,7 @@
 #include "mcpserver.h"
 
 #include <jansson.h>
+#include <climits>
 #include <cstring>
 #include <optional>
 
@@ -118,6 +119,21 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 
 	// Flags (cross-enum: object/ship/parse-object/AI; see list_ship_flags)
 	json_object_set_new(obj, "ship_flags", build_ship_flags_array(ship_idx));
+
+	// Flag-paired scalars: emitted only when the matching flag is set, mirroring
+	// the FRED ship-flags dialog's "checkbox + spinner" model.  The scalars are
+	// independently stored in the ship/AI struct (qtFRED writes them
+	// unconditionally) -- the flag governs interpretation, not storage.
+	if (shipp.flags[Ship::Ship_Flags::Escort])
+		json_object_set_new(obj, "escort_priority", json_integer(shipp.escort_priority));
+	if (Ai_info[shipp.ai_index].ai_flags[AI::AI_Flags::Kamikaze])
+		json_object_set_new(obj, "kamikaze_damage",
+			json_integer(Ai_info[shipp.ai_index].kamikaze_damage));
+	// Kill_before_mission has no parse-flag counterpart and isn't in ship_flags;
+	// the scalar field carries both presence and value.
+	if (shipp.flags[Ship::Ship_Flags::Kill_before_mission])
+		json_object_set_new(obj, "destroy_before_mission_seconds",
+			json_integer(shipp.final_death_time));
 
 	return obj;
 }
@@ -474,9 +490,23 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto departure_delay   = get_optional_integer(input, "departure_delay", sink);
 	auto departure_cue     = get_optional_integer(input, "departure_cue", sink);
 
+	auto escort_priority   = get_optional_integer(input, "escort_priority", sink);
+	auto kamikaze_damage   = get_optional_integer(input, "kamikaze_damage", sink);
+
+	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
+	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
+
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
 	if (sink.has_error()) return;
+
+	// Range-check the flag-paired scalars.
+	if (escort_priority.has_value() && !check_int_range(*escort_priority, 0, INT_MAX, "escort_priority", sink))
+		return;
+	if (kamikaze_damage.has_value() && !check_int_range(*kamikaze_damage, 0, INT_MAX, "kamikaze_damage", sink))
+		return;
+	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
+		return;
 
 	// Validate ship_flags up-front so a bad flag name aborts before mutation.
 	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
@@ -628,6 +658,22 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	// Apply ship_flags (already validated above).
 	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
 
+	// Flag-paired scalars: written unconditionally (qtFRED pattern); the matching
+	// flag in ship_flags governs whether the value is meaningful at runtime.
+	if (escort_priority.has_value())
+		shipp.escort_priority = *escort_priority;
+	if (kamikaze_damage.has_value())
+		Ai_info[shipp.ai_index].kamikaze_damage = *kamikaze_damage;
+
+	// destroy_before_mission_seconds: scalar IS the flag.  Non-null number sets
+	// both; null clears the flag (final_death_time is preserved as residual).
+	if (destroy_before_mission_is_explicit_null) {
+		shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+	} else if (destroy_before_mission.has_value()) {
+		shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
+		shipp.final_death_time = *destroy_before_mission;
+	}
+
 	obj_merge_created_list();
 	mark_modified("MCP: create ship %s", name);
 
@@ -676,9 +722,23 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto departure_delay   = get_optional_integer(input, "departure_delay", sink);
 	auto departure_cue     = get_optional_integer(input, "departure_cue", sink);
 
+	auto escort_priority   = get_optional_integer(input, "escort_priority", sink);
+	auto kamikaze_damage   = get_optional_integer(input, "kamikaze_damage", sink);
+
+	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
+	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
+
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
 	if (sink.has_error()) return;
+
+	// Range-check the flag-paired scalars.
+	if (escort_priority.has_value() && !check_int_range(*escort_priority, 0, INT_MAX, "escort_priority", sink))
+		return;
+	if (kamikaze_damage.has_value() && !check_int_range(*kamikaze_damage, 0, INT_MAX, "kamikaze_damage", sink))
+		return;
+	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
+		return;
 
 	// Validate ship_flags up-front so a bad flag name aborts before mutation.
 	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
@@ -857,6 +917,22 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 
 	// Apply ship_flags (already validated above).
 	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
+
+	// Flag-paired scalars: written unconditionally (qtFRED pattern); the matching
+	// flag in ship_flags governs whether the value is meaningful at runtime.
+	if (escort_priority.has_value())
+		shipp.escort_priority = *escort_priority;
+	if (kamikaze_damage.has_value())
+		Ai_info[shipp.ai_index].kamikaze_damage = *kamikaze_damage;
+
+	// destroy_before_mission_seconds: scalar IS the flag.  Non-null number sets
+	// both; null clears the flag (final_death_time is preserved as residual).
+	if (destroy_before_mission_is_explicit_null) {
+		shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+	} else if (destroy_before_mission.has_value()) {
+		shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
+		shipp.final_death_time = *destroy_before_mission;
+	}
 
 	mark_modified("MCP: update ship %s", shipp.ship_name);
 
@@ -1089,6 +1165,17 @@ void mcp_register_ship_tools(json_t *tools)
 			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
 			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
 			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
+		add_integer_prop(props, "escort_priority",
+			"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
+			"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
+		add_integer_prop(props, "kamikaze_damage",
+			"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
+			"stored unconditionally but only matters at runtime when \"kamikaze\" is set. "
+			"FRED defaults this to min(1000, 200 + hull/4) on ship creation. Non-negative.");
+		add_integer_prop(props, "destroy_before_mission_seconds",
+			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
+			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
+			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("ship_class"));
@@ -1144,6 +1231,16 @@ void mcp_register_ship_tools(json_t *tools)
 			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
 			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
 			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
+		add_integer_prop(props, "escort_priority",
+			"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
+			"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
+		add_integer_prop(props, "kamikaze_damage",
+			"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
+			"stored unconditionally but only matters at runtime when \"kamikaze\" is set. Non-negative.");
+		add_integer_prop(props, "destroy_before_mission_seconds",
+			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
+			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
+			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_ship",
