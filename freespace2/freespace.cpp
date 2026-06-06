@@ -705,46 +705,63 @@ void game_sunspot_process(float frametime)
 	TRACE_SCOPE(tracing::SunspotProcess);
 	float Sun_spot_goal = 0.0f;
 
-	int supernova_sun_idx = 0;
-	int supernova_light_idx = light_find_for_sun(supernova_sun_idx);
-
-	// supernova
 	auto sn_stage = supernova_stage();
-	if (sn_stage != SUPERNOVA_STAGE::NONE && supernova_light_idx >= 0) {
-		// sunspot differently based on supernova stage
+	constexpr int supernova_sun_idx = 0;
+	int supernova_light_idx = supernova_active() ? light_find_for_sun(supernova_sun_idx) : -1;
+
+	// Regular sun glare contribution: fires whenever the player is still in control of the camera
+	// and the sun is visible. During the supernova approach this keeps the natural lightshafts
+	// alive (they were vanishing in master because the supernova branch entirely replaced this
+	// path). HIT+ takes the camera over and overrides Sun_spot_goal with a forced bright value,
+	// so this path is skipped there.
+	if (sn_stage < SUPERNOVA_STAGE::HIT) {
+		if ( Sun_drew )	{
+			int n_lights = light_get_global_count();
+
+			for(int light_idx=0; light_idx<n_lights; light_idx++)	{
+				bool in_shadow = shipfx_eye_in_shadow(&Eye_position, Viewer_obj, light_idx);
+
+				if (!in_shadow) {
+					vec3d light_dir;
+					light_get_global_dir(&light_dir, light_idx);
+
+					//only do sunglare stuff if this light source has one
+					if (light_has_glare(light_idx))	{
+						float dot = vm_vec_dot( &light_dir, &Eye_matrix.vec.fvec )*0.5f+0.5f;
+						float peak = (float)pow(dot,85.0f);
+
+						// amplify the look-at peak for the supernova sun during CLOSE
+						if (sn_stage >= SUPERNOVA_STAGE::CLOSE && light_idx == supernova_light_idx) {
+							peak *= 1.0f + SUPERNOVA_LOOKAT_AMPLIFY * supernova_close_pct();
+						}
+						Sun_spot_goal += peak;
+					}
+
+					// draw the glow for this sun
+					int sun_idx = light_get_sun_index(light_idx);
+					if (sun_idx >= 0) {
+						stars_draw_sun_glow(sun_idx);
+					}
+				}
+			}
+
+			Sun_drew = 0;
+		}
+	}
+
+	// Supernova-specific contribution: adds on top of the regular contribution starting at CLOSE.
+	// STARTED is just the countdown - the player sees normal sun glare until the shockwave is
+	// genuinely close (and sound1 has fired).
+	if (sn_stage >= SUPERNOVA_STAGE::CLOSE && supernova_light_idx >= 0) {
 		switch (sn_stage) {
-		// this case is only here to make gcc happy - apparently it doesn't know we already checked for it
-		case SUPERNOVA_STAGE::NONE:
-			UNREACHABLE("The SUPERNOVA_STAGE::NONE case should have already been handled");
+		// shockwave very close, player still in control. view-independent ambient ramp tints the
+		// whole screen regardless of where the player is looking, matching retail behavior
+		case SUPERNOVA_STAGE::CLOSE: {
+			float ambient = 0.9f * supernova_close_pct() * sn_glare_scale;
+			Sun_spot_goal += ambient;
+			Supernova_last_glare = ambient;
 			break;
-
-		// approaching. player still in control
-		case SUPERNOVA_STAGE::STARTED:
-		case SUPERNOVA_STAGE::CLOSE:
-			float pct;
-			pct = supernova_sunspot_pct();
-
-			vec3d light_dir;				
-			light_get_global_dir(&light_dir, supernova_light_idx);
-			float dot;
-			dot = vm_vec_dot( &light_dir, &Eye_matrix.vec.fvec );
-			
-			if(dot >= 0.0f){
-				// scale it some more
-				dot = dot * (0.5f + (pct * 0.5f));
-				dot += 0.05f;					
-
-				Sun_spot_goal += (dot * sn_glare_scale);
-			}
-
-			// draw the sun glow
-			if ( !shipfx_eye_in_shadow( &Eye_position, Viewer_obj, supernova_light_idx ) )	{
-				// draw the glow for this sun
-				stars_draw_sun_glow(supernova_sun_idx);
-			}
-
-			Supernova_last_glare = Sun_spot_goal;
-			break;
+		}
 
 		// camera cut. player not in control. note : at this point camera starts out facing the sun. so we can go nice and bright
 		case SUPERNOVA_STAGE::HIT:
@@ -758,7 +775,7 @@ void game_sunspot_process(float frametime)
 
 			Sun_spot_goal *= sn_glare_scale;
 			Supernova_last_glare = Sun_spot_goal;
-			break;		
+			break;
 
 		// fade to white. display dead popup
 		case SUPERNOVA_STAGE::DEAD1:
@@ -770,38 +787,12 @@ void game_sunspot_process(float frametime)
 
 			Sun_spot_goal = Supernova_last_glare;
 			break;
-		}
-	
-		Sun_drew = 0;				
-	} else {
-		Sun_spot_goal = 0.0f;
-		if ( Sun_drew )	{
-			// check sunspots for all suns
-			int n_lights = light_get_global_count();
 
-			// check
-			for(int light_idx=0; light_idx<n_lights; light_idx++)	{
-				bool in_shadow = shipfx_eye_in_shadow(&Eye_position, Viewer_obj, light_idx);
-
-				if (!in_shadow) {
-					vec3d light_dir;				
-					light_get_global_dir(&light_dir, light_idx);
-
-					//only do sunglare stuff if this light source has one
-					if (light_has_glare(light_idx))	{
-						float dot = vm_vec_dot( &light_dir, &Eye_matrix.vec.fvec )*0.5f+0.5f;
-						Sun_spot_goal += (float)pow(dot,85.0f);
-					}
-
-					// draw the glow for this sun
-					int sun_idx = light_get_sun_index(light_idx);
-					if (sun_idx >= 0) {
-						stars_draw_sun_glow(sun_idx);
-					}
-				}
-			}
-
-			Sun_drew = 0;
+		// only here to satisfy gcc - the outer if already excluded these
+		case SUPERNOVA_STAGE::NONE:
+		case SUPERNOVA_STAGE::STARTED:
+			UNREACHABLE("Pre-CLOSE stages should have been excluded by the outer if");
+			break;
 		}
 	}
 
@@ -902,7 +893,9 @@ static void game_flash_diminish(float frametime)
 		g = fl2i( Game_flash_green*128.0f );   
 		b = fl2i( Game_flash_blue*128.0f );  
 
-		if ( Sun_spot > 0.0f && gr_sunglare_enabled() && !gr_lightshafts_enabled()) {
+		// during a supernova the omnidirectional whiteout fires even if lightshafts are also drawing -
+		// the two effects model different things (eye bleach vs. radial scatter) and supernova needs both
+		if ( Sun_spot > 0.0f && gr_sunglare_enabled() && (!gr_lightshafts_enabled() || supernova_stage() >= SUPERNOVA_STAGE::CLOSE)) {
 			r += fl2i(Sun_spot*128.0f);
 			g += fl2i(Sun_spot*128.0f);
 			b += fl2i(Sun_spot*128.0f);

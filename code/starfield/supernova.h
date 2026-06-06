@@ -28,6 +28,10 @@ constexpr float SUPERNOVA_FADE_TO_WHITE_DURATION = 1.0f;				// fade to white ove
 // how much bigger the sun will be when the effect hits
 constexpr float SUPERNOVA_SUN_SCALE = 3.0f;
 
+// how much the per-sun look-at glare peak is amplified for the supernova sun during CLOSE:
+// multiplier is (1 + this * supernova_close_pct()), so 1x at start of CLOSE, (1+x)x at HIT
+constexpr float SUPERNOVA_LOOKAT_AMPLIFY = 1.0f;
+
 // stages for the supernova this mission
 enum class SUPERNOVA_STAGE : int
 {
@@ -69,6 +73,9 @@ float supernova_pct_complete();
 
 // special sunspot percent calculation (0.0 to 1.0)
 float supernova_sunspot_pct();
+
+// linear progress through the CLOSE stage: 0.0 at start of CLOSE, 1.0 at start of HIT
+float supernova_close_pct();
 
 // if the camera should cut to the "you-are-toast" cam
 bool supernova_camera_cut();

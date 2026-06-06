@@ -264,11 +264,6 @@ bool gr_lightshafts_enabled()
 		return false;
 	}
 
-	// supernova glare should switch to legacy lightshafts
-	if (supernova_stage() >= SUPERNOVA_STAGE::CLOSE) {
-		return false;
-	}
-
 	if (!graphics::Post_processing_manager->getLightshaftParams().on) {
 		return false;
 	}
