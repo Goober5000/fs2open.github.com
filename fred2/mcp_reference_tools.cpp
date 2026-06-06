@@ -648,116 +648,16 @@ static json_t *handle_get_ship_type(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
-static json_t *handle_list_ship_classes(json_t *arguments)
-{
-	json_t *err = nullptr;
-	McpErrorSink sink(&err);
-
-	// Optional filters
-	auto filter_species = get_optional_string(arguments, "species", sink);
-	auto filter_type    = get_optional_string(arguments, "ship_type", sink);
-	if (err) return err;
-
-	int filter_species_idx = -1;
-	if (filter_species) {
-		filter_species_idx = species_info_lookup(filter_species);
-		if (filter_species_idx < 0)
-			return make_not_found_error("Species", filter_species);
-	}
-
-	int filter_type_idx = -1;
-	if (filter_type) {
-		filter_type_idx = ship_type_name_lookup(filter_type);
-		if (filter_type_idx < 0)
-			return make_not_found_error("Ship type", filter_type);
-	}
-
-	json_t *arr = json_array();
-	for (int i = 0; i < ship_info_size(); i++) {
-		const auto &sip = Ship_info[i];
-
-		if (filter_species_idx >= 0 && sip.species != filter_species_idx)
-			continue;
-		if (filter_type_idx >= 0 && sip.class_type != filter_type_idx)
-			continue;
-
-		json_t *item = json_object();
-		json_object_set_new(item, "name", json_safe_string(sip.name));
-		if (sip.has_display_name())
-			json_object_set_new(item, "display_name", json_safe_string(sip.get_display_name()));
-
-		if (sip.species >= 0 && sip.species < (int)Species_info.size())
-			json_object_set_new(item, "species", json_safe_string(Species_info[sip.species].species_name));
-
-		if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
-			json_object_set_new(item, "ship_type", json_safe_string(Ship_types[sip.class_type].name));
-
-		json_array_append_new(arr, item);
-	}
-
-	return make_json_tool_result(arr);
-}
-
-// Build a JSON array describing weapon banks. restriction_offset is the base index
-// into sip.restricted_loadout_flag / allowed_bank_restricted_weapons for this bank set
-// (0 for primary banks, MAX_SHIP_PRIMARY_BANKS for secondary banks).
+// Defined after the ship class handlers below.
 static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
-	const int *bank_weapons, const int *bank_ammo_capacity, int restriction_offset)
+	const int *bank_weapons, const int *bank_ammo_capacity, int restriction_offset);
+
+static json_t *build_ship_class_json(int sip_idx, bool include_details)
 {
-	json_t *banks = json_array();
-	for (int b = 0; b < num_banks; b++) {
-		json_t *bank_obj = json_object();
-		json_object_set_new(bank_obj, "index", json_integer(b));
-
-		int wi = bank_weapons[b];
-		if (wi >= 0 && wi < weapon_info_size())
-			json_object_set_new(bank_obj, "default_weapon", json_safe_string(Weapon_info[wi].name));
-		else
-			json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
-
-		json_object_set_new(bank_obj, "capacity_in_ammo_units", json_integer(bank_ammo_capacity[b]));
-
-		int ri = restriction_offset + b;
-		std::array<std::tuple<int, const char*, const char*>, 2> restriction_types = { {
-			{ REGULAR_WEAPON, "restricted", "allowed_weapons" },
-			{ DOGFIGHT_WEAPON, "restricted_dogfight", "allowed_dogfight_weapons" }
-		} };
-		for (auto &rt : restriction_types) {
-			auto flag = std::get<0>(rt);
-			auto tag = std::get<1>(rt);
-			auto bag = std::get<2>(rt);
-			bool has_restriction = (ri < (int)sip.restricted_loadout_flag.size()) && (sip.restricted_loadout_flag[ri] & flag);
-			json_object_set_new(bank_obj, tag, json_boolean(has_restriction));
-			if (has_restriction && (ri < (int)sip.allowed_bank_restricted_weapons.size())) {
-				json_t *rw = json_array();
-				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
-					if ((wf.second & flag) && wf.first >= 0 && wf.first < weapon_info_size())
-						json_array_append_new(rw, json_safe_string(Weapon_info[wf.first].name));
-				}
-				json_object_set_new(bank_obj, bag, rw);
-			}
-		}
-
-		json_array_append_new(banks, bank_obj);
-	}
-	return banks;
-}
-
-static json_t *handle_get_ship_class(json_t *arguments)
-{
-	json_t *err = nullptr;
-	McpErrorSink sink(&err);
-	auto name = get_required_string(arguments, "name", sink, true);
-	if (!name) return err;
-
-	int idx = ship_info_lookup(name);
-	if (idx < 0)
-		return make_not_found_error("Ship class", name);
-
-	const auto &sip = Ship_info[idx];
+	const auto &sip = Ship_info[sip_idx];
 	json_t *obj = json_object();
 
-	// Identity
+	// Identity (brief)
 	json_object_set_new(obj, "name", json_safe_string(sip.name));
 	if (sip.has_display_name())
 		json_object_set_new(obj, "display_name", json_safe_string(sip.get_display_name()));
@@ -766,6 +666,9 @@ static json_t *handle_get_ship_class(json_t *arguments)
 		json_object_set_new(obj, "species", json_safe_string(Species_info[sip.species].species_name));
 	if (sip.class_type >= 0 && sip.class_type < (int)Ship_types.size())
 		json_object_set_new(obj, "ship_type", json_safe_string(Ship_types[sip.class_type].name));
+
+	if (!include_details)
+		return obj;
 
 	// flags
 	json_object_set_new(obj, "allowed_for_player", json_boolean(sip.flags[Ship::Info_Flags::Player_ship]));
@@ -850,71 +753,120 @@ static json_t *handle_get_ship_class(json_t *arguments)
 	json_object_set_new(obj, "can_move_under_its_own_power", json_boolean(sip.is_flyable()));
 	json_object_set_new(obj, "is_fighter_or_bomber", json_boolean(sip.is_fighter_bomber()));
 
-	return make_json_tool_result(obj);
+	return obj;
 }
 
-static json_t *handle_list_weapon_classes(json_t *arguments)
+static json_t *handle_list_ship_classes(json_t *arguments)
 {
-	// Optional category filter.  We use the semantic helpers (is_beam(),
-	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
-	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
-	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	auto st = get_optional_string(arguments, "subtype", sink);
-	if (st) {
-		if (!check_string_enum(st, subtype_enum_values, "subtype", sink))
-			return err;
-		if (stricmp(st, "primary") == 0)
-			filter = FILTER_PRIMARY;
-		else if (stricmp(st, "secondary") == 0)
-			filter = FILTER_SECONDARY;
-		else
-			filter = FILTER_BEAM;
+
+	// Optional filters
+	auto filter_species = get_optional_string(arguments, "species", sink);
+	auto filter_type    = get_optional_string(arguments, "ship_type", sink);
+	if (err) return err;
+
+	int filter_species_idx = -1;
+	if (filter_species) {
+		filter_species_idx = species_info_lookup(filter_species);
+		if (filter_species_idx < 0)
+			return make_not_found_error("Species", filter_species);
+	}
+
+	int filter_type_idx = -1;
+	if (filter_type) {
+		filter_type_idx = ship_type_name_lookup(filter_type);
+		if (filter_type_idx < 0)
+			return make_not_found_error("Ship type", filter_type);
 	}
 
 	json_t *arr = json_array();
-	for (int i = 0; i < weapon_info_size(); i++) {
-		const auto &wip = Weapon_info[i];
+	for (int i = 0; i < ship_info_size(); i++) {
+		const auto &sip = Ship_info[i];
 
-		if (filter == FILTER_PRIMARY && !wip.is_non_beam_primary())
+		if (filter_species_idx >= 0 && sip.species != filter_species_idx)
 			continue;
-		if (filter == FILTER_SECONDARY && !wip.is_secondary())
-			continue;
-		if (filter == FILTER_BEAM && !wip.is_beam())
+		if (filter_type_idx >= 0 && sip.class_type != filter_type_idx)
 			continue;
 
-		json_t *item = json_object();
-		json_object_set_new(item, "name", json_safe_string(wip.name));
-		if (wip.has_display_name())
-			json_object_set_new(item, "display_name", json_safe_string(wip.get_display_name()));
-		json_object_set_new(item, "subtype", json_string(weapon_category_str(wip)));
-
-		json_array_append_new(arr, item);
+		json_array_append_new(arr, build_ship_class_json(i, false));
 	}
 
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_get_weapon_class(json_t *arguments)
+// Build a JSON array describing weapon banks. restriction_offset is the base index
+// into sip.restricted_loadout_flag / allowed_bank_restricted_weapons for this bank set
+// (0 for primary banks, MAX_SHIP_PRIMARY_BANKS for secondary banks).
+static json_t *build_weapon_bank_array(const ship_info &sip, int num_banks,
+	const int *bank_weapons, const int *bank_ammo_capacity, int restriction_offset)
+{
+	json_t *banks = json_array();
+	for (int b = 0; b < num_banks; b++) {
+		json_t *bank_obj = json_object();
+		json_object_set_new(bank_obj, "index", json_integer(b));
+
+		int wi = bank_weapons[b];
+		if (wi >= 0 && wi < weapon_info_size())
+			json_object_set_new(bank_obj, "default_weapon", json_safe_string(Weapon_info[wi].name));
+		else
+			json_object_set_new(bank_obj, "default_weapon", json_string("(none)"));
+
+		json_object_set_new(bank_obj, "capacity_in_ammo_units", json_integer(bank_ammo_capacity[b]));
+
+		int ri = restriction_offset + b;
+		std::array<std::tuple<int, const char*, const char*>, 2> restriction_types = { {
+			{ REGULAR_WEAPON, "restricted", "allowed_weapons" },
+			{ DOGFIGHT_WEAPON, "restricted_dogfight", "allowed_dogfight_weapons" }
+		} };
+		for (auto &rt : restriction_types) {
+			auto flag = std::get<0>(rt);
+			auto tag = std::get<1>(rt);
+			auto bag = std::get<2>(rt);
+			bool has_restriction = (ri < (int)sip.restricted_loadout_flag.size()) && (sip.restricted_loadout_flag[ri] & flag);
+			json_object_set_new(bank_obj, tag, json_boolean(has_restriction));
+			if (has_restriction && (ri < (int)sip.allowed_bank_restricted_weapons.size())) {
+				json_t *rw = json_array();
+				for (const auto &wf : sip.allowed_bank_restricted_weapons[ri].weapon_and_flags) {
+					if ((wf.second & flag) && wf.first >= 0 && wf.first < weapon_info_size())
+						json_array_append_new(rw, json_safe_string(Weapon_info[wf.first].name));
+				}
+				json_object_set_new(bank_obj, bag, rw);
+			}
+		}
+
+		json_array_append_new(banks, bank_obj);
+	}
+	return banks;
+}
+
+static json_t *handle_get_ship_class(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
 	auto name = get_required_string(arguments, "name", sink, true);
 	if (!name) return err;
 
-	int idx = weapon_info_lookup(name);
+	int idx = ship_info_lookup(name);
 	if (idx < 0)
-		return make_not_found_error("Weapon class", name);
+		return make_not_found_error("Ship class", name);
 
-	const auto &wip = Weapon_info[idx];
+	return make_json_tool_result(build_ship_class_json(idx, true));
+}
+
+static json_t *build_weapon_class_json(int wip_idx, bool include_details)
+{
+	const auto &wip = Weapon_info[wip_idx];
 	json_t *obj = json_object();
 
-	// Identity
+	// Identity (brief)
 	json_object_set_new(obj, "name", json_safe_string(wip.name));
 	if (wip.has_display_name())
 		json_object_set_new(obj, "display_name", json_safe_string(wip.get_display_name()));
 	json_object_set_new(obj, "subtype", json_string(weapon_category_str(wip)));
+
+	if (!include_details)
+		return obj;
 
 	// Loadout and Tech screen strings
 	{
@@ -996,7 +948,58 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	json_object_set_new(obj, "allowed_for_player", json_boolean(wip.wi_flags[Weapon::Info_Flags::Player_allowed]));
 	json_object_set_new(obj, "hurts_big_ships", json_boolean(wip.hurts_big_ships()));
 
-	return make_json_tool_result(obj);
+	return obj;
+}
+
+static json_t *handle_list_weapon_classes(json_t *arguments)
+{
+	// Optional category filter.  We use the semantic helpers (is_beam(),
+	// is_secondary(), is_non_beam_primary()) instead of the raw subtype field,
+	// because most beam weapons have subtype WP_LASER rather than WP_BEAM.
+	enum { FILTER_NONE, FILTER_PRIMARY, FILTER_SECONDARY, FILTER_BEAM } filter = FILTER_NONE;
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto st = get_optional_string(arguments, "subtype", sink);
+	if (st) {
+		if (!check_string_enum(st, subtype_enum_values, "subtype", sink))
+			return err;
+		if (stricmp(st, "primary") == 0)
+			filter = FILTER_PRIMARY;
+		else if (stricmp(st, "secondary") == 0)
+			filter = FILTER_SECONDARY;
+		else
+			filter = FILTER_BEAM;
+	}
+
+	json_t *arr = json_array();
+	for (int i = 0; i < weapon_info_size(); i++) {
+		const auto &wip = Weapon_info[i];
+
+		if (filter == FILTER_PRIMARY && !wip.is_non_beam_primary())
+			continue;
+		if (filter == FILTER_SECONDARY && !wip.is_secondary())
+			continue;
+		if (filter == FILTER_BEAM && !wip.is_beam())
+			continue;
+
+		json_array_append_new(arr, build_weapon_class_json(i, false));
+	}
+
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_get_weapon_class(json_t *arguments)
+{
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto name = get_required_string(arguments, "name", sink, true);
+	if (!name) return err;
+
+	int idx = weapon_info_lookup(name);
+	if (idx < 0)
+		return make_not_found_error("Weapon class", name);
+
+	return make_json_tool_result(build_weapon_class_json(idx, true));
 }
 
 static json_t *handle_list_species()
@@ -1173,6 +1176,9 @@ static json_t *handle_list_sexp_categories()
 	return make_json_tool_result(arr);
 }
 
+// Defined after build_argument_types_json below.
+static json_t *build_sexp_operator_json(int op_index, bool include_details);
+
 static json_t *handle_list_sexp_operators(json_t *arguments)
 {
 	json_t *err = nullptr;
@@ -1234,18 +1240,8 @@ static json_t *handle_list_sexp_operators(json_t *arguments)
 
 	// Build result array
 	json_t *arr = json_array();
-	for (const auto &match : matches) {
-		const auto &op = Operators[match.first];
-		json_t *item = json_object();
-		json_object_set_new(item, "name", json_safe_string(op.text.c_str()));
-		json_object_set_new(item, "min_args", json_integer(op.min));
-		json_object_set_new(item, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
-
-		int cat_id = get_category(op.value);
-		json_object_set_new(item, "category", json_string(mcp_get_sexp_category_name(cat_id)));
-
-		json_array_append_new(arr, item);
-	}
+	for (const auto &match : matches)
+		json_array_append_new(arr, build_sexp_operator_json(static_cast<int>(match.first), false));
 
 	return make_json_tool_result(arr);
 }
@@ -1382,29 +1378,23 @@ static void build_argument_types_json(json_t *obj, int op_index, int min_args, i
 	}
 }
 
-static json_t *handle_get_sexp_operator(json_t *arguments)
+static json_t *build_sexp_operator_json(int op_index, bool include_details)
 {
-	json_t *err = nullptr;
-	McpErrorSink sink(&err);
-	auto name = get_required_string(arguments, "name", sink, true);
-	if (!name) return err;
-
-	// Find operator by name
-	int op_index = find_item_with_string(Operators, &sexp_oper::text, name);
-	if (op_index < 0)
-		return make_not_found_error("SEXP operator", name);
-
 	const auto &op = Operators[op_index];
 	json_t *obj = json_object();
 
+	// Identity (brief)
 	json_object_set_new(obj, "name", json_safe_string(op.text.c_str()));
 	json_object_set_new(obj, "min_args", json_integer(op.min));
 	json_object_set_new(obj, "max_args", json_integer(op.max == INT_MAX ? -1 : op.max));
 
-	// Category and subcategory
 	int cat_id = get_category(op.value);
 	json_object_set_new(obj, "category", json_string(mcp_get_sexp_category_name(cat_id)));
 
+	if (!include_details)
+		return obj;
+
+	// Subcategory
 	int subcat_id = get_subcategory(op.value);
 	if (subcat_id != OP_SUBCATEGORY_NONE) {
 		// Find subcategory name in op_submenu
@@ -1428,7 +1418,22 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 	// Argument types
 	build_argument_types_json(obj, op_index, op.min, op.max);
 
-	return make_json_tool_result(obj);
+	return obj;
+}
+
+static json_t *handle_get_sexp_operator(json_t *arguments)
+{
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto name = get_required_string(arguments, "name", sink, true);
+	if (!name) return err;
+
+	// Find operator by name
+	int op_index = find_item_with_string(Operators, &sexp_oper::text, name);
+	if (op_index < 0)
+		return make_not_found_error("SEXP operator", name);
+
+	return make_json_tool_result(build_sexp_operator_json(op_index, true));
 }
 
 // ---------------------------------------------------------------------------
