@@ -208,7 +208,10 @@ static void apply_display_name(ship &shipp, const char *display_name)
 
 static bool resolve_or_add_cargo(const char *cargo_name, char &out_index, McpErrorSink &sink)
 {
-	if (!cargo_name || !*cargo_name) {
+	// Treat null, empty, and "<none>" all as clear-to-Nothing; the latter
+	// matches the display_name / weapon_class / alt_class_name / callsign
+	// convention used elsewhere in the ship tools.
+	if (!cargo_name || !*cargo_name || !stricmp(cargo_name, "<none>")) {
 		out_index = 0;	// "Nothing"
 		return true;
 	}
@@ -1807,7 +1810,7 @@ static bool resolve_bank_target(
 	return true;
 }
 
-static void handle_get_ship_weapons(json_t *input, McpToolRequest *req)
+static void handle_list_ship_weapons(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_ships, sink)) return;
@@ -1988,6 +1991,202 @@ static void handle_get_max_ammo_for_bank(json_t *input, McpToolRequest *req)
 	json_t *result = json_object();
 	json_object_set_new(result, "max_ammo_count", json_integer(max_ammo));
 	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// Subsystem tools -- mirror the per-subsystem fields of the Initial Status
+// dialog (fred2/initialstatus.cpp): health, cargo, cargo title, and (for
+// turrets) AI class.  Weapon banks on turrets are handled separately via
+// update_ship_weapon_bank.
+// ---------------------------------------------------------------------------
+
+// Matches initialstatus.cpp:587-589 -- a ship has scannable subsystems iff
+// (is_huge_ship) XOR (Toggle_subsystem_scanning flag).
+static bool ship_has_scannable_subsystems(const ship &shipp)
+{
+	bool scannable = Ship_info[shipp.ship_info_index].is_huge_ship();
+	if (shipp.flags[Ship::Ship_Flags::Toggle_subsystem_scanning])
+		scannable = !scannable;
+	return scannable;
+}
+
+// Build { subsystem, subsystem_type, initial_health_percent, cargo?, cargo_title?, ai_class? }.
+static json_t *build_subsystem_json(const ship_subsys *subsys)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "subsystem", json_safe_string(subsys->system_info->subobj_name));
+
+	int type = subsys->system_info->type;
+	if (type < 0 || type >= SUBSYSTEM_MAX)
+		type = SUBSYSTEM_UNKNOWN;
+	json_object_set_new(obj, "subsystem_type", json_safe_string(Subsystem_types[type]));
+
+	// FRED stores current_hits as 0-100 percent during edit (see
+	// missionparse.cpp:2858 Fred_running branch); fl2ir rounds half-away-from-zero
+	// to keep round-trips stable.
+	json_object_set_new(obj, "initial_health_percent",
+		json_integer(fl2ir(subsys->current_hits)));
+
+	if (subsys->subsys_cargo_name > 0 && subsys->subsys_cargo_name < Num_cargo)
+		json_object_set_new(obj, "cargo", json_safe_string(Cargo_names[subsys->subsys_cargo_name]));
+	set_optional_string(obj, "cargo_title", subsys->subsys_cargo_title, true);
+
+	if (subsys->system_info->type == SUBSYSTEM_TURRET) {
+		int ai_class = subsys->weapons.ai_class;
+		if (ai_class >= 0 && ai_class < Num_ai_classes)
+			json_object_set_new(obj, "ai_class", json_safe_string(Ai_class_names[ai_class]));
+	}
+
+	return obj;
+}
+
+static void handle_list_ship_subsystems(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	ship &shipp = Ships[ship_idx];
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(shipp.ship_name));
+
+	json_t *arr = json_array();
+	for (ship_subsys *ss = GET_FIRST(&shipp.subsys_list);
+		ss != END_OF_LIST(&shipp.subsys_list);
+		ss = GET_NEXT(ss))
+	{
+		if (ss->system_info == nullptr)
+			continue;
+		json_array_append_new(arr, build_subsystem_json(ss));
+	}
+	json_object_set_new(result, "subsystems", arr);
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_get_ship_subsystem(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	auto subsystem_name = get_required_string(input, "subsystem", sink, true);
+	if (!subsystem_name) return;
+
+	ship &shipp = Ships[ship_idx];
+	ship_subsys *subsys = ship_get_subsys(&shipp, subsystem_name);
+	if (subsys == nullptr) {
+		sink.set_error("Subsystem '%s' not found on ship '%s'.", subsystem_name, shipp.ship_name);
+		return;
+	}
+
+	req->result_json = make_json_tool_result(build_subsystem_json(subsys));
+	req->success = true;
+}
+
+static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	auto subsystem_name = get_required_string(input, "subsystem", sink, true);
+	if (!subsystem_name) return;
+
+	ship &shipp = Ships[ship_idx];
+	ship_subsys *subsys = ship_get_subsys(&shipp, subsystem_name);
+	if (subsys == nullptr) {
+		sink.set_error("Subsystem '%s' not found on ship '%s'.", subsystem_name, shipp.ship_name);
+		return;
+	}
+
+	auto health     = get_optional_integer(input, "initial_health_percent", sink);
+	auto cargo_arg  = get_optional_string(input, "cargo", sink, NAME_LENGTH - 1);
+	auto title_arg  = get_optional_string(input, "cargo_title", sink, NAME_LENGTH - 1);
+	auto ai_arg     = get_optional_string(input, "ai_class", sink);
+	auto force_arg  = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
+	bool force = force_arg.value_or(false);
+
+	// Range-check health up-front so a bad value aborts before mutation.
+	if (health.has_value()
+		&& !check_int_range(*health, 0, 100, "initial_health_percent", sink))
+		return;
+
+	// ai_class only valid on turrets.
+	int ai_class_idx = -1;
+	if (ai_arg) {
+		if (subsys->system_info->type != SUBSYSTEM_TURRET) {
+			sink.set_error("ai_class can only be set on turret subsystems; '%s' on '%s' is type '%s'.",
+				subsystem_name, shipp.ship_name,
+				Subsystem_types[subsys->system_info->type]);
+			return;
+		}
+		ai_class_idx = check_lookup(ai_arg,
+			[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
+			"ai_class", sink);
+		if (ai_class_idx < 0) return;
+	}
+
+	// Cargo / cargo_title gate.
+	bool cargo_specified = (cargo_arg != nullptr) || (title_arg != nullptr);
+	if (cargo_specified && !force && !ship_has_scannable_subsystems(shipp)) {
+		sink.set_error("Ship '%s' does not have scannable subsystems "
+			"(is_huge_ship XOR toggle-subsystem-scanning flag must be true). "
+			"Pass force=true to set cargo/cargo_title anyway.", shipp.ship_name);
+		return;
+	}
+
+	// Resolve cargo index (auto-adds if new).
+	char cargo_idx = 0;
+	if (cargo_arg && !resolve_or_add_cargo(cargo_arg, cargo_idx, sink))
+		return;
+
+	// All validation done -- mutate.
+	bool changed = false;
+
+	if (health.has_value()) {
+		subsys->current_hits = (float)*health;
+		changed = true;
+	}
+	if (cargo_arg) {
+		subsys->subsys_cargo_name = cargo_idx;
+		changed = true;
+	}
+	if (title_arg) {
+		if (!*title_arg || !stricmp(title_arg, "<none>"))
+			subsys->subsys_cargo_title[0] = '\0';
+		else
+			strncpy_s(subsys->subsys_cargo_title, title_arg, NAME_LENGTH - 1);
+		changed = true;
+	}
+	if (ai_arg) {
+		subsys->weapons.ai_class = ai_class_idx;
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update ship %s subsystem %s", shipp.ship_name, subsystem_name);
+
+	req->result_json = make_json_tool_result(build_subsystem_json(subsys));
 	req->success = true;
 }
 
@@ -2297,8 +2496,8 @@ void mcp_register_ship_tools(json_t *tools)
 			props, req);
 	}
 
-	// get_ship_weapons
-	register_tool_with_required_string(tools, "get_ship_weapons",
+	// list_ship_weapons
+	register_tool_with_required_string(tools, "list_ship_weapons",
 		"Get every weapon bank assignment on a ship -- the pilot weapon set plus every turret "
 		"subsystem.  Each bank entry is { bank, weapon_class, ammo_count } where bank is 1-based, "
 		"weapon_class \"<none>\" means an empty slot, and ammo_count is an absolute count (0 for "
@@ -2381,6 +2580,64 @@ void mcp_register_ship_tools(json_t *tools)
 			"Mirrors the engine's per-bank-and-weapon clamp.",
 			props, req);
 	}
+
+	// list_ship_subsystems
+	register_tool_with_required_string(tools, "list_ship_subsystems",
+		"List all subsystems on a ship with their initial-state details: subsystem name, type "
+		"(Engines/Turrets/Radar/etc.), initial_health_percent, cargo (if set), cargo_title "
+		"(if set), and ai_class (turrets only). For a single subsystem, see get_ship_subsystem; "
+		"for updates, see update_ship_subsystem.",
+		"name", "Name of the ship");
+
+	// get_ship_subsystem
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_string_prop(props, "subsystem",
+			"Subsystem name (matches subobj_name from the model, case-insensitive). Use "
+			"list_ship_subsystems to enumerate available names.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("subsystem"));
+		register_tool(tools, "get_ship_subsystem",
+			"Get one subsystem by name with its initial-state details. For all subsystems on a "
+			"ship in one call, see list_ship_subsystems.",
+			props, req);
+	}
+
+	// update_ship_subsystem
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_string_prop(props, "subsystem",
+			"Subsystem name (matches subobj_name from the model, case-insensitive).");
+		add_integer_prop(props, "initial_health_percent",
+			"Initial health at mission start, as a percent of class max (0-100). "
+			"100 = full, 0 = destroyed. Mirrors the Initial Status dialog's \"Damage\" field "
+			"(damage = 100 - health).");
+		add_string_prop(props, "cargo",
+			"Per-subsystem cargo name. Auto-added to the mission cargo pool if new (subject to "
+			"MAX_CARGO). Pass \"<none>\" or an empty string to clear. Separate from the ship's "
+			"own cargo field on update_ship.");
+		add_string_prop(props, "cargo_title",
+			"Display label paired with cargo (non-retail; e.g. \"Cargo:\" or \"Passengers:\"). "
+			"Pass \"<none>\" or an empty string to clear.");
+		add_string_prop(props, "ai_class",
+			"AI class name. Turret subsystems only; rejected on any other subsystem type. "
+			"Use list_ai_classes for valid names.");
+		add_bool_prop(props, "force",
+			"If true, bypass the scannable-subsystems gate on cargo/cargo_title writes. By "
+			"default, those fields are only writable on ships with scannable subsystems "
+			"(is_huge_ship XOR toggle-subsystem-scanning flag). Default false.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("subsystem"));
+		register_tool(tools, "update_ship_subsystem",
+			"Update initial-state fields for a single subsystem (health, cargo, cargo_title, "
+			"ai_class). All update fields are optional; omitted fields are left unchanged. "
+			"Returns the post-update subsystem record.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2413,14 +2670,20 @@ bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_list_docked_group(input_json, req);
 	} else if (strcmp(tool_name, "set_dock_leader") == 0) {
 		handle_set_dock_leader(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_weapons") == 0) {
-		handle_get_ship_weapons(input_json, req);
+	} else if (strcmp(tool_name, "list_ship_weapons") == 0) {
+		handle_list_ship_weapons(input_json, req);
 	} else if (strcmp(tool_name, "get_ship_weapon_bank") == 0) {
 		handle_get_ship_weapon_bank(input_json, req);
 	} else if (strcmp(tool_name, "update_ship_weapon_bank") == 0) {
 		handle_update_ship_weapon_bank(input_json, req);
 	} else if (strcmp(tool_name, "get_max_ammo_for_bank") == 0) {
 		handle_get_max_ammo_for_bank(input_json, req);
+	} else if (strcmp(tool_name, "list_ship_subsystems") == 0) {
+		handle_list_ship_subsystems(input_json, req);
+	} else if (strcmp(tool_name, "get_ship_subsystem") == 0) {
+		handle_get_ship_subsystem(input_json, req);
+	} else if (strcmp(tool_name, "update_ship_subsystem") == 0) {
+		handle_update_ship_subsystem(input_json, req);
 	} else {
 		return false;
 	}
