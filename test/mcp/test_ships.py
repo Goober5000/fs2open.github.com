@@ -1514,7 +1514,7 @@ def register(suite, client):
                 return w.get("name")
         return None
 
-    def test_get_ship_weapons_pilot_shape():
+    def test_list_ship_weapons_pilot_shape():
         cls = _pick_ship_class_with_banks("primary")
         if cls is None:
             return
@@ -1529,7 +1529,7 @@ def register(suite, client):
             assert_success(r)
             created.append("MCP Weapons Shape")
 
-            r = client.call_tool("get_ship_weapons", {"name": "MCP Weapons Shape"})
+            r = client.call_tool("list_ship_weapons", {"name": "MCP Weapons Shape"})
             assert_success(r)
             d = tool_data(r)
             assert_equal(d.get("ship"), "MCP Weapons Shape", "ship name echoed")
@@ -1823,6 +1823,400 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, created)
 
+    # ---------------------------------------------------------------------
+    # Subsystem tools
+    # ---------------------------------------------------------------------
+    #
+    # Per-subsystem initial state -- health, cargo, cargo_title, and
+    # (turret-only) ai_class.  Mod content drives what's testable, so each
+    # test skips cleanly when it can't find a suitable ship/subsystem.
+
+    def _pick_class_with_subsystem_type(type_name):
+        """First ship class that, once instantiated, has at least one subsystem
+        whose type equals type_name (e.g. "Engines", "Turrets").  Returns
+        (class_name, subsystem_name) or None.
+
+        This creates and deletes probe ships, so callers should not assume the
+        mission state is unchanged on return."""
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        probe = "MCP Subsys Probe"
+        for c in tool_data(r):
+            name = c.get("name")
+            if not name:
+                continue
+            rr = client.call_tool("create_ship", {
+                "name": probe, "ship_class": name,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            if rr.get("isError"):
+                continue
+            try:
+                rs = client.call_tool("list_ship_subsystems", {"name": probe})
+                if rs.get("isError"):
+                    continue
+                for s in tool_data(rs).get("subsystems", []):
+                    if s.get("subsystem_type") == type_name:
+                        return (name, s.get("subsystem"))
+            finally:
+                client.call_tool("delete_ship", {"name": probe, "force": True})
+        return None
+
+    def _probe_scannable(class_name):
+        """Try a no-force cargo write on the first subsystem of a probe ship of
+        the given class.  Returns True iff the write succeeds (i.e. the class
+        has scannable subsystems by FRED's rule)."""
+        probe = "MCP Scan Probe"
+        rr = client.call_tool("create_ship", {
+            "name": probe, "ship_class": class_name,
+            "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "orientation": IDENTITY_ORIENT,
+        })
+        if rr.get("isError"):
+            return False
+        try:
+            rs = client.call_tool("list_ship_subsystems", {"name": probe})
+            assert_success(rs)
+            subs = tool_data(rs).get("subsystems", [])
+            if not subs:
+                return False
+            r = client.call_tool("update_ship_subsystem", {
+                "name": probe, "subsystem": subs[0]["subsystem"],
+                "cargo": "MCPProbeCargo",
+            })
+            return not r.get("isError")
+        finally:
+            client.call_tool("delete_ship", {"name": probe, "force": True})
+
+    def _pick_scannable_class():
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        for c in tool_data(r):
+            name = c.get("name")
+            if name and _probe_scannable(name):
+                return name
+        return None
+
+    def _pick_non_scannable_class():
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        for c in tool_data(r):
+            name = c.get("name")
+            if name and not _probe_scannable(name):
+                return name
+        return None
+
+    def test_list_ship_subsystems_shape():
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys Shape"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Shape", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys Shape"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP Subsys Shape", "echoed ship name")
+            subs = d.get("subsystems")
+            assert_is_list(subs, "subsystems")
+            if not subs:
+                return  # ship class with zero subsystems; skip detailed checks
+            for s in subs:
+                assert_is_dict(s)
+                assert_has_key(s, "subsystem")
+                assert_has_key(s, "subsystem_type")
+                assert_has_key(s, "initial_health_percent")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_get_ship_subsystem_matches_bulk():
+        # Routing regression guard for list_ship_subsystems vs get_ship_subsystem.
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys Match"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Match", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys Match"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]
+            r = client.call_tool("get_ship_subsystem", {
+                "name": "MCP Subsys Match",
+                "subsystem": target["subsystem"],
+            })
+            assert_success(r)
+            assert_equal(tool_data(r), target,
+                "single get must equal the matching bulk entry")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_get_ship_subsystem_unknown_reject():
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys Unk"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Unk", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("get_ship_subsystem", {
+                "name": "MCP Subsys Unk",
+                "subsystem": "does_not_exist_xyz",
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_health_round_trip():
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys Health"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Health", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys Health"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]["subsystem"]
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys Health", "subsystem": target,
+                "initial_health_percent": 50,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("initial_health_percent"), 50,
+                "echoed health 50")
+            r = client.call_tool("get_ship_subsystem", {
+                "name": "MCP Subsys Health", "subsystem": target,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("initial_health_percent"), 50,
+                "round-trip health 50")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_health_out_of_range_reject():
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys HRange"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys HRange", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys HRange"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]["subsystem"]
+            for bad in (-1, 101):
+                r = client.call_tool("update_ship_subsystem", {
+                    "name": "MCP Subsys HRange", "subsystem": target,
+                    "initial_health_percent": bad,
+                })
+                assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_unknown_subsystem_reject():
+        cls = _pick_ship_class(client)
+        created = ["MCP Subsys UnkUpd"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys UnkUpd", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys UnkUpd", "subsystem": "no_such_subsys",
+                "initial_health_percent": 75,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_cargo_scannable():
+        cls = _pick_scannable_class()
+        if cls is None:
+            return
+        created = ["MCP Subsys Cargo"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Cargo", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys Cargo"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]["subsystem"]
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys Cargo", "subsystem": target,
+                "cargo": "MCPTestSubsysCargo",
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("cargo"), "MCPTestSubsysCargo",
+                "cargo round-trip")
+            # Clear via "<none>".
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys Cargo", "subsystem": target,
+                "cargo": "<none>",
+            })
+            assert_success(r)
+            assert_true("cargo" not in tool_data(r),
+                "cargo cleared by \"<none>\" should be absent in response")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_cargo_non_scannable_reject_and_force():
+        cls = _pick_non_scannable_class()
+        if cls is None:
+            return
+        created = ["MCP Subsys NonScan"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys NonScan", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys NonScan"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]["subsystem"]
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys NonScan", "subsystem": target,
+                "cargo": "MCPNonScanProbe",
+            })
+            assert_error(r)
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys NonScan", "subsystem": target,
+                "cargo": "MCPNonScanProbe", "force": True,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("cargo"), "MCPNonScanProbe",
+                "cargo set under force")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_cargo_title_round_trip():
+        cls = _pick_scannable_class()
+        if cls is None:
+            return
+        created = ["MCP Subsys Title"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys Title", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_ship_subsystems", {"name": "MCP Subsys Title"})
+            assert_success(r)
+            subs = tool_data(r).get("subsystems", [])
+            if not subs:
+                return
+            target = subs[0]["subsystem"]
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys Title", "subsystem": target,
+                "cargo": "MCPTitleCargo", "cargo_title": "Passengers",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("cargo"), "MCPTitleCargo")
+            assert_equal(d.get("cargo_title"), "Passengers")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_ai_class_turret():
+        pick = _pick_class_with_subsystem_type("Turrets")
+        if pick is None:
+            return
+        cls, turret = pick
+        # Pick a valid ai_class.
+        r = client.call_tool("list_ai_classes")
+        assert_success(r)
+        classes = tool_data(r)
+        if not classes:
+            return
+        # list_ai_classes entries are either dicts with "name" or bare strings.
+        first = classes[0]
+        ai_name = first.get("name") if isinstance(first, dict) else first
+        if not ai_name:
+            return
+
+        created = ["MCP Subsys AI"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys AI", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys AI", "subsystem": turret,
+                "ai_class": ai_name,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("ai_class"), ai_name,
+                "ai_class round-trip on turret")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_subsystem_ai_class_non_turret_reject():
+        pick = _pick_class_with_subsystem_type("Engines")
+        if pick is None:
+            return
+        cls, engine = pick
+        r = client.call_tool("list_ai_classes")
+        assert_success(r)
+        classes = tool_data(r)
+        if not classes:
+            return
+        first = classes[0]
+        ai_name = first.get("name") if isinstance(first, dict) else first
+        if not ai_name:
+            return
+
+        created = ["MCP Subsys AINon"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Subsys AINon", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("update_ship_subsystem", {
+                "name": "MCP Subsys AINon", "subsystem": engine,
+                "ai_class": ai_name,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
     suite.add("ships_basic_crud", test_ships_basic_crud)
     suite.add("ships_arrival_cue_replacement", test_ship_arrival_cue_replacement)
     suite.add("ships_alt_class_name_callsign_cycle", test_ship_alt_class_name_and_callsign_cycle)
@@ -1858,7 +2252,7 @@ def register(suite, client):
     suite.add("ships_set_dock_leader_swap", test_ships_set_dock_leader_swap)
     suite.add("ships_set_dock_leader_already_leader_noop", test_ships_set_dock_leader_already_leader_noop)
     suite.add("ships_set_dock_leader_validation", test_ships_set_dock_leader_validation)
-    suite.add("ship_weapons_pilot_shape", test_get_ship_weapons_pilot_shape)
+    suite.add("ship_weapons_pilot_shape", test_list_ship_weapons_pilot_shape)
     suite.add("ship_weapon_bank_pilot_default_matches_explicit",
         test_get_ship_weapon_bank_pilot_default_matches_explicit)
     suite.add("ship_weapon_bank_change_primary", test_update_ship_weapon_bank_change_primary)
@@ -1872,6 +2266,25 @@ def register(suite, client):
     suite.add("ship_weapon_bank_max_ammo_returns_int", test_get_max_ammo_for_bank_returns_int)
     suite.add("ship_weapon_bank_nonexistent_subsystem_rejected",
         test_get_ship_weapon_bank_nonexistent_subsystem_rejected)
+    suite.add("ship_subsystems_shape", test_list_ship_subsystems_shape)
+    suite.add("ship_subsystem_matches_bulk", test_get_ship_subsystem_matches_bulk)
+    suite.add("ship_subsystem_unknown_reject", test_get_ship_subsystem_unknown_reject)
+    suite.add("ship_subsystem_health_round_trip",
+        test_update_ship_subsystem_health_round_trip)
+    suite.add("ship_subsystem_health_out_of_range_reject",
+        test_update_ship_subsystem_health_out_of_range_reject)
+    suite.add("ship_subsystem_unknown_subsystem_reject",
+        test_update_ship_subsystem_unknown_subsystem_reject)
+    suite.add("ship_subsystem_cargo_scannable",
+        test_update_ship_subsystem_cargo_scannable)
+    suite.add("ship_subsystem_cargo_non_scannable_reject_and_force",
+        test_update_ship_subsystem_cargo_non_scannable_reject_and_force)
+    suite.add("ship_subsystem_cargo_title_round_trip",
+        test_update_ship_subsystem_cargo_title_round_trip)
+    suite.add("ship_subsystem_ai_class_turret",
+        test_update_ship_subsystem_ai_class_turret)
+    suite.add("ship_subsystem_ai_class_non_turret_reject",
+        test_update_ship_subsystem_ai_class_non_turret_reject)
 
 
 if __name__ == "__main__":
