@@ -17,8 +17,11 @@ assume any pre-existing ships.
 from mcp_test_lib import (
     assert_equal,
     assert_error,
+    assert_has_key,
     assert_in,
+    assert_is_dict,
     assert_is_list,
+    assert_non_empty_list,
     assert_success,
     assert_true,
     run_module_standalone,
@@ -979,6 +982,352 @@ def register(suite, client):
         r = client.call_tool("move_ship", {"from_index": 0, "to_index": 1})
         assert_error(r)
 
+    # ---------------------------------------------------------------------
+    # Weapon-bank tools
+    # ---------------------------------------------------------------------
+    #
+    # Most of these depend on mod content (a ship class with banks, a weapon
+    # of a given type, a ballistic weapon for the ammo tests).  Each test
+    # uses a _pick_* helper and returns early if the required content is
+    # absent so the suite stays green on minimal data setups.
+
+    def _pick_ship_class_with_banks(kind):
+        """First ship class with at least one bank of the given kind
+        ("primary" or "secondary"), or None if none found."""
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        for c in tool_data(r):
+            name = c.get("name")
+            if not name:
+                continue
+            rr = client.call_tool("get_ship_class", {"name": name})
+            if rr.get("isError"):
+                continue
+            d = tool_data(rr)
+            key = "primary_banks" if kind == "primary" else "secondary_banks"
+            banks = d.get(key) or []
+            if len(banks) > 0:
+                return name
+        return None
+
+    def _pick_selectable_weapon(subtype):
+        """First weapon of given subtype that is selectable_in_editor."""
+        r = client.call_tool("list_weapon_classes", {"subtype": subtype})
+        assert_success(r)
+        for w in tool_data(r):
+            if w.get("selectable_in_editor", True):
+                return w.get("name")
+        return None
+
+    def test_get_ship_weapons_pilot_shape():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Weapons Shape",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Weapons Shape")
+
+            r = client.call_tool("get_ship_weapons", {"name": "MCP Weapons Shape"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP Weapons Shape", "ship name echoed")
+
+            pilot = d.get("pilot")
+            assert_is_dict(pilot, "pilot block")
+
+            primaries = pilot.get("primary_banks")
+            assert_non_empty_list(primaries, "pilot.primary_banks")
+            for i, bank in enumerate(primaries):
+                assert_equal(bank.get("bank"), i + 1, f"primary bank index {i}")
+                assert_has_key(bank, "weapon_class", f"primary bank {i+1} weapon_class")
+                assert_has_key(bank, "ammo_count", f"primary bank {i+1} ammo_count")
+
+            secondaries = pilot.get("secondary_banks")
+            assert_is_list(secondaries, "pilot.secondary_banks")
+
+            turrets = d.get("turrets")
+            assert_is_list(turrets, "turrets")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_get_ship_weapon_bank_pilot_default_matches_explicit():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Weapons Default",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Weapons Default")
+
+            base = {"name": "MCP Weapons Default", "bank_type": "primary", "bank": 1}
+            r_default = client.call_tool("get_ship_weapon_bank", base)
+            r_pilot = client.call_tool("get_ship_weapon_bank", dict(base, subsystem="Pilot"))
+            assert_success(r_default)
+            assert_success(r_pilot)
+            assert_equal(tool_data(r_default), tool_data(r_pilot),
+                "Default subsystem should equal explicit 'Pilot'")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_change_primary():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        weapon = _pick_selectable_weapon("primary")
+        if weapon is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Change",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Change")
+
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp Change", "bank_type": "primary", "bank": 1,
+                "weapon_class": weapon, "force": True,
+            })
+            assert_success(r)
+
+            r = client.call_tool("get_ship_weapon_bank", {
+                "name": "MCP Wp Change", "bank_type": "primary", "bank": 1,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("weapon_class"), weapon,
+                "primary bank 1 weapon round-trip")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_clear():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Clear",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Clear")
+
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp Clear", "bank_type": "primary", "bank": 1,
+                "weapon_class": "<none>",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("weapon_class"), "<none>", "cleared weapon_class")
+            assert_equal(d.get("ammo_count"), 0, "cleared bank ammo_count is 0")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_wrong_type_reject():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        secondary = _pick_selectable_weapon("secondary")
+        if secondary is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Wrong",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Wrong")
+
+            # Secondary weapon in a primary slot is a structural rule; force
+            # should not bypass it.
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp Wrong", "bank_type": "primary", "bank": 1,
+                "weapon_class": secondary, "force": True,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_ammo_bounds():
+        cls = _pick_ship_class_with_banks("secondary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Ammo",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Ammo")
+
+            # Search for a secondary weapon with non-zero max for this ship's
+            # secondary bank 1 (i.e. a ballistic secondary the bank can hold).
+            r = client.call_tool("list_weapon_classes", {"subtype": "secondary"})
+            assert_success(r)
+            weapon = None
+            max_ammo = 0
+            for w in tool_data(r):
+                name = w.get("name")
+                if not name:
+                    continue
+                rr = client.call_tool("get_max_ammo_for_bank", {
+                    "name": "MCP Wp Ammo", "bank_type": "secondary", "bank": 1,
+                    "weapon_class": name,
+                })
+                if rr.get("isError"):
+                    continue
+                m = tool_data(rr).get("max_ammo_count", 0)
+                if m > 0:
+                    weapon = name
+                    max_ammo = m
+                    break
+            if weapon is None:
+                return
+
+            # Over-max rejected even with force.
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp Ammo", "bank_type": "secondary", "bank": 1,
+                "weapon_class": weapon, "ammo_count": max_ammo + 1, "force": True,
+            })
+            assert_error(r)
+
+            # Exactly at max accepted; round-trip.
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp Ammo", "bank_type": "secondary", "bank": 1,
+                "weapon_class": weapon, "ammo_count": max_ammo, "force": True,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("ammo_count"), max_ammo,
+                "ammo_count at exact max should round-trip")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_clear_with_nonzero_ammo_rejected():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp ClearAmmo",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp ClearAmmo")
+
+            r = client.call_tool("update_ship_weapon_bank", {
+                "name": "MCP Wp ClearAmmo", "bank_type": "primary", "bank": 1,
+                "weapon_class": "<none>", "ammo_count": 5,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_update_ship_weapon_bank_out_of_range_bank():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Range",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Range")
+
+            r = client.call_tool("get_ship_weapon_bank", {
+                "name": "MCP Wp Range", "bank_type": "primary", "bank": 0,
+            })
+            assert_error(r)
+            r = client.call_tool("get_ship_weapon_bank", {
+                "name": "MCP Wp Range", "bank_type": "primary", "bank": 99,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_get_max_ammo_for_bank_returns_int():
+        cls = _pick_ship_class_with_banks("secondary")
+        if cls is None:
+            return
+        weapon = _pick_selectable_weapon("secondary")
+        if weapon is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp Max",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp Max")
+
+            r = client.call_tool("get_max_ammo_for_bank", {
+                "name": "MCP Wp Max", "bank_type": "secondary", "bank": 1,
+                "weapon_class": weapon,
+            })
+            assert_success(r)
+            m = tool_data(r).get("max_ammo_count")
+            assert_true(isinstance(m, int) and m >= 0,
+                f"max_ammo_count should be a non-negative int, got {m!r}")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_get_ship_weapon_bank_nonexistent_subsystem_rejected():
+        cls = _pick_ship_class_with_banks("primary")
+        if cls is None:
+            return
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Wp NoSubsys",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Wp NoSubsys")
+
+            r = client.call_tool("get_ship_weapon_bank", {
+                "name": "MCP Wp NoSubsys",
+                "subsystem": "does_not_exist_xyz",
+                "bank_type": "primary", "bank": 1,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
     suite.add("ships_basic_crud", test_ships_basic_crud)
     suite.add("ships_arrival_cue_replacement", test_ship_arrival_cue_replacement)
     suite.add("ships_alt_class_name_callsign_cycle", test_ship_alt_class_name_and_callsign_cycle)
@@ -1003,6 +1352,20 @@ def register(suite, client):
     suite.add("ships_move_preserves_identity", test_ships_move_preserves_identity)
     suite.add("ships_swap_out_of_range", test_ships_swap_out_of_range)
     suite.add("ships_move_out_of_range", test_ships_move_out_of_range)
+    suite.add("ship_weapons_pilot_shape", test_get_ship_weapons_pilot_shape)
+    suite.add("ship_weapon_bank_pilot_default_matches_explicit",
+        test_get_ship_weapon_bank_pilot_default_matches_explicit)
+    suite.add("ship_weapon_bank_change_primary", test_update_ship_weapon_bank_change_primary)
+    suite.add("ship_weapon_bank_clear", test_update_ship_weapon_bank_clear)
+    suite.add("ship_weapon_bank_wrong_type_reject",
+        test_update_ship_weapon_bank_wrong_type_reject)
+    suite.add("ship_weapon_bank_ammo_bounds", test_update_ship_weapon_bank_ammo_bounds)
+    suite.add("ship_weapon_bank_clear_with_nonzero_ammo_rejected",
+        test_update_ship_weapon_bank_clear_with_nonzero_ammo_rejected)
+    suite.add("ship_weapon_bank_out_of_range", test_update_ship_weapon_bank_out_of_range_bank)
+    suite.add("ship_weapon_bank_max_ammo_returns_int", test_get_max_ammo_for_bank_returns_int)
+    suite.add("ship_weapon_bank_nonexistent_subsystem_rejected",
+        test_get_ship_weapon_bank_nonexistent_subsystem_rejected)
 
 
 if __name__ == "__main__":
