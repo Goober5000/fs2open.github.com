@@ -79,6 +79,18 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 	if (!include_details)
 		return obj;
 
+	// Initial state at mission start (percent of class max).  In FRED edit mode
+	// the engine stores these as 0-100 percents directly in the runtime fields
+	// (see code/ship/ship.cpp Fred_running branches) so that missionsave can
+	// emit them as "+Initial Hull/Shields/Velocity:" without conversion.
+	// initial_shield_percent is omitted when the no-shields flag is set (the
+	// stored value is inert), but updates remain permitted so callers can
+	// pre-stage a value for when the flag is later turned off.
+	json_object_set_new(obj, "initial_hull_percent",   json_integer((int)objp.hull_strength));
+	if (!objp.flags[Object::Object_Flags::No_shields])
+		json_object_set_new(obj, "initial_shield_percent", json_integer((int)objp.shield_quadrant[0]));
+	json_object_set_new(obj, "initial_speed_percent",  json_integer((int)objp.phys_info.speed));
+
 	// Identity
 	if (shipp.has_display_name())
 		json_object_set_new(obj, "display_name", json_safe_string(shipp.display_name.c_str()));
@@ -496,6 +508,10 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
 	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
 
+	auto initial_hull   = get_optional_integer(input, "initial_hull_percent", sink);
+	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
+	auto initial_speed  = get_optional_integer(input, "initial_speed_percent", sink);
+
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
 	if (sink.has_error()) return;
@@ -507,6 +523,9 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 		return;
 	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
 		return;
+	if (initial_hull.has_value()   && !check_int_range(*initial_hull,   0, 100, "initial_hull_percent",   sink)) return;
+	if (initial_shield.has_value() && !check_int_range(*initial_shield, 0, 100, "initial_shield_percent", sink)) return;
+	if (initial_speed.has_value()  && !check_int_range(*initial_speed,  0, 100, "initial_speed_percent",  sink)) return;
 
 	// Validate ship_flags up-front so a bad flag name aborts before mutation.
 	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
@@ -674,6 +693,15 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 		shipp.final_death_time = *destroy_before_mission;
 	}
 
+	// Initial state at mission start.  In FRED edit mode the engine stores
+	// these as 0-100 percents directly in the runtime object fields.
+	if (initial_hull.has_value())
+		Objects[obj].hull_strength = (float)*initial_hull;
+	if (initial_shield.has_value())
+		Objects[obj].shield_quadrant[0] = (float)*initial_shield;
+	if (initial_speed.has_value())
+		Objects[obj].phys_info.speed = (float)*initial_speed;
+
 	obj_merge_created_list();
 	mark_modified("MCP: create ship %s", name);
 
@@ -728,6 +756,10 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
 	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
 
+	auto initial_hull   = get_optional_integer(input, "initial_hull_percent", sink);
+	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
+	auto initial_speed  = get_optional_integer(input, "initial_speed_percent", sink);
+
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
 	if (sink.has_error()) return;
@@ -739,6 +771,9 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		return;
 	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
 		return;
+	if (initial_hull.has_value()   && !check_int_range(*initial_hull,   0, 100, "initial_hull_percent",   sink)) return;
+	if (initial_shield.has_value() && !check_int_range(*initial_shield, 0, 100, "initial_shield_percent", sink)) return;
+	if (initial_speed.has_value()  && !check_int_range(*initial_speed,  0, 100, "initial_speed_percent",  sink)) return;
 
 	// Validate ship_flags up-front so a bad flag name aborts before mutation.
 	if (!validate_ship_flags_only(ship_flags_in, sink)) return;
@@ -933,6 +968,15 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
 		shipp.final_death_time = *destroy_before_mission;
 	}
+
+	// Initial state at mission start.  In FRED edit mode the engine stores
+	// these as 0-100 percents directly in the runtime object fields.
+	if (initial_hull.has_value())
+		objp.hull_strength = (float)*initial_hull;
+	if (initial_shield.has_value())
+		objp.shield_quadrant[0] = (float)*initial_shield;
+	if (initial_speed.has_value())
+		objp.phys_info.speed = (float)*initial_speed;
 
 	mark_modified("MCP: update ship %s", shipp.ship_name);
 
@@ -1176,6 +1220,13 @@ void mcp_register_ship_tools(json_t *tools)
 			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
 			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
 			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
+		add_integer_prop(props, "initial_hull_percent",
+			"Initial hull strength at mission start, as a percent of class max (0-100). FRED defaults to 100.");
+		add_integer_prop(props, "initial_shield_percent",
+			"Initial shield strength at mission start, as a percent of class max (0-100). FRED defaults to 100. "
+			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
+		add_integer_prop(props, "initial_speed_percent",
+			"Initial speed at mission start, as a percent of class max (0-100). FRED defaults to 33.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("ship_class"));
@@ -1241,6 +1292,13 @@ void mcp_register_ship_tools(json_t *tools)
 			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
 			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
 			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
+		add_integer_prop(props, "initial_hull_percent",
+			"Initial hull strength at mission start, as a percent of class max (0-100).");
+		add_integer_prop(props, "initial_shield_percent",
+			"Initial shield strength at mission start, as a percent of class max (0-100). "
+			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
+		add_integer_prop(props, "initial_speed_percent",
+			"Initial speed at mission start, as a percent of class max (0-100).");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_ship",
