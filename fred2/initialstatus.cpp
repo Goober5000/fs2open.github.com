@@ -29,7 +29,7 @@ static char THIS_FILE[] = __FILE__;
 // non-class function prototypes, bah
 void initial_status_mark_dock_leader_helper(object *objp, dock_function_info *infop);
 void initial_status_unmark_dock_handled_flag(object *objp, dock_function_info *infop);
-void reset_arrival_to_false(int shipnum, bool reset_wing);
+void reset_arrival_to_false(int shipnum, bool reset_wing, bool suppress_message_box);
 
 /**
  * @brief Handles setting a flag on a flagset when the value is inconsistent
@@ -1025,7 +1025,7 @@ bool set_cue_to_false(int *cue)
 }
 
 // function to set the arrival cue of a ship to false
-void reset_arrival_to_false(int shipnum, bool reset_wing)
+void reset_arrival_to_false(int shipnum, bool reset_wing, bool suppress_message_box)
 {
 	char buf[256];
 	ship *shipp = &Ships[shipnum];
@@ -1033,8 +1033,11 @@ void reset_arrival_to_false(int shipnum, bool reset_wing)
 	// falsify the ship cue
 	if (set_cue_to_false(&shipp->arrival_cue))
 	{
-		sprintf(buf, "Setting arrival cue of ship %s\nto false for initial docking purposes.", shipp->ship_name);
-		MessageBox(NULL, buf, "", MB_OK | MB_ICONEXCLAMATION);
+		if (!suppress_message_box)
+		{
+			sprintf(buf, "Setting arrival cue of ship %s\nto false for initial docking purposes.", shipp->ship_name);
+			MessageBox(nullptr, buf, "", MB_OK | MB_ICONEXCLAMATION);
+		}
 	}
 
 	// falsify the wing cue and all ships in that wing
@@ -1045,12 +1048,15 @@ void reset_arrival_to_false(int shipnum, bool reset_wing)
 
 		if (set_cue_to_false(&wingp->arrival_cue))
 		{
-			sprintf(buf, "Setting arrival cue of wing %s\nto false for initial docking purposes.", wingp->name);
-			MessageBox(NULL, buf, "", MB_OK | MB_ICONEXCLAMATION);
+			if (!suppress_message_box)
+			{
+				sprintf(buf, "Setting arrival cue of wing %s\nto false for initial docking purposes.", wingp->name);
+				MessageBox(nullptr, buf, "", MB_OK | MB_ICONEXCLAMATION);
+			}
 		}
 
 		for (i = 0; i < wingp->wave_count; i++)
-			reset_arrival_to_false(wingp->ship_index[i], false);
+			reset_arrival_to_false(wingp->ship_index[i], false, suppress_message_box);
 	}
 }
 
@@ -1058,6 +1064,7 @@ void reset_arrival_to_false(int shipnum, bool reset_wing)
 // group with a non-false arrival cue
 void initial_status_mark_dock_leader_helper(object *objp, dock_function_info *infop)
 {
+	bool suppress_message_box = infop->parameter_variables.bool_value;
 	ship *shipp = &Ships[objp->instance];
 	int cue_to_check;
 
@@ -1090,13 +1097,13 @@ void initial_status_mark_dock_leader_helper(object *objp, dock_function_info *in
 			if (ship_class_compare(shipp->ship_info_index, leader_shipp->ship_info_index) >= 0)
 			{
 				// set my arrival cue to false
-				reset_arrival_to_false(SHIP_INDEX(shipp), true);
+				reset_arrival_to_false(SHIP_INDEX(shipp), true, suppress_message_box);
 				return;
 			}
 
 			// otherwise, unmark the existing leader and set his arrival cue to false
 			leader_shipp->flags.remove(Ship::Ship_Flags::Dock_leader);
-			reset_arrival_to_false(SHIP_INDEX(leader_shipp), true);
+			reset_arrival_to_false(SHIP_INDEX(leader_shipp), true, suppress_message_box);
 		}
 
 		// mark and save me as the leader
