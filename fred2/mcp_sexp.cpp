@@ -295,8 +295,8 @@ static void debriefing_write(const FormulaRootInfo &info, int new_root)
 static bool ship_lookup(const char *entity_id, entity_specific_tag tag,
 	FormulaRootInfo &info, int &out_root, McpErrorSink &sink)
 {
-	int ship_idx = ship_name_lookup(entity_id, 1);
-	if (ship_idx < 0) { set_not_found_error(sink, "Ship", entity_id); return false; }
+	int ship_idx = lookup_ship(entity_id, sink);
+	if (ship_idx < 0) return false;
 	info.attached_id = Ships[ship_idx].ship_name;
 	info.attached_tag = tag;
 	out_root = (tag == entity_specific_tag::DEPARTURE_CUE)
@@ -331,8 +331,8 @@ static void ship_write(const FormulaRootInfo &info, int new_root)
 static bool wing_lookup(const char *entity_id, entity_specific_tag tag,
 	FormulaRootInfo &info, int &out_root, McpErrorSink &sink)
 {
-	int wing_idx = wing_name_lookup(entity_id);
-	if (wing_idx < 0) { set_not_found_error(sink, "Wing", entity_id); return false; }
+	int wing_idx = lookup_wing(entity_id, sink);
+	if (wing_idx < 0) return false;
 	info.attached_id = Wings[wing_idx].name;
 	info.attached_tag = tag;
 	out_root = (tag == entity_specific_tag::DEPARTURE_CUE)

@@ -452,11 +452,8 @@ static void handle_get_ship(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx < 0) {
-		set_not_found_error(sink, "Ship", name);
-		return;
-	}
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
 
 	req->result_json = make_json_tool_result(build_ship_json(ship_idx, true));
 	req->success = true;
@@ -719,11 +716,8 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx < 0) {
-		set_not_found_error(sink, "Ship", name);
-		return;
-	}
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
 
 	auto new_name          = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	auto display_name      = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
@@ -1004,11 +998,8 @@ static void handle_delete_ship(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx < 0) {
-		set_not_found_error(sink, "Ship", name);
-		return;
-	}
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
 
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
@@ -1180,6 +1171,23 @@ static bool resolve_weapon_bank_set(
 	return true;
 }
 
+// Per-bank accessors that absorb the is_primary ternary.  References so callers
+// can read or assign through them.
+static int& bank_weapon_ref(ship_weapon *swp, bool is_primary, int idx)
+{
+	return is_primary ? swp->primary_bank_weapons[idx] : swp->secondary_bank_weapons[idx];
+}
+
+static int& bank_ammo_ref(ship_weapon *swp, bool is_primary, int idx)
+{
+	return is_primary ? swp->primary_bank_ammo[idx] : swp->secondary_bank_ammo[idx];
+}
+
+static int bank_count(const ship_weapon *swp, bool is_primary)
+{
+	return is_primary ? swp->num_primary_banks : swp->num_secondary_banks;
+}
+
 // Dispatch to the correct engine max-ammo helper.  Pilot helpers use
 // std::lround (round-to-nearest); turret helpers use truncation -- an engine
 // inconsistency we mirror so the reported max matches what the game clamps to.
@@ -1219,9 +1227,7 @@ static json_t *build_bank_json(
 	int ship_class, ship_weapon *swp, ship_subsys *subsys,
 	bool is_primary, int bank_zero_based)
 {
-	int weapon_idx = is_primary
-		? swp->primary_bank_weapons[bank_zero_based]
-		: swp->secondary_bank_weapons[bank_zero_based];
+	int weapon_idx = bank_weapon_ref(swp, is_primary, bank_zero_based);
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "bank", json_integer(bank_zero_based + 1));
@@ -1235,9 +1241,7 @@ static json_t *build_bank_json(
 	json_object_set_new(obj, "weapon_class", json_safe_string(Weapon_info[weapon_idx].name));
 
 	int max_ammo = compute_max_ammo(ship_class, swp, subsys, is_primary, bank_zero_based, weapon_idx);
-	int stored_percent = is_primary
-		? swp->primary_bank_ammo[bank_zero_based]
-		: swp->secondary_bank_ammo[bank_zero_based];
+	int stored_percent = bank_ammo_ref(swp, is_primary, bank_zero_based);
 	json_object_set_new(obj, "ammo_count",
 		json_integer(ammo_percent_to_count(stored_percent, max_ammo)));
 
@@ -1363,11 +1367,8 @@ static bool resolve_bank_target(
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return false;
 
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx < 0) {
-		set_not_found_error(sink, "Ship", name);
-		return false;
-	}
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return false;
 
 	auto bank_type = get_required_string(input, "bank_type", sink, true);
 	if (!bank_type) return false;
@@ -1387,7 +1388,7 @@ static bool resolve_bank_target(
 	if (!resolve_weapon_bank_set(shipp, subsystem, swp, subsys, sink))
 		return false;
 
-	int num_banks = is_primary ? swp->num_primary_banks : swp->num_secondary_banks;
+	int num_banks = bank_count(swp, is_primary);
 	if (num_banks <= 0) {
 		sink.set_error("%s on ship '%s' has no %s banks.",
 			subsys ? subsys->system_info->subobj_name : "Pilot weapon set",
@@ -1421,11 +1422,8 @@ static void handle_get_ship_weapons(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int ship_idx = ship_name_lookup(name, 1);
-	if (ship_idx < 0) {
-		set_not_found_error(sink, "Ship", name);
-		return;
-	}
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
 
 	ship &shipp = Ships[ship_idx];
 	int ship_class = shipp.ship_info_index;
@@ -1490,9 +1488,7 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 	bool force = force_arg.value_or(false);
 
 	// Resolve the target weapon: -1 means "<none>" (clear).
-	int existing_weapon_idx = is_primary
-		? swp->primary_bank_weapons[bank_zb]
-		: swp->secondary_bank_weapons[bank_zb];
+	int existing_weapon_idx = bank_weapon_ref(swp, is_primary, bank_zb);
 	int new_weapon_idx = existing_weapon_idx;
 	bool weapon_specified = (weapon_class_arg != nullptr);
 	bool clearing = false;
@@ -1502,11 +1498,8 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 			new_weapon_idx = -1;
 			clearing = true;
 		} else {
-			new_weapon_idx = weapon_info_lookup(weapon_class_arg);
-			if (new_weapon_idx < 0) {
-				set_not_found_error(sink, "Weapon class", weapon_class_arg);
-				return;
-			}
+			new_weapon_idx = check_lookup(weapon_class_arg, weapon_info_lookup, "weapon_class", sink);
+			if (new_weapon_idx < 0) return;
 			if (!weapon_matches_bank_type(new_weapon_idx, is_primary, sink))
 				return;
 			if (!force && !weapon_selectable_in_editor(new_weapon_idx, sink))
@@ -1535,10 +1528,6 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 		}
 		new_ammo_count = 0;
 	} else if (ammo_specified) {
-		if (*ammo_count_arg < 0) {
-			sink.set_error("ammo_count must be non-negative.");
-			return;
-		}
 		if (new_max_ammo <= 0) {
 			if (*ammo_count_arg != 0) {
 				sink.set_error("Weapon '%s' has no ammo (energy/beam or non-ballistic primary); "
@@ -1547,37 +1536,25 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 				return;
 			}
 			new_ammo_count = 0;
-		} else if (*ammo_count_arg > new_max_ammo) {
-			sink.set_error("ammo_count %d exceeds maximum %d for this bank/weapon combination.",
-				*ammo_count_arg, new_max_ammo);
-			return;
 		} else {
+			if (!check_int_range(*ammo_count_arg, 0, new_max_ammo, "ammo_count", sink))
+				return;
 			new_ammo_count = *ammo_count_arg;
 		}
 	} else if (weapon_changing) {
 		// Weapon changing without explicit ammo -- preserve the previous
 		// percentage against the new weapon's max (mirrors the FRED dialog,
 		// see weaponeditordlg.cpp change_selection()).
-		int existing_percent = is_primary
-			? swp->primary_bank_ammo[bank_zb]
-			: swp->secondary_bank_ammo[bank_zb];
+		int existing_percent = bank_ammo_ref(swp, is_primary, bank_zb);
 		new_ammo_count = ammo_percent_to_count(existing_percent, new_max_ammo);
 	}
 
 	bool any_change = weapon_changing || clearing || ammo_specified;
 
 	if (any_change) {
-		if (weapon_changing || clearing) {
-			if (is_primary)
-				swp->primary_bank_weapons[bank_zb] = new_weapon_idx;
-			else
-				swp->secondary_bank_weapons[bank_zb] = new_weapon_idx;
-		}
-		int stored_percent = ammo_count_to_percent(new_ammo_count, new_max_ammo);
-		if (is_primary)
-			swp->primary_bank_ammo[bank_zb] = stored_percent;
-		else
-			swp->secondary_bank_ammo[bank_zb] = stored_percent;
+		if (weapon_changing || clearing)
+			bank_weapon_ref(swp, is_primary, bank_zb) = new_weapon_idx;
+		bank_ammo_ref(swp, is_primary, bank_zb) = ammo_count_to_percent(new_ammo_count, new_max_ammo);
 
 		mark_modified("MCP: update ship %s weapon bank (%s %s %d)",
 			shipp->ship_name,
@@ -1607,11 +1584,8 @@ static void handle_get_max_ammo_for_bank(json_t *input, McpToolRequest *req)
 	auto weapon_class = get_required_string(input, "weapon_class", sink, true);
 	if (!weapon_class) return;
 
-	int weapon_idx = weapon_info_lookup(weapon_class);
-	if (weapon_idx < 0) {
-		set_not_found_error(sink, "Weapon class", weapon_class);
-		return;
-	}
+	int weapon_idx = check_lookup(weapon_class, weapon_info_lookup, "weapon_class", sink);
+	if (weapon_idx < 0) return;
 	if (!weapon_matches_bank_type(weapon_idx, is_primary, sink))
 		return;
 
