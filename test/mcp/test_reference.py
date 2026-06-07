@@ -133,6 +133,18 @@ def register(suite, client):
         if not found_with_bays:
             raise SkipTest("No ship classes with dockpoints in this mod")
 
+    def test_list_subsystem_types():
+        r = client.call_tool("list_subsystem_types")
+        assert_success(r)
+        d = tool_data(r)
+        assert_is_list(d)
+        names = {e.get("name") for e in d if isinstance(e, dict)}
+        # The engine maps these SUBSYSTEM_* values to fixed lowercase strings;
+        # check a representative sample to ensure the catalog stays coherent.
+        for expected in ("engine", "turret", "radar", "navigation",
+                         "communication", "weapons", "sensors"):
+            assert_in(expected, names)
+
     def test_list_weapon_classes():
         r = client.call_tool("list_weapon_classes")
         assert_success(r)
@@ -436,6 +448,7 @@ def register(suite, client):
         ("reference_get_ship_class", test_get_ship_class),
         ("reference_get_ship_class_model_details", test_get_ship_class_model_details),
         ("reference_list_ship_class_dockpoints", test_list_ship_class_dockpoints),
+        ("reference_list_subsystem_types", test_list_subsystem_types),
         ("reference_list_weapon_classes", test_list_weapon_classes),
         ("reference_list_weapon_classes_filtered", test_list_weapon_classes_filtered),
         ("reference_get_weapon_class", test_get_weapon_class),
