@@ -306,11 +306,8 @@ static void handle_get_wing(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		set_not_found_error(sink, "Wing", name);
-		return;
-	}
+	int wing_idx = lookup_wing(name, sink);
+	if (wing_idx < 0) return;
 
 	req->result_json = make_json_tool_result(build_wing_json(wing_idx, true));
 	req->success = true;
@@ -502,11 +499,8 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		set_not_found_error(sink, "Wing", name);
-		return;
-	}
+	int wing_idx = lookup_wing(name, sink);
+	if (wing_idx < 0) return;
 
 	auto new_name            = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
@@ -638,11 +632,8 @@ static void handle_arrange_in_formation(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		set_not_found_error(sink, "Wing", name);
-		return;
-	}
+	int wing_idx = lookup_wing(name, sink);
+	if (wing_idx < 0) return;
 
 	auto formation_str   = get_optional_string(input, "formation", sink);
 	auto formation_scale = get_optional_float(input, "formation_scale", sink);
@@ -716,11 +707,8 @@ static void handle_delete_wing(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		set_not_found_error(sink, "Wing", name);
-		return;
-	}
+	int wing_idx = lookup_wing(name, sink);
+	if (wing_idx < 0) return;
 
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
@@ -746,11 +734,8 @@ static void handle_disband_wing(json_t *input, McpToolRequest *req)
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		set_not_found_error(sink, "Wing", name);
-		return;
-	}
+	int wing_idx = lookup_wing(name, sink);
+	if (wing_idx < 0) return;
 
 	auto force = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
