@@ -983,6 +983,501 @@ def register(suite, client):
         assert_error(r)
 
     # ---------------------------------------------------------------------
+    # Docking
+    # ---------------------------------------------------------------------
+    #
+    # Need a ship class with at least two dockpoints whose type-flag sets
+    # overlap so the same class can dock to itself.  Iterate list_ship_classes
+    # until we find one (most cap ships have multiple generic bays).  Tests
+    # that need this skip cleanly when no suitable class exists.
+
+    def _pick_dockable_class():
+        """Return (class_name, [point1_name, point2_name]) where point1 and
+        point2 can be docked together (their dock_types intersect).  Returns
+        None if no class has two such dockpoints."""
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        for c in tool_data(r):
+            name = c.get("name")
+            if not name:
+                continue
+            rr = client.call_tool("list_ship_class_dockpoints", {"ship_class": name})
+            if rr.get("isError"):
+                continue
+            bays = tool_data(rr)
+            if len(bays) < 2:
+                continue
+            # Pick the first two bays whose dock_types overlap.
+            for i in range(len(bays)):
+                ti = set(bays[i].get("dock_types", []))
+                if not ti:
+                    continue
+                for j in range(len(bays)):
+                    if i == j:
+                        continue
+                    tj = set(bays[j].get("dock_types", []))
+                    if ti & tj:
+                        return (name, [bays[i]["name"], bays[j]["name"]])
+        return None
+
+    def _create_dockable_pair(cls, name_a, name_b):
+        client.call_tool("create_ship", {
+            "name": name_a, "ship_class": cls,
+            "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "orientation": IDENTITY_ORIENT,
+        })
+        client.call_tool("create_ship", {
+            "name": name_b, "ship_class": cls,
+            "position": {"x": 200.0, "y": 0.0, "z": 0.0},
+            "orientation": IDENTITY_ORIENT,
+        })
+
+    def test_ships_dock_basic_round_trip():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return  # skip cleanly if no class has compatible dockpoints
+        cls, (pt1, pt2) = pick
+        created = ["MCP Dock A", "MCP Dock B"]
+        try:
+            _create_dockable_pair(cls, *created)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP Dock A", "dockee": "MCP Dock B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("docker"), "MCP Dock A", "echoed docker")
+            assert_equal(d.get("dockee"), "MCP Dock B", "echoed dockee")
+            assert_equal(d.get("docker_point"), pt1, "echoed docker_point")
+            assert_equal(d.get("dockee_point"), pt2, "echoed dockee_point")
+            # Dock leader is one of the two ships
+            assert_in(d.get("dock_leader"), ["MCP Dock A", "MCP Dock B"])
+
+            # get_ship reports docked_to + is_dock_leader on both sides.
+            ra = tool_data(client.call_tool("get_ship", {"name": "MCP Dock A"}))
+            rb = tool_data(client.call_tool("get_ship", {"name": "MCP Dock B"}))
+            assert_in("docked_to", ra)
+            assert_in("docked_to", rb)
+            assert_equal(len(ra["docked_to"]), 1, "A docked_to length")
+            assert_equal(ra["docked_to"][0]["ship"], "MCP Dock B", "A->B partner")
+            assert_equal(ra["docked_to"][0]["my_dockpoint"], pt1, "A my_dockpoint")
+            assert_equal(ra["docked_to"][0]["other_dockpoint"], pt2, "A other_dockpoint")
+            assert_equal(rb["docked_to"][0]["ship"], "MCP Dock A", "B->A partner")
+            # Mirror: my_dockpoint is always THIS ship's point, regardless of
+            # which side was the docker in the original dock_ships call.
+            assert_equal(rb["docked_to"][0]["my_dockpoint"], pt2, "B my_dockpoint")
+            assert_equal(rb["docked_to"][0]["other_dockpoint"], pt1, "B other_dockpoint")
+            assert_in("is_dock_leader", ra)
+            assert_in("is_dock_leader", rb)
+            # Exactly one of them is the leader.
+            leaders = [s for s in (ra, rb) if s.get("is_dock_leader")]
+            assert_equal(len(leaders), 1, "exactly one dock leader")
+
+            # Undock the pair.
+            r = client.call_tool("undock_ships", {
+                "ship": "MCP Dock A", "other_ship": "MCP Dock B",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP Dock A")
+            assert_equal(d.get("other_ship"), "MCP Dock B")
+            # No further partners after this undock of a one-on-one pair.
+            assert_equal(d.get("still_docked_to"), [], "still_docked_to empty after final undock")
+
+            # docked_to / is_dock_leader disappear when undocked.
+            ra = tool_data(client.call_tool("get_ship", {"name": "MCP Dock A"}))
+            rb = tool_data(client.call_tool("get_ship", {"name": "MCP Dock B"}))
+            assert_true("docked_to" not in ra, "A docked_to omitted when undocked")
+            assert_true("docked_to" not in rb, "B docked_to omitted when undocked")
+            assert_true("is_dock_leader" not in ra, "A is_dock_leader omitted")
+            assert_true("is_dock_leader" not in rb, "B is_dock_leader omitted")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_dock_validation():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return
+        cls, (pt1, pt2) = pick
+        created = ["MCP DV A", "MCP DV B"]
+        try:
+            _create_dockable_pair(cls, *created)
+
+            # Self-dock
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP DV A", "dockee": "MCP DV A",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_error(r)
+
+            # Unknown ship name
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP DV A", "dockee": "Does Not Exist",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_error(r)
+
+            # Unknown dockpoint name
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP DV A", "dockee": "MCP DV B",
+                "docker_point": "no-such-point", "dockee_point": pt2,
+            })
+            assert_error(r)
+
+            # Now do a real dock.
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP DV A", "dockee": "MCP DV B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+
+            # Already docked.
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP DV A", "dockee": "MCP DV B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_undock_derive_partner():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return
+        cls, (pt1, pt2) = pick
+        created = ["MCP UD A", "MCP UD B"]
+        try:
+            _create_dockable_pair(cls, *created)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP UD A", "dockee": "MCP UD B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+
+            # Omit other_ship; should derive "MCP UD B".
+            r = client.call_tool("undock_ships", {"ship": "MCP UD A"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("other_ship"), "MCP UD B", "derived partner")
+
+            ra = tool_data(client.call_tool("get_ship", {"name": "MCP UD A"}))
+            assert_true("docked_to" not in ra, "A no longer docked")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def _pick_dockable_class_three_points():
+        """Like _pick_dockable_class but requires the class to have three
+        dockpoints that can all be paired with two others.  We just look for
+        a class with >= 3 dockpoints whose types overlap pairwise."""
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        for c in tool_data(r):
+            name = c.get("name")
+            if not name:
+                continue
+            rr = client.call_tool("list_ship_class_dockpoints", {"ship_class": name})
+            if rr.get("isError"):
+                continue
+            bays = tool_data(rr)
+            if len(bays) < 3:
+                continue
+            # Pick three points where bay0 overlaps bay1 and bay0 overlaps bay2.
+            for i in range(len(bays)):
+                ti = set(bays[i].get("dock_types", []))
+                if not ti:
+                    continue
+                compat = []
+                for j in range(len(bays)):
+                    if i == j:
+                        continue
+                    if set(bays[j].get("dock_types", [])) & ti:
+                        compat.append(bays[j]["name"])
+                        if len(compat) == 2:
+                            return (name, bays[i]["name"], compat[0], compat[1])
+        return None
+
+    def test_ships_undock_ambiguous():
+        pick = _pick_dockable_class_three_points()
+        if pick is None:
+            return
+        cls, hub_pt, leaf_pt_b, leaf_pt_c = pick
+        # Hub will be A; B docks at leaf_pt_b on hub_pt's side... actually
+        # the hub's pt is what B and C connect TO.  So both B and C use leaf_pt
+        # as their docker_point and hub_pt is unused -- wait, that's wrong.
+        # Re-think: A has dockpoints {hub_pt, leaf_pt_b, leaf_pt_c}.
+        # We dock B to A on hub_pt <-> leaf_pt_b (B uses some dockpoint compatible),
+        # and C to A on hub_pt <-> leaf_pt_c.  But A can only use hub_pt once.
+        # The simpler arrangement: A has multiple dockpoints; B and C each dock
+        # to a *different* dockpoint on A.  So we just need 2 dockpoints on A
+        # that B/C can connect to.  Re-pick using leaf_pt_b and leaf_pt_c as
+        # the two dockpoints on A.
+        a_pt_for_b = leaf_pt_b
+        a_pt_for_c = leaf_pt_c
+        b_pt = hub_pt
+        c_pt = hub_pt
+        created = ["MCP UA Hub", "MCP UA B", "MCP UA C"]
+        try:
+            for nm, x in zip(created, [0.0, 200.0, 400.0]):
+                r = client.call_tool("create_ship", {
+                    "name": nm, "ship_class": cls,
+                    "position": {"x": x, "y": 0.0, "z": 0.0},
+                    "orientation": IDENTITY_ORIENT,
+                })
+                assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP UA Hub", "dockee": "MCP UA B",
+                "docker_point": a_pt_for_b, "dockee_point": b_pt,
+            })
+            assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP UA Hub", "dockee": "MCP UA C",
+                "docker_point": a_pt_for_c, "dockee_point": c_pt,
+            })
+            assert_success(r)
+
+            # Hub is docked to 2 ships; undock without other_ship should error.
+            r = client.call_tool("undock_ships", {"ship": "MCP UA Hub"})
+            assert_error(r)
+
+            # Disambiguated undock of one partner: still_docked_to should list
+            # the remaining partner (the other dock attachment is untouched).
+            r = client.call_tool("undock_ships", {
+                "ship": "MCP UA Hub", "other_ship": "MCP UA B",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP UA Hub")
+            assert_equal(d.get("other_ship"), "MCP UA B")
+            assert_equal(d.get("still_docked_to"), ["MCP UA C"],
+                "still_docked_to should list the remaining partner after partial undock")
+
+            # Now undock the last partner: still_docked_to becomes empty.
+            r = client.call_tool("undock_ships", {
+                "ship": "MCP UA Hub", "other_ship": "MCP UA C",
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("still_docked_to"), [],
+                "still_docked_to empty once hub has no partners")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_undock_all():
+        pick = _pick_dockable_class_three_points()
+        if pick is None:
+            return
+        cls, hub_pt, a_pt_for_b, a_pt_for_c = pick
+        b_pt = hub_pt
+        c_pt = hub_pt
+        created = ["MCP UA2 Hub", "MCP UA2 B", "MCP UA2 C"]
+        try:
+            for nm, x in zip(created, [0.0, 200.0, 400.0]):
+                r = client.call_tool("create_ship", {
+                    "name": nm, "ship_class": cls,
+                    "position": {"x": x, "y": 0.0, "z": 0.0},
+                    "orientation": IDENTITY_ORIENT,
+                })
+                assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP UA2 Hub", "dockee": "MCP UA2 B",
+                "docker_point": a_pt_for_b, "dockee_point": b_pt,
+            })
+            assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP UA2 Hub", "dockee": "MCP UA2 C",
+                "docker_point": a_pt_for_c, "dockee_point": c_pt,
+            })
+            assert_success(r)
+
+            r = client.call_tool("undock_all_ships", {"ship": "MCP UA2 Hub"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP UA2 Hub")
+            partners = set(d.get("formerly_docked_to", []))
+            assert_equal(partners, {"MCP UA2 B", "MCP UA2 C"}, "formerly_docked_to set")
+
+            for name in created:
+                rr = tool_data(client.call_tool("get_ship", {"name": name}))
+                assert_true("docked_to" not in rr, f"{name} no longer docked")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    # ---------- list_docked_group / set_dock_leader ----------
+
+    def test_ships_list_docked_group_undocked():
+        cls = _pick_ship_class(client)
+        created = ["MCP LG Solo"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP LG Solo", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            r = client.call_tool("list_docked_group", {"ship": "MCP LG Solo"})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), "MCP LG Solo")
+            assert_equal(d.get("dock_leader"), None,
+                "dock_leader should be null for a solitary ship")
+            assert_equal(d.get("ships"), ["MCP LG Solo"], "single-element group")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_list_docked_group_pair():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return
+        cls, (pt1, pt2) = pick
+        created = ["MCP LG A", "MCP LG B"]
+        try:
+            _create_dockable_pair(cls, *created)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP LG A", "dockee": "MCP LG B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+
+            # Calling from either side returns the same group.
+            for query in ("MCP LG A", "MCP LG B"):
+                r = client.call_tool("list_docked_group", {"ship": query})
+                assert_success(r)
+                d = tool_data(r)
+                assert_equal(set(d.get("ships", [])), {"MCP LG A", "MCP LG B"},
+                    f"group from {query}")
+                assert_in(d.get("dock_leader"), ["MCP LG A", "MCP LG B"],
+                    "dock_leader must be one of the pair")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_list_docked_group_chain():
+        pick = _pick_dockable_class_three_points()
+        if pick is None:
+            return
+        cls, hub_pt, a_pt_for_b, a_pt_for_c = pick
+        created = ["MCP LG3 Hub", "MCP LG3 B", "MCP LG3 C"]
+        try:
+            for nm, x in zip(created, [0.0, 200.0, 400.0]):
+                r = client.call_tool("create_ship", {
+                    "name": nm, "ship_class": cls,
+                    "position": {"x": x, "y": 0.0, "z": 0.0},
+                    "orientation": IDENTITY_ORIENT,
+                })
+                assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP LG3 Hub", "dockee": "MCP LG3 B",
+                "docker_point": a_pt_for_b, "dockee_point": hub_pt,
+            })
+            assert_success(r)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP LG3 Hub", "dockee": "MCP LG3 C",
+                "docker_point": a_pt_for_c, "dockee_point": hub_pt,
+            })
+            assert_success(r)
+
+            # Calling from any of the three should yield the same group.
+            for query in created:
+                r = client.call_tool("list_docked_group", {"ship": query})
+                assert_success(r)
+                d = tool_data(r)
+                assert_equal(set(d.get("ships", [])),
+                    {"MCP LG3 Hub", "MCP LG3 B", "MCP LG3 C"},
+                    f"group from {query}")
+                assert_in(d.get("dock_leader"), created,
+                    "dock_leader must be one of the three")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_set_dock_leader_swap():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return
+        cls, (pt1, pt2) = pick
+        created = ["MCP SL A", "MCP SL B"]
+        try:
+            _create_dockable_pair(cls, *created)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP SL A", "dockee": "MCP SL B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+            auto_leader = tool_data(r).get("dock_leader")
+            other = "MCP SL B" if auto_leader == "MCP SL A" else "MCP SL A"
+
+            # Capture the leader's arrival cue before the swap.
+            r = client.call_tool("get_ship", {"name": auto_leader})
+            assert_success(r)
+            leader_cue_before = tool_data(r).get("arrival_cue")
+
+            # Promote the other ship.
+            r = client.call_tool("set_dock_leader", {"ship": other})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), other)
+            assert_equal(d.get("previous_leader"), auto_leader,
+                "previous_leader should be the auto-picked ship")
+
+            # New leader has is_dock_leader: true, old one does not.
+            ra = tool_data(client.call_tool("get_ship", {"name": other}))
+            rb = tool_data(client.call_tool("get_ship", {"name": auto_leader}))
+            assert_equal(ra.get("is_dock_leader"), True, "new leader flag set")
+            assert_equal(rb.get("is_dock_leader"), False, "old leader flag cleared")
+
+            # The leader's cue moved with the title.
+            assert_equal(ra.get("arrival_cue"), leader_cue_before,
+                "new leader carries the previous leader's arrival cue")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_set_dock_leader_already_leader_noop():
+        pick = _pick_dockable_class()
+        if pick is None:
+            return
+        cls, (pt1, pt2) = pick
+        created = ["MCP SL2 A", "MCP SL2 B"]
+        try:
+            _create_dockable_pair(cls, *created)
+            r = client.call_tool("dock_ships", {
+                "docker": "MCP SL2 A", "dockee": "MCP SL2 B",
+                "docker_point": pt1, "dockee_point": pt2,
+            })
+            assert_success(r)
+            auto_leader = tool_data(r).get("dock_leader")
+
+            r = client.call_tool("set_dock_leader", {"ship": auto_leader})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("ship"), auto_leader)
+            assert_equal(d.get("previous_leader"), auto_leader,
+                "previous_leader echoes the same ship for no-op")
+
+            # Still the leader; flag still set.
+            rr = tool_data(client.call_tool("get_ship", {"name": auto_leader}))
+            assert_equal(rr.get("is_dock_leader"), True)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ships_set_dock_leader_validation():
+        cls = _pick_ship_class(client)
+        created = ["MCP SLV Solo"]
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP SLV Solo", "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+
+            # Unknown ship.
+            r = client.call_tool("set_dock_leader", {"ship": "Does Not Exist"})
+            assert_error(r)
+
+            # Solitary ship is not docked → error.
+            r = client.call_tool("set_dock_leader", {"ship": "MCP SLV Solo"})
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
+    # ---------------------------------------------------------------------
     # Weapon-bank tools
     # ---------------------------------------------------------------------
     #
@@ -1352,6 +1847,17 @@ def register(suite, client):
     suite.add("ships_move_preserves_identity", test_ships_move_preserves_identity)
     suite.add("ships_swap_out_of_range", test_ships_swap_out_of_range)
     suite.add("ships_move_out_of_range", test_ships_move_out_of_range)
+    suite.add("ships_dock_basic_round_trip", test_ships_dock_basic_round_trip)
+    suite.add("ships_dock_validation", test_ships_dock_validation)
+    suite.add("ships_undock_derive_partner", test_ships_undock_derive_partner)
+    suite.add("ships_undock_ambiguous", test_ships_undock_ambiguous)
+    suite.add("ships_undock_all", test_ships_undock_all)
+    suite.add("ships_list_docked_group_undocked", test_ships_list_docked_group_undocked)
+    suite.add("ships_list_docked_group_pair", test_ships_list_docked_group_pair)
+    suite.add("ships_list_docked_group_chain", test_ships_list_docked_group_chain)
+    suite.add("ships_set_dock_leader_swap", test_ships_set_dock_leader_swap)
+    suite.add("ships_set_dock_leader_already_leader_noop", test_ships_set_dock_leader_already_leader_noop)
+    suite.add("ships_set_dock_leader_validation", test_ships_set_dock_leader_validation)
     suite.add("ship_weapons_pilot_shape", test_get_ship_weapons_pilot_shape)
     suite.add("ship_weapon_bank_pilot_default_matches_explicit",
         test_get_ship_weapon_bank_pilot_default_matches_explicit)

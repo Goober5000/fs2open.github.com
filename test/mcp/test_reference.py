@@ -13,6 +13,7 @@ Nothing here writes ctx keys that other areas need.
 from mcp_test_lib import (
     assert_has_key,
     assert_in,
+    assert_is_dict,
     assert_is_list,
     assert_non_empty_list,
     assert_success,
@@ -92,6 +93,45 @@ def register(suite, client):
         assert_success(r)
         d = tool_data(r)
         assert_has_key(d, "name")
+
+    def test_list_ship_class_dockpoints():
+        # Iterate ship classes until we find one with at least one dockpoint,
+        # since not every class has docking bays (fighters often don't).
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        classes = tool_data(r)
+        found_with_bays = False
+        for c in classes:
+            name = c.get("name") if isinstance(c, dict) else c
+            if not name:
+                continue
+            rr = client.call_tool("list_ship_class_dockpoints", {"ship_class": name}, timeout=120)
+            assert_success(rr)
+            bays = tool_data(rr)
+            assert_is_list(bays)
+            if not bays:
+                continue
+            found_with_bays = True
+            # Validate shape on the first bay-bearing class encountered.
+            for bay in bays:
+                assert_is_dict(bay)
+                assert_has_key(bay, "name")
+                assert_has_key(bay, "dock_types")
+                assert_is_list(bay["dock_types"])
+                for t in bay["dock_types"]:
+                    assert_in(t, ["cargo", "rearm", "generic"])
+                # position and normal are vec3d {x, y, z} in model-local frame.
+                assert_has_key(bay, "position")
+                assert_is_dict(bay["position"])
+                for k in ("x", "y", "z"):
+                    assert_has_key(bay["position"], k)
+                assert_has_key(bay, "normal")
+                assert_is_dict(bay["normal"])
+                for k in ("x", "y", "z"):
+                    assert_has_key(bay["normal"], k)
+            break
+        if not found_with_bays:
+            raise SkipTest("No ship classes with dockpoints in this mod")
 
     def test_list_weapon_classes():
         r = client.call_tool("list_weapon_classes")
@@ -395,6 +435,7 @@ def register(suite, client):
         ("reference_list_ship_classes_filtered_type", test_list_ship_classes_filtered_type),
         ("reference_get_ship_class", test_get_ship_class),
         ("reference_get_ship_class_model_details", test_get_ship_class_model_details),
+        ("reference_list_ship_class_dockpoints", test_list_ship_class_dockpoints),
         ("reference_list_weapon_classes", test_list_weapon_classes),
         ("reference_list_weapon_classes_filtered", test_list_weapon_classes_filtered),
         ("reference_get_weapon_class", test_get_weapon_class),
