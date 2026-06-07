@@ -453,6 +453,12 @@ void mcp_register_reference_tools(json_t *tools)
 		"AI classes control per-ship AI behavior (accuracy, evasion, courage, etc.).",
 		json_object());
 
+	// list_subsystem_types
+	register_tool(tools, "list_subsystem_types",
+		"List the engine-defined subsystem types. These are the values that appear "
+		"in the subsystem_type field for certain tools which return subsystem information.",
+		json_object());
+
 	// list_ai_profiles
 	register_tool(tools, "list_ai_profiles",
 		"List all AI profiles defined in ai_profiles.tbl. "
@@ -2329,6 +2335,20 @@ static json_t *handle_list_ai_classes()
 	return make_json_tool_result(arr);
 }
 
+// Enumerates the engine's SUBSYSTEM_* values (skipping NONE/MAX sentinels).
+// Same mapping subsystem_type_str uses for the subsystem_type field in
+// get_ship_class_model_details.subsystems[].
+static json_t *handle_list_subsystem_types()
+{
+	json_t *arr = json_array();
+	for (int t = SUBSYSTEM_ENGINE; t <= SUBSYSTEM_UNKNOWN; t++) {
+		json_t *item = json_object();
+		json_object_set_new(item, "name", json_safe_string(subsystem_type_str(t)));
+		json_array_append_new(arr, item);
+	}
+	return make_json_tool_result(arr);
+}
+
 extern void get_wing_delta(vec3d *delta, int wing_index);
 
 static json_t *handle_list_wing_formations()
@@ -3023,6 +3043,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_fonts();
 	if (strcmp(tool_name, "list_ai_classes") == 0)
 		return handle_list_ai_classes();
+	if (strcmp(tool_name, "list_subsystem_types") == 0)
+		return handle_list_subsystem_types();
 	if (strcmp(tool_name, "list_ai_profiles") == 0)
 		return handle_list_ai_profiles();
 	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
