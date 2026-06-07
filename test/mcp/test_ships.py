@@ -620,6 +620,141 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, created)
 
+    # ---------- initial state percents ----------
+    #
+    # initial_hull_percent / initial_shield_percent / initial_speed_percent
+    # are stored directly in the runtime object fields when FRED is running
+    # (hull_strength, shield_quadrant[0], phys_info.speed) -- the engine
+    # normalizes them to 0-100 percents in edit mode so missionsave can emit
+    # them as "+Initial Hull/Shields/Velocity:" without conversion.
+
+    def test_ship_initial_percents_round_trip():
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            # Create with explicit values for all three.
+            r = client.call_tool("create_ship", {
+                "name": "MCP Initial Pcts",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "initial_hull_percent": 80,
+                "initial_shield_percent": 50,
+                "initial_speed_percent": 25,
+            })
+            assert_success(r)
+            created.append("MCP Initial Pcts")
+            d = tool_data(r)
+            assert_equal(d.get("initial_hull_percent"), 80, "initial_hull_percent echoed")
+            assert_equal(d.get("initial_shield_percent"), 50, "initial_shield_percent echoed")
+            assert_equal(d.get("initial_speed_percent"), 25, "initial_speed_percent echoed")
+
+            # Update with new values.
+            r = client.call_tool("update_ship", {
+                "name": "MCP Initial Pcts",
+                "initial_hull_percent": 100,
+                "initial_shield_percent": 0,
+                "initial_speed_percent": 100,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("initial_hull_percent"), 100, "initial_hull_percent updated")
+            assert_equal(d.get("initial_shield_percent"), 0, "initial_shield_percent updated")
+            assert_equal(d.get("initial_speed_percent"), 100, "initial_speed_percent updated")
+
+            # Defaults are visible on a ship created without these fields.
+            r = client.call_tool("create_ship", {
+                "name": "MCP Initial Defaults",
+                "ship_class": cls,
+                "position": {"x": 100.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Initial Defaults")
+            d = tool_data(r)
+            # FRED defaults: hull=100, shield=100, speed=33.
+            assert_equal(d.get("initial_hull_percent"), 100, "default hull")
+            assert_equal(d.get("initial_shield_percent"), 100, "default shield")
+            assert_equal(d.get("initial_speed_percent"), 33, "default speed")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_initial_shield_percent_no_shields_gating():
+        # initial_shield_percent is meaningful only when the no-shields flag is
+        # off.  When the flag is on, GET responses omit the field (the stored
+        # value is inert), but updates remain permitted so callers can pre-stage
+        # a value for when the flag is later turned off.
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP NoShield Init",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "initial_shield_percent": 60,
+            })
+            assert_success(r)
+            created.append("MCP NoShield Init")
+            d = tool_data(r)
+            assert_equal(d.get("initial_shield_percent"), 60, "visible at create")
+
+            # Turn on no-shields: field disappears.
+            r = client.call_tool("update_ship", {
+                "name": "MCP NoShield Init",
+                "ship_flags": {"no-shields": True},
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_true("initial_shield_percent" not in d,
+                "initial_shield_percent must be omitted when no-shields is set")
+
+            # Update the value while no-shields is on: succeeds, still omitted.
+            r = client.call_tool("update_ship", {
+                "name": "MCP NoShield Init",
+                "initial_shield_percent": 25,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_true("initial_shield_percent" not in d,
+                "still omitted after a write while flag is set")
+
+            # Clear the flag: stored value re-emerges.
+            r = client.call_tool("update_ship", {
+                "name": "MCP NoShield Init",
+                "ship_flags": {"no-shields": False},
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("initial_shield_percent"), 25,
+                "stored value visible again after no-shields cleared")
+        finally:
+            _delete_all_test_ships(client, created)
+
+    def test_ship_initial_percents_errors():
+        cls = _pick_ship_class(client)
+        created = []
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Initial Errs",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Initial Errs")
+
+            # Out of range (0-100).
+            for field in ("initial_hull_percent", "initial_shield_percent", "initial_speed_percent"):
+                r = client.call_tool("update_ship", {"name": "MCP Initial Errs", field: -1})
+                assert_error(r)
+                r = client.call_tool("update_ship", {"name": "MCP Initial Errs", field: 101})
+                assert_error(r)
+                r = client.call_tool("update_ship", {"name": "MCP Initial Errs", field: "half"})
+                assert_error(r)
+        finally:
+            _delete_all_test_ships(client, created)
+
     # ---------- move / swap ----------
     #
     # The MCP API hides Ships[]'s sparse layout: indices are 1-based over the
@@ -856,6 +991,9 @@ def register(suite, client):
     suite.add("ships_flags_excluded_names_rejected", test_ship_flags_excluded_names_rejected)
     suite.add("ships_flag_paired_scalars", test_ship_flag_paired_scalars)
     suite.add("ships_flag_paired_scalars_errors", test_ship_flag_paired_scalars_errors)
+    suite.add("ships_initial_percents_round_trip", test_ship_initial_percents_round_trip)
+    suite.add("ships_initial_shield_percent_no_shields_gating", test_ship_initial_shield_percent_no_shields_gating)
+    suite.add("ships_initial_percents_errors", test_ship_initial_percents_errors)
     suite.add("ships_swap_basic", test_ships_swap_basic)
     suite.add("ships_swap_idempotent", test_ships_swap_idempotent)
     suite.add("ships_swap_same_index_noop", test_ships_swap_same_index_noop)
