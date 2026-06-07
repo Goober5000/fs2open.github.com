@@ -27,6 +27,9 @@
 #include "ship/ship.h"
 #include "weapon/weapon.h"            // Weapon_info, weapon_info_lookup, Weapon::Info_Flags
 
+#include "model/model.h"              // model_find_dock_name_index, model_get_dock_*
+#include "object/objectdock.h"        // dock_*, object_is_docked, dock_function_info
+
 #include "fred.h"                     // Ship_editor_dialog
 #include "management.h"               // create_ship, delete_ship, rename_ship, invalidate_references, etc.
 
@@ -38,6 +41,11 @@ extern bool sexp_check_flag_arrays(const char *flag_name,
 extern void sexp_alter_ship_flag_helper(object_ship_wing_point_team &oswpt,
 	bool future_ships, Object::Object_Flags object_flag, Ship::Ship_Flags ship_flag,
 	Mission::Parse_Object_Flags parse_obj_flag, AI::AI_Flags ai_flag, bool set_flag);
+
+// FRED initial-status helpers used to bring a freshly-docked chain to a
+// consistent state.  Defined at file scope (non-static) in initialstatus.cpp.
+extern void initial_status_unmark_dock_handled_flag(object *objp, dock_function_info *infop);
+extern void initial_status_mark_dock_leader_helper(object *objp, dock_function_info *infop);
 
 // ---------------------------------------------------------------------------
 // Dialog conflict guard
@@ -57,7 +65,7 @@ static json_t *build_ship_flags_array(int ship_idx);
 static json_t *build_ship_json(int ship_idx, bool include_details)
 {
 	const ship &shipp = Ships[ship_idx];
-	const object &objp = Objects[shipp.objnum];
+	object &objp = Objects[shipp.objnum];
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_safe_string(shipp.ship_name));
@@ -148,6 +156,31 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 	if (shipp.flags[Ship::Ship_Flags::Kill_before_mission])
 		json_object_set_new(obj, "destroy_before_mission_seconds",
 			json_integer(shipp.final_death_time));
+
+	// Initially-docked state -- emitted only when the ship is actually docked.
+	// is_dock_leader is meaningful only in that context; absence signals "not docked."
+	if (object_is_docked(&objp)) {
+		json_object_set_new(obj, "is_dock_leader",
+			json_boolean(shipp.flags[Ship::Ship_Flags::Dock_leader]));
+
+		json_t *docks = json_array();
+		const int this_model = Ship_info[shipp.ship_info_index].model_num;
+		for (dock_instance *d = objp.dock_list; d != nullptr; d = d->next) {
+			object *partner = d->docked_objp;
+			const ship &partner_shipp = Ships[partner->instance];
+			const int partner_model = Ship_info[partner_shipp.ship_info_index].model_num;
+
+			json_t *entry = json_object();
+			json_object_set_new(entry, "ship", json_safe_string(partner_shipp.ship_name));
+			json_object_set_new(entry, "my_dockpoint",
+				json_safe_string(model_get_dock_name(this_model, d->dockpoint_used)));
+			const int partner_point = dock_find_dockpoint_used_by_object(partner, &objp);
+			json_object_set_new(entry, "other_dockpoint",
+				json_safe_string(model_get_dock_name(partner_model, partner_point)));
+			json_array_append_new(docks, entry);
+		}
+		json_object_set_new(obj, "docked_to", docks);
+	}
 
 	return obj;
 }
@@ -1127,6 +1160,366 @@ static void handle_swap_ships(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Docking tools -- mirror initial_status::dock / initial_status::undock from
+// fred2/initialstatus.cpp.  Spatial separation on undock is unconditionally
+// skipped; callers can issue update_ship with a new position if needed.
+// ---------------------------------------------------------------------------
+
+// Walks the docked chain rooted at objp and returns whichever ship in the
+// chain holds the Dock_leader flag, or nullptr if none does.
+// dock_find_dock_leader_helper is a single-object check; dock_evaluate_all_docked_objects
+// fans it across the chain and short-circuits via early_return_condition.
+static object *find_dock_leader_obj(object *objp)
+{
+	dock_function_info dfi;
+	dock_evaluate_all_docked_objects(objp, &dfi, dock_find_dock_leader_helper);
+	return dfi.maintained_variables.objp_value;
+}
+
+static const char *find_dock_leader_name(object *objp)
+{
+	object *leader_objp = find_dock_leader_obj(objp);
+	return leader_objp != nullptr ? Ships[leader_objp->instance].ship_name : nullptr;
+}
+
+// Mirrors the arrival-cue restoration + dock-leader clear that
+// initial_status::undock performs on each ship after a pair separates.
+static void undock_followup(ship &s, object *objp)
+{
+	if (s.arrival_cue == Locked_sexp_false && s.wingnum < 0)
+		s.arrival_cue = Locked_sexp_true;
+	if (!object_is_docked(objp))
+		s.flags.remove(Ship::Ship_Flags::Dock_leader);
+}
+
+static void handle_dock_ships(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto docker_name      = get_required_string(input, "docker", sink, true);
+	auto dockee_name      = get_required_string(input, "dockee", sink, true);
+	auto docker_point     = get_required_string(input, "docker_point", sink, true);
+	auto dockee_point     = get_required_string(input, "dockee_point", sink, true);
+	if (!docker_name || !dockee_name || !docker_point || !dockee_point) return;
+
+	if (!stricmp(docker_name, dockee_name)) {
+		sink.set_error("docker and dockee must be different ships.");
+		return;
+	}
+
+	int docker_idx_ship = lookup_ship(docker_name, sink);
+	if (docker_idx_ship < 0) return;
+	int dockee_idx_ship = lookup_ship(dockee_name, sink);
+	if (dockee_idx_ship < 0) return;
+
+	ship &docker_shipp = Ships[docker_idx_ship];
+	ship &dockee_shipp = Ships[dockee_idx_ship];
+	object *docker_objp = &Objects[docker_shipp.objnum];
+	object *dockee_objp = &Objects[dockee_shipp.objnum];
+	const int docker_model = Ship_info[docker_shipp.ship_info_index].model_num;
+	const int dockee_model = Ship_info[dockee_shipp.ship_info_index].model_num;
+
+	int docker_pt = model_find_dock_name_index(docker_model, docker_point);
+	if (docker_pt < 0) {
+		sink.set_error("Dockpoint '%s' not found on '%s' (use list_ship_class_dockpoints).",
+			docker_point, docker_name);
+		return;
+	}
+	int dockee_pt = model_find_dock_name_index(dockee_model, dockee_point);
+	if (dockee_pt < 0) {
+		sink.set_error("Dockpoint '%s' not found on '%s' (use list_ship_class_dockpoints).",
+			dockee_point, dockee_name);
+		return;
+	}
+
+	// Type compatibility
+	const int docker_type = model_get_dock_index_type(docker_model, docker_pt);
+	const int dockee_type = model_get_dock_index_type(dockee_model, dockee_pt);
+	if ((docker_type & dockee_type) == 0) {
+		sink.set_error("Incompatible dockpoint types: '%s' on '%s' and '%s' on '%s' do not share a type.",
+			docker_point, docker_name, dockee_point, dockee_name);
+		return;
+	}
+
+	// Occupancy
+	if (dock_find_object_at_dockpoint(docker_objp, docker_pt) != nullptr) {
+		sink.set_error("Dockpoint '%s' on '%s' is already occupied.", docker_point, docker_name);
+		return;
+	}
+	if (dock_find_object_at_dockpoint(dockee_objp, dockee_pt) != nullptr) {
+		sink.set_error("Dockpoint '%s' on '%s' is already occupied.", dockee_point, dockee_name);
+		return;
+	}
+
+	// Already directly docked?
+	if (dock_check_find_direct_docked_object(docker_objp, dockee_objp)) {
+		sink.set_error("'%s' and '%s' are already docked to each other.", docker_name, dockee_name);
+		return;
+	}
+
+	// Mutation: mirrors initial_status::dock.  The MCP convention is "docker
+	// moves, dockee stays", so the dockee is the anchor: it's the engine's
+	// "dockee" param (so dock_orient_and_approach moves the docker into
+	// position), and it's the chain-walk anchor for unmark/move/leader.
+	dock_function_info dfi;
+	ai_dock_with_object(docker_objp, docker_pt, dockee_objp, dockee_pt, AIDO_DOCK_NOW);
+	dock_evaluate_all_docked_objects(dockee_objp, &dfi, initial_status_unmark_dock_handled_flag);
+	dock_move_docked_objects(dockee_objp);
+	dfi.parameter_variables.bool_value = true;	// suppress "setting to false for initial docking purposes" message box
+	dock_evaluate_all_docked_objects(dockee_objp, &dfi, initial_status_mark_dock_leader_helper);
+	if (dfi.maintained_variables.int_value == 0)
+		dockee_shipp.flags.set(Ship::Ship_Flags::Dock_leader);
+
+	// Leader-resolution may have rewritten an arrival_cue to Locked_sexp_false.
+	mcp_sexp_forest_mark_dirty();
+	mark_modified("MCP: dock %s -> %s", docker_name, dockee_name);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "docker", json_safe_string(docker_name));
+	json_object_set_new(result, "dockee", json_safe_string(dockee_name));
+	json_object_set_new(result, "docker_point", json_safe_string(docker_point));
+	json_object_set_new(result, "dockee_point", json_safe_string(dockee_point));
+	const char *leader = find_dock_leader_name(dockee_objp);
+	if (leader != nullptr)
+		json_object_set_new(result, "dock_leader", json_safe_string(leader));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_undock_ships(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto ship_name = get_required_string(input, "ship", sink, true);
+	if (!ship_name) return;
+
+	auto other_name_opt = get_optional_string(input, "other_ship", sink);
+	if (sink.has_error()) return;
+
+	int ship_idx = lookup_ship(ship_name, sink);
+	if (ship_idx < 0) return;
+
+	ship &this_shipp = Ships[ship_idx];
+	object *this_objp = &Objects[this_shipp.objnum];
+
+	object *other_objp;
+	if (other_name_opt) {
+		int other_idx = lookup_ship(other_name_opt, sink);
+		if (other_idx < 0) return;
+		other_objp = &Objects[Ships[other_idx].objnum];
+		if (!dock_check_find_direct_docked_object(this_objp, other_objp)) {
+			sink.set_error("'%s' is not directly docked to '%s'.", ship_name, other_name_opt);
+			return;
+		}
+	} else {
+		int n = dock_count_direct_docked_objects(this_objp);
+		if (n == 0) {
+			sink.set_error("'%s' is not docked to anything.", ship_name);
+			return;
+		}
+		if (n > 1) {
+			sink.set_error("'%s' is docked to %d ships; specify 'other_ship' to disambiguate.",
+				ship_name, n);
+			return;
+		}
+		other_objp = dock_get_first_docked_object(this_objp);
+	}
+
+	ship &other_shipp = Ships[other_objp->instance];
+	const SCP_string other_name(other_shipp.ship_name);
+
+	ai_do_objects_undocked_stuff(this_objp, other_objp);
+	undock_followup(this_shipp, this_objp);
+	undock_followup(other_shipp, other_objp);
+
+	mcp_sexp_forest_mark_dirty();
+	mark_modified("MCP: undock %s from %s", ship_name, other_name.c_str());
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(ship_name));
+	json_object_set_new(result, "other_ship", json_safe_string(other_name.c_str()));
+
+	// Enumerate any ships that "ship" remains directly docked to after this call,
+	// so the caller can tell whether further undock_ships calls (or undock_all_ships)
+	// are needed without a follow-up get_ship.
+	json_t *still_docked = json_array();
+	for (dock_instance *d = this_objp->dock_list; d != nullptr; d = d->next)
+		json_array_append_new(still_docked,
+			json_safe_string(Ships[d->docked_objp->instance].ship_name));
+	json_object_set_new(result, "still_docked_to", still_docked);
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_undock_all_ships(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto ship_name = get_required_string(input, "ship", sink, true);
+	if (!ship_name) return;
+
+	int ship_idx = lookup_ship(ship_name, sink);
+	if (ship_idx < 0) return;
+
+	ship &this_shipp = Ships[ship_idx];
+	object *this_objp = &Objects[this_shipp.objnum];
+
+	SCP_vector<SCP_string> former_partners;
+	while (object_is_docked(this_objp)) {
+		object *partner = dock_get_first_docked_object(this_objp);
+		ship &partner_shipp = Ships[partner->instance];
+		former_partners.emplace_back(partner_shipp.ship_name);
+		ai_do_objects_undocked_stuff(this_objp, partner);
+		undock_followup(partner_shipp, partner);
+	}
+	undock_followup(this_shipp, this_objp);
+
+	mcp_sexp_forest_mark_dirty();
+	if (!former_partners.empty())
+		mark_modified("MCP: undock_all %s", ship_name);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(ship_name));
+	json_t *partners = json_array();
+	for (const auto &p : former_partners)
+		json_array_append_new(partners, json_safe_string(p.c_str()));
+	json_object_set_new(result, "formerly_docked_to", partners);
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// Chain-walk helper for list_docked_group.  Stashes its vector pointer in
+// the dock_function_info's vecp_value slot (typed vec3d* but unused for our
+// purposes) via reinterpret_cast -- mirrors how initialstatus.cpp's leader
+// helper repurposes objp_value to carry state through the chain walker.
+static void collect_ship_name_helper(object *objp, dock_function_info *infop)
+{
+	auto *names = reinterpret_cast<SCP_vector<SCP_string> *>(infop->maintained_variables.vecp_value);
+	names->emplace_back(Ships[objp->instance].ship_name);
+}
+
+static void handle_list_docked_group(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto ship_name = get_required_string(input, "ship", sink, true);
+	if (!ship_name) return;
+
+	int ship_idx = lookup_ship(ship_name, sink);
+	if (ship_idx < 0) return;
+
+	ship &shipp = Ships[ship_idx];
+	object *objp = &Objects[shipp.objnum];
+
+	SCP_vector<SCP_string> names;
+	if (!object_is_docked(objp)) {
+		// Solitary ship: report a single-element group with null leader.
+		names.emplace_back(shipp.ship_name);
+	} else {
+		dock_function_info dfi;
+		dfi.maintained_variables.vecp_value = reinterpret_cast<vec3d *>(&names);
+		dock_evaluate_all_docked_objects(objp, &dfi, collect_ship_name_helper);
+	}
+
+	const char *leader = object_is_docked(objp) ? find_dock_leader_name(objp) : nullptr;
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(ship_name));
+	if (leader != nullptr)
+		json_object_set_new(result, "dock_leader", json_safe_string(leader));
+	else
+		json_object_set_new(result, "dock_leader", json_null());
+	json_t *ships_arr = json_array();
+	for (const auto &n : names)
+		json_array_append_new(ships_arr, json_safe_string(n.c_str()));
+	json_object_set_new(result, "ships", ships_arr);
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_set_dock_leader(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto ship_name = get_required_string(input, "ship", sink, true);
+	if (!ship_name) return;
+
+	int ship_idx = lookup_ship(ship_name, sink);
+	if (ship_idx < 0) return;
+
+	ship &shipp = Ships[ship_idx];
+	object *objp = &Objects[shipp.objnum];
+
+	if (!object_is_docked(objp)) {
+		sink.set_error("'%s' is not docked; the dock-leader flag is meaningless on a solitary ship.",
+			ship_name);
+		return;
+	}
+
+	if (shipp.wingnum >= 0) {
+		sink.set_error("Cannot set a wing-member ship as dock leader; its effective arrival cue "
+			"is the wing's, not its own. Remove '%s' from its wing first.", ship_name);
+		return;
+	}
+
+	object *current_leader_objp = find_dock_leader_obj(objp);
+	ship *current_leader_shipp = current_leader_objp != nullptr
+		? &Ships[current_leader_objp->instance] : nullptr;
+	const char *previous_leader_name = current_leader_shipp != nullptr
+		? current_leader_shipp->ship_name : nullptr;
+
+	// No-op when ship is already the leader.
+	if (current_leader_shipp == &shipp) {
+		json_t *result = json_object();
+		json_object_set_new(result, "ship", json_safe_string(ship_name));
+		json_object_set_new(result, "previous_leader", json_safe_string(ship_name));
+		req->result_json = make_json_tool_result(result);
+		req->success = true;
+		return;
+	}
+
+	if (current_leader_shipp != nullptr && current_leader_shipp->wingnum >= 0) {
+		sink.set_error("Cannot take dock leadership from '%s' because it is a wing member; "
+			"its arrival cue is the wing's, not its own. Remove it from its wing first.",
+			current_leader_shipp->ship_name);
+		return;
+	}
+
+	// If there's a current leader, swap cues: the new leader takes the
+	// current leader's cue; the current leader is parked on Locked_sexp_false.
+	// Raw assignment instead of set_cue_to_false because that helper would
+	// free the old leader's cue before we could move it to the new leader.
+	// In the leaderless case (rare: external code cleared the flag) we just
+	// promote the requested ship and leave its existing cue intact.
+	if (current_leader_shipp != nullptr) {
+		if (shipp.arrival_cue != Locked_sexp_false)
+			free_sexp2(shipp.arrival_cue);
+		shipp.arrival_cue = current_leader_shipp->arrival_cue;
+		current_leader_shipp->arrival_cue = Locked_sexp_false;
+		current_leader_shipp->flags.remove(Ship::Ship_Flags::Dock_leader);
+	}
+	shipp.flags.set(Ship::Ship_Flags::Dock_leader);
+
+	mcp_sexp_forest_mark_dirty();
+	mark_modified("MCP: set_dock_leader %s", ship_name);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(ship_name));
+	if (previous_leader_name != nullptr)
+		json_object_set_new(result, "previous_leader", json_safe_string(previous_leader_name));
+	else
+		json_object_set_new(result, "previous_leader", json_null());
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Weapon bank tools
 // ---------------------------------------------------------------------------
 
@@ -1817,6 +2210,93 @@ void mcp_register_ship_tools(json_t *tools)
 			props, req);
 	}
 
+	// dock_ships
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "docker", "Name of the docker ship.");
+		add_string_prop(props, "dockee", "Name of the dockee ship (must differ from docker).");
+		add_string_prop(props, "docker_point",
+			"Dockpoint name on the docker's ship class. Use list_ship_class_dockpoints "
+			"for available names, or get_ship_class_model_details.docking_bays for full info.");
+		add_string_prop(props, "dockee_point",
+			"Dockpoint name on the dockee's ship class. Type of dockpoint (cargo/rearm/generic) "
+			"must be compatible with docker_point.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("docker"));
+		json_array_append_new(req, json_string("dockee"));
+		json_array_append_new(req, json_string("docker_point"));
+		json_array_append_new(req, json_string("dockee_point"));
+		register_tool(tools, "dock_ships",
+			"Link two ships at mission start via the named dockpoints (\"+Docked With:\" in the .fs2 file). "
+			"The chain's dock leader is auto-resolved per FRED's rules: the one ship whose arrival cue is "
+			"not locked-false, tie-broken by ship_class_compare. Non-leader arrival cues may be rewritten "
+			"to locked-false to keep only the leader arriving on cue. Note: after running this tool, the "
+			"docker will be moved and reoriented to its docked location on the dockee's dockpoint.",
+			props, req);
+	}
+
+	// undock_ships
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "ship", "Name of the ship.");
+		add_string_prop(props, "other_ship",
+			"Optional partner ship name. If omitted, the ship must be docked to exactly one other; "
+			"otherwise the call errors as ambiguous. The response always echoes the resolved partner.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("ship"));
+		register_tool(tools, "undock_ships",
+			"Separate two directly-docked ships. Ships are not physically moved apart; issue update_ship "
+			"with a new position if you need spatial separation. Arrival cues that were forced to "
+			"locked-false by an earlier dock-leader resolution are restored to locked-true if the ship "
+			"is no longer docked and is not part of a wing. The response includes still_docked_to: an "
+			"array of ship names that 'ship' remains directly docked to after this call (empty when "
+			"'ship' has no further dock attachments).",
+			props, req);
+	}
+
+	// undock_all_ships
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "ship", "Name of the ship to fully undock.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("ship"));
+		register_tool(tools, "undock_all_ships",
+			"Separate the ship from every other ship it is directly docked to, in one call. "
+			"Returns formerly_docked_to listing every ship that was undocked (empty if the ship had no "
+			"dock attachments). Otherwise behaves like undock_ships applied iteratively.",
+			props, req);
+	}
+
+	// list_docked_group
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "ship", "Name of any ship in the docked group.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("ship"));
+		register_tool(tools, "list_docked_group",
+			"Enumerate every ship transitively docked together with the given ship, including the chain's "
+			"dock leader. Prefer this over recursively walking get_ship.docked_to. Solitary ships are "
+			"reported as a single-element group with dock_leader: null.",
+			props, req);
+	}
+
+	// set_dock_leader
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "ship",
+			"Name of the ship to designate as the dock leader. Must already be in a docked group "
+			"and must not be a wing member.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("ship"));
+		register_tool(tools, "set_dock_leader",
+			"Override the auto-resolved dock leader for the group containing this ship. Swaps the "
+			"previous leader's arrival cue onto the new leader (preserving the chain's effective "
+			"arrival behavior) and parks the previous leader on locked-false. Refuses if either the "
+			"new leader or the current leader is a wing member, since wing-member effective cues "
+			"come from the wing, not the individual ship.",
+			props, req);
+	}
+
 	// get_ship_weapons
 	register_tool_with_required_string(tools, "get_ship_weapons",
 		"Get every weapon bank assignment on a ship -- the pilot weapon set plus every turret "
@@ -1923,6 +2403,16 @@ bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_move_ship(input_json, req);
 	} else if (strcmp(tool_name, "swap_ships") == 0) {
 		handle_swap_ships(input_json, req);
+	} else if (strcmp(tool_name, "dock_ships") == 0) {
+		handle_dock_ships(input_json, req);
+	} else if (strcmp(tool_name, "undock_ships") == 0) {
+		handle_undock_ships(input_json, req);
+	} else if (strcmp(tool_name, "undock_all_ships") == 0) {
+		handle_undock_all_ships(input_json, req);
+	} else if (strcmp(tool_name, "list_docked_group") == 0) {
+		handle_list_docked_group(input_json, req);
+	} else if (strcmp(tool_name, "set_dock_leader") == 0) {
+		handle_set_dock_leader(input_json, req);
 	} else if (strcmp(tool_name, "get_ship_weapons") == 0) {
 		handle_get_ship_weapons(input_json, req);
 	} else if (strcmp(tool_name, "get_ship_weapon_bank") == 0) {
