@@ -35,6 +35,14 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 bool check_and_report_sexp_refs(sexp_ref_type ref_type, const char *entity_label,
 	const char *name, std::optional<bool> force, McpErrorSink &sink);
 
+// Named-entity lookups with not-found error reporting.  Return the index, or -1
+// on failure (in which case sink carries a "Ship/Wing not found: <name>" error).
+// These wrap the engine's ship_name_lookup / wing_name_lookup; check_lookup is
+// the right tool for enum-like inputs (ship_class, ai_class), but for named
+// entity instances the "not found: <name>" phrasing is clearer.
+int lookup_ship(const char *name, McpErrorSink &sink);
+int lookup_wing(const char *name, McpErrorSink &sink);
+
 extern const SCP_vector<const char *> team_enum_values;
 
 const char *team_name_from_index(int multi_team);

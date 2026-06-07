@@ -66,6 +66,22 @@ bool check_and_report_sexp_refs(sexp_ref_type ref_type, const char *entity_label
 	return true;
 }
 
+int lookup_ship(const char *name, McpErrorSink &sink)
+{
+	int idx = ship_name_lookup(name, 1);
+	if (idx < 0)
+		set_not_found_error(sink, "Ship", name);
+	return idx;
+}
+
+int lookup_wing(const char *name, McpErrorSink &sink)
+{
+	int idx = wing_name_lookup(name);
+	if (idx < 0)
+		set_not_found_error(sink, "Wing", name);
+	return idx;
+}
+
 // ---------------------------------------------------------------------------
 // Enum helpers
 // ---------------------------------------------------------------------------
