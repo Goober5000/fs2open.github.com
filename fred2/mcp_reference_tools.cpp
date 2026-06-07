@@ -327,10 +327,20 @@ void mcp_register_reference_tools(json_t *tools)
 		"Get 3D model details for a ship class, including subsystems, bounding box "
 		"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
 		"fighter bay arrival/departure). All coordinate information is in the model's "
-		"local reference frame. Note: if the model has not been previously loaded, "
-		"this tool may take several seconds to respond while the model is loaded "
-		"into memory.",
+		"local reference frame. Note: if there is no ship with this ship class in the "
+		"current mission, this tool may take several seconds to respond while the model is "
+		"temporarily loaded into memory.",
 		"name", "Name of the ship class (e.g. \"GTD Orion\")");
+
+	// list_ship_class_dockpoints
+	register_tool_with_required_string(tools, "list_ship_class_dockpoints",
+		"List the dockpoints on a ship class as { name, dock_types, position, normal }, "
+		"all in the model's local reference frame. dock_types is a subset of "
+		"[\"cargo\", \"rearm\", \"generic\"]. Use get_ship_class_model_details if you "
+		"also need spline path names or other model data. As with that tool, this one may "
+		"take several seconds to respond if there is no ship with this ship class in the "
+		"current mission.",
+		"ship_class", "Name of the ship class.");
 
 	// subsystem_names_compare
 	{
@@ -1997,6 +2007,81 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
+// Dockpoint listing -- mirrors the docking_bays subset of
+// get_ship_class_model_details (name, dock_types, position, normal); spline
+// path names stay over there so callers picking a dockpoint for dock_ships
+// don't need a second tool call.
+// ---------------------------------------------------------------------------
+
+static json_t *handle_list_ship_class_dockpoints(json_t *arguments)
+{
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto name = get_required_string(arguments, "ship_class", sink, true);
+	if (!name) return err;
+
+	int sip_idx = ship_info_lookup(name);
+	if (sip_idx < 0)
+		return make_not_found_error("Ship class", name);
+
+	// Hold the model cache mutex to serialize with get_ship_class_model_details,
+	// which may load/unload the same polymodel.
+	std::lock_guard<std::mutex> cache_lock(model_cache_mutex);
+
+	const auto &sip = Ship_info[sip_idx];
+	const char *canonical_name = sip.name;
+	bool we_loaded_model = false;
+	if (sip.model_num < 0) {
+		json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
+		json_t *is_err = json_object_get(load_result, "isError");
+		if (is_err && json_is_true(is_err))
+			return load_result;
+		json_decref(load_result);
+		if (sip.model_num < 0)
+			return make_tool_result("Model failed to load", true);
+		we_loaded_model = true;
+	}
+
+	polymodel *pm = model_get(sip.model_num);
+	if (!pm)
+		return make_tool_result("Model data unavailable", true);
+
+	json_t *arr = json_array();
+	for (int d = 0; d < pm->n_docks; d++) {
+		const auto &bay = pm->docking_bays[d];
+		json_t *entry = json_object();
+		json_object_set_new(entry, "name", json_safe_string(bay.name));
+
+		json_t *type_arr = json_array();
+		if (bay.type_flags & DOCK_TYPE_CARGO)
+			json_array_append_new(type_arr, json_string("cargo"));
+		if (bay.type_flags & DOCK_TYPE_REARM)
+			json_array_append_new(type_arr, json_string("rearm"));
+		if (bay.type_flags & DOCK_TYPE_GENERIC)
+			json_array_append_new(type_arr, json_string("generic"));
+		json_object_set_new(entry, "dock_types", type_arr);
+
+		// Slot position and normal (same source as get_ship_class_model_details).
+		vec3d local_dock_point;
+		matrix local_dock_orient;
+		find_adjusted_dockpoint_info(&local_dock_point, &local_dock_orient, nullptr, pm, -1, d);
+		json_object_set_new(entry, "position", build_vec3d_json(local_dock_point));
+		json_object_set_new(entry, "normal", build_vec3d_json(local_dock_orient.vec.uvec));
+
+		json_array_append_new(arr, entry);
+	}
+
+	json_t *result = make_json_tool_result(arr);
+
+	if (we_loaded_model) {
+		json_t *unload_result = mcp_execute_on_main_thread(McpToolId::UNLOAD_SHIP_MODEL, canonical_name);
+		json_decref(unload_result);
+	}
+
+	return result;
+}
+
+// ---------------------------------------------------------------------------
 // Subsystem name comparison
 // ---------------------------------------------------------------------------
 
@@ -2920,6 +3005,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_sexp_argument_values(arguments);
 	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
 		return handle_get_ship_class_model_details(arguments);
+	if (strcmp(tool_name, "list_ship_class_dockpoints") == 0)
+		return handle_list_ship_class_dockpoints(arguments);
 	if (strcmp(tool_name, "subsystem_names_compare") == 0)
 		return handle_subsystem_names_compare(arguments);
 	if (strcmp(tool_name, "subsystem_names_equal") == 0)
