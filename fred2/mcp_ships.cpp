@@ -16,6 +16,7 @@
 
 #include "ai/ai.h"
 #include "iff_defs/iff_defs.h"
+#include "math/floating.h"            // fl2ir
 #include "mission/missionmessage.h"   // Personas
 #include "mission/missionparse.h"
 #include "missioneditor/common.h"     // target_to_anchor, anchor_to_target, stuff_special_arrival_anchor_name
@@ -24,6 +25,7 @@
 #include "parse/sexp.h"
 #include "ship/anchor_t.h"
 #include "ship/ship.h"
+#include "weapon/weapon.h"            // Weapon_info, weapon_info_lookup, Weapon::Info_Flags
 
 #include "fred.h"                     // Ship_editor_dialog
 #include "management.h"               // create_ship, delete_ship, rename_ship, invalidate_references, etc.
@@ -1134,6 +1136,495 @@ static void handle_swap_ships(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Weapon bank tools
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char*> bank_type_enum_values = { "primary", "secondary" };
+
+// Matches the FRED Weapons-dialog listbox label for the ship's main weapon
+// set, used to distinguish it from named turret subsystems.
+static const char *PILOT_BANK_SET_NAME = "Pilot";
+
+// Resolve a subsystem name to its ship_weapon and ship_subsys.  The pilot's
+// own weapons are returned when subsystem_name is null or "Pilot"
+// (case-insensitive); any other value must name a SUBSYSTEM_TURRET on the
+// ship.  Returns false and writes to sink on error.
+static bool resolve_weapon_bank_set(
+	ship &shipp,
+	const char *subsystem_name,
+	ship_weapon *&out_swp,
+	ship_subsys *&out_subsys,
+	McpErrorSink &sink)
+{
+	if (subsystem_name == nullptr || !stricmp(subsystem_name, PILOT_BANK_SET_NAME)) {
+		out_swp = &shipp.weapons;
+		out_subsys = nullptr;
+		return true;
+	}
+
+	ship_subsys *ss = ship_get_subsys(&shipp, subsystem_name);
+	if (ss == nullptr) {
+		sink.set_error("Subsystem '%s' not found on ship '%s'.",
+			subsystem_name, shipp.ship_name);
+		return false;
+	}
+	if (ss->system_info == nullptr || ss->system_info->type != SUBSYSTEM_TURRET) {
+		sink.set_error("Subsystem '%s' on ship '%s' is not a turret; weapon banks "
+			"are only defined for the pilot and turret subsystems.",
+			subsystem_name, shipp.ship_name);
+		return false;
+	}
+
+	out_swp = &ss->weapons;
+	out_subsys = ss;
+	return true;
+}
+
+// Dispatch to the correct engine max-ammo helper.  Pilot helpers use
+// std::lround (round-to-nearest); turret helpers use truncation -- an engine
+// inconsistency we mirror so the reported max matches what the game clamps to.
+static int compute_max_ammo(
+	int ship_class, ship_weapon *swp, ship_subsys *subsys,
+	bool is_primary, int bank_zero_based, int weapon_idx)
+{
+	if (subsys == nullptr) {
+		if (is_primary)
+			return get_max_ammo_count_for_primary_bank(ship_class, bank_zero_based, weapon_idx);
+		return get_max_ammo_count_for_bank(ship_class, bank_zero_based, weapon_idx);
+	}
+	if (is_primary)
+		return get_max_ammo_count_for_primary_turret_bank(swp, bank_zero_based, weapon_idx);
+	return get_max_ammo_count_for_turret_bank(swp, bank_zero_based, weapon_idx);
+}
+
+// FRED stores secondary/ballistic ammo as 0-100 percent of the per-bank max
+// (the dialog converts on every read/write -- see weaponeditordlg.cpp:307/371).
+// Both directions clamp to 0 when the max is 0 (energy/beam/cleared bank).
+static int ammo_percent_to_count(int percent, int max_count)
+{
+	if (max_count <= 0)
+		return 0;
+	return fl2ir((float)percent * (float)max_count / 100.0f);
+}
+
+static int ammo_count_to_percent(int count, int max_count)
+{
+	if (max_count <= 0)
+		return 0;
+	return fl2ir((float)count * 100.0f / (float)max_count);
+}
+
+// Build { bank, weapon_class, ammo_count } for one bank slot.
+static json_t *build_bank_json(
+	int ship_class, ship_weapon *swp, ship_subsys *subsys,
+	bool is_primary, int bank_zero_based)
+{
+	int weapon_idx = is_primary
+		? swp->primary_bank_weapons[bank_zero_based]
+		: swp->secondary_bank_weapons[bank_zero_based];
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "bank", json_integer(bank_zero_based + 1));
+
+	if (weapon_idx < 0 || weapon_idx >= weapon_info_size()) {
+		json_object_set_new(obj, "weapon_class", json_string("<none>"));
+		json_object_set_new(obj, "ammo_count", json_integer(0));
+		return obj;
+	}
+
+	json_object_set_new(obj, "weapon_class", json_safe_string(Weapon_info[weapon_idx].name));
+
+	int max_ammo = compute_max_ammo(ship_class, swp, subsys, is_primary, bank_zero_based, weapon_idx);
+	int stored_percent = is_primary
+		? swp->primary_bank_ammo[bank_zero_based]
+		: swp->secondary_bank_ammo[bank_zero_based];
+	json_object_set_new(obj, "ammo_count",
+		json_integer(ammo_percent_to_count(stored_percent, max_ammo)));
+
+	return obj;
+}
+
+// Build { primary_banks: [...], secondary_banks: [...] } for one set.
+// Only banks within num_*_banks are reported.
+static json_t *build_bank_set_json(int ship_class, ship_weapon *swp, ship_subsys *subsys)
+{
+	json_t *obj = json_object();
+
+	json_t *primaries = json_array();
+	for (int b = 0; b < swp->num_primary_banks; ++b)
+		json_array_append_new(primaries, build_bank_json(ship_class, swp, subsys, true, b));
+	json_object_set_new(obj, "primary_banks", primaries);
+
+	json_t *secondaries = json_array();
+	for (int b = 0; b < swp->num_secondary_banks; ++b)
+		json_array_append_new(secondaries, build_bank_json(ship_class, swp, subsys, false, b));
+	json_object_set_new(obj, "secondary_banks", secondaries);
+
+	return obj;
+}
+
+// Primary slots reject secondary weapons; secondary slots require them.
+// Mirrors the dialog's dropdown filter (weaponeditordlg.cpp:226-274).
+static bool weapon_matches_bank_type(int weapon_idx, bool is_primary, McpErrorSink &sink)
+{
+	const weapon_info &wip = Weapon_info[weapon_idx];
+	if (is_primary && wip.is_secondary()) {
+		sink.set_error("Weapon '%s' is a secondary weapon and cannot be loaded into a primary bank.",
+			wip.name);
+		return false;
+	}
+	if (!is_primary && !wip.is_secondary()) {
+		sink.set_error("Weapon '%s' is a primary weapon and cannot be loaded into a secondary bank.",
+			wip.name);
+		return false;
+	}
+	return true;
+}
+
+// Editor-selectability check matching the selectable_in_editor field on
+// list_weapon_classes.  Overridable with force=true.
+static bool weapon_selectable_in_editor(int weapon_idx, McpErrorSink &sink)
+{
+	const weapon_info &wip = Weapon_info[weapon_idx];
+	bool no_fred = wip.wi_flags[Weapon::Info_Flags::No_fred];
+	bool child = wip.wi_flags[Weapon::Info_Flags::Child];
+	if (!no_fred && !child)
+		return true;
+
+	const char *flag_label;
+	if (no_fred && child)
+		flag_label = "No_fred and Child";
+	else if (no_fred)
+		flag_label = "No_fred";
+	else
+		flag_label = "Child";
+
+	sink.set_error("Weapon '%s' is not selectable in the editor (%s flag set). "
+		"Pass force=true to override.", wip.name, flag_label);
+	return false;
+}
+
+// Pilot banks only: enforce the ship-class allowed-weapons list and per-bank
+// restrictions.  Dogfight missions use DOGFIGHT_WEAPON; everything else uses
+// REGULAR_WEAPON.  Turret loadouts are governed by the model rather than the
+// ship class, so callers must skip this check for turret banks.
+static bool weapon_allowed_for_pilot_bank(
+	int ship_class, int weapon_idx, bool is_primary, int bank_zero_based, McpErrorSink &sink)
+{
+	const ship_info &sip = Ship_info[ship_class];
+	int mode_flag = IS_MISSION_MULTI_DOGFIGHT ? DOGFIGHT_WEAPON : REGULAR_WEAPON;
+	int bank_global_index = is_primary
+		? bank_zero_based
+		: MAX_SHIP_PRIMARY_BANKS + bank_zero_based;
+
+	auto weapon_present_in = [weapon_idx, mode_flag](const auto &allowed) {
+		for (const auto &wf : allowed.weapon_and_flags) {
+			if (wf.first == weapon_idx && (wf.second & mode_flag))
+				return true;
+		}
+		return false;
+	};
+
+	bool per_bank_active = (bank_global_index < (int)sip.restricted_loadout_flag.size())
+		&& (sip.restricted_loadout_flag[bank_global_index] & mode_flag);
+
+	bool allowed;
+	const char *scope_label;
+	if (per_bank_active) {
+		allowed = (bank_global_index < (int)sip.allowed_bank_restricted_weapons.size())
+			&& weapon_present_in(sip.allowed_bank_restricted_weapons[bank_global_index]);
+		scope_label = "this bank's";
+	} else if (!sip.allowed_weapons.weapon_and_flags.empty()) {
+		allowed = weapon_present_in(sip.allowed_weapons);
+		scope_label = "the ship class's";
+	} else {
+		return true;
+	}
+
+	if (allowed)
+		return true;
+
+	sink.set_error("Weapon '%s' is not in %s allowed-weapons list for ship class '%s'. "
+		"Pass force=true to override.",
+		Weapon_info[weapon_idx].name, scope_label, sip.name);
+	return false;
+}
+
+// Common arg parsing for get_ship_weapon_bank, update_ship_weapon_bank, and
+// get_max_ammo_for_bank.  On success, the caller receives a resolved bank
+// target with the 1-based "bank" arg converted to a 0-based index and bounds
+// already checked against num_*_banks.
+static bool resolve_bank_target(
+	json_t *input, McpErrorSink &sink,
+	ship *&out_shipp,
+	ship_weapon *&out_swp, ship_subsys *&out_subsys,
+	bool &out_is_primary, int &out_bank_zero_based)
+{
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return false;
+
+	int ship_idx = ship_name_lookup(name, 1);
+	if (ship_idx < 0) {
+		set_not_found_error(sink, "Ship", name);
+		return false;
+	}
+
+	auto bank_type = get_required_string(input, "bank_type", sink, true);
+	if (!bank_type) return false;
+	if (!check_string_enum(bank_type, bank_type_enum_values, "bank_type", sink))
+		return false;
+	bool is_primary = !stricmp(bank_type, "primary");
+
+	auto bank_1based = get_required_integer(input, "bank", sink);
+	if (!bank_1based) return false;
+
+	auto subsystem = get_optional_string(input, "subsystem", sink);
+	if (sink.has_error()) return false;
+
+	ship &shipp = Ships[ship_idx];
+	ship_weapon *swp = nullptr;
+	ship_subsys *subsys = nullptr;
+	if (!resolve_weapon_bank_set(shipp, subsystem, swp, subsys, sink))
+		return false;
+
+	int num_banks = is_primary ? swp->num_primary_banks : swp->num_secondary_banks;
+	if (num_banks <= 0) {
+		sink.set_error("%s on ship '%s' has no %s banks.",
+			subsys ? subsys->system_info->subobj_name : "Pilot weapon set",
+			shipp.ship_name,
+			is_primary ? "primary" : "secondary");
+		return false;
+	}
+	if (*bank_1based < 1 || *bank_1based > num_banks) {
+		sink.set_error("bank %d out of range; %s has %d %s bank%s.",
+			*bank_1based,
+			subsys ? "this turret" : "the pilot set",
+			num_banks,
+			is_primary ? "primary" : "secondary",
+			num_banks == 1 ? "" : "s");
+		return false;
+	}
+
+	out_shipp = &shipp;
+	out_swp = swp;
+	out_subsys = subsys;
+	out_is_primary = is_primary;
+	out_bank_zero_based = *bank_1based - 1;
+	return true;
+}
+
+static void handle_get_ship_weapons(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = ship_name_lookup(name, 1);
+	if (ship_idx < 0) {
+		set_not_found_error(sink, "Ship", name);
+		return;
+	}
+
+	ship &shipp = Ships[ship_idx];
+	int ship_class = shipp.ship_info_index;
+
+	json_t *result = json_object();
+	json_object_set_new(result, "ship", json_safe_string(shipp.ship_name));
+	json_object_set_new(result, "pilot",
+		build_bank_set_json(ship_class, &shipp.weapons, nullptr));
+
+	json_t *turrets = json_array();
+	for (ship_subsys *ss = GET_FIRST(&shipp.subsys_list);
+		ss != END_OF_LIST(&shipp.subsys_list);
+		ss = GET_NEXT(ss))
+	{
+		if (ss->system_info == nullptr || ss->system_info->type != SUBSYSTEM_TURRET)
+			continue;
+		json_t *t = build_bank_set_json(ship_class, &ss->weapons, ss);
+		json_object_set_new(t, "subsystem", json_safe_string(ss->system_info->subobj_name));
+		json_array_append_new(turrets, t);
+	}
+	json_object_set_new(result, "turrets", turrets);
+
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+static void handle_get_ship_weapon_bank(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	ship *shipp;
+	ship_weapon *swp;
+	ship_subsys *subsys;
+	bool is_primary;
+	int bank_zb;
+	if (!resolve_bank_target(input, sink, shipp, swp, subsys, is_primary, bank_zb))
+		return;
+
+	req->result_json = make_json_tool_result(
+		build_bank_json(shipp->ship_info_index, swp, subsys, is_primary, bank_zb));
+	req->success = true;
+}
+
+static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	ship *shipp;
+	ship_weapon *swp;
+	ship_subsys *subsys;
+	bool is_primary;
+	int bank_zb;
+	if (!resolve_bank_target(input, sink, shipp, swp, subsys, is_primary, bank_zb))
+		return;
+
+	auto weapon_class_arg = get_optional_string(input, "weapon_class", sink);
+	auto ammo_count_arg = get_optional_integer(input, "ammo_count", sink);
+	auto force_arg = get_optional_bool(input, "force", sink);
+	if (sink.has_error()) return;
+	bool force = force_arg.value_or(false);
+
+	// Resolve the target weapon: -1 means "<none>" (clear).
+	int existing_weapon_idx = is_primary
+		? swp->primary_bank_weapons[bank_zb]
+		: swp->secondary_bank_weapons[bank_zb];
+	int new_weapon_idx = existing_weapon_idx;
+	bool weapon_specified = (weapon_class_arg != nullptr);
+	bool clearing = false;
+
+	if (weapon_specified) {
+		if (!stricmp(weapon_class_arg, "<none>")) {
+			new_weapon_idx = -1;
+			clearing = true;
+		} else {
+			new_weapon_idx = weapon_info_lookup(weapon_class_arg);
+			if (new_weapon_idx < 0) {
+				set_not_found_error(sink, "Weapon class", weapon_class_arg);
+				return;
+			}
+			if (!weapon_matches_bank_type(new_weapon_idx, is_primary, sink))
+				return;
+			if (!force && !weapon_selectable_in_editor(new_weapon_idx, sink))
+				return;
+			if (!force && subsys == nullptr
+				&& !weapon_allowed_for_pilot_bank(shipp->ship_info_index, new_weapon_idx,
+					is_primary, bank_zb, sink))
+				return;
+		}
+	}
+
+	bool weapon_changing = weapon_specified && (new_weapon_idx != existing_weapon_idx);
+	bool ammo_specified = ammo_count_arg.has_value();
+
+	// Compute the post-update max with the resolved weapon.
+	int new_max_ammo = (new_weapon_idx >= 0)
+		? compute_max_ammo(shipp->ship_info_index, swp, subsys,
+			is_primary, bank_zb, new_weapon_idx)
+		: 0;
+	int new_ammo_count = 0;
+
+	if (clearing) {
+		if (ammo_specified && *ammo_count_arg != 0) {
+			sink.set_error("ammo_count must be 0 when weapon_class is \"<none>\".");
+			return;
+		}
+		new_ammo_count = 0;
+	} else if (ammo_specified) {
+		if (*ammo_count_arg < 0) {
+			sink.set_error("ammo_count must be non-negative.");
+			return;
+		}
+		if (new_max_ammo <= 0) {
+			if (*ammo_count_arg != 0) {
+				sink.set_error("Weapon '%s' has no ammo (energy/beam or non-ballistic primary); "
+					"ammo_count must be 0.",
+					new_weapon_idx >= 0 ? Weapon_info[new_weapon_idx].name : "<none>");
+				return;
+			}
+			new_ammo_count = 0;
+		} else if (*ammo_count_arg > new_max_ammo) {
+			sink.set_error("ammo_count %d exceeds maximum %d for this bank/weapon combination.",
+				*ammo_count_arg, new_max_ammo);
+			return;
+		} else {
+			new_ammo_count = *ammo_count_arg;
+		}
+	} else if (weapon_changing) {
+		// Weapon changing without explicit ammo -- preserve the previous
+		// percentage against the new weapon's max (mirrors the FRED dialog,
+		// see weaponeditordlg.cpp change_selection()).
+		int existing_percent = is_primary
+			? swp->primary_bank_ammo[bank_zb]
+			: swp->secondary_bank_ammo[bank_zb];
+		new_ammo_count = ammo_percent_to_count(existing_percent, new_max_ammo);
+	}
+
+	bool any_change = weapon_changing || clearing || ammo_specified;
+
+	if (any_change) {
+		if (weapon_changing || clearing) {
+			if (is_primary)
+				swp->primary_bank_weapons[bank_zb] = new_weapon_idx;
+			else
+				swp->secondary_bank_weapons[bank_zb] = new_weapon_idx;
+		}
+		int stored_percent = ammo_count_to_percent(new_ammo_count, new_max_ammo);
+		if (is_primary)
+			swp->primary_bank_ammo[bank_zb] = stored_percent;
+		else
+			swp->secondary_bank_ammo[bank_zb] = stored_percent;
+
+		mark_modified("MCP: update ship %s weapon bank (%s %s %d)",
+			shipp->ship_name,
+			subsys ? subsys->system_info->subobj_name : PILOT_BANK_SET_NAME,
+			is_primary ? "primary" : "secondary",
+			bank_zb + 1);
+	}
+
+	req->result_json = make_json_tool_result(
+		build_bank_json(shipp->ship_info_index, swp, subsys, is_primary, bank_zb));
+	req->success = true;
+}
+
+static void handle_get_max_ammo_for_bank(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	ship *shipp;
+	ship_weapon *swp;
+	ship_subsys *subsys;
+	bool is_primary;
+	int bank_zb;
+	if (!resolve_bank_target(input, sink, shipp, swp, subsys, is_primary, bank_zb))
+		return;
+
+	auto weapon_class = get_required_string(input, "weapon_class", sink, true);
+	if (!weapon_class) return;
+
+	int weapon_idx = weapon_info_lookup(weapon_class);
+	if (weapon_idx < 0) {
+		set_not_found_error(sink, "Weapon class", weapon_class);
+		return;
+	}
+	if (!weapon_matches_bank_type(weapon_idx, is_primary, sink))
+		return;
+
+	int max_ammo = compute_max_ammo(shipp->ship_info_index, swp, subsys,
+		is_primary, bank_zb, weapon_idx);
+
+	json_t *result = json_object();
+	json_object_set_new(result, "max_ammo_count", json_integer(max_ammo));
+	req->result_json = make_json_tool_result(result);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -1351,6 +1842,91 @@ void mcp_register_ship_tools(json_t *tools)
 			"Swap two ships at the given list positions.  Indices are 1-based.",
 			props, req);
 	}
+
+	// get_ship_weapons
+	register_tool_with_required_string(tools, "get_ship_weapons",
+		"Get every weapon bank assignment on a ship -- the pilot weapon set plus every turret "
+		"subsystem.  Each bank entry is { bank, weapon_class, ammo_count } where bank is 1-based, "
+		"weapon_class \"<none>\" means an empty slot, and ammo_count is an absolute count (0 for "
+		"energy primaries and beams).  Only banks within the ship/turret's num_*_banks are reported.",
+		"name", "Name of the ship");
+
+	// get_ship_weapon_bank
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_string_prop(props, "subsystem",
+			"Subsystem name.  Default \"Pilot\" (the ship's main weapon set).  Any other value "
+			"must name a turret subsystem on the ship.");
+		add_string_enum_prop(props, "bank_type",
+			"Which set of banks to read.", bank_type_enum_values);
+		add_integer_prop(props, "bank",
+			"1-based bank index within the selected bank_type.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("bank_type"));
+		json_array_append_new(req, json_string("bank"));
+		register_tool(tools, "get_ship_weapon_bank",
+			"Get the weapon class and ammo count for a single weapon bank (pilot or turret).",
+			props, req);
+	}
+
+	// update_ship_weapon_bank
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_string_prop(props, "subsystem",
+			"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
+		add_string_enum_prop(props, "bank_type",
+			"Which set of banks to update.", bank_type_enum_values);
+		add_integer_prop(props, "bank",
+			"1-based bank index within the selected bank_type.");
+		add_string_prop(props, "weapon_class",
+			"Weapon to load.  Pass \"<none>\" to clear the bank.  Must match the bank's type "
+			"(primary slots reject secondary weapons and vice versa).  Omit to leave the weapon "
+			"unchanged.");
+		add_integer_prop(props, "ammo_count",
+			"Absolute ammo count for ballistic primaries and secondaries.  Must be 0 for energy "
+			"primaries, beams, and cleared banks.  Range-checked against the per-bank-and-weapon "
+			"maximum (see get_max_ammo_for_bank).  Omit to leave ammo unchanged -- if the weapon "
+			"is changing, the previous percentage is preserved against the new weapon's max.");
+		add_bool_prop(props, "force",
+			"If true, bypass the editor-selectability check (No_fred / Child) and the ship-class "
+			"allowed-weapons check for pilot banks.  Default false.  Does not bypass structural "
+			"rules (bank range, weapon/bank type match, ammo bounds).");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("bank_type"));
+		json_array_append_new(req, json_string("bank"));
+		register_tool(tools, "update_ship_weapon_bank",
+			"Set the weapon and/or ammo count for a single weapon bank.  Either weapon_class or "
+			"ammo_count may be omitted to leave that field unchanged.",
+			props, req);
+	}
+
+	// get_max_ammo_for_bank
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_string_prop(props, "subsystem",
+			"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
+		add_string_enum_prop(props, "bank_type",
+			"Which set of banks to compute for.", bank_type_enum_values);
+		add_integer_prop(props, "bank",
+			"1-based bank index within the selected bank_type.");
+		add_string_prop(props, "weapon_class",
+			"Weapon to compute the maximum for.  Returns 0 for energy primaries and beams "
+			"(only ballistic weapons have ammo).");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("bank_type"));
+		json_array_append_new(req, json_string("bank"));
+		json_array_append_new(req, json_string("weapon_class"));
+		register_tool(tools, "get_max_ammo_for_bank",
+			"Compute the maximum ammo count for a specific (ship, bank, weapon) combination.  "
+			"Mirrors the engine's per-bank-and-weapon clamp.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -1373,6 +1949,14 @@ bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_move_ship(input_json, req);
 	} else if (strcmp(tool_name, "swap_ships") == 0) {
 		handle_swap_ships(input_json, req);
+	} else if (strcmp(tool_name, "get_ship_weapons") == 0) {
+		handle_get_ship_weapons(input_json, req);
+	} else if (strcmp(tool_name, "get_ship_weapon_bank") == 0) {
+		handle_get_ship_weapon_bank(input_json, req);
+	} else if (strcmp(tool_name, "update_ship_weapon_bank") == 0) {
+		handle_update_ship_weapon_bank(input_json, req);
+	} else if (strcmp(tool_name, "get_max_ammo_for_bank") == 0) {
+		handle_get_max_ammo_for_bank(input_json, req);
 	} else {
 		return false;
 	}
