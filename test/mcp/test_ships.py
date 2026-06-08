@@ -2217,6 +2217,301 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, created)
 
+    # ---------------------------------------------------------------------
+    # Special explosion & special hitpoints
+    # ---------------------------------------------------------------------
+
+    def _create_basic_ship(name):
+        cls = _pick_ship_class(client)
+        r = client.call_tool("create_ship", {
+            "name": name, "ship_class": cls,
+            "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+            "orientation": IDENTITY_ORIENT,
+        })
+        assert_success(r)
+
+    def test_ship_special_explosion_defaults():
+        name = "MCP SpecExp Default"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("get_ship_special_explosion", {"name": name})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("enabled"), False, "fresh ship: enabled is False")
+            assert_true("damage" not in d, "no damage field when disabled")
+            assert_true("shockwave_enabled" not in d, "no shockwave_enabled when disabled")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_enable_from_defaults():
+        name = "MCP SpecExp Seed"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_explosion",
+                {"name": name, "enable": True})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("enabled"), True, "enabled becomes True")
+            for f in ("damage", "blast_force", "inner_radius", "outer_radius",
+                      "shockwave_enabled"):
+                assert_has_key(d, f, f"{f} populated after seed-from-defaults")
+            assert_true(d["inner_radius"] >= 1, "inner_radius >= 1 after seed")
+            assert_true(d["outer_radius"] >= 2, "outer_radius >= 2 after seed")
+            assert_true(d["inner_radius"] <= d["outer_radius"],
+                "inner_radius <= outer_radius after seed")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_enable_with_overrides():
+        name = "MCP SpecExp Set"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "damage": 1234, "blast_force": 567,
+                "inner_radius": 10, "outer_radius": 50,
+                "shockwave_enabled": True, "shockwave_speed": 7,
+                "deathroll_time_ms": 4000,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d["damage"], 1234, "damage round-trip")
+            assert_equal(d["blast_force"], 567, "blast_force round-trip")
+            assert_equal(d["inner_radius"], 10, "inner_radius round-trip")
+            assert_equal(d["outer_radius"], 50, "outer_radius round-trip")
+            assert_equal(d["shockwave_enabled"], True, "shockwave_enabled round-trip")
+            assert_equal(d["shockwave_speed"], 7, "shockwave_speed round-trip")
+            assert_equal(d["deathroll_time_ms"], 4000, "deathroll_time round-trip")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_inner_gt_outer_rejected():
+        name = "MCP SpecExp InnerGtOuter"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "inner_radius": 100, "outer_radius": 50,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_disable_wipes():
+        name = "MCP SpecExp Wipe"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "inner_radius": 10, "outer_radius": 50,
+            })
+            assert_success(r)
+            r = client.call_tool("update_ship_special_explosion",
+                {"name": name, "enable": False})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("enabled"), False, "disabled after wipe")
+            assert_true("damage" not in d, "damage absent after wipe")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_disable_with_other_fields_rejected():
+        name = "MCP SpecExp DisableConflict"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": False, "damage": 100,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_shockwave_subtoggle():
+        name = "MCP SpecExp Subtoggle"
+        try:
+            _create_basic_ship(name)
+            # Enable with shockwave off; speed must not be required and
+            # the response should omit shockwave_speed.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "inner_radius": 10, "outer_radius": 50,
+                "shockwave_enabled": False,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d["shockwave_enabled"], False, "shockwave off")
+            assert_true("shockwave_speed" not in d, "no shockwave_speed when shockwave off")
+            # Re-enable shockwave with explicit speed.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "shockwave_enabled": True, "shockwave_speed": 5,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d["shockwave_enabled"], True)
+            assert_equal(d["shockwave_speed"], 5)
+            # Enabling shockwave with speed=0 must be rejected.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True,
+                "shockwave_enabled": True, "shockwave_speed": 0,
+            })
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_explosion_deathroll_validation():
+        name = "MCP SpecExp Deathroll"
+        try:
+            _create_basic_ship(name)
+            # deathroll == 0 (inherit class default) is accepted.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True, "deathroll_time_ms": 0,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_true("deathroll_time_ms" not in d,
+                "deathroll absent when 0 (inherit)")
+            # 1 ms is invalid.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True, "deathroll_time_ms": 1,
+            })
+            assert_error(r)
+            # 2 ms is the minimum override.
+            r = client.call_tool("update_ship_special_explosion", {
+                "name": name, "enable": True, "deathroll_time_ms": 2,
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("deathroll_time_ms"), 2)
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_defaults():
+        name = "MCP SpecHP Default"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("get_ship_special_hitpoints", {"name": name})
+            assert_success(r)
+            d = tool_data(r)
+            assert_true("hull" not in d, "no hull field when not overridden")
+            assert_true("shield" not in d, "no shield field when not overridden")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_hull_only_and_kamikaze_recalc():
+        name = "MCP SpecHP Hull"
+        try:
+            _create_basic_ship(name)
+            # Set the kamikaze flag so get_ship will surface kamikaze_damage
+            # (paired-scalar: only emitted when the flag is on).
+            r = client.call_tool("update_ship",
+                {"name": name, "ship_flags": {"kamikaze": True}})
+            assert_success(r)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 8000})
+            assert_success(r)
+            assert_equal(tool_data(r).get("hull"), 8000, "hull round-trip")
+            # Kamikaze recalc: min(1000, 200 + 8000/4) = min(1000, 2200) = 1000.
+            r = client.call_tool("get_ship", {"name": name})
+            assert_success(r)
+            assert_equal(tool_data(r).get("kamikaze_damage"), 1000,
+                "kamikaze recalc capped at 1000")
+            # Smaller hull -> smaller kamikaze value.
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 100})
+            assert_success(r)
+            r = client.call_tool("get_ship", {"name": name})
+            assert_equal(tool_data(r).get("kamikaze_damage"), 225,
+                "kamikaze recalc = 200 + 100/4 = 225")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_shield_zero_valid():
+        name = "MCP SpecHP Shield0"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "shield": 0})
+            assert_success(r)
+            assert_equal(tool_data(r).get("shield"), 0,
+                "shield: 0 round-trips as a valid override")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_disable_via_null():
+        name = "MCP SpecHP Null"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 5000, "shield": 200})
+            assert_success(r)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": None})
+            assert_success(r)
+            d = tool_data(r)
+            assert_true("hull" not in d, "hull absent after null-disable")
+            assert_equal(d.get("shield"), 200, "shield unchanged by hull-null update")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_omit_leaves_unchanged():
+        name = "MCP SpecHP Omit"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 5000, "shield": 200})
+            assert_success(r)
+            # Update only shield; hull must persist.
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "shield": 300})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("hull"), 5000, "hull unchanged after shield-only update")
+            assert_equal(d.get("shield"), 300, "shield updated")
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_range_validation():
+        name = "MCP SpecHP Range"
+        try:
+            _create_basic_ship(name)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 0})
+            assert_error(r)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "shield": -5})
+            assert_error(r)
+        finally:
+            _delete_all_test_ships(client, [name])
+
+    def test_ship_special_hitpoints_disable_recalcs_to_class():
+        name = "MCP SpecHP RecalcClass"
+        try:
+            _create_basic_ship(name)
+            # Kamikaze flag must be set for kamikaze_damage to appear in get_ship.
+            r = client.call_tool("update_ship",
+                {"name": name, "ship_flags": {"kamikaze": True}})
+            assert_success(r)
+            # Enable special hull, then disable and confirm kamikaze recomputes
+            # against the ship class's max_hull_strength.
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": 8000})
+            assert_success(r)
+            r = client.call_tool("update_ship_special_hitpoints",
+                {"name": name, "hull": None})
+            assert_success(r)
+            r = client.call_tool("get_ship", {"name": name})
+            assert_success(r)
+            ship_class = tool_data(r).get("ship_class")
+            r = client.call_tool("get_ship_class", {"name": ship_class})
+            assert_success(r)
+            class_hull = tool_data(r).get("max_hull_strength")
+            expected = min(1000, 200 + int(class_hull / 4.0))
+            r = client.call_tool("get_ship", {"name": name})
+            assert_equal(tool_data(r).get("kamikaze_damage"), expected,
+                "kamikaze recalc against class max_hull_strength")
+        finally:
+            _delete_all_test_ships(client, [name])
+
     suite.add("ships_basic_crud", test_ships_basic_crud)
     suite.add("ships_arrival_cue_replacement", test_ship_arrival_cue_replacement)
     suite.add("ships_alt_class_name_callsign_cycle", test_ship_alt_class_name_and_callsign_cycle)
@@ -2285,6 +2580,34 @@ def register(suite, client):
         test_update_ship_subsystem_ai_class_turret)
     suite.add("ship_subsystem_ai_class_non_turret_reject",
         test_update_ship_subsystem_ai_class_non_turret_reject)
+    suite.add("ship_special_explosion_defaults", test_ship_special_explosion_defaults)
+    suite.add("ship_special_explosion_enable_from_defaults",
+        test_ship_special_explosion_enable_from_defaults)
+    suite.add("ship_special_explosion_enable_with_overrides",
+        test_ship_special_explosion_enable_with_overrides)
+    suite.add("ship_special_explosion_inner_gt_outer_rejected",
+        test_ship_special_explosion_inner_gt_outer_rejected)
+    suite.add("ship_special_explosion_disable_wipes",
+        test_ship_special_explosion_disable_wipes)
+    suite.add("ship_special_explosion_disable_with_other_fields_rejected",
+        test_ship_special_explosion_disable_with_other_fields_rejected)
+    suite.add("ship_special_explosion_shockwave_subtoggle",
+        test_ship_special_explosion_shockwave_subtoggle)
+    suite.add("ship_special_explosion_deathroll_validation",
+        test_ship_special_explosion_deathroll_validation)
+    suite.add("ship_special_hitpoints_defaults", test_ship_special_hitpoints_defaults)
+    suite.add("ship_special_hitpoints_hull_only_and_kamikaze_recalc",
+        test_ship_special_hitpoints_hull_only_and_kamikaze_recalc)
+    suite.add("ship_special_hitpoints_shield_zero_valid",
+        test_ship_special_hitpoints_shield_zero_valid)
+    suite.add("ship_special_hitpoints_disable_via_null",
+        test_ship_special_hitpoints_disable_via_null)
+    suite.add("ship_special_hitpoints_omit_leaves_unchanged",
+        test_ship_special_hitpoints_omit_leaves_unchanged)
+    suite.add("ship_special_hitpoints_range_validation",
+        test_ship_special_hitpoints_range_validation)
+    suite.add("ship_special_hitpoints_disable_recalcs_to_class",
+        test_ship_special_hitpoints_disable_recalcs_to_class)
 
 
 if __name__ == "__main__":
