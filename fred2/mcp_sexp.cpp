@@ -34,6 +34,14 @@
 #define PLACEHOLDER_STRING "<placeholder>"
 #define MAX_MCP_SEXP_LENGTH	65535
 
+// Strip one leading '@' from a SEXP variable name.  The engine stores variable
+// names bare; the '@' is a display-time prefix emitted by sexp_to_text and
+// accepted by text_to_sexp.  MCP handlers accept either form on input.
+static const char *strip_leading_at(const char *name)
+{
+	return (name && name[0] == '@') ? name + 1 : name;
+}
+
 static bool validate_dialog_for_sexp_nodes(SCP_string &error_msg);
 
 // ---------------------------------------------------------------------------
@@ -848,7 +856,7 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 	// (sexp_to_text emits "@var", text_to_sexp accepts it).  Stored node text
 	// is bare, so a naive client passing "@var" would otherwise find nothing.
 	// Strip a single leading '@', if it exists.
-	if (needle[0] == '@') needle++;
+	needle = strip_leading_at(needle);
 	if (!needle[0]) {
 		sink.set_error("Required parameter must not be empty after stripping leading '@': text");
 		return;
@@ -2453,7 +2461,7 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 {
 	// Variable handling for number/string types
 	if ((!stricmp(type_str, "number") || !stricmp(type_str, "string")) && value_str[0] == '@') {
-		const char *var_name = value_str + 1;
+		const char *var_name = strip_leading_at(value_str);
 		int var_idx = get_index_sexp_variable_name(var_name);
 		if (var_idx < 0) {
 			sink.set_error("Unknown SEXP variable '%s' in argument %d", var_name, arg_index);
@@ -2805,7 +2813,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 			int new_subtype = !stricmp(type_str, "number") ? SEXP_ATOM_NUMBER : SEXP_ATOM_STRING;
 
 			if (value_str[0] == '@') {
-				const char *var_name = value_str + 1;
+				const char *var_name = strip_leading_at(value_str);
 				int var_idx = get_index_sexp_variable_name(var_name);
 				if (var_idx < 0) {
 					sink.set_error("Unknown SEXP variable '%s'", var_name);
@@ -3023,6 +3031,7 @@ static void handle_get_sexp_variable(json_t *input, McpToolRequest *req)
 
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
+	name = strip_leading_at(name);
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
@@ -3041,6 +3050,7 @@ static void handle_create_sexp_variable(json_t *input, McpToolRequest *req)
 
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
+	name = strip_leading_at(name);
 	if (!validate_sexp_variable_name(name, sink)) return;
 
 	auto default_value = get_required_string(input, "default_value", sink, false, TOKEN_LENGTH - 1);
@@ -3101,6 +3111,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
+	name = strip_leading_at(name);
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
@@ -3124,6 +3135,7 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 		return;
 	}
 	if (new_name) {
+		new_name = strip_leading_at(new_name);
 		if (!validate_sexp_variable_name(new_name, sink, idx)) return;
 	}
 
@@ -3204,6 +3216,7 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 
 	auto name = get_required_string(input, "name", sink, true);
 	if (!name) return;
+	name = strip_leading_at(name);
 
 	int idx = get_index_sexp_variable_name(name);
 	if (idx < 0) {
@@ -3780,14 +3793,18 @@ void mcp_register_sexp_tools(json_t *tools)
 	register_tool_with_required_string(tools, "get_sexp_variable",
 		"Get full details of a SEXP variable by name, including default value, "
 		"type (number or string), and flags.",
-		"name", "Name of the variable to retrieve");
+		"name", "Name of the variable to retrieve.  A single leading '@' is "
+		"stripped (the '@' is a SEXP display convention and is not part of the "
+		"stored name).");
 
 	// create_sexp_variable
 	{
 		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
 		json_t *props = json_object();
 		add_string_prop(props, "name",
-			"Unique variable name. Cannot contain spaces or the characters @, (, ).");
+			"Unique variable name.  Cannot contain spaces or the characters (, ).  "
+			"A single leading '@' is stripped before the name is stored (the '@' "
+			"is a SEXP display convention and is not part of the stored name).");
 		add_string_prop(props, "default_value",
 			"Default value for the variable. Must be a valid integer for number type.");
 		add_string_enum_prop(props, "variable_type",
@@ -3811,9 +3828,11 @@ void mcp_register_sexp_tools(json_t *tools)
 		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
 		json_t *props = json_object();
 		add_string_prop(props, "name",
-			"Name of the existing variable to update");
+			"Name of the existing variable to update.  A single leading '@' is "
+			"stripped before lookup.");
 		add_string_prop(props, "new_name",
-			"New name for the variable. All SEXP node references will be updated automatically.");
+			"New name for the variable.  All SEXP node references will be updated "
+			"automatically.  A single leading '@' is stripped before the name is stored.");
 		add_string_prop(props, "default_value",
 			"New default value. Must be a valid integer for number type.");
 		add_string_enum_prop(props, "variable_type",
@@ -3836,7 +3855,8 @@ void mcp_register_sexp_tools(json_t *tools)
 	// delete_sexp_variable
 	{
 		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the variable to delete");
+		add_string_prop(props, "name",
+			"Name of the variable to delete.  A single leading '@' is stripped before lookup.");
 		add_bool_prop(props, "force",
 			"If true, delete even if referenced in SEXP expressions "
 			"(references will be reset to placeholder values)");
