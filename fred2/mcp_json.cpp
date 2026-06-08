@@ -176,104 +176,8 @@ void add_bool_map_prop(json_t *props, const char *name, const char *description)
 	json_object_set_new(props, name, p);
 }
 
-json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups)
-{
-	json_t *arr = json_array();
-	for (const auto &fields : groups) {
-		json_t *branch = json_object();
-		json_t *req = json_array();
-		for (const char *name : fields)
-			json_array_append_new(req, json_string(name));
-		json_object_set_new(branch, "required", req);
-		json_array_append_new(arr, branch);
-	}
-
-	json_t *extras = json_object();
-	json_object_set_new(extras, branchType, arr);
-	return extras;
-}
-
-json_t *build_branch_required_fields_allof(const char *branchType,
-	const SCP_vector<SCP_vector<SCP_vector<const char *>>> &per_branch_groups)
-{
-	json_t *all_of = json_array();
-	for (const auto &groups : per_branch_groups)
-		json_array_append_new(all_of, build_branch_required_fields(branchType, groups));
-
-	json_t *extras = json_object();
-	json_object_set_new(extras, "allOf", all_of);
-	return extras;
-}
-
-json_t *build_conditional_required_fields(const char *property_name,
-	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &value_to_required)
-{
-	json_t *all_of = json_array();
-	for (const auto &entry : value_to_required) {
-		// Build the "if" fragment that matches when `property_name` is present
-		// and has the given value.  The `required` guard ensures the `if`
-		// does not match when the property is absent (otherwise absence of
-		// constraints would trivially satisfy the check).
-		json_t *if_obj = json_object();
-		{
-			json_t *if_props = json_object();
-			json_t *const_obj = json_object();
-			json_object_set_new(const_obj, "const", json_string(entry.first));
-			json_object_set_new(if_props, property_name, const_obj);
-			json_object_set_new(if_obj, "properties", if_props);
-
-			json_t *if_required = json_array();
-			json_array_append_new(if_required, json_string(property_name));
-			json_object_set_new(if_obj, "required", if_required);
-		}
-
-		// Build the "then" fragment that requires the listed fields.
-		json_t *then_obj = json_object();
-		{
-			json_t *then_required = json_array();
-			for (const char *field : entry.second)
-				json_array_append_new(then_required, json_string(field));
-			json_object_set_new(then_obj, "required", then_required);
-		}
-
-		json_t *case_obj = json_object();
-		json_object_set_new(case_obj, "if", if_obj);
-		json_object_set_new(case_obj, "then", then_obj);
-		json_array_append_new(all_of, case_obj);
-	}
-
-	json_t *extras = json_object();
-	json_object_set_new(extras, "allOf", all_of);
-	return extras;
-}
-
-json_t *build_dependencies_extras(const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &deps)
-{
-	json_t *deps_obj = json_object();
-	for (const auto &dep : deps) {
-		json_t *arr = json_array();
-		for (const char *name : dep.second)
-			json_array_append_new(arr, json_string(name));
-		json_object_set_new(deps_obj, dep.first, arr);
-	}
-
-	json_t *extras = json_object();
-	json_object_set_new(extras, "dependencies", deps_obj);
-	return extras;
-}
-
-json_t *merge_schema_extras(json_t *dest, json_t *source)
-{
-	if (source) {
-		if (dest)
-			json_object_update(dest, source);
-		json_decref(source);
-	}
-	return dest;
-}
-
 void register_tool(json_t *tools, const char *name, const char *description,
-	json_t *properties, json_t *required_arr, json_t *schema_extras)
+	json_t *properties, json_t *required_arr)
 {
 	json_t *tool = json_object();
 	json_object_set_new(tool, "name", json_string(name));
@@ -284,10 +188,6 @@ void register_tool(json_t *tools, const char *name, const char *description,
 	json_object_set_new(schema, "properties", properties ? properties : json_object());
 	if (required_arr)
 		json_object_set_new(schema, "required", required_arr);
-	if (schema_extras) {
-		json_object_update(schema, schema_extras);
-		json_decref(schema_extras);
-	}
 	json_object_set_new(tool, "inputSchema", schema);
 
 	json_array_append_new(tools, tool);

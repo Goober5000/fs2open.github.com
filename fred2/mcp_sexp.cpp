@@ -3482,10 +3482,11 @@ void mcp_register_sexp_tools(json_t *tools)
 			"If true, free the detached node and its subtree. If false (the default), "
 			"the detached node is preserved and returned in the response.");
 		register_tool(tools, "detach_sexp_node",
-			"Detach a SEXP node from its tree. The target can be specified by node index "
-			"(node), by node index plus argument position (node + "
-			"argument_index), or by entity coordinates (entity_type + "
-			"entity_id). If the target is an operator inside a list wrapper, the "
+			"Detach a SEXP node from its tree. Provide exactly one targeting form: either "
+			"`node` (optionally with `argument_index`) OR both `entity_type` and `entity_id` "
+			"(optionally with `entity_tag`). `argument_index` requires `node`; `entity_id` and "
+			"`entity_tag` require `entity_type`. Mixing forms is rejected. "
+			"If the target is an operator inside a list wrapper, the "
 			"wrapper is automatically detached as well. If the node is the root of a "
 			"mission entity's formula (or entity mode is used), it is replaced with an "
 			"appropriate default (e.g. do-nothing for action formulas, true for boolean "
@@ -3504,14 +3505,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"trees, a syntax check is performed after modification; if the check fails, "
 			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
 			"be targeted directly; use argument_index with the parent operator.",
-			props, nullptr,
-			merge_schema_extras(
-				build_branch_required_fields("oneOf", { {"node"}, {"entity_type", "entity_id"} }),
-				build_dependencies_extras({
-					{"argument_index", {"node"}},
-					{"entity_id", {"entity_type"}},
-					{"entity_tag", {"entity_type"}},
-				})));
+			props);
 	}
 
 	// attach_sexp_node
@@ -3542,9 +3536,11 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Attach a free-standing SEXP subtree to a position in another tree or as a "
 			"mission entity's formula. The source must be a free-standing root (parent == -1, "
 			"not attached to any entity); use detach_sexp_node first if needed. "
-			"The target can be specified by node index (target_node), by node index plus "
-			"argument position (target_node + target_argument_index), or by entity "
-			"coordinates (target_entity_type + target_entity_id). "
+			"Provide exactly one targeting form: either `target_node` (optionally with "
+			"`target_argument_index` and/or `position`) OR both `target_entity_type` and "
+			"`target_entity_id` (optionally with `target_entity_tag`). `target_argument_index` "
+			"and `position` require `target_node`; `target_entity_id` and `target_entity_tag` "
+			"require `target_entity_type`. Mixing forms is rejected. "
 			"In node-relative mode (target_node), position can be 'replace' (default, swaps "
 			"the target with the source), 'before' (inserts source before target), or 'after' "
 			"(inserts source after target). In entity mode (target_entity_type + target_entity_id), "
@@ -3561,15 +3557,7 @@ void mcp_register_sexp_tools(json_t *tools)
 			"'delete_displaced' is false: if the displaced subtree's root is a redundant list "
 			"wrapper, it is unwrapped so the preserved free-standing root is the bare operator "
 			"atom, and the wrapper counts toward freed_count.",
-			props, req,
-			merge_schema_extras(
-				build_branch_required_fields("oneOf", { {"target_node"}, {"target_entity_type", "target_entity_id"} }),
-				build_dependencies_extras({
-					{"target_argument_index", {"target_node"}},
-					{"target_entity_id", {"target_entity_type"}},
-					{"target_entity_tag", {"target_entity_type"}},
-					{"position", {"target_node"}},
-				})));
+			props, req);
 	}
 
 	// move_sexp_node
@@ -3611,34 +3599,23 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Composes detach_sexp_node + attach_sexp_node internally: the source is detached "
 			"into a free-standing tree, then attached at the target.  If the attach fails "
 			"(e.g. due to a syntax check), the detach is rolled back so the original tree is "
-			"left unchanged. The source can be specified by node index (source_node), by "
-			"node index plus argument position (source_node + source_argument_index), or by "
-			"entity coordinates (source_entity_type + source_entity_id).  The target uses "
-			"the same three forms with target_ prefixes.  In node-relative target mode, "
-			"position can be 'replace' (default), 'before', or 'after' -- same semantics as "
-			"attach_sexp_node.  In entity target mode, the source replaces the entity's "
-			"current formula. If source and target resolve to the same slot, the call is a "
-			"trivial no-op (success with an empty response, no autosave). Otherwise the "
-			"response includes 'moved_node' (int, the absolute index of the relocated "
-			"subtree's root) and the full 'detached' and 'attached' sub-objects (see "
-			"detach_sexp_node and attach_sexp_node for their fields). By default, anything "
-			"already at the target slot is preserved as a free-standing root and reported in "
-			"the response; pass delete_displaced=true to free it instead.",
-			props, /*required=*/nullptr,
-			merge_schema_extras(
-				build_branch_required_fields_allof("oneOf", {
-					{ {"source_node"}, {"source_entity_type", "source_entity_id"} },
-					{ {"target_node"}, {"target_entity_type", "target_entity_id"} },
-				}),
-				build_dependencies_extras({
-					{"source_argument_index", {"source_node"}},
-					{"source_entity_id",      {"source_entity_type"}},
-					{"source_entity_tag",     {"source_entity_type"}},
-					{"target_argument_index", {"target_node"}},
-					{"target_entity_id",      {"target_entity_type"}},
-					{"target_entity_tag",     {"target_entity_type"}},
-					{"position",              {"target_node"}},
-				})));
+			"left unchanged. Provide exactly one source targeting form: either `source_node` "
+			"(optionally with `source_argument_index`) OR both `source_entity_type` and "
+			"`source_entity_id` (optionally with `source_entity_tag`). Provide exactly one "
+			"target targeting form independently with the same rules but `target_` prefixes; "
+			"`position` requires `target_node`. Companion-field dependencies "
+			"(`*_argument_index` requires the matching `*_node`; `*_entity_id` and "
+			"`*_entity_tag` require the matching `*_entity_type`) are enforced. "
+			"In node-relative target mode, position can be 'replace' (default), 'before', or "
+			"'after' -- same semantics as attach_sexp_node. In entity target mode, the source "
+			"replaces the entity's current formula. If source and target resolve to the same "
+			"slot, the call is a trivial no-op (success with an empty response, no autosave). "
+			"Otherwise the response includes 'moved_node' (int, the absolute index of the "
+			"relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
+			"(see detach_sexp_node and attach_sexp_node for their fields). By default, "
+			"anything already at the target slot is preserved as a free-standing root and "
+			"reported in the response; pass delete_displaced=true to free it instead.",
+			props);
 	}
 
 	// swap_sexp_nodes
@@ -3663,29 +3640,19 @@ void mcp_register_sexp_tools(json_t *tools)
 			"Exchange two SEXP subtrees in place, preserving each other's structural "
 			"position. Composes detach_sexp_node + attach_sexp_node internally and is "
 			"atomic: if any sub-step fails, all earlier steps are rolled back. Each "
-			"endpoint can be specified by node index (source_node/target_node), by "
-			"node index plus argument position, or by entity coordinates "
-			"(entity_type + entity_id). All four mode combinations are supported "
-			"(node/node, entity/entity, node/entity, entity/node). If source and "
-			"target resolve to the same slot, the call is a trivial no-op (success "
-			"with an empty response, no autosave). Otherwise the response includes "
-			"'first_attach' and 'second_attach' (see attach_sexp_node for their fields).  "
-			"'first_attach' reports the source attached at the target's vacated slot; "
-			"'second_attach' reports the target attached at the source's vacated slot.",
-			props, /*required=*/nullptr,
-			merge_schema_extras(
-				build_branch_required_fields_allof("oneOf", {
-					{ {"source_node"}, {"source_entity_type", "source_entity_id"} },
-					{ {"target_node"}, {"target_entity_type", "target_entity_id"} },
-				}),
-				build_dependencies_extras({
-					{"source_argument_index", {"source_node"}},
-					{"source_entity_id",      {"source_entity_type"}},
-					{"source_entity_tag",     {"source_entity_type"}},
-					{"target_argument_index", {"target_node"}},
-					{"target_entity_id",      {"target_entity_type"}},
-					{"target_entity_tag",     {"target_entity_type"}},
-				})));
+			"endpoint must provide exactly one targeting form: either `source_node` / "
+			"`target_node` (optionally with the matching `*_argument_index`) OR both "
+			"`*_entity_type` and `*_entity_id` (optionally with `*_entity_tag`). All four "
+			"mode combinations are supported (node/node, entity/entity, node/entity, "
+			"entity/node). Companion-field dependencies (`*_argument_index` requires the "
+			"matching `*_node`; `*_entity_id` and `*_entity_tag` require the matching "
+			"`*_entity_type`) are enforced. If source and target resolve to the same slot, "
+			"the call is a trivial no-op (success with an empty response, no autosave). "
+			"Otherwise the response includes 'first_attach' and 'second_attach' (see "
+			"attach_sexp_node for their fields). 'first_attach' reports the source attached "
+			"at the target's vacated slot; 'second_attach' reports the target attached at "
+			"the source's vacated slot.",
+			props);
 	}
 
 	// create_sexp_node
@@ -3736,13 +3703,11 @@ void mcp_register_sexp_tools(json_t *tools)
 		register_tool(tools, "create_sexp_node",
 			"Create a SEXP node. When role is 'operator', creates an operator node "
 			"with optional arguments, suitable for assigning as a mission entity's "
-			"formula. When role is 'argument', creates a standalone argument node "
-			"(number, string, or boolean). Does not enforce argument count or check syntax.",
-			props, req,
-			build_conditional_required_fields("role", {
-				{"operator", {"operator_name"}},
-				{"argument", {"argument_type", "argument_value"}},
-			}));
+			"formula -- the `operator_name` field is required. When role is 'argument', "
+			"creates a standalone argument node (number, string, or boolean) -- both "
+			"`argument_type` and `argument_value` are required. Does not enforce argument "
+			"count or check syntax.",
+			props, req);
 	}
 
 	// update_sexp_node

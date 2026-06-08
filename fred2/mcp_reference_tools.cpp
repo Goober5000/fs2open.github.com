@@ -398,11 +398,11 @@ void mcp_register_reference_tools(json_t *tools)
 			"Transform a position, direction/normal vector, and/or orientation matrix between "
 			"a local reference frame and world coordinates. Provide the reference frame via "
 			"'reference_frame_orientation' (and optionally 'reference_frame_position'), then "
-			"supply one or more of 'position', 'normal', or 'orientation' to transform. "
+			"supply at least one of 'position', 'normal', or 'orientation' to transform "
+			"(at least one is required; rejected otherwise). "
 			"All coordinate data uses the engine's left-handed coordinate system "
 			"(+X right, +Y up, +Z forward).",
-			props, req,
-			build_branch_required_fields("anyOf", { { "position" }, { "normal" }, { "orientation" } }));
+			props, req);
 	}
 
 	// list_persona_types
@@ -550,11 +550,11 @@ void mcp_register_reference_tools(json_t *tools)
 			{ "function", "property", "operator" });
 		register_tool(tools, "search_scripting_children",
 			"Search for functions, properties, or operators across all scripting libraries "
-			"and classes. Returns matches with parent context. At least one parameter required. "
+			"and classes. Returns matches with parent context. At least one of `search` or "
+			"`child_type` must be supplied (rejected otherwise). "
 			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
 			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props, nullptr,
-			build_branch_required_fields("anyOf", { { "search" }, { "child_type" } }));
+			props);
 	}
 
 	// list_scripting_hooks
