@@ -226,9 +226,9 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	auto command_sender    = get_optional_string(input, "command_sender", sink, NAME_LENGTH - 1);
 	auto command_persona   = get_optional_string(input, "command_persona", sink);
 	auto squadron_name     = get_optional_string(input, "squadron_name", sink, NAME_LENGTH - 1);
-	auto squadron_logo     = get_optional_filename(input, "squadron_logo_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto loading_640       = get_optional_filename(input, "loading_screen_640", sink, false, MAX_FILENAME_LEN - 1);
-	auto loading_1024      = get_optional_filename(input, "loading_screen_1024", sink, false, MAX_FILENAME_LEN - 1);
+	auto squadron_logo     = get_optional_filename(input, "squadron_logo_filename", sink, false);
+	auto loading_640       = get_optional_filename(input, "loading_screen_640", sink, false);
+	auto loading_1024      = get_optional_filename(input, "loading_screen_1024", sink, false);
 	auto ai_profile_str    = get_optional_string(input, "ai_profile", sink);
 
 	if (sink.has_error()) return;
