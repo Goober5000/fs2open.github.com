@@ -2517,8 +2517,14 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 			sink.set_error("Node argument %d: node %d is not in use", arg_index, idx);
 			return -1;
 		}
-		if (find_sexp_root(idx) != idx) {
+		FormulaRootInfo src_info = find_formula_root_and_type(idx);
+		if (src_info.root != idx) {
 			sink.set_error("Node argument %d: node %d is not the root of its own tree", arg_index, idx);
+			return -1;
+		}
+		if (src_info.attached) {
+			sink.set_error("Node argument %d: node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
+				arg_index, idx, src_info.attached_type);
 			return -1;
 		}
 		// Always wrap to avoid corrupting existing tree linkage
