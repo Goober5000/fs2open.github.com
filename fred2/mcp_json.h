@@ -68,44 +68,9 @@ void add_vec3d_array_prop(json_t *props, const char *name, const char *descripti
 void add_matrix_prop(json_t *props, const char *name, const char *description);
 void add_color_prop(json_t *props, const char *name, const char *description);
 
-// Build a schema_extras object with a branch constraint (e.g. "oneOf" or "anyOf")
-// between one or more groups of required fields.
-json_t *build_branch_required_fields(const char *branchType, const SCP_vector<SCP_vector<const char *>> &groups);
-
-// Build {"allOf": [{<branchType>: [<group_a>]}, {<branchType>: [<group_b>]}, ...]}
-// for tools that need multiple independent branch constraints (e.g. one oneOf
-// for source_* and another for target_*).  Each entry in per_branch_groups is
-// the equivalent of one build_branch_required_fields call's `groups` argument.
-json_t *build_branch_required_fields_allof(const char *branchType,
-	const SCP_vector<SCP_vector<SCP_vector<const char *>>> &per_branch_groups);
-
-// Build a schema_extras object with an "allOf" of if/then constraints
-// expressing: for each entry {value, required_fields}, if `property_name` is
-// present and equals `value`, then the listed fields are required.  Useful
-// for discriminator-style parameters (e.g. a `role` field where different
-// values require different companion parameters).
-json_t *build_conditional_required_fields(const char *property_name,
-	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &value_to_required);
-
-// Build a schema_extras object with a "dependencies" constraint expressing
-// conditional presence: for each pair {dependent_field, required_fields}, if
-// dependent_field is present in the input then every name in required_fields
-// must also be present.  Useful for constraints like "entity_tag is only valid
-// with target_entity_type".
-json_t *build_dependencies_extras(
-	const SCP_vector<std::pair<const char *, SCP_vector<const char *>>> &deps);
-
-// Merge the key-value pairs from `source` into `dest`, taking ownership of
-// `source` (it is decref'd).  Returns `dest` so the result can be passed
-// directly as register_tool's schema_extras argument.
-json_t *merge_schema_extras(json_t *dest, json_t *source);
-
-// Register an MCP tool schema in the tools array.  If schema_extras is
-// provided, its keys are merged into the inputSchema (e.g. {"oneOf": [...]} or
-// {"anyOf": [...]}).  Ownership of schema_extras transfers to this function.
+// Register an MCP tool schema in the tools array.
 void register_tool(json_t *tools, const char *name, const char *description,
-	json_t *properties, json_t *required_arr = nullptr,
-	json_t *schema_extras = nullptr);
+	json_t *properties, json_t *required_arr = nullptr);
 
 // Shorthand: register a tool whose only parameter is a single required string.
 void register_tool_with_required_string(json_t *tools, const char *tool_name, const char *description,
