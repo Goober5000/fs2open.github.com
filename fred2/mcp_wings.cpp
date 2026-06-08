@@ -332,7 +332,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	// Optional
 	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
-	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
 	auto threshold           = get_optional_integer(input, "new_wave_threshold", sink);
 	auto wave_delay_min      = get_optional_integer(input, "wave_delay_min", sink);
@@ -505,7 +505,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	auto new_name            = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
 	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
-	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
 	auto threshold           = get_optional_integer(input, "new_wave_threshold", sink);
 	auto wave_delay_min      = get_optional_integer(input, "wave_delay_min", sink);

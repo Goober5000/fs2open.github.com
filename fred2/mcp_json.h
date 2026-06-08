@@ -8,6 +8,7 @@
 #include <jansson.h>
 
 #include "globalincs/vmallocator.h"	// for SCP_string
+#include "globalincs/pstypes.h"		// for MAX_FILENAME_LEN
 
 struct McpToolRequest;  // full definition in mcpserver.h
 struct vec3d;           // full definition in pstypes.h
@@ -141,7 +142,7 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 // Returns nullptr if the parameter is missing; returns nullptr and reports an error via sink if
 // it is JSON null, the wrong type, or exceeds max_len. Returns an empty string if VALID_FNAME
 // (empty, "none", or "<none>") is false. Returns a non-null filename otherwise.
-const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = SIZE_MAX);
+const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = MAX_FILENAME_LEN - 1);
 
 // Extracts optional typed parameters from arguments JSON.
 // Returns std::nullopt if the parameter is missing; reports a type error via sink if present but the wrong type.

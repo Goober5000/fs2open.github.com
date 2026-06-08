@@ -101,7 +101,7 @@ static void handle_create_jump_node(json_t *input, McpToolRequest *req)
 
 	auto display_name = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, true);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -159,7 +159,7 @@ static void handle_update_jump_node(json_t *input, McpToolRequest *req)
 	auto new_pos      = get_optional_vec3d(input, "position", sink);
 	auto display_name = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
 	auto color_val    = get_optional_color(input, "color", sink);
-	auto model_file   = get_optional_filename(input, "model_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto model_file   = get_optional_filename(input, "model_filename", sink, true);
 	auto show_polys   = get_optional_bool(input, "show_polys", sink);
 	auto hidden       = get_optional_bool(input, "hidden", sink);
 	if (sink.has_error()) return;

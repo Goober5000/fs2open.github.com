@@ -104,8 +104,8 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
-	auto ani = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto ani = get_optional_filename(input, "animation_filename", sink, false);
+	auto wave = get_optional_filename(input, "voice_filename", sink, false);
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
@@ -151,9 +151,9 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
-	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_wave = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_text = get_optional_string(input, "text", sink);
+	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false);
+	auto new_wave = get_optional_filename(input, "voice_filename", sink, false);
 	if (sink.has_error()) return;
 
 	cmd_brief_stage &s = cb->stage[*index - 1];
