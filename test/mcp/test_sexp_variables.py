@@ -323,6 +323,124 @@ def register(suite, client):
             for v in vars_:
                 _safe_delete_var(client, v)
 
+    # ----- Scenario 8: create accepts leading '@' on name --------------------
+
+    def test_create_variable_accepts_at_prefix():
+        vars_ = []
+        try:
+            r = client.call_tool("create_sexp_variable", {
+                "name": "@tsv_at_create",
+                "default_value": "0",
+                "variable_type": "number",
+            })
+            assert_success(r)
+            vars_.append("tsv_at_create")
+
+            # The stored canonical name is bare.  list_sexp_variables and
+            # get_sexp_variable both report it without the '@'.
+            assert_in("tsv_at_create", _list_var_names(client),
+                      "variable should be stored bare after stripping '@'")
+            assert_true("@tsv_at_create" not in _list_var_names(client),
+                        "stored name should not retain the '@' prefix")
+
+            r = client.call_tool("get_sexp_variable", {"name": "tsv_at_create"})
+            assert_success(r)
+            assert_equal(tool_data(r).get("name"), "tsv_at_create",
+                         "get by bare name should return the variable created with '@'")
+        finally:
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 9: get accepts leading '@' on name -----------------------
+
+    def test_get_variable_accepts_at_prefix():
+        vars_ = []
+        try:
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tsv_at_get",
+                "default_value": "0",
+                "variable_type": "number",
+            })
+            assert_success(r)
+            vars_.append("tsv_at_get")
+
+            r_bare = client.call_tool("get_sexp_variable", {"name": "tsv_at_get"})
+            assert_success(r_bare)
+            r_at = client.call_tool("get_sexp_variable", {"name": "@tsv_at_get"})
+            assert_success(r_at)
+            assert_equal(tool_data(r_at).get("name"), tool_data(r_bare).get("name"),
+                         "get by '@name' and 'name' should return the same variable")
+        finally:
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 10: update accepts leading '@' on name and new_name ------
+
+    def test_update_variable_accepts_at_prefix():
+        vars_ = []
+        try:
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tsv_at_update",
+                "default_value": "0",
+                "variable_type": "number",
+            })
+            assert_success(r)
+            vars_.append("tsv_at_update")
+
+            # Update the default_value via '@' lookup
+            r = client.call_tool("update_sexp_variable", {
+                "name": "@tsv_at_update",
+                "default_value": "42",
+            })
+            assert_success(r)
+            r = client.call_tool("get_sexp_variable", {"name": "tsv_at_update"})
+            assert_success(r)
+            assert_equal(tool_data(r).get("default_value"), "42",
+                         "update by '@name' should change default_value")
+
+            # Rename via '@' on both name and new_name
+            r = client.call_tool("update_sexp_variable", {
+                "name": "@tsv_at_update",
+                "new_name": "@tsv_at_renamed",
+            })
+            assert_success(r)
+            vars_.remove("tsv_at_update")
+            vars_.append("tsv_at_renamed")
+
+            names = _list_var_names(client)
+            assert_in("tsv_at_renamed", names,
+                      "renamed variable should appear bare in list")
+            assert_true("@tsv_at_renamed" not in names,
+                        "renamed name should not retain the '@' prefix")
+            assert_true("tsv_at_update" not in names,
+                        "old name should be gone after rename")
+        finally:
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 11: delete accepts leading '@' on name -------------------
+
+    def test_delete_variable_accepts_at_prefix():
+        vars_ = []
+        try:
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tsv_at_delete",
+                "default_value": "0",
+                "variable_type": "number",
+            })
+            assert_success(r)
+            vars_.append("tsv_at_delete")
+
+            r = client.call_tool("delete_sexp_variable", {"name": "@tsv_at_delete"})
+            assert_success(r)
+            vars_.remove("tsv_at_delete")
+
+            assert_true("tsv_at_delete" not in _list_var_names(client),
+                        "variable should be gone after delete by '@name'")
+        finally:
+            for v in vars_:
+                _safe_delete_var(client, v)
+
     tests = [
         ("sexp_variables_create_node_with_variable_arg",
          test_create_node_with_variable_arg),
@@ -338,6 +456,14 @@ def register(suite, client):
          test_delete_with_force_resets_references),
         ("sexp_variables_rename_propagates_to_references",
          test_rename_propagates_to_references),
+        ("sexp_variables_create_accepts_at_prefix",
+         test_create_variable_accepts_at_prefix),
+        ("sexp_variables_get_accepts_at_prefix",
+         test_get_variable_accepts_at_prefix),
+        ("sexp_variables_update_accepts_at_prefix",
+         test_update_variable_accepts_at_prefix),
+        ("sexp_variables_delete_accepts_at_prefix",
+         test_delete_variable_accepts_at_prefix),
     ]
     for name, func in tests:
         suite.add(name, func)
