@@ -271,6 +271,30 @@ def register(suite, client):
         assert_success(r)
         ctx.pop("sexp_nonroot_tree", None)
 
+    # ----- create_sexp_node regression: attached-root node arg is rejected -----
+
+    def test_create_sexp_node_attached_root_rejected():
+        """Node args that reference an attached mission formula root must be rejected;
+        otherwise the entity's formula handle and the new operator's child slot would
+        alias the same Sexp_nodes entry, becoming a use-after-free when either owner
+        frees the subtree."""
+        # Create an event — its formula root is attached to the event.
+        r = client.call_tool("create_event", {"name": "create_attached_test"})
+        assert_success(r)
+        formula = tool_data(r).get("formula")
+        # Try to use the event's formula as a node argument to a new operator.
+        r = client.call_tool("create_sexp_node", {
+            "role": "operator",
+            "operator_name": "when",
+            "operator_arguments": [
+                {"argument_type": "node", "argument_value": str(formula)},
+                {"argument_type": "string", "argument_value": "<placeholder>"},
+            ],
+        })
+        assert_error(r)
+        assert_in("attached", tool_text(r).lower())
+        client.call_tool("delete_event", {"name": "create_attached_test"})
+
     # ----- create_sexp_node regression: type-error rollback preserves referenced tree -----
 
     def test_create_sexp_node_type_error_preserves_referenced_tree():
@@ -336,6 +360,7 @@ def register(suite, client):
         ("sexp_roundtrip_cleanup_composed_tree", test_cleanup_composed_tree),
         ("sexp_roundtrip_create_sexp_node_non_root_rejected", test_create_sexp_node_non_root_rejected),
         ("sexp_roundtrip_cleanup_nonroot_tree", test_cleanup_nonroot_tree),
+        ("sexp_roundtrip_create_sexp_node_attached_root_rejected", test_create_sexp_node_attached_root_rejected),
         ("sexp_roundtrip_create_sexp_node_type_error_preserves_referenced_tree",
          test_create_sexp_node_type_error_preserves_referenced_tree),
         ("sexp_roundtrip_cleanup_preserved_tree", test_cleanup_preserved_tree),
