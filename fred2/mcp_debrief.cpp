@@ -107,7 +107,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
-	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
@@ -159,7 +159,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
 	auto new_text = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
-	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
