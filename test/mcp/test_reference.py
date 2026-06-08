@@ -84,6 +84,14 @@ def register(suite, client):
         assert_success(r)
         d = tool_data(r)
         assert_has_key(d, "name")
+        # Explosion sub-object -- defaults used by update_ship_special_explosion's
+        # seed-from-class behavior.
+        assert_has_key(d, "explosion")
+        e = d["explosion"]
+        for key in ("shockwave_inner_radius", "shockwave_outer_radius",
+                    "shockwave_damage", "shockwave_blast", "shockwave_speed",
+                    "explosion_propagates", "death_roll_base_time_ms"):
+            assert_has_key(e, key, f"get_ship_class.explosion.{key}")
 
     def test_get_ship_class_model_details():
         name = ctx.get("ship_class_name")
