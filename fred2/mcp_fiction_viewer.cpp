@@ -81,14 +81,14 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_fiction, sink)) return;
 
-	auto story = get_required_filename(input, "story_filename", sink, true, MAX_FILENAME_LEN - 1);
+	auto story = get_required_filename(input, "story_filename", sink, true);
 	if (!story) return;
 
-	auto font  = get_optional_filename(input, "font_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto font  = get_optional_filename(input, "font_filename", sink, false);
+	auto voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto ui    = get_optional_string(input, "ui_name", sink);
-	auto bg640 = get_optional_filename(input, "background_640", sink, false, MAX_FILENAME_LEN - 1);
-	auto bg1024 = get_optional_filename(input, "background_1024", sink, false, MAX_FILENAME_LEN - 1);
+	auto bg640 = get_optional_filename(input, "background_640", sink, false);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, false);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -138,12 +138,12 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
-	auto new_story = get_optional_filename(input, "story_filename", sink, true, MAX_FILENAME_LEN - 1);
-	auto new_font  = get_optional_filename(input, "font_filename", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_voice = get_optional_filename(input, "voice_filename", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_story = get_optional_filename(input, "story_filename", sink, true);
+	auto new_font  = get_optional_filename(input, "font_filename", sink, false);
+	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_ui    = get_optional_string(input, "ui_name", sink);
-	auto new_bg640 = get_optional_filename(input, "background_640", sink, false, MAX_FILENAME_LEN - 1);
-	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false, MAX_FILENAME_LEN - 1);
+	auto new_bg640 = get_optional_filename(input, "background_640", sink, false);
+	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;

@@ -209,6 +209,42 @@ def register(suite, client):
         r = client.call_tool("create_event", {"name": "RangeTest", "chain_delay": -2})
         assert_error(r)
 
+    def test_create_message_talking_head_too_long():
+        # MAX_FILENAME_LEN is 32 (incl. terminator); 32 'a' chars exceeds the
+        # 31-char user-visible limit.
+        long_name = "a" * 32
+        r = client.call_tool("create_message", {
+            "name": "OverLongHeadTest",
+            "message": "x",
+            "talking_head": long_name,
+        })
+        assert_error(r)
+        assert_in("too long", tool_text(r).lower())
+        # Defensive cleanup in case a future regression lets it through.
+        try:
+            client.call_tool("delete_message", {"name": "OverLongHeadTest", "force": True})
+        except Exception:
+            pass
+
+    def test_update_message_voice_filename_too_long():
+        long_name = "a" * 32
+        try:
+            r = client.call_tool("create_message", {
+                "name": "OverLongVoiceTest", "message": "x"
+            })
+            assert_success(r)
+            r = client.call_tool("update_message", {
+                "name": "OverLongVoiceTest",
+                "voice_filename": long_name,
+            })
+            assert_error(r)
+            assert_in("too long", tool_text(r).lower())
+        finally:
+            try:
+                client.call_tool("delete_message", {"name": "OverLongVoiceTest", "force": True})
+            except Exception:
+                pass
+
     # ----- DNS-rebinding gate (Host header validation) -----
 
     def test_rejects_bogus_host_header():
@@ -286,6 +322,8 @@ def register(suite, client):
         ("negative_create_event_repeat_count_zero", test_create_event_repeat_count_zero),
         ("negative_create_event_interval_negative", test_create_event_interval_negative),
         ("negative_create_event_chain_delay_invalid", test_create_event_chain_delay_invalid),
+        ("negative_create_message_talking_head_too_long", test_create_message_talking_head_too_long),
+        ("negative_update_message_voice_filename_too_long", test_update_message_voice_filename_too_long),
         ("negative_rejects_bogus_host_header", test_rejects_bogus_host_header),
         ("negative_accepts_localhost_host_header", test_accepts_localhost_host_header),
     ]
