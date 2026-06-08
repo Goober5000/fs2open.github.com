@@ -2191,6 +2191,311 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Special explosion tools -- mirror the per-ship "Special Explosion" dialog
+// (fred2/shipspecialdamage.cpp).  When the master toggle is on, the engine
+// uses these override fields instead of the ship class's shockwave_create_info
+// at death.
+// ---------------------------------------------------------------------------
+
+static json_t *build_special_explosion_json(const ship &shipp)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "ship", json_safe_string(shipp.ship_name));
+	json_object_set_new(obj, "enabled", json_boolean(shipp.use_special_explosion));
+	if (!shipp.use_special_explosion)
+		return obj;
+
+	json_object_set_new(obj, "damage", json_integer(shipp.special_exp_damage));
+	json_object_set_new(obj, "blast_force", json_integer(shipp.special_exp_blast));
+	json_object_set_new(obj, "inner_radius", json_integer(shipp.special_exp_inner));
+	json_object_set_new(obj, "outer_radius", json_integer(shipp.special_exp_outer));
+	json_object_set_new(obj, "shockwave_enabled", json_boolean(shipp.use_shockwave));
+	if (shipp.use_shockwave)
+		json_object_set_new(obj, "shockwave_speed", json_integer(shipp.special_exp_shockwave_speed));
+	// 0 is the engine sentinel for "use class default death-roll time"; omit it.
+	if (shipp.special_exp_deathroll_time > 0)
+		json_object_set_new(obj, "deathroll_time_ms", json_integer(shipp.special_exp_deathroll_time));
+	return obj;
+}
+
+static void handle_get_ship_special_explosion(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	req->result_json = make_json_tool_result(build_special_explosion_json(Ships[ship_idx]));
+	req->success = true;
+}
+
+// Working copy used during partial updates -- assembled from current state (if
+// already enabled) or ship class defaults (if transitioning from disabled), then
+// overlaid with explicit caller-supplied values.
+struct special_explosion_stage {
+	int damage;
+	int blast;
+	int inner;
+	int outer;
+	bool use_shockwave;
+	int shockwave_speed;
+	int deathroll_time;
+};
+
+static special_explosion_stage seed_from_class_defaults(const ship_info &sip)
+{
+	special_explosion_stage s;
+	s.damage = (int)sip.shockwave.damage;
+	s.blast = (int)sip.shockwave.blast;
+	s.inner = (int)sip.shockwave.inner_rad;
+	s.outer = (int)sip.shockwave.outer_rad;
+	s.use_shockwave = (sip.explosion_propagates != 0);
+	s.shockwave_speed = (int)sip.shockwave.speed;
+	s.deathroll_time = 0;
+	// Engine-edge clamps the dialog applies on fresh open
+	// (shipspecialdamage.cpp:140-148).
+	if (s.inner < 1) s.inner = 1;
+	if (s.outer < 2) s.outer = 2;
+	if (s.shockwave_speed < 1) s.shockwave_speed = 1;
+	return s;
+}
+
+static special_explosion_stage seed_from_current(const ship &shipp)
+{
+	special_explosion_stage s;
+	s.damage = shipp.special_exp_damage;
+	s.blast = shipp.special_exp_blast;
+	s.inner = shipp.special_exp_inner;
+	s.outer = shipp.special_exp_outer;
+	s.use_shockwave = shipp.use_shockwave;
+	s.shockwave_speed = shipp.special_exp_shockwave_speed;
+	s.deathroll_time = shipp.special_exp_deathroll_time;
+	return s;
+}
+
+static bool any_explosion_field_supplied(json_t *input)
+{
+	static const char *fields[] = {
+		"damage", "blast_force", "inner_radius", "outer_radius",
+		"shockwave_enabled", "shockwave_speed", "deathroll_time_ms",
+	};
+	for (const char *f : fields)
+		if (json_object_get(input, f) != nullptr)
+			return true;
+	return false;
+}
+
+static void handle_update_ship_special_explosion(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	auto enable = get_required_bool(input, "enable", sink);
+	if (!enable) return;
+
+	ship &shipp = Ships[ship_idx];
+
+	// --- Disable path: wipe to engine sentinels.  Reject any other fields. ---
+	if (!*enable) {
+		if (any_explosion_field_supplied(input)) {
+			sink.set_error("When 'enable' is false, no other special-explosion fields may "
+				"be supplied (they would be discarded by the wipe).");
+			return;
+		}
+		shipp.use_special_explosion = false;
+		shipp.special_exp_damage = -1;
+		shipp.special_exp_blast = -1;
+		shipp.special_exp_inner = -1;
+		shipp.special_exp_outer = -1;
+		shipp.use_shockwave = false;
+		shipp.special_exp_shockwave_speed = -1;
+		shipp.special_exp_deathroll_time = 0;
+		mark_modified("MCP: update ship %s special explosion (disabled)", name);
+		req->result_json = make_json_tool_result(build_special_explosion_json(shipp));
+		req->success = true;
+		return;
+	}
+
+	// --- Enable path: parse partial fields, seed staging, overlay, validate. ---
+	auto damage_arg = get_optional_integer(input, "damage", sink);
+	auto blast_arg = get_optional_integer(input, "blast_force", sink);
+	auto inner_arg = get_optional_integer(input, "inner_radius", sink);
+	auto outer_arg = get_optional_integer(input, "outer_radius", sink);
+	auto shock_enabled_arg = get_optional_bool(input, "shockwave_enabled", sink);
+	auto shock_speed_arg = get_optional_integer(input, "shockwave_speed", sink);
+	auto deathroll_arg = get_optional_integer(input, "deathroll_time_ms", sink);
+	if (sink.has_error()) return;
+
+	bool was_enabled = shipp.use_special_explosion;
+	special_explosion_stage stage = was_enabled
+		? seed_from_current(shipp)
+		: seed_from_class_defaults(Ship_info[shipp.ship_info_index]);
+
+	if (damage_arg.has_value())        stage.damage = *damage_arg;
+	if (blast_arg.has_value())         stage.blast = *blast_arg;
+	if (inner_arg.has_value())         stage.inner = *inner_arg;
+	if (outer_arg.has_value())         stage.outer = *outer_arg;
+	if (shock_enabled_arg.has_value()) stage.use_shockwave = *shock_enabled_arg;
+	if (shock_speed_arg.has_value())   stage.shockwave_speed = *shock_speed_arg;
+	if (deathroll_arg.has_value())     stage.deathroll_time = *deathroll_arg;
+
+	// Validation -- mirrors shipspecialdamage.cpp:192-237.
+	if (stage.damage < 0) {
+		sink.set_error("damage must be non-negative (got %d).", stage.damage);
+		return;
+	}
+	if (stage.blast < 0) {
+		sink.set_error("blast_force must be non-negative (got %d).", stage.blast);
+		return;
+	}
+	if (stage.inner < 1) {
+		sink.set_error("inner_radius must be at least 1 (got %d).", stage.inner);
+		return;
+	}
+	if (stage.outer < 2) {
+		sink.set_error("outer_radius must be at least 2 (got %d).", stage.outer);
+		return;
+	}
+	if (stage.inner > stage.outer) {
+		sink.set_error("inner_radius (%d) must not exceed outer_radius (%d).",
+			stage.inner, stage.outer);
+		return;
+	}
+	if (stage.deathroll_time != 0 && stage.deathroll_time < 2) {
+		sink.set_error("deathroll_time_ms must be 0 (inherit class default) or at least 2 ms (got %d).",
+			stage.deathroll_time);
+		return;
+	}
+	if (stage.use_shockwave && stage.shockwave_speed < 1) {
+		sink.set_error("shockwave_speed must be at least 1 when shockwave_enabled is true (got %d).",
+			stage.shockwave_speed);
+		return;
+	}
+	// Cleanup: when shockwave is off, speed has no meaning -- drop to 0 so the
+	// engine field doesn't carry stale data.
+	if (!stage.use_shockwave)
+		stage.shockwave_speed = 0;
+
+	shipp.use_special_explosion = true;
+	shipp.special_exp_damage = stage.damage;
+	shipp.special_exp_blast = stage.blast;
+	shipp.special_exp_inner = stage.inner;
+	shipp.special_exp_outer = stage.outer;
+	shipp.use_shockwave = stage.use_shockwave;
+	shipp.special_exp_shockwave_speed = stage.shockwave_speed;
+	shipp.special_exp_deathroll_time = stage.deathroll_time;
+
+	mark_modified("MCP: update ship %s special explosion", name);
+	req->result_json = make_json_tool_result(build_special_explosion_json(shipp));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
+// Special hitpoints tools -- mirror the per-ship "Special Hitpoints" dialog
+// (fred2/shipspecialhitpoints.cpp).  Two independent overrides (hull, shield);
+// commit recalculates kamikaze_damage as a side-effect.
+// ---------------------------------------------------------------------------
+
+static json_t *build_special_hitpoints_json(const ship &shipp)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "ship", json_safe_string(shipp.ship_name));
+	// Engine sentinels (0 for hull, -1 for shield) are surfaced as field-omission;
+	// see shipspecialhitpoints.cpp.
+	if (shipp.special_hitpoints > 0)
+		json_object_set_new(obj, "hull", json_integer(shipp.special_hitpoints));
+	if (shipp.special_shield >= 0)
+		json_object_set_new(obj, "shield", json_integer(shipp.special_shield));
+	return obj;
+}
+
+static void handle_get_ship_special_hitpoints(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	req->result_json = make_json_tool_result(build_special_hitpoints_json(Ships[ship_idx]));
+	req->success = true;
+}
+
+static void handle_update_ship_special_hitpoints(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_ships, sink)) return;
+
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
+
+	int ship_idx = lookup_ship(name, sink);
+	if (ship_idx < 0) return;
+
+	// null = disable, numeric = enable+set, omitted = leave unchanged.
+	bool hull_null = is_parameter_present_and_null(input, "hull");
+	auto hull_arg = hull_null ? std::nullopt : get_optional_integer(input, "hull", sink);
+	bool shield_null = is_parameter_present_and_null(input, "shield");
+	auto shield_arg = shield_null ? std::nullopt : get_optional_integer(input, "shield", sink);
+	if (sink.has_error()) return;
+
+	if (hull_arg.has_value() && *hull_arg < 1) {
+		sink.set_error("hull must be at least 1 (got %d).  Pass null to disable.", *hull_arg);
+		return;
+	}
+	if (shield_arg.has_value() && *shield_arg < 0) {
+		sink.set_error("shield must be non-negative (got %d).  Pass null to disable.", *shield_arg);
+		return;
+	}
+
+	ship &shipp = Ships[ship_idx];
+	bool changed = false;
+
+	if (hull_null) {
+		shipp.special_hitpoints = 0;
+		changed = true;
+	} else if (hull_arg.has_value()) {
+		shipp.special_hitpoints = *hull_arg;
+		changed = true;
+	}
+	if (shield_null) {
+		shipp.special_shield = -1;
+		changed = true;
+	} else if (shield_arg.has_value()) {
+		shipp.special_shield = *shield_arg;
+		changed = true;
+	}
+
+	if (changed) {
+		// Recalculate kamikaze_damage from the post-update hull (matches
+		// shipspecialhitpoints.cpp:205-215).  Overrides any prior value set via
+		// update_ship.kamikaze_damage -- mirrors the dialog behavior.
+		float hull_for_calc = (shipp.special_hitpoints > 0)
+			? (float)shipp.special_hitpoints
+			: Ship_info[shipp.ship_info_index].max_hull_strength;
+		Ai_info[shipp.ai_index].kamikaze_damage =
+			std::min(1000, 200 + (int)(hull_for_calc / 4.0f));
+		mark_modified("MCP: update ship %s special hitpoints", name);
+	}
+
+	req->result_json = make_json_tool_result(build_special_hitpoints_json(shipp));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -2638,6 +2943,83 @@ void mcp_register_ship_tools(json_t *tools)
 			"Returns the post-update subsystem record.",
 			props, req);
 	}
+
+	// get_ship_special_explosion
+	register_tool_with_required_string(tools, "get_ship_special_explosion",
+		"Get the per-ship Special Explosion override fields (changes explosion characteristics "
+		"from the ship class defaults).  When the master toggle is off, returns "
+		"{ ship, enabled: false } with no other fields.  When on, returns the override values "
+		"(damage, blast_force, inner_radius, outer_radius, shockwave_enabled, optional "
+		"shockwave_speed when shockwave_enabled is true, optional deathroll_time_ms when "
+		"non-zero).  If a ship has no special explosion, the ship class default values "
+		"(see get_ship_class) are used.",
+		"name", "Name of the ship");
+
+	// update_ship_special_explosion
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_bool_prop(props, "enable",
+			"Master toggle for the override (use_special_explosion).  When false, all override "
+			"fields are wiped and no other fields may be supplied.  When true, partial updates "
+			"apply; any value not specified uses the previously specified value, or the ship class "
+			"default value (see get_ship_class) if never specified.");
+		add_integer_prop(props, "damage", "Explosion damage. Non-negative.");
+		add_integer_prop(props, "blast_force",
+			"Explosion blast force. Non-negative.");
+		add_integer_prop(props, "inner_radius",
+			"Inner shockwave radius (>= 1, must not exceed outer_radius).");
+		add_integer_prop(props, "outer_radius",
+			"Outer shockwave radius (>= 2).");
+		add_bool_prop(props, "shockwave_enabled",
+			"Whether the explosion should produce a shockwave.");
+		add_integer_prop(props, "shockwave_speed",
+			"Shockwave propagation speed. Must be >= 1 when shockwave_enabled is true; "
+			"wiped to 0 when shockwave_enabled is false.");
+		add_integer_prop(props, "deathroll_time_ms",
+			"How long, in milliseconds, the ship tumbles in its death roll before the final explosion.  0 means inherit the class default; "
+			"otherwise must be at least 2 ms.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		json_array_append_new(req, json_string("enable"));
+		register_tool(tools, "update_ship_special_explosion",
+			"Update the per-ship Special Explosion override fields.  Set 'enable' to false to "
+			"wipe the override (no other fields permitted in that case).  Set 'enable' to true "
+			"to activate or modify the override; partial updates are allowed (omitted fields "
+			"retain their current value or use the ship class's defaults if never overridden).  "
+			"Validation: inner_radius <= outer_radius; "
+			"deathroll_time_ms is 0 or >= 2; shockwave_speed >= 1 when shockwave_enabled.",
+			props, req);
+	}
+
+	// get_ship_special_hitpoints
+	register_tool_with_required_string(tools, "get_ship_special_hitpoints",
+		"Get the per-ship Special Hitpoints overrides (changes hull and shield hitpoints from the "
+		"ship class standard values).  Each field is independent and is omitted from the response "
+		"when not overridden.  Standard values (max_hull_strength, max_shield_strength) are "
+		"exposed via get_ship_class.",
+		"name", "Name of the ship");
+
+	// update_ship_special_hitpoints
+	{
+		json_t *props = json_object();
+		add_string_prop(props, "name", "Name of the ship.");
+		add_integer_prop(props, "hull",
+			"Hull strength override.  Numeric value (>= 1) enables and sets; explicit null "
+			"disables the override; omitting the field leaves it unchanged.");
+		add_integer_prop(props, "shield",
+			"Shield strength override.  Numeric value (>= 0; 0 is a valid no-shields config) "
+			"enables and sets; explicit null disables the override; omitting the field leaves "
+			"it unchanged.");
+		json_t *req = json_array();
+		json_array_append_new(req, json_string("name"));
+		register_tool(tools, "update_ship_special_hitpoints",
+			"Update the per-ship Special Hitpoints overrides.  Each of 'hull' and 'shield' is "
+			"independently optional: numeric value enables+sets, explicit null disables, "
+			"omitting leaves unchanged.  When either field changes, "
+			"kamikaze_damage is also recalculated, but the kamikaze flag is not changed.",
+			props, req);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -2684,6 +3066,14 @@ bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequ
 		handle_get_ship_subsystem(input_json, req);
 	} else if (strcmp(tool_name, "update_ship_subsystem") == 0) {
 		handle_update_ship_subsystem(input_json, req);
+	} else if (strcmp(tool_name, "get_ship_special_explosion") == 0) {
+		handle_get_ship_special_explosion(input_json, req);
+	} else if (strcmp(tool_name, "update_ship_special_explosion") == 0) {
+		handle_update_ship_special_explosion(input_json, req);
+	} else if (strcmp(tool_name, "get_ship_special_hitpoints") == 0) {
+		handle_get_ship_special_hitpoints(input_json, req);
+	} else if (strcmp(tool_name, "update_ship_special_hitpoints") == 0) {
+		handle_update_ship_special_hitpoints(input_json, req);
 	} else {
 		return false;
 	}
