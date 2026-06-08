@@ -142,6 +142,35 @@ static json_t *handle_tools_call(json_t *params)
 // HTTP request handler
 // ---------------------------------------------------------------------------
 
+// Returns true if the Host header value names a loopback address.  Defends
+// against DNS-rebinding attacks against the loopback-bound MCP server: a
+// rebound browser request still carries the original "attacker.com" Host
+// header, which this rejects.  Accepts "127.0.0.1", "localhost", "[::1]",
+// "::1", each optionally followed by ":<port>".  Case-insensitive on the
+// hostname portion (RFC 3986).
+static bool is_loopback_host(const char *host)
+{
+	if (!host || !*host) return false;
+
+	// Strip optional ":<port>" suffix.  Be careful with IPv6 bracket form
+	// "[::1]:8080" -- the colon inside the brackets is part of the address.
+	SCP_string h(host);
+	if (!h.empty() && h.front() == '[') {
+		auto close_bracket = h.find(']');
+		if (close_bracket == SCP_string::npos) return false;
+		h.resize(close_bracket + 1);	// keep "[::1]", drop ":port" suffix
+	} else {
+		auto colon = h.find(':');
+		if (colon != SCP_string::npos)
+			h.resize(colon);
+	}
+
+	return !stricmp(h.c_str(), "127.0.0.1")
+		|| !stricmp(h.c_str(), "localhost")
+		|| !stricmp(h.c_str(), "[::1]")
+		|| !stricmp(h.c_str(), "::1");
+}
+
 static void serve_html_status(struct mg_connection *conn)
 {
 	mg_printf(conn,
@@ -239,6 +268,22 @@ static void *mcp_request_handler(enum mg_event event, struct mg_connection *conn
 {
 	if (event != MG_NEW_REQUEST)
 		return nullptr;
+
+	// DNS-rebinding gate: reject any request whose Host header isn't a
+	// loopback name.  The server only listens on 127.0.0.1, so any non-
+	// loopback Host means a browser was tricked into sending a same-origin
+	// request to us under a non-loopback name (DNS rebinding).
+	const char *host_header = mg_get_header(conn, "Host");
+	if (!is_loopback_host(host_header)) {
+		mg_printf(conn,
+			"HTTP/1.1 403 Forbidden\r\n"
+			"Content-Type: text/plain\r\n"
+			"Connection: close\r\n"
+			"\r\n"
+			"MCP server only accepts requests to loopback hostnames "
+			"(127.0.0.1, localhost, ::1).\n");
+		return (void *)"";
+	}
 
 	const struct mg_request_info *info = mg_get_request_info(conn);
 
