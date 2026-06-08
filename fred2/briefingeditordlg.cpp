@@ -1410,8 +1410,9 @@ void briefing_editor_dlg::OnEndlabeleditTree(NMHDR* pNMHDR, LRESULT* pResult)
 	*pResult = m_tree.end_label_edit(pTVDispInfo->item);
 }
 
-BOOL briefing_editor_dlg::DestroyWindow() 
+BOOL briefing_editor_dlg::DestroyWindow()
 {
+	Briefing_dialog = nullptr;
 	m_play_bm.DeleteObject();
 	audiostream_close_file(m_voice_id, 0);
 	return CDialog::DestroyWindow();
