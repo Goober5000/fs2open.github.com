@@ -8,6 +8,7 @@ empty mission, so they are safe to run after the CRUD/SEXP areas.
 """
 
 from mcp_test_lib import (
+    assert_equal,
     assert_error,
     assert_in,
     assert_success,
@@ -192,6 +193,48 @@ def register(suite, client):
         r = client.call_tool("create_event", {"name": "RangeTest", "chain_delay": -2})
         assert_error(r)
 
+    # ----- DNS-rebinding gate (Host header validation) -----
+
+    def test_rejects_bogus_host_header():
+        # The MCP server must reject HTTP requests whose Host header names a
+        # non-loopback host.  Defends against DNS-rebinding attacks where the
+        # rebound request still carries the original attacker.com Host header.
+        # MCPClient.call_tool doesn't expose header overrides, so use
+        # http.client directly to force a specific Host value.
+        import http.client
+        from urllib.parse import urlsplit
+        parsed = urlsplit(client.url)
+        body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+        try:
+            conn.request("POST", parsed.path, body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Host": "attacker.com:8080"})
+            resp = conn.getresponse()
+            assert_equal(resp.status, 403,
+                         "expected 403 Forbidden for bogus Host header")
+        finally:
+            conn.close()
+
+    def test_accepts_localhost_host_header():
+        # Positive sanity: a Host header of 'localhost' (the other accepted
+        # loopback name) must be accepted in addition to '127.0.0.1', so the
+        # gate doesn't break legitimate clients that resolve via /etc/hosts.
+        import http.client
+        from urllib.parse import urlsplit
+        parsed = urlsplit(client.url)
+        body = b'{"jsonrpc":"2.0","id":1,"method":"tools/list"}'
+        conn = http.client.HTTPConnection(parsed.hostname, parsed.port, timeout=5)
+        try:
+            conn.request("POST", parsed.path, body=body,
+                         headers={"Content-Type": "application/json",
+                                  "Host": f"localhost:{parsed.port}"})
+            resp = conn.getresponse()
+            assert_equal(resp.status, 200,
+                         "expected 200 OK for localhost Host header")
+        finally:
+            conn.close()
+
     tests = [
         ("negative_unknown_tool", test_unknown_tool),
         ("negative_get_message_missing_param", test_get_message_missing_param),
@@ -225,6 +268,8 @@ def register(suite, client):
         ("negative_create_event_repeat_count_zero", test_create_event_repeat_count_zero),
         ("negative_create_event_interval_negative", test_create_event_interval_negative),
         ("negative_create_event_chain_delay_invalid", test_create_event_chain_delay_invalid),
+        ("negative_rejects_bogus_host_header", test_rejects_bogus_host_header),
+        ("negative_accepts_localhost_host_header", test_accepts_localhost_host_header),
     ]
     for name, func in tests:
         suite.add(name, func)
