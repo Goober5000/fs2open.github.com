@@ -463,6 +463,77 @@ def register(suite, client):
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
             client.call_tool("delete_event", {"name": "mvars_tgt", "force": True})
 
+    def test_move_overlapping_subtrees_errors():
+        # If one operand is inside the other's subtree, move can't be cleanly
+        # implemented and the containment guard should reject up-front before
+        # any mutation.  Tests both directions (parent-as-source and
+        # parent-as-target) and verifies the tree is untouched.
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 ( * 10 20 ) 30 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            pre_sig = tree_signature(tool_data(r)["nodes"])
+            mul_op = find_node_by_value(tool_data(r)["nodes"], "*")["node"]
+            twenty = find_node_by_value(tool_data(r)["nodes"], "20")["node"]
+
+            # Direction 1: source contains target (mul subtree contains 20).
+            r = client.call_tool("move_sexp_node", {
+                "source_node": mul_op,
+                "target_node": twenty,
+            })
+            assert_error(r)
+            assert_in("inside", tool_text(r).lower())
+            assert_in("disjoint", tool_text(r).lower())
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after rejected move (source contains target)")
+
+            # Direction 2: target contains source (same nodes, swapped roles).
+            r = client.call_tool("move_sexp_node", {
+                "source_node": twenty,
+                "target_node": mul_op,
+            })
+            assert_error(r)
+            assert_in("inside", tool_text(r).lower())
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            assert_equal(tree_signature(tool_data(r)["nodes"]), pre_sig,
+                "tree unchanged after rejected move (target contains source)")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
+    def test_move_disjoint_subtrees_succeeds():
+        # Sanity: a move between disjoint subtrees of the same root proceeds
+        # normally.  This protects against an over-eager containment guard
+        # rejecting legitimate moves.  Build ( + ( * 10 20 ) ( * 30 40 ) );
+        # move "20" into the slot of "40".  After: ( + ( * 10 <placeholder> )
+        # ( * 30 20 ) ).
+        r = client.call_tool("text_to_sexp",
+            {"text": "( + ( * 10 20 ) ( * 30 40 ) )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            twenty = find_node_by_value(tool_data(r)["nodes"], "20")["node"]
+            forty = find_node_by_value(tool_data(r)["nodes"], "40")["node"]
+
+            r = client.call_tool("move_sexp_node", {
+                "source_node": twenty,
+                "target_node": forty,
+            })
+            assert_success(r)
+
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            vals = tree_values(tool_data(r)["nodes"], filter_empty=True)
+            # "20" should now appear under the second * (not the first), and
+            # the first * should carry a <placeholder> where 20 used to be.
+            assert_true("20" in vals, "moved value '20' present in tree")
+            assert_true("40" not in vals, "displaced value '40' replaced")
+            assert_in("<placeholder>", vals,
+                "vacated source slot carries placeholder")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
     # =================================================================
     # swap_sexp_nodes — node-to-node
     # =================================================================
@@ -851,6 +922,8 @@ def register(suite, client):
     suite.add("sexp_move_locked_singleton_bare_source_errors", test_move_locked_singleton_bare_source_errors)
     suite.add("sexp_move_atomic_rollback_shrink_false", test_move_atomic_rollback_shrink_false)
     suite.add("sexp_move_atomic_rollback_shrink_true", test_move_atomic_rollback_shrink_true)
+    suite.add("sexp_move_overlapping_subtrees_errors", test_move_overlapping_subtrees_errors)
+    suite.add("sexp_move_disjoint_subtrees_succeeds", test_move_disjoint_subtrees_succeeds)
     suite.add("sexp_swap_two_embedded_nodes_same_tree", test_swap_two_embedded_nodes_same_tree)
     suite.add("sexp_swap_nodes_across_separate_trees", test_swap_nodes_across_separate_trees)
     suite.add("sexp_swap_two_entity_formulas", test_swap_two_entity_formulas)
