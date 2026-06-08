@@ -720,6 +720,21 @@ static json_t *build_ship_class_json(int sip_idx, bool include_details)
 	json_object_set_new(obj, "max_hull_strength", json_real(sip.max_hull_strength));
 	json_object_set_new(obj, "max_shield_strength", json_real(sip.max_shield_strength));
 
+	// Explosion defaults -- ship_info side of the per-instance Special Explosion
+	// override.  Fields here are floats; the matching per-ship overrides
+	// (special_exp_damage etc.) are stored as ints, so values are int-clamped
+	// when the FRED dialog seeds from these defaults.
+	{
+		json_t *explosion = json_object();
+		json_object_set_new(explosion, "inner_radius", json_real(sip.shockwave.inner_rad));
+		json_object_set_new(explosion, "outer_radius", json_real(sip.shockwave.outer_rad));
+		json_object_set_new(explosion, "damage", json_real(sip.shockwave.damage));
+		json_object_set_new(explosion, "blast_force", json_real(sip.shockwave.blast));
+		json_object_set_new(explosion, "shockwave_speed", json_real(sip.shockwave.speed));
+		json_object_set_new(explosion, "death_roll_base_time_ms", json_integer(sip.death_roll_base_time));
+		json_object_set_new(obj, "explosion", explosion);
+	}
+
 	// Energy
 	json_object_set_new(obj, "power_output", json_real(sip.power_output));
 	json_object_set_new(obj, "max_weapon_reserve", json_real(sip.max_weapon_reserve));
