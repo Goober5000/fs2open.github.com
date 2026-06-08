@@ -1429,6 +1429,23 @@ struct detach_result {
 
 static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general_ref, bool shrink, bool do_delete, McpErrorSink &sink, bool suppress_mark_modified = false);
 
+// Returns true if `descendant` is inside the subtree rooted at `ancestor`,
+// taking into account both the embedded case (.parent links) and the
+// free-standing case (reverse-iteration via find_sexp_antecedent).  Both
+// inputs are post-retarget effective node indices (operator atoms have
+// already been mapped to their list wrappers by retarget_to_list_wrapper).
+// Used by swap and move to reject overlapping operands before any mutation.
+static bool subtree_contains(int ancestor, int descendant)
+{
+	if (descendant < 0 || ancestor < 0) return false;
+	int target_op = (SEXP_NODE_TYPE(ancestor) == SEXP_LIST)
+		? Sexp_nodes[ancestor].first : ancestor;
+	for (int cur = descendant; cur >= 0; cur = find_parent_operator(cur)) {
+		if (cur == target_op) return true;
+	}
+	return false;
+}
+
 static json_t *build_detach_response_json(const detach_result &result, bool do_delete)
 {
 	json_t *result_json = json_object();
@@ -2166,6 +2183,24 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 		}
 	}
 
+	// Containment guard: move requires the source subtree and the target slot
+	// to be disjoint.  If one contains the other, the post-detach attach would
+	// target a slot that no longer exists (it was inside the subtree we just
+	// detached), and even a successful rollback can leave internal pointers
+	// in a partially-mutated state.  Reject up-front before any mutation.
+	if (subtree_contains(src_eff, tgt_eff)) {
+		sink.set_error("Cannot move: target (node %d) is inside source's subtree "
+			"(rooted at node %d). Move requires source and target to be disjoint.",
+			tgt_eff, src_eff);
+		return;
+	}
+	if (subtree_contains(tgt_eff, src_eff)) {
+		sink.set_error("Cannot move: source (node %d) is inside target's subtree "
+			"(rooted at node %d). Move requires source and target to be disjoint.",
+			src_eff, tgt_eff);
+		return;
+	}
+
 	// Step 1: detach the source.  Suppress the inner mark_modified -- the
 	// composer emits one high-level entry on success.
 	auto det = handle_detach_sexp_node(src_ref, shrink, /*do_delete=*/false, sink, /*suppress_mark_modified=*/true);
@@ -2250,35 +2285,17 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 	// one operand is inside the other's subtree, swap can't be cleanly
 	// implemented as two detaches + two attaches because each detach disturbs
 	// the other's slot.  Reject up-front before any mutation.
-	{
-		// Walk up from descendant via find_parent_operator, which handles
-		// both the embedded case (.parent links) and the free-standing case
-		// (reverse-iteration via .antecedent) -- a plain .parent walk would
-		// miss the latter because of the unwrap convention.  If ancestor is
-		// a list wrapper, the operator atom we're matching against is its
-		// .first; otherwise ancestor itself.
-		auto contains = [](int ancestor, int descendant) {
-			if (descendant < 0 || ancestor < 0) return false;
-			int target_op = (SEXP_NODE_TYPE(ancestor) == SEXP_LIST)
-				? Sexp_nodes[ancestor].first : ancestor;
-			for (int cur = descendant; cur >= 0; cur = find_parent_operator(cur)) {
-				if (cur == target_op) return true;
-			}
-			return false;
-		};
-
-		if (contains(src_eff, tgt_eff)) {
-			sink.set_error("Cannot swap: target (node %d) is inside source's subtree "
-				"(rooted at node %d). Swap requires disjoint operands.",
-				tgt_eff, src_eff);
-			return;
-		}
-		if (contains(tgt_eff, src_eff)) {
-			sink.set_error("Cannot swap: source (node %d) is inside target's subtree "
-				"(rooted at node %d). Swap requires disjoint operands.",
-				src_eff, tgt_eff);
-			return;
-		}
+	if (subtree_contains(src_eff, tgt_eff)) {
+		sink.set_error("Cannot swap: target (node %d) is inside source's subtree "
+			"(rooted at node %d). Swap requires disjoint operands.",
+			tgt_eff, src_eff);
+		return;
+	}
+	if (subtree_contains(tgt_eff, src_eff)) {
+		sink.set_error("Cannot swap: source (node %d) is inside target's subtree "
+			"(rooted at node %d). Swap requires disjoint operands.",
+			src_eff, tgt_eff);
+		return;
 	}
 
 	// Step 1: detach source.  Suppress the inner mark_modified -- the
