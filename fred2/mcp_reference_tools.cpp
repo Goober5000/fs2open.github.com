@@ -2695,7 +2695,7 @@ static json_t *handle_search_scripting_children(json_t *arguments)
 
 	// Sort by cost when searching (best match first)
 	if (has_search) {
-		std::sort(matches.begin(), matches.end(), [](const child_match &a, const child_match &b) {
+		std::stable_sort(matches.begin(), matches.end(), [](const child_match &a, const child_match &b) {
 			return a.cost < b.cost;
 		});
 	}
@@ -2838,7 +2838,7 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 		}
 
 		// Sort by cost (best match first)
-		std::sort(matches.begin(), matches.end(), [](const std::pair<const char *, size_t> &a, const std::pair<const char *, size_t> &b) {
+		std::stable_sort(matches.begin(), matches.end(), [](const std::pair<const char *, size_t> &a, const std::pair<const char *, size_t> &b) {
 			return a.second < b.second;
 		});
 
