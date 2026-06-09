@@ -421,7 +421,7 @@ def register(suite, client):
             assert_success(r)
 
             # The wing should be gone but the ship should remain (engine
-            # renames it back to a default class name on remove_wing).
+            # renames it back to a default class name on disband_wing).
             r = client.call_tool("list_wings")
             assert_success(r)
             assert_true(wing_name not in [w.get("name") for w in tool_data(r)],
