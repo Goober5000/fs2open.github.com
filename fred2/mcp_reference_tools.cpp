@@ -1,11 +1,12 @@
 #include "stdafx.h"
-#include "mcp_reference_tools.h"
-#include "mcp_ships.h"      // mcp_ship_flag_excluded
 #include "mcpserver.h"
 #include "mcp_array_utils.h"
 #include "mcp_json.h"
+#include "mcp_reference_tools.h"
 #include "mcp_sexp_forest.h"
+#include "mcp_ships.h"      // mcp_ship_flag_excluded
 #include "mcp_utils.h"
+#include "mcp_wings.h"      // mcp_wing_flag_excluded
 #include "sexp_tree.h"
 
 #include <jansson.h>
@@ -2485,6 +2486,27 @@ static mcp_visible_ship_flags get_mcp_visible_ship_flags()
 	return out;
 }
 
+// MCP-visible subset of Parse_wing_flags.  Same rationale as mcp_visible_ship_flags.
+struct mcp_visible_wing_flags
+{
+	SCP_vector<flag_def_list_new<Ship::Wing_Flags>>             flags;
+	SCP_vector<parse_object_flag_description<Ship::Wing_Flags>> descs;
+};
+
+static mcp_visible_wing_flags get_mcp_visible_wing_flags()
+{
+	mcp_visible_wing_flags out;
+	out.flags.reserve(Num_parse_wing_flags);
+	out.descs.reserve(Num_parse_wing_flags);
+	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
+		if (mcp_wing_flag_excluded(Parse_wing_flags[i].def))
+			continue;
+		out.flags.push_back(Parse_wing_flags[i]);
+		out.descs.push_back(Parse_wing_flag_descriptions[i]);
+	}
+	return out;
+}
+
 // ---------------------------------------------------------------------------
 // Scripting API documentation
 // ---------------------------------------------------------------------------
@@ -3099,8 +3121,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 	}
 	if (strcmp(tool_name, "list_wing_formations") == 0)
 		return handle_list_wing_formations();
-	if (strcmp(tool_name, "list_wing_flags") == 0)
-		return handle_list_flags(Parse_wing_flags, Parse_wing_flag_descriptions, Num_parse_wing_flags);
+	if (strcmp(tool_name, "list_wing_flags") == 0) {
+		const static auto v = get_mcp_visible_wing_flags();
+		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
+	}
 	if (strcmp(tool_name, "list_scripting_elements") == 0)
 		return handle_list_scripting_elements(arguments);
 	if (strcmp(tool_name, "get_scripting_element") == 0)
