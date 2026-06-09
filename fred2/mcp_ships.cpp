@@ -302,12 +302,14 @@ static void apply_helper(int ship_idx, const char *new_text, apply_type type)
 // ---------------------------------------------------------------------------
 
 // don't include these in the valid flags for MCP for various reasons:
-//   player-start: edits go through is_player_start (manages Player_starts and OBJ_START)
-//   immobile:     deprecated, callers should set don't-change-position + don't-change-orientation
-//   locked:       deprecated, callers should set ship-locked + weapons-locked
+//   player-start:  edits go through is_player_start (manages Player_starts and OBJ_START)
+//   reinforcement: edits go through reinforcement tools (to keep the vector in sync)
+//   immobile:      deprecated, callers should set don't-change-position + don't-change-orientation
+//   locked:        deprecated, callers should set ship-locked + weapons-locked
 bool mcp_ship_flag_excluded(const Mission::Parse_Object_Flags &candidate)
 {
-	return candidate == Mission::Parse_Object_Flags::OF_Player_start || candidate == Mission::Parse_Object_Flags::OF_Immobile || candidate == Mission::Parse_Object_Flags::SF_Locked;
+	return candidate == Mission::Parse_Object_Flags::OF_Player_start || candidate == Mission::Parse_Object_Flags::SF_Reinforcement
+		|| candidate == Mission::Parse_Object_Flags::OF_Immobile || candidate == Mission::Parse_Object_Flags::SF_Locked;
 }
 
 // Resolve a flag name to the runtime enum(s) sexp_alter_ship_flag_helper can apply.
