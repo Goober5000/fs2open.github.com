@@ -1869,10 +1869,12 @@ def register(suite, client):
                 client.call_tool("delete_ship", {"name": probe, "force": True})
         return None
 
-    def _probe_scannable(class_name):
+    def _probe_has_scannable_subsystems(class_name):
         """Try a no-force cargo write on the first subsystem of a probe ship of
         the given class.  Returns True iff the write succeeds (i.e. the class
-        has scannable subsystems by FRED's rule)."""
+        has scannable subsystems by FRED's rule).  Note this is about
+        *subsystem* scannability specifically -- a class can be ship-scannable
+        (cargo on the ship itself) without having any scannable subsystems."""
         probe = "MCP Scan Probe"
         rr = client.call_tool("create_ship", {
             "name": probe, "ship_class": class_name,
@@ -1895,17 +1897,17 @@ def register(suite, client):
         finally:
             client.call_tool("delete_ship", {"name": probe, "force": True})
 
-    def _pick_scannable_class():
+    def _pick_class_with_scannable_subsystems():
         for c in _big_or_huge_classes():
             name = c.get("name")
-            if name and _probe_scannable(name):
+            if name and _probe_has_scannable_subsystems(name):
                 return name
         return None
 
-    def _pick_non_scannable_class():
+    def _pick_class_without_scannable_subsystems():
         for c in _big_or_huge_classes():
             name = c.get("name")
-            if name and not _probe_scannable(name):
+            if name and not _probe_has_scannable_subsystems(name):
                 return name
         return None
 
@@ -2056,7 +2058,7 @@ def register(suite, client):
             _delete_all_test_ships(client, created)
 
     def test_update_ship_subsystem_cargo_scannable():
-        cls = _pick_scannable_class()
+        cls = _pick_class_with_scannable_subsystems()
         if cls is None:
             return
         created = ["MCP Subsys Cargo"]
@@ -2092,7 +2094,7 @@ def register(suite, client):
             _delete_all_test_ships(client, created)
 
     def test_update_ship_subsystem_cargo_non_scannable_reject_and_force():
-        cls = _pick_non_scannable_class()
+        cls = _pick_class_without_scannable_subsystems()
         if cls is None:
             return
         created = ["MCP Subsys NonScan"]
@@ -2125,7 +2127,7 @@ def register(suite, client):
             _delete_all_test_ships(client, created)
 
     def test_update_ship_subsystem_cargo_title_round_trip():
-        cls = _pick_scannable_class()
+        cls = _pick_class_with_scannable_subsystems()
         if cls is None:
             return
         created = ["MCP Subsys Title"]
