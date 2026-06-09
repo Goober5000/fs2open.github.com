@@ -179,8 +179,11 @@ SCP_string anchor_to_name(anchor_t anchor)
 // SEXP cue replacement (shared by ships and wings)
 // ---------------------------------------------------------------------------
 
-void replace_cue(int &cue_slot, int new_cue)
+bool replace_cue(int &cue_slot, int new_cue)
 {
+	if (cue_slot == new_cue)
+		return false;
+
 	SCP_vector<int> dirty;
 	if (cue_slot >= 0 && cue_slot != Locked_sexp_true && cue_slot != Locked_sexp_false) {
 		free_sexp2(cue_slot);
@@ -189,6 +192,7 @@ void replace_cue(int &cue_slot, int new_cue)
 	cue_slot = new_cue;
 	dirty.push_back(new_cue);
 	mcp_sexp_forest_mark_dirty(dirty);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
