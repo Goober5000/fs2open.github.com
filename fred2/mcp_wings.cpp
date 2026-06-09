@@ -21,7 +21,7 @@
 #include "ship/ship.h"                // Wings, MAX_WINGS, ship_query_general_type, wing_formation_lookup, wing_bash_ship_name
 
 #include "management.h"               // cur_wing, wing_objects, cur_object_index, mark_object, unmark_all, find_free_wing, invalidate_references
-#include "wing.h"                     // create_wing, delete_wing, remove_wing
+#include "wing.h"                     // create_wing, delete_wing, disband_wing
 
 // ---------------------------------------------------------------------------
 // Dialog conflict guard
@@ -751,7 +751,7 @@ static void handle_disband_wing(json_t *input, McpToolRequest *req)
 
 	if (!preflight_wing_removal(name, force, sink)) return;
 
-	remove_wing(wing_idx);
+	disband_wing(wing_idx);
 
 	mark_modified("MCP: disband wing %s", name);
 
