@@ -984,6 +984,7 @@ static json_t *build_weapon_class_json(int wip_idx, bool include_details)
 	// Flags
 	json_object_set_new(obj, "allowed_for_player", json_boolean(wip.wi_flags[Weapon::Info_Flags::Player_allowed]));
 	json_object_set_new(obj, "hurts_big_ships", json_boolean(wip.hurts_big_ships()));
+	json_object_set_new(obj, "restricted_to_big_ships", json_boolean(wip.wi_flags[Weapon::Info_Flags::Big_only]));
 
 	return obj;
 }
