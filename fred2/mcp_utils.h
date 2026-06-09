@@ -39,7 +39,7 @@ SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 			if (cost != SCP_string::npos)
 				matches.emplace_back(i, cost);
 		}
-		std::sort(matches.begin(), matches.end(),
+		std::stable_sort(matches.begin(), matches.end(),
 			[](const auto &a, const auto &b) { return a.second < b.second; });
 	} else {
 		for (size_t i = 0; i < count; i++)
