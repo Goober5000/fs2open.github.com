@@ -104,10 +104,19 @@ static json_t *build_wing_json(int wing_idx, bool include_details)
 // only reaches 8 of them).
 // ---------------------------------------------------------------------------
 
+// don't include these in the valid flags for MCP for various reasons:
+//   reinforcement: edits go through reinforcement tools (to keep the Reinforcements vector in sync)
+bool mcp_wing_flag_excluded(const Ship::Wing_Flags &candidate)
+{
+	return candidate == Ship::Wing_Flags::Reinforcement;
+}
+
 static int find_wing_flag_by_name(const char *name)
 {
 	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
 		if (!Parse_wing_flags[i].in_use)
+			continue;
+		if (mcp_wing_flag_excluded(Parse_wing_flags[i].def))
 			continue;
 		if (!stricmp(name, Parse_wing_flags[i].name))
 			return (int)i;
@@ -122,7 +131,7 @@ static json_t *build_wing_flags_array(int wing_idx)
 	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
 		if (!Parse_wing_flags[i].in_use)
 			continue;
-		if (wingp.flags[Parse_wing_flags[i].def])
+		if (wingp.flags[Parse_wing_flags[i].def] && !mcp_wing_flag_excluded(Parse_wing_flags[i].def))
 			json_array_append_new(arr, json_string(Parse_wing_flags[i].name));
 	}
 	return arr;
