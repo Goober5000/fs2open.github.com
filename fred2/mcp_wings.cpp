@@ -12,6 +12,7 @@
 #include <optional>
 
 #include "ai/ai.h"                    // get_absolute_wing_pos
+#include "globalincs/utility.h"       // find_item_with_string
 #include "mission/missionparse.h"
 #include "missioneditor/common.h"     // FredWingSlotConfig, reassign_wing_slot, swap_wing_slots, update_custom_wing_indexes
 #include "object/object.h"
@@ -214,6 +215,9 @@ static void rename_wing(int wing_idx, const char *new_name)
 	update_sexp_references(wingp.name, new_name);
 	ai_update_goal_references(sexp_ref_type::WING, wingp.name, new_name);
 	update_texture_replacements(wingp.name, new_name);
+	int reinforcement_idx = find_item_with_string(Reinforcements, &reinforcements::name, wingp.name);
+	if (reinforcement_idx >= 0)
+		strcpy_s(Reinforcements[reinforcement_idx].name, new_name);
 
 	// Re-bash member ship names: "OldWing 1" -> "NewWing 1", etc.
 	for (int i = 0; i < wingp.wave_count; ++i) {

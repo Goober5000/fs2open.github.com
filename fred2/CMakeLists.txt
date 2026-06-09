@@ -191,6 +191,8 @@ set(FRED2_SOURCES
 	mcp_fiction_viewer.h
 	mcp_jump_node.cpp
 	mcp_jump_node.h
+	mcp_reinforcements.cpp
+	mcp_reinforcements.h
 	mcp_sexp.cpp
 	mcp_sexp.h
 	mcp_sexp_forest.cpp
