@@ -192,7 +192,7 @@ int opf_from_name(const char *name)
 {
 	if (!name) return -1;
 	for (const auto &p : Opf_types_to_names)
-		if (strcmp(p.second, name) == 0)
+		if (stricmp(p.second, name) == 0)
 			return p.first;
 	return -1;
 }
