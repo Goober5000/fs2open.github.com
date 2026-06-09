@@ -729,7 +729,7 @@ void WingEditorDialogModel::disbandCurrentWing()
 	if (!wingIsValid())
 		return;
 
-	_editor->remove_wing(_currentWingIndex);
+	_editor->disband_wing(_currentWingIndex);
 	reloadFromCurWing();
 }
 
