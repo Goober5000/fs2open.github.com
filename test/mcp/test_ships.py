@@ -991,13 +991,21 @@ def register(suite, client):
     # until we find one (most cap ships have multiple generic bays).  Tests
     # that need this skip cleanly when no suitable class exists.
 
+    def _big_or_huge_classes():
+        """Return ship-class entries whose size_classification is 'big' or
+        'huge'.  Used by dockability and cargo-scanning helpers to skip
+        fighters/bombers, which can't satisfy those tests' preconditions and
+        would otherwise force a model-load per skipped class."""
+        r = client.call_tool("list_ship_classes")
+        assert_success(r)
+        return [c for c in tool_data(r)
+                if c.get("size_classification") in ("big", "huge")]
+
     def _pick_dockable_class():
         """Return (class_name, [point1_name, point2_name]) where point1 and
         point2 can be docked together (their dock_types intersect).  Returns
         None if no class has two such dockpoints."""
-        r = client.call_tool("list_ship_classes")
-        assert_success(r)
-        for c in tool_data(r):
+        for c in _big_or_huge_classes():
             name = c.get("name")
             if not name:
                 continue
@@ -1169,9 +1177,7 @@ def register(suite, client):
         """Like _pick_dockable_class but requires the class to have three
         dockpoints that can all be paired with two others.  We just look for
         a class with >= 3 dockpoints whose types overlap pairwise."""
-        r = client.call_tool("list_ship_classes")
-        assert_success(r)
-        for c in tool_data(r):
+        for c in _big_or_huge_classes():
             name = c.get("name")
             if not name:
                 continue
@@ -1890,18 +1896,14 @@ def register(suite, client):
             client.call_tool("delete_ship", {"name": probe, "force": True})
 
     def _pick_scannable_class():
-        r = client.call_tool("list_ship_classes")
-        assert_success(r)
-        for c in tool_data(r):
+        for c in _big_or_huge_classes():
             name = c.get("name")
             if name and _probe_scannable(name):
                 return name
         return None
 
     def _pick_non_scannable_class():
-        r = client.call_tool("list_ship_classes")
-        assert_success(r)
-        for c in tool_data(r):
+        for c in _big_or_huge_classes():
             name = c.get("name")
             if name and not _probe_scannable(name):
                 return name
