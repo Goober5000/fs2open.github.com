@@ -1617,7 +1617,8 @@ static int ammo_count_to_percent(int count, int max_count)
 {
 	if (max_count <= 0)
 		return 0;
-	return fl2ir((float)count * 100.0f / (float)max_count);
+	int percent = fl2ir((float)count * 100.0f / (float)max_count);
+	return std::clamp(percent, 0, 100);
 }
 
 // Build { bank, weapon_class, ammo_count } for one bank slot.
@@ -1681,6 +1682,23 @@ static bool weapon_matches_bank_type(int weapon_idx, bool is_primary, McpErrorSi
 		return false;
 	}
 	return true;
+}
+
+// Big_only weapons (capital missiles, etc.) require a big-or-huge ship.  The
+// dialog filters these from the dropdown when the ship isn't big_or_huge
+// (weaponeditordlg.cpp:250-251).  Treated as a structural constraint -- force
+// does NOT bypass this.
+static bool weapon_size_matches_ship(int weapon_idx, int ship_class, McpErrorSink &sink)
+{
+	const weapon_info &wip = Weapon_info[weapon_idx];
+	if (!wip.wi_flags[Weapon::Info_Flags::Big_only])
+		return true;
+	const ship_info &sip = Ship_info[ship_class];
+	if (sip.is_big_or_huge())
+		return true;
+	sink.set_error("Weapon '%s' has the restricted_to_big_ships flag and cannot be loaded onto ship class '%s' "
+		"(not big or huge).", wip.name, sip.name);
+	return false;
 }
 
 // Editor-selectability check matching the selectable_in_editor field on
@@ -1900,6 +1918,8 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 			if (new_weapon_idx < 0) return;
 			if (!weapon_matches_bank_type(new_weapon_idx, is_primary, sink))
 				return;
+			if (!weapon_size_matches_ship(new_weapon_idx, shipp->ship_info_index, sink))
+				return;
 			if (!force && !weapon_selectable_in_editor(new_weapon_idx, sink))
 				return;
 			if (!force && subsys == nullptr
@@ -1939,20 +1959,24 @@ static void handle_update_ship_weapon_bank(json_t *input, McpToolRequest *req)
 				return;
 			new_ammo_count = *ammo_count_arg;
 		}
-	} else if (weapon_changing) {
-		// Weapon changing without explicit ammo -- preserve the previous
-		// percentage against the new weapon's max (mirrors the FRED dialog,
-		// see weaponeditordlg.cpp change_selection()).
-		int existing_percent = bank_ammo_ref(swp, is_primary, bank_zb);
-		new_ammo_count = ammo_percent_to_count(existing_percent, new_max_ammo);
 	}
+	// When only the weapon class is changing (no explicit ammo_count), leave
+	// the stored percent untouched.  build_bank_json will surface the count
+	// derived from that percent against the new weapon's max.  Round-tripping
+	// the percent through ammo_count_to_percent(ammo_percent_to_count(...))
+	// can drift on integer division (e.g. 67% with max=7 -> count 5 -> 71%).
 
-	bool any_change = weapon_changing || clearing || ammo_specified;
+	// Compare against current stored state so redundant calls (clearing an
+	// already-empty bank, setting ammo to its current value) don't autosave.
+	int new_percent = ammo_count_to_percent(new_ammo_count, new_max_ammo);
+	int existing_percent = bank_ammo_ref(swp, is_primary, bank_zb);
+	bool ammo_will_change = (clearing || ammo_specified) && (new_percent != existing_percent);
 
-	if (any_change) {
-		if (weapon_changing || clearing)
+	if (weapon_changing || ammo_will_change) {
+		if (weapon_changing)
 			bank_weapon_ref(swp, is_primary, bank_zb) = new_weapon_idx;
-		bank_ammo_ref(swp, is_primary, bank_zb) = ammo_count_to_percent(new_ammo_count, new_max_ammo);
+		if (ammo_will_change)
+			bank_ammo_ref(swp, is_primary, bank_zb) = new_percent;
 
 		mark_modified("MCP: update ship %s weapon bank (%s %s %d)",
 			shipp->ship_name,
@@ -1985,6 +2009,8 @@ static void handle_get_max_ammo_for_bank(json_t *input, McpToolRequest *req)
 	int weapon_idx = check_lookup(weapon_class, weapon_info_lookup, "weapon_class", sink);
 	if (weapon_idx < 0) return;
 	if (!weapon_matches_bank_type(weapon_idx, is_primary, sink))
+		return;
+	if (!weapon_size_matches_ship(weapon_idx, shipp->ship_info_index, sink))
 		return;
 
 	int max_ammo = compute_max_ammo(shipp->ship_info_index, swp, subsys,
@@ -2887,7 +2913,7 @@ void mcp_register_ship_tools(json_t *tools)
 		add_bool_prop(props, "force",
 			"If true, bypass the editor-selectability check (No_fred / Child) and the ship-class "
 			"allowed-weapons check for pilot banks.  Default false.  Does not bypass structural "
-			"rules (bank range, weapon/bank type match, ammo bounds).");
+			"rules (bank range, weapon/bank type match, restricted_to_big_ships match, ammo bounds).");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("bank_type"));
@@ -2918,7 +2944,13 @@ void mcp_register_ship_tools(json_t *tools)
 		json_array_append_new(req, json_string("weapon_class"));
 		register_tool(tools, "get_max_ammo_for_bank",
 			"Compute the maximum ammo count for a specific (ship, bank, weapon) combination.  "
-			"Mirrors the engine's per-bank-and-weapon clamp.",
+			"Mirrors the engine's per-bank-and-weapon clamp -- use this value as the upper bound "
+			"when passing ammo_count to update_ship_weapon_bank.  "
+			"Note: the engine rounds pilot banks (capacity / cargo_size) with std::lround but "
+			"truncates turret banks; for the same weapon and capacity, the turret value can be "
+			"one less than the pilot value.  This tool mirrors whichever rule applies to the "
+			"requested bank, so the returned max matches what update_ship_weapon_bank will "
+			"accept.",
 			props, req);
 	}
 
