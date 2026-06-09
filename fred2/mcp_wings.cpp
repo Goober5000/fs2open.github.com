@@ -163,38 +163,52 @@ static bool validate_wing_flags_only(json_t *flags_obj, McpErrorSink &sink)
 	return true;
 }
 
-static bool apply_wing_flags_partial(int wing_idx, json_t *flags_obj, McpErrorSink &sink)
+// Apply a partial wing_flags update.  flags_obj may be null (no-op).
+// Returns true iff wingp.flags actually changed.  Callers must validate
+// flags_obj up-front via validate_wing_flags_only.
+static bool apply_wing_flags_partial(int wing_idx, json_t *flags_obj, McpErrorSink &/*sink*/)
 {
 	if (!flags_obj)
-		return true;
-	if (!validate_wing_flags_only(flags_obj, sink))
 		return false;
 
 	wing &wingp = Wings[wing_idx];
+	auto before = wingp.flags;
+
 	const char *key;
 	json_t *val;
 	json_object_foreach(flags_obj, key, val) {
 		int idx = find_wing_flag_by_name(key);
 		wingp.flags.set(Parse_wing_flags[idx].def, json_boolean_value(val));
 	}
-	return true;
+	return wingp.flags != before;
 }
 
 // ---------------------------------------------------------------------------
 // Display name helper (mirrors apply_display_name in mcp_ships.cpp)
 // ---------------------------------------------------------------------------
 
-static void apply_wing_display_name(wing &wingp, const char *display_name)
+// Returns true iff the call actually changed display_name or the
+// Has_display_name flag.
+static bool apply_wing_display_name(wing &wingp, const char *display_name)
 {
 	// A blank display name is a valid display name.  To remove a display
 	// name, pass "<none>" or a string matching the wing's regular name.
-	if (!stricmp(display_name, "<none>") || !strcmp(display_name, wingp.name)) {
+	bool clearing = !stricmp(display_name, "<none>") || !strcmp(display_name, wingp.name);
+	bool had_flag = wingp.flags[Ship::Wing_Flags::Has_display_name];
+
+	if (clearing) {
+		if (!had_flag && wingp.display_name.empty())
+			return false;
 		wingp.display_name = "";
 		wingp.flags.remove(Ship::Wing_Flags::Has_display_name);
-	} else {
-		wingp.display_name = display_name;
-		wingp.flags.set(Ship::Wing_Flags::Has_display_name);
+		return true;
 	}
+
+	if (had_flag && wingp.display_name == display_name)
+		return false;
+	wingp.display_name = display_name;
+	wingp.flags.set(Ship::Wing_Flags::Has_display_name);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -546,86 +560,134 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	if (!validate_wing_flags_only(wing_flags_in, sink)) return;
 
 	wing &wingp = Wings[wing_idx];
+	// Each branch sets changed=true only when it actually mutates state, so
+	// no-op calls (omitted fields, fields equal to current values) don't autosave.
+	bool changed = false;
 
 	// Rename
 	if (new_name && stricmp(wingp.name, new_name) != 0) {
 		if (!check_object_rename("wing", new_name, sink, -1, wing_idx)) return;
 		rename_wing(wing_idx, new_name);
 		mcp_sexp_forest_mark_dirty();
+		changed = true;
 	}
 
-	if (display_name)
-		apply_wing_display_name(wingp, display_name);
+	if (display_name && apply_wing_display_name(wingp, display_name))
+		changed = true;
 
 	if (hotkey.has_value()) {
 		if (!check_int_range(*hotkey, 0, 9, "hotkey", sink)) return;
-		wingp.hotkey = *hotkey;
+		if (wingp.hotkey != *hotkey) {
+			wingp.hotkey = *hotkey;
+			changed = true;
+		}
 	}
 
-	if (wing_squad_filename)
+	if (wing_squad_filename
+		&& strcmp(wingp.wing_squad_filename, wing_squad_filename) != 0) {
 		strcpy_s(wingp.wing_squad_filename, wing_squad_filename);
+		changed = true;
+	}
 
-	if (num_waves.has_value())
+	if (num_waves.has_value() && wingp.num_waves != *num_waves) {
 		wingp.num_waves = *num_waves;
-	if (threshold.has_value())
+		changed = true;
+	}
+	if (threshold.has_value() && wingp.threshold != *threshold) {
 		wingp.threshold = *threshold;
-	if (wave_delay_min.has_value())
+		changed = true;
+	}
+	if (wave_delay_min.has_value() && wingp.wave_delay_min != *wave_delay_min) {
 		wingp.wave_delay_min = *wave_delay_min;
-	if (wave_delay_max.has_value())
+		changed = true;
+	}
+	if (wave_delay_max.has_value() && wingp.wave_delay_max != *wave_delay_max) {
 		wingp.wave_delay_max = *wave_delay_max;
+		changed = true;
+	}
 
 	if (arrival_loc_str) {
 		int loc = check_lookup(arrival_loc_str, arrival_location_enum_values, "arrival_location", sink);
 		if (loc < 0) return;
-		wingp.arrival_location = static_cast<ArrivalLocation>(loc);
+		auto new_loc = static_cast<ArrivalLocation>(loc);
+		if (wingp.arrival_location != new_loc) {
+			wingp.arrival_location = new_loc;
+			changed = true;
+		}
 	}
 	if (arrival_tgt_str) {
 		anchor_t a = anchor_t::invalid();
 		if (!resolve_target_name_to_anchor(arrival_tgt_str, a, sink)) return;
-		wingp.arrival_anchor = a;
+		if (wingp.arrival_anchor != a) {
+			wingp.arrival_anchor = a;
+			changed = true;
+		}
 	}
-	if (arrival_distance.has_value())
+	if (arrival_distance.has_value() && wingp.arrival_distance != *arrival_distance) {
 		wingp.arrival_distance = *arrival_distance;
-	if (arrival_delay.has_value())
+		changed = true;
+	}
+	if (arrival_delay.has_value() && wingp.arrival_delay != *arrival_delay) {
 		wingp.arrival_delay = *arrival_delay;
+		changed = true;
+	}
 	if (arrival_cue.has_value()) {
 		if (!check_sexp_formula(*arrival_cue, OPR_BOOL, sink)) return;
-		replace_cue(wingp.arrival_cue, *arrival_cue);
+		if (replace_cue(wingp.arrival_cue, *arrival_cue))
+			changed = true;
 	}
 
 	if (departure_loc_str) {
 		int loc = check_lookup(departure_loc_str, departure_location_enum_values, "departure_location", sink);
 		if (loc < 0) return;
-		wingp.departure_location = static_cast<DepartureLocation>(loc);
+		auto new_loc = static_cast<DepartureLocation>(loc);
+		if (wingp.departure_location != new_loc) {
+			wingp.departure_location = new_loc;
+			changed = true;
+		}
 	}
 	if (departure_tgt_str) {
 		anchor_t a = anchor_t::invalid();
 		if (!resolve_target_name_to_anchor(departure_tgt_str, a, sink)) return;
-		wingp.departure_anchor = a;
+		if (wingp.departure_anchor != a) {
+			wingp.departure_anchor = a;
+			changed = true;
+		}
 	}
-	if (departure_delay.has_value())
+	if (departure_delay.has_value() && wingp.departure_delay != *departure_delay) {
 		wingp.departure_delay = *departure_delay;
+		changed = true;
+	}
 	if (departure_cue.has_value()) {
 		if (!check_sexp_formula(*departure_cue, OPR_BOOL, sink)) return;
-		replace_cue(wingp.departure_cue, *departure_cue);
+		if (replace_cue(wingp.departure_cue, *departure_cue))
+			changed = true;
 	}
 
 	if (formation_str) {
+		int new_formation;
 		if (!*formation_str || !stricmp(formation_str, "default")) {
-			wingp.formation = -1;
+			new_formation = -1;
 		} else {
-			int formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
-			if (formation_idx < 0) return;
-			wingp.formation = formation_idx;
+			new_formation = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
+			if (new_formation < 0) return;
+		}
+		if (wingp.formation != new_formation) {
+			wingp.formation = new_formation;
+			changed = true;
 		}
 	}
-	if (formation_scale.has_value())
+	if (formation_scale.has_value() && wingp.formation_scale != *formation_scale) {
 		wingp.formation_scale = *formation_scale;
+		changed = true;
+	}
 
 	// Apply wing_flags (already validated above).
-	apply_wing_flags_partial(wing_idx, wing_flags_in, sink);
+	if (apply_wing_flags_partial(wing_idx, wing_flags_in, sink))
+		changed = true;
 
-	mark_modified("MCP: update wing %s", wingp.name);
+	if (changed)
+		mark_modified("MCP: update wing %s", wingp.name);
 
 	req->result_json = make_json_tool_result(build_wing_json(wing_idx, true));
 	req->success = true;

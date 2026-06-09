@@ -17,6 +17,7 @@
 #include "ai/ai.h"
 #include "iff_defs/iff_defs.h"
 #include "math/floating.h"            // fl2ir
+#include "math/vecmat.h"              // vm_vec_equal, vm_matrix_equal
 #include "mission/missionmessage.h"   // Personas
 #include "mission/missionparse.h"
 #include "missioneditor/common.h"     // target_to_anchor, anchor_to_target, stuff_special_arrival_anchor_name
@@ -189,17 +190,28 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 // Display name helper - "<none>" / matches ship name => clear the flag
 // ---------------------------------------------------------------------------
 
-static void apply_display_name(ship &shipp, const char *display_name)
+// Returns true iff the call actually changed display_name or the
+// Has_display_name flag.
+static bool apply_display_name(ship &shipp, const char *display_name)
 {
 	// A blank display name is a valid display name.  To remove a display
 	// name, pass "<none>" or a string matching the ship's regular name.
-	if (!stricmp(display_name, "<none>") || !strcmp(display_name, shipp.ship_name)) {
+	bool clearing = !stricmp(display_name, "<none>") || !strcmp(display_name, shipp.ship_name);
+	bool had_flag = shipp.flags[Ship::Ship_Flags::Has_display_name];
+
+	if (clearing) {
+		if (!had_flag && shipp.display_name.empty())
+			return false;
 		shipp.display_name = "";
 		shipp.flags.remove(Ship::Ship_Flags::Has_display_name);
-	} else {
-		shipp.display_name = display_name;
-		shipp.flags.set(Ship::Ship_Flags::Has_display_name);
+		return true;
 	}
+
+	if (had_flag && shipp.display_name == display_name)
+		return false;
+	shipp.display_name = display_name;
+	shipp.flags.set(Ship::Ship_Flags::Has_display_name);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -243,7 +255,8 @@ static bool resolve_or_add_cargo(const char *cargo_name, char &out_index, McpErr
 // ---------------------------------------------------------------------------
 
 enum class apply_type { ALT_NAME, CALLSIGN };
-static void apply_helper(int ship_idx, const char *new_text, apply_type type)
+// Returns true iff the call actually changed the per-ship slot.
+static bool apply_helper(int ship_idx, const char *new_text, apply_type type)
 {
 	auto apply_array = (type == apply_type::ALT_NAME) ? Fred_alt_names : Fred_callsigns;
 	auto lookup_func = (type == apply_type::ALT_NAME) ? mission_parse_lookup_alt : mission_parse_lookup_callsign;
@@ -257,25 +270,25 @@ static void apply_helper(int ship_idx, const char *new_text, apply_type type)
 		|| !stricmp(new_text, "<none>") || !stricmp(new_text, "none");
 
 	if (clearing) {
-		if (*slot) {
-			// Remove from the mission-wide pool only if no other ship still uses it.
-			bool used = false;
-			for (int i = 0; i < MAX_SHIPS; ++i) {
-				if (i != ship_idx && !strcmp(apply_array[i], slot)) {
-					used = true;
-					break;
-				}
+		if (!*slot)
+			return false;
+		// Remove from the mission-wide pool only if no other ship still uses it.
+		bool used = false;
+		for (int i = 0; i < MAX_SHIPS; ++i) {
+			if (i != ship_idx && !strcmp(apply_array[i], slot)) {
+				used = true;
+				break;
 			}
-			if (!used)
-				remove_func(slot);
-			*slot = '\0';
 		}
-		return;
+		if (!used)
+			remove_func(slot);
+		*slot = '\0';
+		return true;
 	}
 
 	// No change?
 	if (!strcmp(slot, new_text))
-		return;
+		return false;
 
 	// If the old text was in use elsewhere too, leave it in the pool; otherwise drop it.
 	if (*slot) {
@@ -294,6 +307,7 @@ static void apply_helper(int ship_idx, const char *new_text, apply_type type)
 	if (lookup_func(new_text) < 0)
 		add_func(new_text);
 	strcpy_s(apply_array[ship_idx], new_text);
+	return true;
 }
 
 // ---------------------------------------------------------------------------
@@ -438,15 +452,27 @@ static bool validate_ship_flags_only(json_t *flags_obj, McpErrorSink &sink)
 	return true;
 }
 
-// Validate and apply a partial ship_flags update.  flags_obj may be null (no-op).
-static bool apply_ship_flags_partial(int ship_idx, json_t *flags_obj, McpErrorSink &sink)
+// Apply a partial ship_flags update.  flags_obj may be null (no-op).
+// Returns true iff any of the touched flagsets actually changed.  Callers must
+// validate flags_obj up-front via validate_ship_flags_only; the partial apply
+// assumes all referenced flag names resolve.
+static bool apply_ship_flags_partial(int ship_idx, json_t *flags_obj, McpErrorSink &/*sink*/)
 {
 	if (!flags_obj)
-		return true;
-	if (!validate_ship_flags_only(flags_obj, sink))
 		return false;
 
-	object_ship_wing_point_team oswpt(&Ships[ship_idx]);
+	ship &shipp = Ships[ship_idx];
+	object &objp = Objects[shipp.objnum];
+	ai_info &aip = Ai_info[shipp.ai_index];
+
+	// Snapshot the three runtime flagsets that the helper may touch.  Parse
+	// object flags do not live in their own flagset on a runtime ship -- they
+	// are decomposed across these three.
+	auto obj_before = objp.flags;
+	auto ship_before = shipp.flags;
+	auto ai_before = aip.ai_flags;
+
+	object_ship_wing_point_team oswpt(&shipp);
 
 	const char *key;
 	json_t *val;
@@ -459,7 +485,10 @@ static bool apply_ship_flags_partial(int ship_idx, json_t *flags_obj, McpErrorSi
 		sexp_alter_ship_flag_helper(oswpt, true, object_flag, ship_flag,
 			parse_obj_flag, ai_flag, json_boolean_value(val));
 	}
-	return true;
+
+	return objp.flags != obj_before
+		|| shipp.flags != ship_before
+		|| aip.ai_flags != ai_before;
 }
 
 // ---------------------------------------------------------------------------
@@ -816,29 +845,38 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	object &objp = Objects[shipp.objnum];
 	bool in_wing = (shipp.wingnum >= 0);
 	SCP_vector<SCP_string> wing_ignored;
+	// Each branch sets changed=true only when it actually mutates state, so
+	// no-op calls (omitted fields, fields equal to current values) don't autosave.
+	bool changed = false;
 
 	// Rename
 	if (new_name && stricmp(shipp.ship_name, new_name) != 0) {
 		if (!check_object_rename("ship", new_name, sink, ship_idx)) return;
 		rename_ship(ship_idx, new_name);
 		mcp_sexp_forest_mark_dirty();
+		changed = true;
 	}
 
-	if (display_name)
-		apply_display_name(shipp, display_name);
+	if (display_name && apply_display_name(shipp, display_name))
+		changed = true;
 
 	// Ship class
 	if (class_name) {
 		int new_class = check_lookup(class_name, ship_info_lookup, "ship_class", sink);
 		if (new_class < 0) return;
-		if (new_class != shipp.ship_info_index)
+		if (new_class != shipp.ship_info_index) {
 			change_ship_type(ship_idx, new_class, 0);
+			changed = true;
+		}
 	}
 
 	if (team_str) {
 		int team_idx = check_lookup(team_str, iff_lookup, "team", sink);
 		if (team_idx < 0) return;
-		shipp.team = team_idx;
+		if (shipp.team != team_idx) {
+			shipp.team = team_idx;
+			changed = true;
+		}
 	}
 
 	if (ai_class_str) {
@@ -846,43 +884,70 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 			[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
 			"ai_class", sink);
 		if (ai_class_idx < 0) return;
-		shipp.weapons.ai_class = ai_class_idx;
+		if (shipp.weapons.ai_class != ai_class_idx) {
+			shipp.weapons.ai_class = ai_class_idx;
+			changed = true;
+		}
 	}
 
 	if (cargo_str) {
 		char cargo_idx = 0;
 		if (!resolve_or_add_cargo(cargo_str, cargo_idx, sink)) return;
-		shipp.cargo1 = cargo_idx;
+		// Note: resolve_or_add_cargo may grow the Cargo_names table as a side
+		// effect even when shipp.cargo1 wouldn't change; that side effect stays.
+		if (shipp.cargo1 != cargo_idx) {
+			shipp.cargo1 = cargo_idx;
+			changed = true;
+		}
 	}
 
 	if (hotkey.has_value()) {
 		if (!check_int_range(*hotkey, 0, 9, "hotkey", sink)) return;
-		shipp.hotkey = *hotkey;
-	}
-
-	if (persona_str) {
-		if (!*persona_str) {
-			shipp.persona_index = -1;
-		} else {
-			int p = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
-			if (p < 0) return;
-			shipp.persona_index = p;
+		if (shipp.hotkey != *hotkey) {
+			shipp.hotkey = *hotkey;
+			changed = true;
 		}
 	}
 
-	if (alt_name) apply_helper(ship_idx, alt_name, apply_type::ALT_NAME);
-	if (callsign) apply_helper(ship_idx, callsign, apply_type::CALLSIGN);
-
-	if (score.has_value())
-		shipp.score = *score;
-	if (assist_pct.has_value()) {
-		shipp.assist_score_pct = std::clamp(*assist_pct, 0.0f, 1.0f);
+	if (persona_str) {
+		int new_persona;
+		if (!*persona_str) {
+			new_persona = -1;
+		} else {
+			new_persona = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
+			if (new_persona < 0) return;
+		}
+		if (shipp.persona_index != new_persona) {
+			shipp.persona_index = new_persona;
+			changed = true;
+		}
 	}
 
-	if (new_pos.has_value())
+	if (alt_name && apply_helper(ship_idx, alt_name, apply_type::ALT_NAME))
+		changed = true;
+	if (callsign && apply_helper(ship_idx, callsign, apply_type::CALLSIGN))
+		changed = true;
+
+	if (score.has_value() && shipp.score != *score) {
+		shipp.score = *score;
+		changed = true;
+	}
+	if (assist_pct.has_value()) {
+		float new_pct = std::clamp(*assist_pct, 0.0f, 1.0f);
+		if (shipp.assist_score_pct != new_pct) {
+			shipp.assist_score_pct = new_pct;
+			changed = true;
+		}
+	}
+
+	if (new_pos.has_value() && !vm_vec_equal(objp.pos, *new_pos)) {
 		objp.pos = *new_pos;
-	if (new_orient.has_value())
+		changed = true;
+	}
+	if (new_orient.has_value() && !vm_matrix_equal(objp.orient, *new_orient)) {
 		objp.orient = *new_orient;
+		changed = true;
+	}
 
 	// Arrival group (gated by wing membership)
 	auto skip_arr_dep = [&](const char *field) {
@@ -895,7 +960,11 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		} else {
 			int loc = check_lookup(arrival_loc_str, arrival_location_enum_values, "arrival_location", sink);
 			if (loc < 0) return;
-			shipp.arrival_location = static_cast<ArrivalLocation>(loc);
+			auto new_loc = static_cast<ArrivalLocation>(loc);
+			if (shipp.arrival_location != new_loc) {
+				shipp.arrival_location = new_loc;
+				changed = true;
+			}
 		}
 	}
 	if (arrival_tgt_str) {
@@ -904,23 +973,33 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		} else {
 			anchor_t a = anchor_t::invalid();
 			if (!resolve_target_name_to_anchor(arrival_tgt_str, a, sink)) return;
-			shipp.arrival_anchor = a;
+			if (shipp.arrival_anchor != a) {
+				shipp.arrival_anchor = a;
+				changed = true;
+			}
 		}
 	}
 	if (arrival_distance.has_value()) {
 		if (in_wing) skip_arr_dep("arrival_distance");
-		else shipp.arrival_distance = *arrival_distance;
+		else if (shipp.arrival_distance != *arrival_distance) {
+			shipp.arrival_distance = *arrival_distance;
+			changed = true;
+		}
 	}
 	if (arrival_delay.has_value()) {
 		if (in_wing) skip_arr_dep("arrival_delay");
-		else shipp.arrival_delay = *arrival_delay;
+		else if (shipp.arrival_delay != *arrival_delay) {
+			shipp.arrival_delay = *arrival_delay;
+			changed = true;
+		}
 	}
 	if (arrival_cue.has_value()) {
 		if (in_wing) {
 			skip_arr_dep("arrival_cue");
 		} else {
 			if (!check_sexp_formula(*arrival_cue, OPR_BOOL, sink)) return;
-			replace_cue(shipp.arrival_cue, *arrival_cue);
+			if (replace_cue(shipp.arrival_cue, *arrival_cue))
+				changed = true;
 		}
 	}
 
@@ -931,7 +1010,11 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		} else {
 			int loc = check_lookup(departure_loc_str, departure_location_enum_values, "departure_location", sink);
 			if (loc < 0) return;
-			shipp.departure_location = static_cast<DepartureLocation>(loc);
+			auto new_loc = static_cast<DepartureLocation>(loc);
+			if (shipp.departure_location != new_loc) {
+				shipp.departure_location = new_loc;
+				changed = true;
+			}
 		}
 	}
 	if (departure_tgt_str) {
@@ -940,19 +1023,26 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		} else {
 			anchor_t a = anchor_t::invalid();
 			if (!resolve_target_name_to_anchor(departure_tgt_str, a, sink)) return;
-			shipp.departure_anchor = a;
+			if (shipp.departure_anchor != a) {
+				shipp.departure_anchor = a;
+				changed = true;
+			}
 		}
 	}
 	if (departure_delay.has_value()) {
 		if (in_wing) skip_arr_dep("departure_delay");
-		else shipp.departure_delay = *departure_delay;
+		else if (shipp.departure_delay != *departure_delay) {
+			shipp.departure_delay = *departure_delay;
+			changed = true;
+		}
 	}
 	if (departure_cue.has_value()) {
 		if (in_wing) {
 			skip_arr_dep("departure_cue");
 		} else {
 			if (!check_sexp_formula(*departure_cue, OPR_BOOL, sink)) return;
-			replace_cue(shipp.departure_cue, *departure_cue);
+			if (replace_cue(shipp.departure_cue, *departure_cue))
+				changed = true;
 		}
 	}
 
@@ -964,6 +1054,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 			Player_starts++;
 			if (Player_start_shipnum < 0)
 				Player_start_shipnum = ship_idx;
+			changed = true;
 		} else if (!*is_player && currently_player) {
 			if (Player_starts < 2) {
 				sink.set_error("Cannot remove player-start flag from '%s': at least one player start must exist.", shipp.ship_name);
@@ -981,38 +1072,60 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 					}
 				}
 			}
+			changed = true;
 		}
 	}
 
 	// Apply ship_flags (already validated above).
-	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
+	if (apply_ship_flags_partial(ship_idx, ship_flags_in, sink))
+		changed = true;
 
-	// Flag-paired scalars: written unconditionally (qtFRED pattern); the matching
-	// flag in ship_flags governs whether the value is meaningful at runtime.
-	if (escort_priority.has_value())
+	// Flag-paired scalars: the matching flag in ship_flags governs whether
+	// the value is meaningful at runtime, but the scalar field itself is
+	// still part of the saved mission state.
+	if (escort_priority.has_value() && shipp.escort_priority != *escort_priority) {
 		shipp.escort_priority = *escort_priority;
-	if (kamikaze_damage.has_value())
+		changed = true;
+	}
+	if (kamikaze_damage.has_value()
+		&& Ai_info[shipp.ai_index].kamikaze_damage != *kamikaze_damage) {
 		Ai_info[shipp.ai_index].kamikaze_damage = *kamikaze_damage;
+		changed = true;
+	}
 
 	// destroy_before_mission_seconds: scalar IS the flag.  Non-null number sets
 	// both; null clears the flag (final_death_time is preserved as residual).
 	if (destroy_before_mission_is_explicit_null) {
-		shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+		if (shipp.flags[Ship::Ship_Flags::Kill_before_mission]) {
+			shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+			changed = true;
+		}
 	} else if (destroy_before_mission.has_value()) {
-		shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
-		shipp.final_death_time = *destroy_before_mission;
+		bool had_flag = shipp.flags[Ship::Ship_Flags::Kill_before_mission];
+		if (!had_flag || shipp.final_death_time != *destroy_before_mission) {
+			shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
+			shipp.final_death_time = *destroy_before_mission;
+			changed = true;
+		}
 	}
 
 	// Initial state at mission start.  In FRED edit mode the engine stores
 	// these as 0-100 percents directly in the runtime object fields.
-	if (initial_hull.has_value())
+	if (initial_hull.has_value() && objp.hull_strength != (float)*initial_hull) {
 		objp.hull_strength = (float)*initial_hull;
-	if (initial_shield.has_value())
+		changed = true;
+	}
+	if (initial_shield.has_value() && objp.shield_quadrant[0] != (float)*initial_shield) {
 		objp.shield_quadrant[0] = (float)*initial_shield;
-	if (initial_speed.has_value())
+		changed = true;
+	}
+	if (initial_speed.has_value() && objp.phys_info.speed != (float)*initial_speed) {
 		objp.phys_info.speed = (float)*initial_speed;
+		changed = true;
+	}
 
-	mark_modified("MCP: update ship %s", shipp.ship_name);
+	if (changed)
+		mark_modified("MCP: update ship %s", shipp.ship_name);
 
 	// Build response
 	json_t *result = build_ship_json(ship_idx, true);
@@ -2212,25 +2325,30 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 	if (cargo_arg && !resolve_or_add_cargo(cargo_arg, cargo_idx, sink))
 		return;
 
-	// All validation done -- mutate.
+	// All validation done -- mutate.  Compare each field against its current
+	// value so redundant calls (passing the existing value) don't autosave.
 	bool changed = false;
 
-	if (health.has_value()) {
+	if (health.has_value() && subsys->current_hits != (float)*health) {
 		subsys->current_hits = (float)*health;
 		changed = true;
 	}
-	if (cargo_arg) {
+	if (cargo_arg && subsys->subsys_cargo_name != cargo_idx) {
 		subsys->subsys_cargo_name = cargo_idx;
 		changed = true;
 	}
 	if (title_arg) {
-		if (!*title_arg || !stricmp(title_arg, "<none>"))
-			subsys->subsys_cargo_title[0] = '\0';
-		else
-			strncpy_s(subsys->subsys_cargo_title, title_arg, NAME_LENGTH - 1);
-		changed = true;
+		bool clearing_title = (!*title_arg || !stricmp(title_arg, "<none>"));
+		const char *new_title = clearing_title ? "" : title_arg;
+		if (strcmp(subsys->subsys_cargo_title, new_title) != 0) {
+			if (clearing_title)
+				subsys->subsys_cargo_title[0] = '\0';
+			else
+				strncpy_s(subsys->subsys_cargo_title, title_arg, NAME_LENGTH - 1);
+			changed = true;
+		}
 	}
-	if (ai_arg) {
+	if (ai_arg && subsys->weapons.ai_class != ai_class_idx) {
 		subsys->weapons.ai_class = ai_class_idx;
 		changed = true;
 	}
@@ -2364,15 +2482,26 @@ static void handle_update_ship_special_explosion(json_t *input, McpToolRequest *
 				"be supplied (they would be discarded by the wipe).");
 			return;
 		}
-		shipp.use_special_explosion = false;
-		shipp.special_exp_damage = -1;
-		shipp.special_exp_blast = -1;
-		shipp.special_exp_inner = -1;
-		shipp.special_exp_outer = -1;
-		shipp.use_shockwave = false;
-		shipp.special_exp_shockwave_speed = 0;
-		shipp.special_exp_deathroll_time = 0;
-		mark_modified("MCP: update ship %s special explosion (disabled)", name);
+		// Only mutate + autosave if any field is not already at its sentinel.
+		bool changed = shipp.use_special_explosion
+			|| shipp.special_exp_damage != -1
+			|| shipp.special_exp_blast != -1
+			|| shipp.special_exp_inner != -1
+			|| shipp.special_exp_outer != -1
+			|| shipp.use_shockwave
+			|| shipp.special_exp_shockwave_speed != 0
+			|| shipp.special_exp_deathroll_time != 0;
+		if (changed) {
+			shipp.use_special_explosion = false;
+			shipp.special_exp_damage = -1;
+			shipp.special_exp_blast = -1;
+			shipp.special_exp_inner = -1;
+			shipp.special_exp_outer = -1;
+			shipp.use_shockwave = false;
+			shipp.special_exp_shockwave_speed = 0;
+			shipp.special_exp_deathroll_time = 0;
+			mark_modified("MCP: update ship %s special explosion (disabled)", name);
+		}
 		req->result_json = make_json_tool_result(build_special_explosion_json(shipp));
 		req->success = true;
 		return;
@@ -2438,16 +2567,31 @@ static void handle_update_ship_special_explosion(json_t *input, McpToolRequest *
 	if (!stage.use_shockwave)
 		stage.shockwave_speed = 0;
 
-	shipp.use_special_explosion = true;
-	shipp.special_exp_damage = stage.damage;
-	shipp.special_exp_blast = stage.blast;
-	shipp.special_exp_inner = stage.inner;
-	shipp.special_exp_outer = stage.outer;
-	shipp.use_shockwave = stage.use_shockwave;
-	shipp.special_exp_shockwave_speed = stage.shockwave_speed;
-	shipp.special_exp_deathroll_time = stage.deathroll_time;
+	// Only mutate + autosave if the staged state differs from the current state.
+	// A disabled->enabled transition is always a change; otherwise compare each
+	// field against the seed_from_current baseline.
+	bool changed = !was_enabled
+		|| shipp.special_exp_damage != stage.damage
+		|| shipp.special_exp_blast != stage.blast
+		|| shipp.special_exp_inner != stage.inner
+		|| shipp.special_exp_outer != stage.outer
+		|| shipp.use_shockwave != stage.use_shockwave
+		|| shipp.special_exp_shockwave_speed != stage.shockwave_speed
+		|| shipp.special_exp_deathroll_time != stage.deathroll_time;
 
-	mark_modified("MCP: update ship %s special explosion", name);
+	if (changed) {
+		shipp.use_special_explosion = true;
+		shipp.special_exp_damage = stage.damage;
+		shipp.special_exp_blast = stage.blast;
+		shipp.special_exp_inner = stage.inner;
+		shipp.special_exp_outer = stage.outer;
+		shipp.use_shockwave = stage.use_shockwave;
+		shipp.special_exp_shockwave_speed = stage.shockwave_speed;
+		shipp.special_exp_deathroll_time = stage.deathroll_time;
+
+		mark_modified("MCP: update ship %s special explosion", name);
+	}
+
 	req->result_json = make_json_tool_result(build_special_explosion_json(shipp));
 	req->success = true;
 }
