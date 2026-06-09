@@ -9,6 +9,7 @@
 #include "mcp_fiction_viewer.h"
 #include "mcp_jump_node.h"
 #include "mcp_mission_info.h"
+#include "mcp_reinforcements.h"
 #include "mcp_ships.h"
 #include "mcp_wings.h"
 #include "mcp_sexp.h"
@@ -539,6 +540,9 @@ static const char *mission_tool_names[] = {
 	"update_mission_music",
 	"get_editor_view",
 	"set_editor_view",
+	"list_reinforcements",
+	"get_reinforcement",
+	"set_reinforcement",
 	nullptr
 };
 
@@ -560,6 +564,7 @@ void mcp_register_mission_tools(json_t *tools)
 	mcp_register_jump_node_tools(tools);
 	mcp_register_ship_tools(tools);
 	mcp_register_wing_tools(tools);
+	mcp_register_reinforcement_tools(tools);
 
 	// get_mission_music
 	register_tool(tools, "get_mission_music",
@@ -656,6 +661,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		// handled by ships unit
 	} else if (mcp_handle_wing_tool(tool_name, input_json, req)) {
 		// handled by wings unit
+	} else if (mcp_handle_reinforcement_tool(tool_name, input_json, req)) {
+		// handled by reinforcements unit
 	} else if (strcmp(tool_name, "get_mission_music") == 0) {
 		handle_get_mission_music(input_json, req);
 	} else if (strcmp(tool_name, "update_mission_music") == 0) {
