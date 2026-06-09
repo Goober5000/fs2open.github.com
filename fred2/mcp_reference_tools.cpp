@@ -70,6 +70,7 @@
 
 static std::mutex model_cache_mutex;
 static SCP_unordered_map<SCP_string, json_t*> model_details_cache;
+static SCP_unordered_map<SCP_string, json_t*> dockpoints_cache;
 
 // ---------------------------------------------------------------------------
 // Scripting API cache
@@ -2045,12 +2046,30 @@ static json_t *handle_list_ship_class_dockpoints(json_t *arguments)
 	if (sip_idx < 0)
 		return make_not_found_error("Ship class", name);
 
-	// Hold the model cache mutex to serialize with get_ship_class_model_details,
-	// which may load/unload the same polymodel.
+	// Check cache (use canonical name from Ship_info for consistent keys)
+	const char *canonical_name = Ship_info[sip_idx].name;
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		auto it = dockpoints_cache.find(canonical_name);
+		if (it != dockpoints_cache.end())
+			return json_incref(it->second);
+	}
+
+	// Hold the model cache mutex across the entire load-read-cache-unload cycle
+	// to prevent a use-after-free if two threads request the same uncached class:
+	// without this, Thread A could unload the model while Thread B still reads it.
+	// Also serializes with get_ship_class_model_details, which may load/unload
+	// the same polymodel.
 	std::lock_guard<std::mutex> cache_lock(model_cache_mutex);
 
+	// Re-check cache — another thread may have populated it while we waited.
+	{
+		auto it = dockpoints_cache.find(canonical_name);
+		if (it != dockpoints_cache.end())
+			return json_incref(it->second);
+	}
+
 	const auto &sip = Ship_info[sip_idx];
-	const char *canonical_name = sip.name;
 	bool we_loaded_model = false;
 	if (sip.model_num < 0) {
 		json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
@@ -2093,6 +2112,10 @@ static json_t *handle_list_ship_class_dockpoints(json_t *arguments)
 	}
 
 	json_t *result = make_json_tool_result(arr);
+
+	// Cache the result for future calls (cache mutex already held)
+	if (dockpoints_cache.find(canonical_name) == dockpoints_cache.end())
+		dockpoints_cache.emplace(SCP_string(canonical_name), json_incref(result));
 
 	if (we_loaded_model) {
 		json_t *unload_result = mcp_execute_on_main_thread(McpToolId::UNLOAD_SHIP_MODEL, canonical_name);
@@ -3123,6 +3146,10 @@ void mcp_reference_tools_cleanup()
 	for (auto &pair : model_details_cache)
 		json_decref(pair.second);
 	model_details_cache.clear();
+
+	for (auto &pair : dockpoints_cache)
+		json_decref(pair.second);
+	dockpoints_cache.clear();
 
 	if (reference_notes_cache) {
 		json_decref(reference_notes_cache);
