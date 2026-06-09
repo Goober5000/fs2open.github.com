@@ -2137,15 +2137,21 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 	int ai_class_idx = -1;
 	if (ai_arg) {
 		if (subsys->system_info->type != SUBSYSTEM_TURRET) {
+			int type = subsys->system_info->type;
+			if (type < 0 || type >= SUBSYSTEM_MAX)
+				type = SUBSYSTEM_UNKNOWN;
 			sink.set_error("ai_class can only be set on turret subsystems; '%s' on '%s' is type '%s'.",
-				subsystem_name, shipp.ship_name,
-				Subsystem_types[subsys->system_info->type]);
+				subsystem_name, shipp.ship_name, Subsystem_types[type]);
 			return;
 		}
-		ai_class_idx = check_lookup(ai_arg,
-			[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
-			"ai_class", sink);
-		if (ai_class_idx < 0) return;
+		if (!stricmp(ai_arg, "<default>")) {
+			ai_class_idx = Ship_info[shipp.ship_info_index].ai_class;
+		} else {
+			ai_class_idx = check_lookup(ai_arg,
+				[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
+				"ai_class", sink);
+			if (ai_class_idx < 0) return;
+		}
 	}
 
 	// Cargo / cargo_title gate.
@@ -2155,6 +2161,24 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 			"(is_huge_ship XOR toggle-subsystem-scanning flag must be true). "
 			"Pass force=true to set cargo/cargo_title anyway.", shipp.ship_name);
 		return;
+	}
+
+	// cargo_title is meaningless without cargo, and missionsave drops the
+	// +Subsystem: block (and title) when there's no cargo / damage / turret
+	// weapons.  Require cargo to be set (now or already) when setting a non-empty
+	// title, so a successful write here always survives a save.
+	if (title_arg && *title_arg && stricmp(title_arg, "<none>") != 0) {
+		bool will_have_cargo;
+		if (cargo_arg)
+			will_have_cargo = (*cargo_arg && stricmp(cargo_arg, "<none>") != 0);
+		else
+			will_have_cargo = (subsys->subsys_cargo_name > 0);
+		if (!will_have_cargo) {
+			sink.set_error("cargo_title requires cargo to be set on subsystem '%s'.  "
+				"Provide cargo in the same call, or clear cargo_title with \"<none>\".",
+				subsystem_name);
+			return;
+		}
 	}
 
 	// Resolve cargo index (auto-adds if new).
@@ -2320,7 +2344,7 @@ static void handle_update_ship_special_explosion(json_t *input, McpToolRequest *
 		shipp.special_exp_inner = -1;
 		shipp.special_exp_outer = -1;
 		shipp.use_shockwave = false;
-		shipp.special_exp_shockwave_speed = -1;
+		shipp.special_exp_shockwave_speed = 0;
 		shipp.special_exp_deathroll_time = 0;
 		mark_modified("MCP: update ship %s special explosion (disabled)", name);
 		req->result_json = make_json_tool_result(build_special_explosion_json(shipp));
@@ -2405,7 +2429,7 @@ static void handle_update_ship_special_explosion(json_t *input, McpToolRequest *
 // ---------------------------------------------------------------------------
 // Special hitpoints tools -- mirror the per-ship "Special Hitpoints" dialog
 // (fred2/shipspecialhitpoints.cpp).  Two independent overrides (hull, shield);
-// commit recalculates kamikaze_damage as a side-effect.
+// commit of hull also recalculates kamikaze_damage.
 // ---------------------------------------------------------------------------
 
 static json_t *build_special_hitpoints_json(const ship &shipp)
@@ -2464,34 +2488,44 @@ static void handle_update_ship_special_hitpoints(json_t *input, McpToolRequest *
 	}
 
 	ship &shipp = Ships[ship_idx];
-	bool changed = false;
+	bool changed_hull = false, changed_shield = false;
 
 	if (hull_null) {
-		shipp.special_hitpoints = 0;
-		changed = true;
+		if (shipp.special_hitpoints != 0) {
+			shipp.special_hitpoints = 0;
+			changed_hull = true;
+		}
 	} else if (hull_arg.has_value()) {
-		shipp.special_hitpoints = *hull_arg;
-		changed = true;
+		if (shipp.special_hitpoints != *hull_arg) {
+			shipp.special_hitpoints = *hull_arg;
+			changed_hull = true;
+		}
 	}
 	if (shield_null) {
-		shipp.special_shield = -1;
-		changed = true;
+		if (shipp.special_shield != -1) {
+			shipp.special_shield = -1;
+			changed_shield = true;
+		}
 	} else if (shield_arg.has_value()) {
-		shipp.special_shield = *shield_arg;
-		changed = true;
+		if (shipp.special_shield != *shield_arg) {
+			shipp.special_shield = *shield_arg;
+			changed_shield = true;
+		}
 	}
 
-	if (changed) {
+	if (changed_hull) {
 		// Recalculate kamikaze_damage from the post-update hull (matches
-		// shipspecialhitpoints.cpp:205-215).  Overrides any prior value set via
-		// update_ship.kamikaze_damage -- mirrors the dialog behavior.
+		// shipspecialhitpoints.cpp:205-215).  In contrast to the dialog,
+		// only updates on hull change.
 		float hull_for_calc = (shipp.special_hitpoints > 0)
 			? (float)shipp.special_hitpoints
 			: Ship_info[shipp.ship_info_index].max_hull_strength;
 		Ai_info[shipp.ai_index].kamikaze_damage =
 			std::min(1000, 200 + (int)(hull_for_calc / 4.0f));
-		mark_modified("MCP: update ship %s special hitpoints", name);
 	}
+
+	if (changed_hull || changed_shield)
+		mark_modified("MCP: update ship %s special hitpoints", name);
 
 	req->result_json = make_json_tool_result(build_special_hitpoints_json(shipp));
 	req->success = true;
@@ -2928,10 +2962,12 @@ void mcp_register_ship_tools(json_t *tools)
 			"own cargo field on update_ship.");
 		add_string_prop(props, "cargo_title",
 			"Display label paired with cargo (non-retail; e.g. \"Cargo:\" or \"Passengers:\"). "
-			"Pass \"<none>\" or an empty string to clear.");
+			"Requires cargo to also be set (in this call or already on the subsystem); "
+			"pass \"<none>\" or an empty string to clear.");
 		add_string_prop(props, "ai_class",
 			"AI class name. Turret subsystems only; rejected on any other subsystem type. "
-			"Use list_ai_classes for valid names.");
+			"Use list_ai_classes for valid names. Pass \"<default>\" to reset to the "
+			"ship class default.");
 		add_bool_prop(props, "force",
 			"If true, bypass the scannable-subsystems gate on cargo/cargo_title writes. By "
 			"default, those fields are only writable on ships with scannable subsystems "
