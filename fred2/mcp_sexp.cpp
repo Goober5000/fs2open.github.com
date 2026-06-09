@@ -2857,9 +2857,18 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		}
 	}
 
+	// Compare against saved state to detect no-op updates (e.g. user passes
+	// the current operator name or argument value).  A no-op write cannot
+	// introduce a new syntax error, so the syntax check, autosave, and
+	// forest-dirty invalidation can all be skipped in that case.
+	bool node_changed = strcmp(saved_text, Sexp_nodes[n].text) != 0
+		|| saved_type != Sexp_nodes[n].type
+		|| saved_subtype != Sexp_nodes[n].subtype
+		|| saved_first != Sexp_nodes[n].first;
+
 	// Syntax check for mission-attached formulas
 	auto info = find_formula_root_and_type(n);
-	if (info.attached) {
+	if (node_changed && info.attached) {
 		int bad_node = -1;
 		int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
 		if (syntax_result != SEXP_CHECK_NO_ERROR) {
@@ -2878,7 +2887,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 	}
 
-	mcp_sexp_forest_mark_dirty({ info.root });
+	if (node_changed)
+		mcp_sexp_forest_mark_dirty({ info.root });
 
 	req->result_json = make_json_tool_result(build_sexp_node_json(n));
 	req->success = true;

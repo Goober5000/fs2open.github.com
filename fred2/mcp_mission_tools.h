@@ -86,7 +86,9 @@ SCP_string anchor_to_name(anchor_t anchor);
 // sentinels), assigns the new node, and marks the SEXP forest dirty.
 // ---------------------------------------------------------------------------
 
-void replace_cue(int &cue_slot, int new_cue);
+// Returns true if the slot was actually changed, false if cue_slot already
+// held new_cue (no-op).  Callers can use this to gate mark_modified.
+bool replace_cue(int &cue_slot, int new_cue);
 
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
