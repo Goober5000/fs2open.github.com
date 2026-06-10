@@ -469,6 +469,144 @@ def register(suite, client):
         assert_success(r)
         assert_true("MCP Bad Member" not in [w.get("name") for w in tool_data(r)])
 
+    # ---------- reform ----------
+
+    def test_wings_reform_basic():
+        """form_wing with reform=true releases the existing roster and attaches
+        the new members in place, preserving the wing's other settings."""
+        cls = _pick_ship_class(client)
+        wing = "MCP Reform Wing"
+        outsider = "MCP Reform Outsider"
+        try:
+            _create_ship(client, "MCP Reform A", cls, x=0.0)
+            _create_ship(client, "MCP Reform B", cls, x=100.0)
+            _create_ship(client, outsider, cls, x=200.0)
+
+            # Form with some non-default settings we expect to survive the reform.
+            r = client.call_tool("form_wing", {
+                "name": wing,
+                "members": ["MCP Reform A", "MCP Reform B"],
+                "num_waves": 4,
+                "new_wave_threshold": 1,
+                "hotkey": 3,
+                "arrival_delay": 7,
+            })
+            assert_success(r)
+            pre = tool_data(r)
+
+            # Now re-form with one of the original members plus the outsider.
+            r = client.call_tool("form_wing", {
+                "name": wing,
+                "members": [f"{wing} 1", outsider],
+                "reform": True,
+            })
+            assert_success(r)
+
+            r = client.call_tool("get_wing", {"name": wing})
+            assert_success(r)
+            post = tool_data(r)
+            members = post.get("members") or []
+            assert_equal(len(members), 2, "re-formed wing has 2 members")
+            assert_in(f"{wing} 1", members, "slot 1 bashed (originally MCP Reform A)")
+            assert_in(f"{wing} 2", members, "slot 2 bashed (now the outsider)")
+
+            # Wing settings should be preserved across the reform.
+            assert_equal(post.get("num_waves"), pre.get("num_waves"),
+                "num_waves preserved across reform")
+            assert_equal(post.get("new_wave_threshold"), pre.get("new_wave_threshold"),
+                "wave threshold preserved")
+            assert_equal(post.get("hotkey"), pre.get("hotkey"),
+                "hotkey preserved")
+            assert_equal(post.get("arrival_delay"), pre.get("arrival_delay"),
+                "arrival_delay preserved")
+            assert_equal(post.get("arrival_cue"), pre.get("arrival_cue"),
+                "arrival_cue (SEXP node id) preserved")
+            assert_equal(post.get("departure_cue"), pre.get("departure_cue"),
+                "departure_cue preserved")
+
+            # Membership accounting via list_ships.
+            r = client.call_tool("list_ships")
+            assert_success(r)
+            ships = tool_data(r)
+            names = [s.get("name") for s in ships]
+            in_wing = {s.get("name"): s.get("wing") for s in ships if s.get("in_wing")}
+            assert_equal(in_wing.get(f"{wing} 1"), wing, "slot 1 belongs to the wing")
+            assert_equal(in_wing.get(f"{wing} 2"), wing, "slot 2 belongs to the wing")
+            assert_true(outsider not in names,
+                "outsider's original name was bashed away by reform")
+
+            # The displaced original "MCP Reform B" was released; one standalone
+            # ship of this class should exist that wasn't there pre-reform.
+            standalone = [s for s in ships if not s.get("in_wing")
+                          and s.get("ship_class") == cls]
+            assert_true(len(standalone) >= 1,
+                "displaced original member is now a standalone ship")
+        finally:
+            _safe_delete_wing(client, wing)
+            try:
+                r = client.call_tool("list_ships")
+                if not r.get("isError"):
+                    for s in tool_data(r):
+                        if not s.get("in_wing") and s.get("ship_class") == cls:
+                            _safe_delete_ship(client, s.get("name"))
+            except Exception:
+                pass
+            for n in (f"{wing} 1", f"{wing} 2", "MCP Reform A", "MCP Reform B", outsider):
+                _safe_delete_ship(client, n)
+
+    def test_wings_reform_requires_flag():
+        """form_wing without reform=true rejects an existing wing name."""
+        cls = _pick_ship_class(client)
+        wing = "MCP NoReform Wing"
+        try:
+            _create_ship(client, "MCP NoReform Seed", cls, x=0.0)
+            r = client.call_tool("form_wing", {
+                "name": wing,
+                "members": ["MCP NoReform Seed"],
+            })
+            assert_success(r)
+
+            _create_ship(client, "MCP NoReform Other", cls, x=100.0)
+            r = client.call_tool("form_wing", {
+                "name": wing,
+                "members": ["MCP NoReform Other"],
+            })
+            assert_error(r)
+
+            # The original wing should be intact.
+            r = client.call_tool("get_wing", {"name": wing})
+            assert_success(r)
+            members = tool_data(r).get("members") or []
+            assert_in(f"{wing} 1", members,
+                "original member still in the wing")
+        finally:
+            _safe_delete_wing(client, wing)
+            for n in (f"{wing} 1", "MCP NoReform Seed", "MCP NoReform Other"):
+                _safe_delete_ship(client, n)
+
+    def test_wings_reform_on_nonexistent_creates():
+        """reform=true on a name that doesn't exist behaves like a normal form."""
+        cls = _pick_ship_class(client)
+        wing = "MCP Reform Fresh"
+        try:
+            _create_ship(client, "MCP Reform Fresh Seed", cls, x=0.0)
+            r = client.call_tool("form_wing", {
+                "name": wing,
+                "members": ["MCP Reform Fresh Seed"],
+                "reform": True,
+            })
+            assert_success(r)
+
+            r = client.call_tool("get_wing", {"name": wing})
+            assert_success(r)
+            members = tool_data(r).get("members") or []
+            assert_in(f"{wing} 1", members,
+                "reform on nonexistent wing created it normally")
+        finally:
+            _safe_delete_wing(client, wing)
+            for n in (f"{wing} 1", "MCP Reform Fresh Seed"):
+                _safe_delete_ship(client, n)
+
     def test_wings_duplicate_name():
         cls = _pick_ship_class(client)
         ship_name = "MCP Dup Ship"
@@ -585,6 +723,9 @@ def register(suite, client):
     suite.add("wings_form_requires_members", test_wings_form_requires_members)
     suite.add("wings_form_member_not_found", test_wings_form_member_not_found)
     suite.add("wings_duplicate_name", test_wings_duplicate_name)
+    suite.add("wings_reform_basic", test_wings_reform_basic)
+    suite.add("wings_reform_requires_flag", test_wings_reform_requires_flag)
+    suite.add("wings_reform_on_nonexistent_creates", test_wings_reform_on_nonexistent_creates)
     suite.add("wings_flags_basic_round_trip", test_wings_flags_basic_round_trip)
     suite.add("wings_flags_errors_and_atomicity", test_wings_flags_errors_and_atomicity)
 

@@ -257,13 +257,14 @@ static void rename_wing(int wing_idx, const char *new_name)
 // ---------------------------------------------------------------------------
 // Member-ship preflight for form_wing
 //
-// Validate every named member exists, isn't already in a wing, and has a
-// ship class allowed in wings.  Done up-front so create_wing() never has a
-// reason to pop a modal MessageBox.
+// Validate every named member exists, isn't already in a wing (unless we're
+// re-forming, in which case members of the wing being re-formed are OK since
+// they'll be released first), and has a ship class allowed in wings.  Done
+// up-front so create_wing() never has a reason to pop a modal MessageBox.
 // ---------------------------------------------------------------------------
 
 static bool preflight_member_ships(const SCP_vector<SCP_string> &member_names,
-	SCP_vector<int> &out_ship_indices, McpErrorSink &sink)
+	int reform_wing_idx, SCP_vector<int> &out_ship_indices, McpErrorSink &sink)
 {
 	if (member_names.empty()) {
 		sink.set_error("Parameter 'members' must list at least one ship name.");
@@ -282,7 +283,7 @@ static bool preflight_member_ships(const SCP_vector<SCP_string> &member_names,
 			sink.set_error("Member ship not found: '%s'", name.c_str());
 			return false;
 		}
-		if (Ships[ship_idx].wingnum >= 0) {
+		if (Ships[ship_idx].wingnum >= 0 && Ships[ship_idx].wingnum != reform_wing_idx) {
 			sink.set_error("Member ship '%s' is already in wing '%s'.",
 				name.c_str(), Wings[Ships[ship_idx].wingnum].name);
 			return false;
@@ -303,6 +304,64 @@ static bool preflight_member_ships(const SCP_vector<SCP_string> &member_names,
 		out_ship_indices.push_back(ship_idx);
 	}
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// In-place wing re-form: replace the roster, preserve everything else.
+//
+// Releases all current members (renames each back to its engine-default name
+// via remove_ship_from_wing), then re-attaches the supplied members using the
+// same name-bashing / cue-locking pattern as create_wing()'s add-ships loop.
+//
+// What is preserved (because the wing slot is reused):
+//   name, display_name, squad logo, hotkey, num_waves, threshold,
+//   wave_delay_min/max, arrival/departure location/anchor/distance/delay,
+//   arrival/departure cues, formation, formation_scale, wing_flags,
+//   reinforcement entry, SEXP / AI-goal references to the wing name.
+//
+// What is reset: special_ship becomes 0 (first new member is the leader),
+// matching the engine convention.  Num_wings is unchanged on net (no decrement
+// during dissolve, no increment during re-add).
+// ---------------------------------------------------------------------------
+
+static void reform_wing_in_place(int wing_num, const SCP_vector<int> &new_member_ship_indices)
+{
+	// Iterate from the back: remove_ship_from_wing shifts the last slot into
+	// the removed position, so a forward loop would re-process the shifted
+	// element and walk off the end.
+	for (int i = Wings[wing_num].wave_count - 1; i >= 0; --i) {
+		object *ptr = &Objects[wing_objects[wing_num][i]];
+		if (ptr->type == OBJ_SHIP)
+			remove_ship_from_wing(ptr->instance, 0);
+		else if (ptr->type == OBJ_START)
+			remove_player_from_wing(ptr->instance, 0);
+	}
+
+	// Re-attach the new members.  Mirrors create_wing()'s add-ships loop.
+	int count = 0;
+	for (int ship_idx : new_member_ship_indices) {
+		int slot = count++;
+		char bashed[NAME_LENGTH];
+		wing_bash_ship_name(bashed, Wings[wing_num].name, slot + 1);
+		rename_ship(ship_idx, bashed);
+		// bash again for the display name
+		wing_bash_ship_name(&Ships[ship_idx], &Wings[wing_num], slot + 1, true);
+
+		Wings[wing_num].ship_index[slot] = ship_idx;
+		Ships[ship_idx].wingnum = wing_num;
+
+		if (Ships[ship_idx].arrival_cue >= 0)
+			free_sexp2(Ships[ship_idx].arrival_cue);
+		Ships[ship_idx].arrival_cue = Locked_sexp_false;
+		if (Ships[ship_idx].departure_cue >= 0)
+			free_sexp2(Ships[ship_idx].departure_cue);
+		Ships[ship_idx].departure_cue = Locked_sexp_false;
+
+		wing_objects[wing_num][slot] = Ships[ship_idx].objnum;
+	}
+
+	Wings[wing_num].wave_count = count;
+	Wings[wing_num].special_ship = 0;	// first new member is the leader
 }
 
 // ---------------------------------------------------------------------------
@@ -379,6 +438,8 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	auto formation_str       = get_optional_string(input, "formation", sink);
 	auto formation_scale     = get_optional_float(input, "formation_scale", sink);
 
+	auto reform              = get_optional_bool(input, "reform", sink);
+
 	json_t *wing_flags_in    = json_object_get(input, "wing_flags");
 
 	if (sink.has_error()) return;
@@ -386,16 +447,23 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	// Validate wing_flags up-front so a bad flag name aborts before mutation.
 	if (!validate_wing_flags_only(wing_flags_in, sink)) return;
 
-	// Validate name and pre-validate members
-	if (!check_object_rename("wing", name, sink)) return;
+	// Decide whether this is a re-form (recreate-in-place) or a fresh form.
+	int reform_wing_idx = wing_name_lookup(name);
+	bool reforming = (reform_wing_idx >= 0) && reform.has_value() && *reform;
 
-	if (find_free_wing() < 0) {
-		sink.set_error("Maximum number of wings (%d) already in use.", MAX_WINGS);
-		return;
+	if (!reforming) {
+		// Fresh form: name must not already be taken, and we need a free slot.
+		if (!check_object_rename("wing", name, sink)) return;
+
+		if (find_free_wing() < 0) {
+			sink.set_error("Maximum number of wings (%d) already in use.", MAX_WINGS);
+			return;
+		}
 	}
 
 	SCP_vector<int> member_ship_indices;
-	if (!preflight_member_ships(*members_opt, member_ship_indices, sink))
+	if (!preflight_member_ships(*members_opt, reforming ? reform_wing_idx : -1,
+			member_ship_indices, sink))
 		return;
 
 	// Pre-resolve optional fields so we can fail before any state changes
@@ -435,36 +503,43 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 		}
 	}
 
-	// Save marking state so we don't disrupt the user's editor selection
-	SCP_vector<int> previously_marked;
-	for (auto p : list_range(&obj_used_list)) {
-		if (p->flags[Object::Object_Flags::Marked])
-			previously_marked.push_back(OBJ_INDEX(p));
-	}
-	int saved_cur_object = cur_object_index;
+	int wing_idx;
+	if (reforming) {
+		// In-place roster swap: keep the wing slot and all its settings.
+		reform_wing_in_place(reform_wing_idx, member_ship_indices);
+		wing_idx = reform_wing_idx;
+	} else {
+		// Fresh form: drive create_wing via the marked-objects protocol.
+		SCP_vector<int> previously_marked;
+		for (auto p : list_range(&obj_used_list)) {
+			if (p->flags[Object::Object_Flags::Marked])
+				previously_marked.push_back(OBJ_INDEX(p));
+		}
+		int saved_cur_object = cur_object_index;
 
-	unmark_all();
-	for (int ship_idx : member_ship_indices)
-		mark_object(Ships[ship_idx].objnum);
-	cur_object_index = Ships[member_ship_indices.front()].objnum;
+		unmark_all();
+		for (int ship_idx : member_ship_indices)
+			mark_object(Ships[ship_idx].objnum);
+		cur_object_index = Ships[member_ship_indices.front()].objnum;
 
-	int rc = create_wing(name);
+		int rc = create_wing(name);
 
-	// Restore prior selection regardless of outcome.
-	unmark_all();
-	for (int obj : previously_marked)
-		mark_object(obj);
-	cur_object_index = saved_cur_object;
+		// Restore prior selection regardless of outcome.
+		unmark_all();
+		for (int obj : previously_marked)
+			mark_object(obj);
+		cur_object_index = saved_cur_object;
 
-	if (rc != 0) {
-		sink.set_error("create_wing() failed for '%s' (engine returned %d).", name, rc);
-		return;
-	}
+		if (rc != 0) {
+			sink.set_error("create_wing() failed for '%s' (engine returned %d).", name, rc);
+			return;
+		}
 
-	int wing_idx = wing_name_lookup(name);
-	if (wing_idx < 0) {
-		sink.set_error("create_wing() reported success but wing '%s' could not be looked up.", name);
-		return;
+		wing_idx = wing_name_lookup(name);
+		if (wing_idx < 0) {
+			sink.set_error("create_wing() reported success but wing '%s' could not be looked up.", name);
+			return;
+		}
 	}
 	wing &wingp = Wings[wing_idx];
 
@@ -512,7 +587,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	// Apply wing_flags (already validated above).
 	apply_wing_flags_partial(wing_idx, wing_flags_in, sink);
 
-	mark_modified("MCP: form wing %s", name);
+	mark_modified(reforming ? "MCP: re-form wing %s" : "MCP: form wing %s", name);
 
 	req->result_json = make_json_tool_result(build_wing_json(wing_idx, true));
 	req->success = true;
@@ -964,6 +1039,15 @@ void mcp_register_wing_tools(json_t *tools)
 		add_bool_map_prop(props, "wing_flags",
 			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
 			"Only listed keys are touched.");
+		add_bool_prop(props, "reform",
+			"If true and a wing with this name already exists, re-form it in place: release the "
+			"current members and attach the supplied members instead.  The wing's other settings "
+			"(cues, formation, hotkey, wing_flags, num_waves, threshold, wave delays, "
+			"arrival/departure location/target/distance/delay, etc.) are preserved.  Members that "
+			"are currently in the wing being re-formed are accepted (they are released first).  "
+			"Released members go back to standalone ships with engine-default names.  Members not "
+			"in the original roster are bashed to \"<wing_name> N\" as usual.  If the wing does not "
+			"already exist, this flag is ignored.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("members"));
@@ -971,7 +1055,8 @@ void mcp_register_wing_tools(json_t *tools)
 			"Form a new wing from existing ships.  Member ships must share a team, must not "
 			"already be in a wing, and must have ship classes that allow wing membership. "
 			"On success the members are renamed to \"<wing_name> 1\", etc., and their own "
-			"arrival/departure cues are disabled (the wing's cues become authoritative).",
+			"arrival/departure cues are disabled (the wing's cues become authoritative). "
+			"Pass reform=true to re-form an existing wing of the same name in place.",
 			props, req);
 	}
 
