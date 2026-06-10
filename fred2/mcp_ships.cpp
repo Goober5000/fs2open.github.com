@@ -15,6 +15,7 @@
 #include "globalincs/utility.h"
 
 #include "ai/ai.h"
+#include "hud/hudsquadmsg.h"          // Player_orders
 #include "iff_defs/iff_defs.h"
 #include "math/floating.h"            // fl2ir
 #include "math/vecmat.h"              // vm_vec_equal, vm_matrix_equal
@@ -143,6 +144,15 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 	// Flags (cross-enum: object/ship/parse-object/AI; see list_ship_flags)
 	json_object_set_new(obj, "ship_flags", build_ship_flags_array(ship_idx));
 
+	// Player orders this ship will accept (subset of ship type's valid_player_orders).
+	// Emit as Player_orders parse_names; cross-reference list_defined_player_orders.
+	json_t *poa = json_array();
+	for (size_t i : shipp.orders_accepted) {
+		if (i < Player_orders.size())
+			json_array_append_new(poa, json_safe_string(Player_orders[i].parse_name.c_str()));
+	}
+	json_object_set_new(obj, "player_orders_accepted", poa);
+
 	// Flag-paired scalars: emitted only when the matching flag is set, mirroring
 	// the FRED ship-flags dialog's "checkbox + spinner" model.  The scalars are
 	// independently stored in the ship/AI struct (qtFRED writes them
@@ -248,6 +258,40 @@ static bool resolve_or_add_cargo(const char *cargo_name, char &out_index, McpErr
 	strcpy(Cargo_names[z], cargo_name);
 	out_index = (char)z;
 	return true;
+}
+
+// ---------------------------------------------------------------------------
+// Player-orders helper - resolves an array of Player_orders parse_names to a
+// SCP_set<size_t>, validating each against the ship type's allowed set.
+// ---------------------------------------------------------------------------
+
+static std::optional<SCP_set<size_t>> resolve_player_orders_accepted(
+	const SCP_vector<SCP_string> &names,
+	const SCP_set<size_t> &allowed,
+	McpErrorSink &sink)
+{
+	SCP_set<size_t> out;
+	for (const auto &n : names) {
+		size_t found = SIZE_MAX;
+		for (size_t i = 0; i < Player_orders.size(); i++) {
+			if (n == Player_orders[i].parse_name) {
+				found = i;
+				break;
+			}
+		}
+		if (found == SIZE_MAX) {
+			sink.set_error("Unknown player order parse_name: '%s'. "
+				"Use list_defined_player_orders to discover valid names.", n.c_str());
+			return std::nullopt;
+		}
+		if (!allowed.contains(found)) {
+			sink.set_error("Player order '%s' is not in the ship type's valid_player_orders.",
+				n.c_str());
+			return std::nullopt;
+		}
+		out.insert(found);
+	}
+	return out;
 }
 
 // ---------------------------------------------------------------------------
@@ -578,6 +622,8 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
 	auto initial_speed  = get_optional_integer(input, "initial_speed_percent", sink);
 
+	auto player_orders_in = get_optional_string_array(input, "player_orders_accepted", sink);
+
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
 	if (sink.has_error()) return;
@@ -599,6 +645,14 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	// Resolve ship class
 	int class_idx = check_lookup(class_name, ship_info_lookup, "ship_class", sink);
 	if (class_idx < 0) return;
+
+	// Validate player_orders_accepted against the new ship class's type defaults
+	std::optional<SCP_set<size_t>> resolved_player_orders;
+	if (player_orders_in.has_value()) {
+		const auto &allowed = ship_get_default_orders_accepted(&Ship_info[class_idx]);
+		resolved_player_orders = resolve_player_orders_accepted(*player_orders_in, allowed, sink);
+		if (!resolved_player_orders.has_value()) return;
+	}
 
 	// Validate name does not collide with any existing object
 	if (!check_object_rename("ship", name, sink)) return;
@@ -743,6 +797,11 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	// Apply ship_flags (already validated above).
 	apply_ship_flags_partial(ship_idx, ship_flags_in, sink);
 
+	// Override the engine's default orders_accepted (seeded by create_ship) with
+	// the user's explicit subset, if provided.
+	if (resolved_player_orders.has_value())
+		shipp.orders_accepted = *resolved_player_orders;
+
 	// Flag-paired scalars: written unconditionally (qtFRED pattern); the matching
 	// flag in ship_flags governs whether the value is meaningful at runtime.
 	if (escort_priority.has_value())
@@ -822,6 +881,8 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto initial_hull   = get_optional_integer(input, "initial_hull_percent", sink);
 	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
 	auto initial_speed  = get_optional_integer(input, "initial_speed_percent", sink);
+
+	auto player_orders_in = get_optional_string_array(input, "player_orders_accepted", sink);
 
 	json_t *ship_flags_in  = json_object_get(input, "ship_flags");
 
@@ -1079,6 +1140,19 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	// Apply ship_flags (already validated above).
 	if (apply_ship_flags_partial(ship_idx, ship_flags_in, sink))
 		changed = true;
+
+	// Apply player_orders_accepted *after* ship_class so that validation runs
+	// against the (possibly new) class's allowed set, and the explicit subset
+	// overrides change_ship_type's reset-to-defaults.
+	if (player_orders_in.has_value()) {
+		const auto &allowed = ship_get_default_orders_accepted(&Ship_info[shipp.ship_info_index]);
+		auto resolved = resolve_player_orders_accepted(*player_orders_in, allowed, sink);
+		if (!resolved.has_value()) return;
+		if (shipp.orders_accepted != *resolved) {
+			shipp.orders_accepted = *resolved;
+			changed = true;
+		}
+	}
 
 	// Flag-paired scalars: the matching flag in ship_flags governs whether
 	// the value is meaningful at runtime, but the scalar field itself is
@@ -2705,6 +2779,23 @@ static void handle_update_ship_special_hitpoints(json_t *input, McpToolRequest *
 // Tool registration
 // ---------------------------------------------------------------------------
 
+// Returns the schema-time allowed_values list for player_orders_accepted.
+// Cached on first call; pointers reference Player_orders' SCP_string storage,
+// which is stable after engine init and possible Lua add_order calls.
+static const SCP_vector<const char *> &get_mcp_player_orders_parse_names()
+{
+	static const SCP_vector<const char *> cache = []() {
+		SCP_vector<const char *> v;
+		for (const auto &o : Player_orders) {
+			if (o.parse_name == "no order")	// NO_ORDER_ITEM sentinel
+				continue;
+			v.push_back(o.parse_name.c_str());
+		}
+		return v;
+	}();
+	return cache;
+}
+
 void mcp_register_ship_tools(json_t *tools)
 {
 	// list_ships
@@ -2795,6 +2886,13 @@ void mcp_register_ship_tools(json_t *tools)
 			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
 		add_integer_prop(props, "initial_speed_percent",
 			"Initial speed at mission start, as a percent of class max (0-100). FRED defaults to 33.");
+		add_string_array_prop(props, "player_orders_accepted",
+			"Array of player order parse_names this ship will accept from the player "
+			"(e.g. \"attack ship\", \"form on wing\"). Must be a subset of the ship "
+			"type's valid_player_orders. If omitted, defaults to the ship type's "
+			"full valid_player_orders set. Use list_defined_player_orders to discover "
+			"valid parse_names.",
+			get_mcp_player_orders_parse_names());
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		json_array_append_new(req, json_string("ship_class"));
@@ -2867,6 +2965,12 @@ void mcp_register_ship_tools(json_t *tools)
 			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
 		add_integer_prop(props, "initial_speed_percent",
 			"Initial speed at mission start, as a percent of class max (0-100).");
+		add_string_array_prop(props, "player_orders_accepted",
+			"Array of player order parse_names this ship will accept from the player. "
+			"Must be a subset of the ship type's valid_player_orders (validated against "
+			"the post-update ship_class when both are set in the same call). Use "
+			"list_defined_player_orders to discover valid parse_names.",
+			get_mcp_player_orders_parse_names());
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_ship",
