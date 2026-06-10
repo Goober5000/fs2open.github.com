@@ -208,6 +208,20 @@ static void set_missing_param_error(McpErrorSink &sink, const char *param_name)
 	sink.set_error("Missing required parameter, or parameter is the wrong type: %s", param_name);
 }
 
+// If val is an explicit JSON null, report an error and return true.  Use at the
+// top of each get_optional_* helper: silently treating null as "field absent"
+// is misleading; callers that genuinely need to distinguish explicit-null from
+// absence should use is_parameter_present_and_null() before calling here.
+static bool reject_explicit_null(json_t *val, const char *param_name, McpErrorSink &sink)
+{
+	if (val && json_is_null(val)) {
+		sink.set_error("Explicit null is not supported for parameter '%s'. "
+			"Omit the field to leave it unchanged.", param_name);
+		return true;
+	}
+	return false;
+}
+
 bool check_string_length(const char *input, size_t max_len, const char *param_name, McpErrorSink &sink)
 {
 	Assertion(input != nullptr, "check_string_length called with null input for param '%s'", param_name);
@@ -407,13 +421,15 @@ std::optional<bool> get_required_bool(json_t *input, const char *param_name, Mcp
 const char *get_optional_string(json_t *arguments, const char *param_name, McpErrorSink &sink, size_t max_len)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return nullptr;
 	if (val && json_is_string(val)) {
 		auto str = json_string_value(val);
 		if (str) {
 			if (max_len == SIZE_MAX || check_string_length(str, max_len, param_name, sink))
 				return str;
 		}
-	} else if (val && !json_is_null(val)) {
+	} else if (val) {
 		sink.set_error("Parameter '%s' must be a string", param_name);
 	}
 	return nullptr;
@@ -437,6 +453,8 @@ const char *get_optional_filename(json_t *arguments, const char *param_name, Mcp
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (val && json_is_integer(val)) {
 		json_int_t raw = json_integer_value(val);
 		if (raw < INT_MIN || raw > INT_MAX) {
@@ -445,7 +463,7 @@ std::optional<int> get_optional_integer(json_t *arguments, const char *param_nam
 		}
 		return (int)raw;
 	}
-	if (val && !json_is_null(val)) {
+	if (val) {
 		sink.set_error("Parameter '%s' must be an integer", param_name);
 	}
 	return std::nullopt;
@@ -454,6 +472,8 @@ std::optional<int> get_optional_integer(json_t *arguments, const char *param_nam
 std::optional<double> get_optional_double(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (val && json_is_number(val)) {
 		double d = json_number_value(val);
 		if (!std::isfinite(d)) {
@@ -462,7 +482,7 @@ std::optional<double> get_optional_double(json_t *arguments, const char *param_n
 		}
 		return d;
 	}
-	if (val && !json_is_null(val)) {
+	if (val) {
 		sink.set_error("Parameter '%s' must be a number", param_name);
 	}
 	return std::nullopt;
@@ -471,6 +491,8 @@ std::optional<double> get_optional_double(json_t *arguments, const char *param_n
 std::optional<float> get_optional_float(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (val && json_is_number(val)) {
 		// Cast first so that a finite double which overflows the float range
 		// (e.g. 1e40) is rejected as non-finite rather than silently becoming Inf.
@@ -481,7 +503,7 @@ std::optional<float> get_optional_float(json_t *arguments, const char *param_nam
 		}
 		return f;
 	}
-	if (val && !json_is_null(val)) {
+	if (val) {
 		sink.set_error("Parameter '%s' must be a number", param_name);
 	}
 	return std::nullopt;
@@ -490,10 +512,12 @@ std::optional<float> get_optional_float(json_t *arguments, const char *param_nam
 std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (val && json_is_boolean(val)) {
 		return json_is_true(val);
 	}
-	if (val && !json_is_null(val)) {
+	if (val) {
 		sink.set_error("Parameter '%s' must be a boolean", param_name);
 	}
 	return std::nullopt;
@@ -502,6 +526,8 @@ std::optional<bool> get_optional_bool(json_t *arguments, const char *param_name,
 std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (val && json_is_array(val)) {
 		SCP_vector<SCP_string> result;
 		size_t index;
@@ -516,7 +542,7 @@ std::optional<SCP_vector<SCP_string>> get_optional_string_array(json_t *argument
 		}
 		return result;
 	}
-	if (val && !json_is_null(val)) {
+	if (val) {
 		sink.set_error("Parameter '%s' must be an array", param_name);
 	}
 	return std::nullopt;
@@ -734,13 +760,15 @@ void add_color_prop(json_t *props, const char *name, const char *description)
 std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	bool failed_finite_check = false;
 	auto result = parse_vec3d_json(val, failed_finite_check);
 	if (failed_finite_check) {
 		sink.set_error("Parameter '%s' has components that are not finite numbers", param_name);
 		return std::nullopt;
 	}
-	if (!result.has_value() && val && !json_is_null(val)) {
+	if (!result.has_value() && val) {
 		sink.set_error("Parameter '%s' must be a vec3d object", param_name);
 		return std::nullopt;
 	}
@@ -750,11 +778,12 @@ std::optional<vec3d> get_optional_vec3d(json_t *arguments, const char *param_nam
 std::optional<matrix> get_optional_matrix(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	if (!val)
 		return std::nullopt;
 	if (!json_is_object(val)) {
-		if (!json_is_null(val))
-			sink.set_error("Parameter '%s' must be a matrix object", param_name);
+		sink.set_error("Parameter '%s' must be a matrix object", param_name);
 		return std::nullopt;
 	}
 	bool failed_finite_check = false;
@@ -801,8 +830,10 @@ std::optional<matrix> get_required_matrix(json_t *input, const char *param_name,
 std::optional<color> get_optional_color(json_t *arguments, const char *param_name, McpErrorSink &sink)
 {
 	json_t *val = arguments ? json_object_get(arguments, param_name) : nullptr;
+	if (reject_explicit_null(val, param_name, sink))
+		return std::nullopt;
 	auto result = parse_color_json(val);
-	if (!result.has_value() && val && !json_is_null(val)) {
+	if (!result.has_value() && val) {
 		sink.set_error("Parameter '%s' must be a color object", param_name);
 	}
 	return result;
