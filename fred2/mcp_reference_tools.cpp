@@ -26,6 +26,7 @@
 #include "parse/sexp/sexp_lookup.h"
 #include "menuui/techmenu.h"
 #include "iff_defs/iff_defs.h"
+#include "hud/hudsquadmsg.h"
 #include "mission/missionmessage.h"
 #include "mod_table/mod_table.h"
 #include "cfile/cfile.h"
@@ -459,6 +460,14 @@ void mcp_register_reference_tools(json_t *tools)
 	register_tool(tools, "list_subsystem_types",
 		"List the engine-defined subsystem types. These are the values that appear "
 		"in the subsystem_type field for certain tools which return subsystem information.",
+		json_object());
+
+	// list_defined_ai_orders
+	register_tool(tools, "list_defined_ai_orders",
+		"List all of the orders that can be issued to AI-controlled ships. "
+		"The set of orders a particular ship will accept is governed by its ship "
+		"type and can be modified on a per-ship basis; this tool just enumerates "
+		"the universe of orders.",
 		json_object());
 
 	// list_ai_profiles
@@ -2389,6 +2398,17 @@ static json_t *handle_list_subsystem_types()
 	return make_json_tool_result(arr);
 }
 
+static json_t *handle_list_defined_ai_orders()
+{
+	json_t *arr = json_array();
+	for (int i = 0; i < Num_ai_goals; i++) {
+		json_t *entry = json_object();
+		json_object_set_new(entry, "name", json_safe_string(Ai_goal_names[i].name));
+		json_array_append_new(arr, entry);
+	}
+	return make_json_tool_result(arr);
+}
+
 extern void get_wing_delta(vec3d *delta, int wing_index);
 
 static json_t *handle_list_wing_formations()
@@ -3106,6 +3126,8 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_ai_classes();
 	if (strcmp(tool_name, "list_subsystem_types") == 0)
 		return handle_list_subsystem_types();
+	if (strcmp(tool_name, "list_defined_ai_orders") == 0)
+		return handle_list_defined_ai_orders();
 	if (strcmp(tool_name, "list_ai_profiles") == 0)
 		return handle_list_ai_profiles();
 	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
