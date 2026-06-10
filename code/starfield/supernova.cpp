@@ -293,14 +293,16 @@ float supernova_sunspot_pct()
 	return 1.0f - (Supernova_time_left / SUPERNOVA_HIT_TIME);
 }
 
-float supernova_close_pct()
+float supernova_sun_growth()
 {
-	if (Supernova_status < SUPERNOVA_STAGE::CLOSE)
-		return 0.0f;
-	if (Supernova_status > SUPERNOVA_STAGE::CLOSE)
+	if (!supernova_active())
 		return 1.0f;
-	return 1.0f - (Supernova_time_left - SUPERNOVA_HIT_TIME)
-				/ (SUPERNOVA_CLOSE_TIME - SUPERNOVA_HIT_TIME);
+
+	// pct_complete exceeds 1.0 once the supernova timer expires (DEAD1+), so cap the growth
+	auto pct = supernova_pct_complete();
+	CLAMP(pct, 0.0f, 1.0f);
+
+	return 1.0f + (SUPERNOVA_SUN_SCALE * pct);
 }
 
 // if the camera should cut to the "you-are-toast" cam

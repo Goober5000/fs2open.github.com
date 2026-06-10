@@ -1314,8 +1314,8 @@ void stars_draw_sun(int show_sun)
 			light_add_directional(&sun_dir, idx, !bm->glare, bm->i, bm->r, bm->g, bm->b);
 
 		// if supernova
-		if ( supernova_active() && (idx == 0) )
-			local_scale = 1.0f + (SUPERNOVA_SUN_SCALE * supernova_pct_complete());
+		if ( idx == 0 )
+			local_scale = supernova_sun_growth();
 		else
 			local_scale = 1.0f;
 
@@ -1446,8 +1446,8 @@ void stars_draw_sun_glow(int sun_n)
 	vm_vec_normalize(&sun_dir);
 
 	// if supernova
-	if ( supernova_active() && (sun_n == 0) )
-		local_scale = 1.0f + (SUPERNOVA_SUN_SCALE * supernova_pct_complete());
+	if ( sun_n == 0 )
+		local_scale = supernova_sun_growth();
 	else
 		local_scale = 1.0f;
 

@@ -5,7 +5,6 @@
 #include "options/Option.h"
 #include "parse/parselo.h"
 #include "ship/ship.h"
-#include "starfield/supernova.h"
 
 namespace graphics {
 namespace {
@@ -275,11 +274,6 @@ bool gr_sunglare_enabled()
 {
 	if (gr_screen.mode == GR_STUB) {
 		return false;
-	}
-
-	// supernova glare gets to override this and actually display glare
-	if (supernova_stage() >= SUPERNOVA_STAGE::CLOSE) {
-		return true;
 	}
 
 	return graphics::SunglareOption->getValue();
