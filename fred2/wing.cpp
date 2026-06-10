@@ -36,12 +36,6 @@ static char THIS_FILE[] = __FILE__;
 int already_deleting_wing = 0;
 int Wings_initialized = 0;
 
-// Declared here
-/**
- * @brief Takes a player out of a wing, deleting wing if that was the only ship in it.
- */
-void remove_player_from_wing(int player, int min = 1);
-
 /**
  * @brief Checks wing dependencies
  *
