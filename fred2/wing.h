@@ -42,6 +42,11 @@ void disband_wing(int wing_num);
 void remove_ship_from_wing(int ship, int min = 1);
 
 /**
+ * @brief Takes a player out of a wing, deleting wing if that was the only ship in it.
+ */
+void remove_player_from_wing(int player, int min = 1);
+
+/**
  * @brief Mark all ships within this wing
  *
  * @param[in] wing Index of the wing to mark
