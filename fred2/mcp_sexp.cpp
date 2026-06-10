@@ -1001,14 +1001,15 @@ int parse_sexp_text(const char *text, const char *source)
 	Mp = buf.data();
 	strcpy_s(Current_filename, source);
 
-	// Enable error collection so error_display() doesn't show modal dialogs
-	Parse_collect_errors = true;
-	Parse_errors.clear();
-
-	int n = get_sexp_main();
+	int n;
+	{
+		// Collect errors so error_display() doesn't show modal dialogs; the
+		// guard restores the prior mode even if get_sexp_main() throws
+		ParseErrorCollectionGuard collect_errors;
+		n = get_sexp_main();
+	}
 
 	// Restore global parse state
-	Parse_collect_errors = false;
 	unpause_parse();
 
 	if (!Parse_errors.empty()) {
