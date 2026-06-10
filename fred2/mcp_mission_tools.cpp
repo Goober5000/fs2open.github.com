@@ -430,6 +430,8 @@ static void handle_set_editor_view(json_t *input, McpToolRequest *req)
 static const char *mission_tool_names[] = {
 	"get_mission_info",
 	"update_mission_info",
+	"get_custom_wing_names",
+	"update_custom_wing_names",
 	"list_fiction_viewer_stages",
 	"get_fiction_viewer_stage",
 	"create_fiction_viewer_stage",
