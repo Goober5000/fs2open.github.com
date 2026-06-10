@@ -42,6 +42,34 @@ struct ParseError {
 extern bool Parse_collect_errors;
 extern SCP_vector<ParseError> Parse_errors;
 
+// RAII guard for parse error collection.  While an instance is alive,
+// error_display() stores errors in Parse_errors instead of displaying dialogs.
+// The constructor clears any stale errors; the destructor restores the prior
+// collection mode even if the parse path exits via an exception.  Collected
+// errors are left in Parse_errors for the caller to consume after the guard
+// goes out of scope.  Not designed for nesting: an inner guard would discard
+// an outer guard's accumulated errors.
+class ParseErrorCollectionGuard {
+public:
+	ParseErrorCollectionGuard()
+		: m_saved(Parse_collect_errors)
+	{
+		Parse_collect_errors = true;
+		Parse_errors.clear();
+	}
+
+	~ParseErrorCollectionGuard()
+	{
+		Parse_collect_errors = m_saved;
+	}
+
+	ParseErrorCollectionGuard(const ParseErrorCollectionGuard &) = delete;
+	ParseErrorCollectionGuard &operator=(const ParseErrorCollectionGuard &) = delete;
+
+private:
+	bool m_saved;
+};
+
 
 #define	COMMENT_CHAR	(char)';'
 #define	EOLN			(char)0x0a
