@@ -78,4 +78,9 @@
 // from weapon.h (and beam.h)
 #define MAX_BEAM_SECTIONS				5
 
+#define NAME_LENGTH_1	31		// For tokenizing (must be NAME_LENGTH - 1)
+#if (NAME_LENGTH_1) != (NAME_LENGTH - 1)
+#error NAME_LENGTH_1 must be equal to NAME_LENGTH - 1!
+#endif
+
 #endif	// _GLOBALS_H
