@@ -138,6 +138,7 @@
 #define IDD_VOLUMETRICS                 332
 #define IDD_EDIT_CUSTOM_STRINGS         333
 #define IDD_SUPPORT_REARM_OPTIONS       334
+#define IDD_REORDER                     335
 #define IDC_SHIP_CLASS                  1003
 #define IDC_SHIP_WING                   1004
 #define IDC_SOUND_CLIP_NAME             1007
@@ -1290,6 +1291,12 @@
 #define IDC_SUPPORT_REARM_SET_ALL_UNLIMITED 1729
 #define IDC_SUPPORT_REARM_SET_ALL_ZERO   1730
 #define IDC_SUPPORT_REARM_POOL_TEAM      1731
+#define IDC_REORDER_TYPE                1732
+#define IDC_REORDER_LIST                1733
+#define IDC_REORDER_MOVE_TO_TOP         1734
+#define IDC_REORDER_MOVE_UP             1735
+#define IDC_REORDER_MOVE_DOWN           1736
+#define IDC_REORDER_MOVE_TO_BOTTOM      1737
 #define IDC_SEXP_POPUP_LIST             32770
 #define ID_FILE_MISSIONNOTES            32771
 #define ID_DUPLICATE                    32774
@@ -1593,7 +1600,8 @@
 #define ID_MISC_POINTUSINGUVEC          33101
 #define ID_MUSIC_PLAYER                 33102
 #define ID_EDITORS_VOLUMETRICS          33103
-#define ID_TOOLS_MCP_SERVER             33104
+#define ID_REORDER                      33104
+#define ID_TOOLS_MCP_SERVER             33105
 #define ID_INDICATOR_MODE               59142
 #define ID_INDICATOR_LEFT               59143
 #define ID_INDICATOR_RIGHT              59144
@@ -1605,9 +1613,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_3D_CONTROLS                     1
-#define _APS_NEXT_RESOURCE_VALUE        335
-#define _APS_NEXT_COMMAND_VALUE         33105
-#define _APS_NEXT_CONTROL_VALUE         1732
+#define _APS_NEXT_RESOURCE_VALUE        336
+#define _APS_NEXT_COMMAND_VALUE         33106
+#define _APS_NEXT_CONTROL_VALUE         1738
 #define _APS_NEXT_SYMED_VALUE           105
 #endif
 #endif

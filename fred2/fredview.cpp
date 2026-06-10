@@ -63,6 +63,7 @@
 #include "sound/audiostr.h"
 #include "mission/missiongrid.h"
 #include "calcrelativecoordsdlg.h"
+#include "reorderdlg.h"
 #include "musicplayerdlg.h"
 #include "volumetricsdlg.h"
 #include "customdatadlg.h"
@@ -343,6 +344,7 @@ BEGIN_MESSAGE_MAP(CFREDView, CView)
 	ON_UPDATE_COMMAND_UI(ID_LOOKAT_OBJ, OnUpdateLookatObj)
 	ON_COMMAND(ID_EDITORS_ADJUST_GRID, OnEditorsAdjustGrid)
 	ON_COMMAND(ID_CALC_RELATIVE_COORDS, OnCalcRelativeCoords)
+	ON_COMMAND(ID_REORDER, OnReorder)
 	ON_COMMAND(ID_MUSIC_PLAYER, OnMusicPlayer)
 	ON_COMMAND(ID_EDITORS_SHIELD_SYS, OnEditorsShieldSys)
 	ON_COMMAND(ID_LEVEL_OBJ, OnLevelObj)
@@ -4474,6 +4476,13 @@ void CFREDView::OnEditorsAdjustGrid()
 void CFREDView::OnCalcRelativeCoords()
 {
 	calc_relative_coords_dlg dlg;
+
+	dlg.DoModal();
+}
+
+void CFREDView::OnReorder()
+{
+	reorder_dlg dlg;
 
 	dlg.DoModal();
 }
