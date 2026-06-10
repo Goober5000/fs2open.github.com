@@ -778,6 +778,114 @@ def register(suite, client):
             except Exception:
                 pass
 
+    # ----- Custom wing names -----
+
+    def test_custom_wing_names_roundtrip():
+        # Snapshot defaults for restoration.
+        r = client.call_tool("get_custom_wing_names")
+        assert_success(r)
+        before = tool_data(r)
+        assert_equal(len(before.get("starting_wings") or []), 3,
+            "starting_wings has 3 entries")
+        assert_equal(len(before.get("squadron_wings") or []), 5,
+            "squadron_wings has 5 entries")
+        assert_equal(len(before.get("tvt_wings") or []), 2,
+            "tvt_wings has 2 entries")
+        assert_equal(before["starting_wings"][0], before["tvt_wings"][0],
+            "default first starting and first tvt agree")
+
+        try:
+            # Full update of all three tables.
+            r = client.call_tool("update_custom_wing_names", {
+                "starting_wings": ["AlphaX", "BetaX", "GammaX"],
+                "squadron_wings": ["AlphaX", "BetaX", "GammaX", "DeltaX", "EpsilonX"],
+                "tvt_wings": ["AlphaX", "ZetaX"],
+            })
+            assert_success(r)
+            after = tool_data(r)
+            assert_equal(after["starting_wings"], ["AlphaX", "BetaX", "GammaX"])
+            assert_equal(after["squadron_wings"], ["AlphaX", "BetaX", "GammaX", "DeltaX", "EpsilonX"])
+            assert_equal(after["tvt_wings"], ["AlphaX", "ZetaX"])
+
+            # Partial update: only squadron, others untouched.
+            r = client.call_tool("update_custom_wing_names", {
+                "squadron_wings": ["Q1", "Q2", "Q3", "Q4", "Q5"],
+            })
+            assert_success(r)
+            after = tool_data(r)
+            assert_equal(after["starting_wings"], ["AlphaX", "BetaX", "GammaX"],
+                "starting_wings preserved across partial update")
+            assert_equal(after["squadron_wings"], ["Q1", "Q2", "Q3", "Q4", "Q5"])
+            assert_equal(after["tvt_wings"], ["AlphaX", "ZetaX"],
+                "tvt_wings preserved across partial update")
+        finally:
+            # Restore the originals so subsequent tests see the defaults.
+            try:
+                client.call_tool("update_custom_wing_names", {
+                    "starting_wings": before["starting_wings"],
+                    "squadron_wings": before["squadron_wings"],
+                    "tvt_wings": before["tvt_wings"],
+                })
+            except Exception:
+                pass
+
+    def test_custom_wing_names_validation():
+        # Snapshot for restoration.
+        r = client.call_tool("get_custom_wing_names")
+        assert_success(r)
+        before = tool_data(r)
+
+        try:
+            # Cross-array: changing starting[0] alone breaks the starting==tvt rule.
+            r = client.call_tool("update_custom_wing_names", {
+                "starting_wings": ["Apollo", before["starting_wings"][1], before["starting_wings"][2]],
+            })
+            assert_error(r)
+
+            # Wrong length: starting needs exactly 3.
+            r = client.call_tool("update_custom_wing_names", {
+                "starting_wings": ["A", "B"],
+            })
+            assert_error(r)
+
+            # Duplicate within a table.
+            r = client.call_tool("update_custom_wing_names", {
+                "squadron_wings": ["Dup", "Dup", "C", "D", "E"],
+            })
+            assert_error(r)
+
+            # Case-insensitive duplicates also rejected.
+            r = client.call_tool("update_custom_wing_names", {
+                "squadron_wings": ["Foo", "FOO", "C", "D", "E"],
+            })
+            assert_error(r)
+
+            # State must be unchanged after each rejected call.
+            r = client.call_tool("get_custom_wing_names")
+            assert_success(r)
+            after = tool_data(r)
+            assert_equal(after, before,
+                "no validation error mutated the tables")
+
+            # A consistent cross-array change succeeds (starting[0] and tvt[0] together).
+            r = client.call_tool("update_custom_wing_names", {
+                "starting_wings": ["Apollo", before["starting_wings"][1], before["starting_wings"][2]],
+                "tvt_wings": ["Apollo", before["tvt_wings"][1]],
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d["starting_wings"][0], "Apollo")
+            assert_equal(d["tvt_wings"][0], "Apollo")
+        finally:
+            try:
+                client.call_tool("update_custom_wing_names", {
+                    "starting_wings": before["starting_wings"],
+                    "squadron_wings": before["squadron_wings"],
+                    "tvt_wings": before["tvt_wings"],
+                })
+            except Exception:
+                pass
+
     suite.add("crud_messages", test_messages_crud)
     suite.add("crud_events", test_events_crud)
     suite.add("crud_goals", test_goals_crud)
@@ -788,6 +896,8 @@ def register(suite, client):
     suite.add("crud_waypoints", test_waypoints_crud)
     suite.add("crud_sexp_variables", test_sexp_variables_crud)
     suite.add("crud_mission_info_filename_preservation", test_mission_info_filename_preservation)
+    suite.add("crud_custom_wing_names_roundtrip", test_custom_wing_names_roundtrip)
+    suite.add("crud_custom_wing_names_validation", test_custom_wing_names_validation)
 
 
 if __name__ == "__main__":
