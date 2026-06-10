@@ -145,7 +145,9 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = MAX_FILENAME_LEN - 1);
 
 // Extracts optional typed parameters from arguments JSON.
-// Returns std::nullopt if the parameter is missing; reports a type error via sink if present but the wrong type.
+// Returns std::nullopt if the parameter is missing; reports an error via sink if present but
+// the wrong type, or if present as JSON null.  Callers that need to distinguish explicit null
+// from absence should use is_parameter_present_and_null() before calling these.
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink);
 std::optional<double> get_optional_double(json_t *arguments, const char *param_name, McpErrorSink &sink);
 std::optional<float> get_optional_float(json_t *arguments, const char *param_name, McpErrorSink &sink);
