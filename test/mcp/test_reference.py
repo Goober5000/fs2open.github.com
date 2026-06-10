@@ -88,9 +88,9 @@ def register(suite, client):
         # seed-from-class behavior.
         assert_has_key(d, "explosion")
         e = d["explosion"]
-        for key in ("shockwave_inner_radius", "shockwave_outer_radius",
-                    "shockwave_damage", "shockwave_blast", "shockwave_speed",
-                    "explosion_propagates", "death_roll_base_time_ms"):
+        for key in ("inner_radius", "outer_radius",
+                    "damage", "blast_force", "shockwave_speed",
+                    "death_roll_base_time_ms"):
             assert_has_key(e, key, f"get_ship_class.explosion.{key}")
 
     def test_get_ship_class_model_details():
