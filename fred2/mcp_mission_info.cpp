@@ -10,6 +10,8 @@
 
 #include "mission/missionparse.h"
 #include "mission/missionmessage.h"
+#include "missioneditor/common.h"     // update_custom_wing_indexes
+#include "ship/ship.h"                 // Starting_wing_names, Squadron_wing_names, TVT_wing_names
 #include "ai/ai.h"
 #include "ai/ai_profiles.h"
 #include "sound/ds.h"
@@ -534,6 +536,165 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Custom wing names
+//
+// Three mission-global string tables that name special wing roles:
+//   Starting_wing_names[3]  — wings the player starts a mission with
+//   Squadron_wing_names[5]  — wings shown on the HUD gauge
+//   TVT_wing_names[2]       — starting wings for team-versus-team play
+// Edited together by fred2/customwingnames.cpp.  The dialog enforces three
+// constraints we mirror here:
+//   - Starting_wing_names[0] must equal TVT_wing_names[0]
+//   - no case-insensitive duplicates within any one table
+//   - each name <= NAME_LENGTH - 1
+// ---------------------------------------------------------------------------
+
+static bool validate_dialog_for_custom_wing_names(SCP_string &error_msg)
+{
+	// The custom-wing-names dialog is modal under the mission specs editor; if
+	// that editor is open we refuse the edit (mirrors the pattern for sub-editors).
+	return validate_single_dialog("custom wing names", "mission notes", error_msg);
+}
+
+static json_t *build_custom_wing_names_json()
+{
+	auto build_array = [](const char (*names)[NAME_LENGTH], int count) {
+		json_t *arr = json_array();
+		for (int i = 0; i < count; ++i)
+			json_array_append_new(arr, json_safe_string(names[i]));
+		return arr;
+	};
+
+	json_t *obj = json_object();
+	json_object_set_new(obj, "starting_wings", build_array(Starting_wing_names, MAX_STARTING_WINGS));
+	json_object_set_new(obj, "squadron_wings", build_array(Squadron_wing_names, MAX_SQUADRON_WINGS));
+	json_object_set_new(obj, "tvt_wings",      build_array(TVT_wing_names,      MAX_TVT_WINGS));
+	return obj;
+}
+
+static void handle_get_custom_wing_names(json_t * /*input*/, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_custom_wing_names, sink)) return;
+
+	req->result_json = make_json_tool_result(build_custom_wing_names_json());
+	req->success = true;
+}
+
+// Read an optional fixed-length string-array param into `out`.  Returns:
+//   touched == false  -> param was omitted
+//   touched == true   -> param was present and parsed into `out` of size `expected`
+// Sets sink error and returns touched=false (with sink error) on malformed input.
+static bool read_fixed_string_array(json_t *input, const char *param_name,
+	int expected_len, SCP_vector<SCP_string> &out, bool &touched, McpErrorSink &sink)
+{
+	auto arr_opt = get_optional_string_array(input, param_name, sink);
+	if (sink.has_error()) return false;
+	if (!arr_opt.has_value()) {
+		touched = false;
+		return true;
+	}
+	if ((int)arr_opt->size() != expected_len) {
+		sink.set_error("Parameter '%s' must be an array of exactly %d strings (got %d).",
+			param_name, expected_len, (int)arr_opt->size());
+		return false;
+	}
+	for (const auto &s : *arr_opt) {
+		if ((int)s.size() > NAME_LENGTH - 1) {
+			sink.set_error("Parameter '%s' entry '%s' exceeds max length (%d).",
+				param_name, s.c_str(), NAME_LENGTH - 1);
+			return false;
+		}
+	}
+	out = std::move(*arr_opt);
+	touched = true;
+	return true;
+}
+
+static bool check_unique_names(const SCP_vector<SCP_string> &names,
+	const char *list_label, McpErrorSink &sink)
+{
+	for (size_t i = 0; i < names.size(); ++i) {
+		for (size_t j = i + 1; j < names.size(); ++j) {
+			if (!stricmp(names[i].c_str(), names[j].c_str())) {
+				sink.set_error("Duplicate wing name '%s' in %s.", names[i].c_str(), list_label);
+				return false;
+			}
+		}
+	}
+	return true;
+}
+
+static void handle_update_custom_wing_names(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_custom_wing_names, sink)) return;
+
+	// Stage incoming values; if a param is omitted, fall back to current.
+	SCP_vector<SCP_string> starting, squadron, tvt;
+	bool starting_touched = false, squadron_touched = false, tvt_touched = false;
+
+	if (!read_fixed_string_array(input, "starting_wings", MAX_STARTING_WINGS,
+			starting, starting_touched, sink))
+		return;
+	if (!read_fixed_string_array(input, "squadron_wings", MAX_SQUADRON_WINGS,
+			squadron, squadron_touched, sink))
+		return;
+	if (!read_fixed_string_array(input, "tvt_wings", MAX_TVT_WINGS,
+			tvt, tvt_touched, sink))
+		return;
+
+	if (!starting_touched) {
+		starting.assign(MAX_STARTING_WINGS, {});
+		for (int i = 0; i < MAX_STARTING_WINGS; ++i)
+			starting[i] = Starting_wing_names[i];
+	}
+	if (!squadron_touched) {
+		squadron.assign(MAX_SQUADRON_WINGS, {});
+		for (int i = 0; i < MAX_SQUADRON_WINGS; ++i)
+			squadron[i] = Squadron_wing_names[i];
+	}
+	if (!tvt_touched) {
+		tvt.assign(MAX_TVT_WINGS, {});
+		for (int i = 0; i < MAX_TVT_WINGS; ++i)
+			tvt[i] = TVT_wing_names[i];
+	}
+
+	// Cross-array constraint: starting[0] == tvt[0] (case-sensitive, matching
+	// CustomWingNames::OnOK).
+	if (strcmp(starting[0].c_str(), tvt[0].c_str()) != 0) {
+		sink.set_error("The first starting wing ('%s') and the first team-versus-team wing "
+			"('%s') must have the same name.", starting[0].c_str(), tvt[0].c_str());
+		return;
+	}
+
+	if (!check_unique_names(starting, "starting_wings", sink)) return;
+	if (!check_unique_names(squadron, "squadron_wings", sink)) return;
+	if (!check_unique_names(tvt, "tvt_wings", sink)) return;
+
+	bool changed = false;
+	auto apply_array = [&](const SCP_vector<SCP_string> &src, char (*dst)[NAME_LENGTH], int n) {
+		for (int i = 0; i < n; ++i) {
+			if (strcmp(dst[i], src[i].c_str()) != 0) {
+				strcpy_s(dst[i], src[i].c_str());
+				changed = true;
+			}
+		}
+	};
+	if (starting_touched) apply_array(starting, Starting_wing_names, MAX_STARTING_WINGS);
+	if (squadron_touched) apply_array(squadron, Squadron_wing_names, MAX_SQUADRON_WINGS);
+	if (tvt_touched)      apply_array(tvt,      TVT_wing_names,      MAX_TVT_WINGS);
+
+	if (changed) {
+		update_custom_wing_indexes();
+		mark_modified("MCP: update custom wing names");
+	}
+
+	req->result_json = make_json_tool_result(build_custom_wing_names_json());
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Registration
 // ---------------------------------------------------------------------------
 
@@ -649,6 +810,46 @@ void mcp_register_mission_info_tools(json_t *tools)
 			"Music fields are NOT included here -- they will belong to a separate tool.",
 			props);
 	}
+
+	// get_custom_wing_names
+	register_tool(tools, "get_custom_wing_names",
+		"Returns the mission's custom wing-name tables: starting_wings (" SCP_TOKEN_TO_STR(MAX_STARTING_WINGS) "), "
+		"squadron_wings (" SCP_TOKEN_TO_STR(MAX_SQUADRON_WINGS) "), tvt_wings (" SCP_TOKEN_TO_STR(MAX_TVT_WINGS) "). "
+		"These name the wings that play special engine roles (wings accessible in the starting loadout, wings shown on "
+		"the squadron HUD gauge, and team-vs-team starting wings).",
+		nullptr);
+
+	// update_custom_wing_names
+	{
+		json_t *props = json_object();
+
+		auto add_fixed_string_array = [&](const char *name, int len, const char *desc) {
+			json_t *items = json_object();
+			json_object_set_new(items, "type", json_string("string"));
+			json_t *schema = json_object();
+			json_object_set_new(schema, "type", json_string("array"));
+			json_object_set_new(schema, "description", json_string(desc));
+			json_object_set_new(schema, "items", items);
+			json_object_set_new(schema, "minItems", json_integer(len));
+			json_object_set_new(schema, "maxItems", json_integer(len));
+			json_object_set(props, name, schema);
+			json_decref(schema);
+		};
+
+		add_fixed_string_array("starting_wings", MAX_STARTING_WINGS,
+			"Player-starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_STARTING_WINGS) " strings). REPLACES the current array.");
+		add_fixed_string_array("squadron_wings", MAX_SQUADRON_WINGS,
+			"Squadron-message HUD wing names (exactly " SCP_TOKEN_TO_STR(MAX_SQUADRON_WINGS) " strings). REPLACES the current array.");
+		add_fixed_string_array("tvt_wings", MAX_TVT_WINGS,
+			"Team-versus-team starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_TVT_WINGS) " strings). REPLACES the current array.");
+
+		register_tool(tools, "update_custom_wing_names",
+			"Replace one or more of the mission's custom wing-name tables. All parameters "
+			"are optional; only provided tables are changed. Constraints: first starting wing "
+			"must equal first team-versus-team wing; no case-insensitive duplicates within a table; each "
+			"name is at most " SCP_TOKEN_TO_STR(NAME_LENGTH_1) " characters. Returns the full updated tables.",
+			props);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +864,14 @@ bool mcp_handle_mission_info_tool(const char *tool_name, json_t *input_json, Mcp
 	}
 	if (strcmp(tool_name, "update_mission_info") == 0) {
 		handle_update_mission_info(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "get_custom_wing_names") == 0) {
+		handle_get_custom_wing_names(input_json, req);
+		return true;
+	}
+	if (strcmp(tool_name, "update_custom_wing_names") == 0) {
+		handle_update_custom_wing_names(input_json, req);
 		return true;
 	}
 	return false;
