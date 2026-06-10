@@ -462,12 +462,21 @@ void mcp_register_reference_tools(json_t *tools)
 		"in the subsystem_type field for certain tools which return subsystem information.",
 		json_object());
 
-	// list_defined_ai_orders
-	register_tool(tools, "list_defined_ai_orders",
-		"List all of the orders that can be issued to AI-controlled ships. "
-		"The set of orders a particular ship will accept is governed by its ship "
-		"type and can be modified on a per-ship basis; this tool just enumerates "
-		"the universe of orders.",
+	// list_defined_ai_goals
+	register_tool(tools, "list_defined_ai_goals",
+		"List all of the AI goals that can be assigned to AI-controlled ships "
+		"(in mission files, ai-* SEXPs, and the per-ship-type +Valid goals: list "
+		"in objecttypes.tbl). The goals a particular ship type accepts are a "
+		"subset of these; this tool just enumerates the universe of goals.",
+		json_object());
+
+	// list_defined_player_orders
+	register_tool(tools, "list_defined_player_orders",
+		"List all of the player orders defined for this mod (e.g. \"Destroy my "
+		"target\", \"Form on my wing\"). Each entry has a parse_name (used in "
+		"mission files and objecttypes.tbl) and a hud_name (the display string "
+		"shown to the player). The set of orders a particular ship will accept "
+		"is governed by its ship type and can be customized per ship.",
 		json_object());
 
 	// list_ai_profiles
@@ -627,18 +636,52 @@ void mcp_register_reference_tools(json_t *tools)
 // Tool handlers
 // ---------------------------------------------------------------------------
 
+static json_t *build_ship_type_json(const ship_type_info &st, bool include_details)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "name", json_safe_string(st.name));
+	json_object_set_new(obj, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
+
+	// valid_ai_goals — emit Ai_goal_names entries whose enum is in ai_valid_goals
+	json_t *goals = json_array();
+	for (int i = 0; i < Num_ai_goals; i++) {
+		if (st.ai_valid_goals.contains(Ai_goal_names[i].def))
+			json_array_append_new(goals, json_safe_string(Ai_goal_names[i].name));
+	}
+	json_object_set_new(obj, "valid_ai_goals", goals);
+
+	// valid_player_orders — emit Player_orders[i].parse_name for each index in ai_player_orders
+	json_t *player_orders = json_array();
+	for (size_t i : st.ai_player_orders) {
+		if (i < Player_orders.size())
+			json_array_append_new(player_orders, json_safe_string(Player_orders[i].parse_name.c_str()));
+	}
+	json_object_set_new(obj, "valid_player_orders", player_orders);
+
+	if (!include_details)
+		return obj;
+
+	json_t *flags = json_object();
+	json_object_set_new(flags, "praise_destruction", json_boolean(st.flags[Ship::Type_Info_Flags::Praise_destruction]));
+	json_object_set_new(flags, "target_as_threat", json_boolean(st.flags[Ship::Type_Info_Flags::Target_as_threat]));
+	json_object_set_new(flags, "ai_accept_player_orders", json_boolean(st.flags[Ship::Type_Info_Flags::AI_accept_player_orders]));
+	json_object_set_new(flags, "ai_auto_attacks", json_boolean(st.flags[Ship::Type_Info_Flags::AI_auto_attacks]));
+	json_object_set_new(flags, "ai_attempt_broadside", json_boolean(st.flags[Ship::Type_Info_Flags::AI_attempt_broadside]));
+	json_object_set_new(flags, "ai_guards_attack", json_boolean(st.flags[Ship::Type_Info_Flags::AI_guards_attack]));
+	json_object_set_new(flags, "ai_can_form_wing", json_boolean(st.flags[Ship::Type_Info_Flags::AI_can_form_wing]));
+	json_object_set_new(flags, "ai_protected_on_cripple", json_boolean(st.flags[Ship::Type_Info_Flags::AI_protected_on_cripple]));
+	json_object_set_new(obj, "flags", flags);
+
+	json_object_set_new(obj, "ai_cripple_ignores", build_array_with_field(st.ai_cripple_ignores, Ship_types, &ship_type_info::name));
+
+	return obj;
+}
+
 static json_t *handle_list_ship_types()
 {
 	json_t *arr = json_array();
-
-	for (size_t i = 0; i < Ship_types.size(); i++) {
-		const auto &st = Ship_types[i];
-		json_t *item = json_object();
-		json_object_set_new(item, "name", json_safe_string(st.name));
-		json_object_set_new(item, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
-		json_array_append_new(arr, item);
-	}
-
+	for (const auto &st : Ship_types)
+		json_array_append_new(arr, build_ship_type_json(st, false));
 	return make_json_tool_result(arr);
 }
 
@@ -653,26 +696,7 @@ static json_t *handle_get_ship_type(json_t *arguments)
 	if (idx < 0)
 		return make_not_found_error("Ship type", name);
 
-	const auto &st = Ship_types[idx];
-	json_t *obj = json_object();
-	json_object_set_new(obj, "name", json_safe_string(st.name));
-
-	// Flags
-	json_t *flags = json_object();
-	json_object_set_new(flags, "praise_destruction", json_boolean(st.flags[Ship::Type_Info_Flags::Praise_destruction]));
-	json_object_set_new(flags, "target_as_threat", json_boolean(st.flags[Ship::Type_Info_Flags::Target_as_threat]));
-	json_object_set_new(flags, "ai_accept_player_orders", json_boolean(st.flags[Ship::Type_Info_Flags::AI_accept_player_orders]));
-	json_object_set_new(flags, "ai_auto_attacks", json_boolean(st.flags[Ship::Type_Info_Flags::AI_auto_attacks]));
-	json_object_set_new(flags, "ai_attempt_broadside", json_boolean(st.flags[Ship::Type_Info_Flags::AI_attempt_broadside]));
-	json_object_set_new(flags, "ai_guards_attack", json_boolean(st.flags[Ship::Type_Info_Flags::AI_guards_attack]));
-	json_object_set_new(flags, "ai_can_form_wing", json_boolean(st.flags[Ship::Type_Info_Flags::AI_can_form_wing]));
-	json_object_set_new(flags, "ai_protected_on_cripple", json_boolean(st.flags[Ship::Type_Info_Flags::AI_protected_on_cripple]));
-	json_object_set_new(obj, "flags", flags);
-
-	json_object_set_new(obj, "ai_actively_pursues", build_array_with_field(st.ai_actively_pursues, Ship_types, &ship_type_info::name));
-	json_object_set_new(obj, "ai_cripple_ignores", build_array_with_field(st.ai_cripple_ignores, Ship_types, &ship_type_info::name));
-
-	return make_json_tool_result(obj);
+	return make_json_tool_result(build_ship_type_json(Ship_types[idx], true));
 }
 
 // Defined after the ship class handlers below.
@@ -2398,12 +2422,29 @@ static json_t *handle_list_subsystem_types()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_defined_ai_orders()
+static json_t *handle_list_defined_ai_goals()
 {
 	json_t *arr = json_array();
 	for (int i = 0; i < Num_ai_goals; i++) {
 		json_t *entry = json_object();
 		json_object_set_new(entry, "name", json_safe_string(Ai_goal_names[i].name));
+		json_array_append_new(arr, entry);
+	}
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_list_defined_player_orders()
+{
+	json_t *arr = json_array();
+	for (const auto &o : Player_orders) {
+		// Skip the NO_ORDER_ITEM sentinel — it exists only to keep the legacy
+		// #define indices aligned with the array, not as a real order.
+		// legacy_id is private on player_order, so match on parse_name.
+		if (o.parse_name == "no order")
+			continue;
+		json_t *entry = json_object();
+		json_object_set_new(entry, "parse_name", json_safe_string(o.parse_name.c_str()));
+		json_object_set_new(entry, "hud_name",   json_safe_string(o.hud_name.c_str()));
 		json_array_append_new(arr, entry);
 	}
 	return make_json_tool_result(arr);
@@ -2493,18 +2534,21 @@ struct mcp_visible_ship_flags
 	SCP_vector<parse_object_flag_description<Mission::Parse_Object_Flags>> descs;
 };
 
-static mcp_visible_ship_flags get_mcp_visible_ship_flags()
+static const mcp_visible_ship_flags &get_mcp_visible_ship_flags()
 {
-	mcp_visible_ship_flags out;
-	out.flags.reserve(Num_parse_object_flags);
-	out.descs.reserve(Num_parse_object_flags);
-	for (size_t i = 0; i < Num_parse_object_flags; i++) {
-		if (mcp_ship_flag_excluded(Parse_object_flags[i].def))
-			continue;
-		out.flags.push_back(Parse_object_flags[i]);
-		out.descs.push_back(Parse_object_flag_descriptions[i]);
-	}
-	return out;
+	static const mcp_visible_ship_flags cache = []() {
+		mcp_visible_ship_flags out;
+		out.flags.reserve(Num_parse_object_flags);
+		out.descs.reserve(Num_parse_object_flags);
+		for (size_t i = 0; i < Num_parse_object_flags; i++) {
+			if (mcp_ship_flag_excluded(Parse_object_flags[i].def))
+				continue;
+			out.flags.push_back(Parse_object_flags[i]);
+			out.descs.push_back(Parse_object_flag_descriptions[i]);
+		}
+		return out;
+	}();
+	return cache;
 }
 
 // MCP-visible subset of Parse_wing_flags.  Same rationale as mcp_visible_ship_flags.
@@ -2514,18 +2558,21 @@ struct mcp_visible_wing_flags
 	SCP_vector<parse_object_flag_description<Ship::Wing_Flags>> descs;
 };
 
-static mcp_visible_wing_flags get_mcp_visible_wing_flags()
+static const mcp_visible_wing_flags &get_mcp_visible_wing_flags()
 {
-	mcp_visible_wing_flags out;
-	out.flags.reserve(Num_parse_wing_flags);
-	out.descs.reserve(Num_parse_wing_flags);
-	for (size_t i = 0; i < Num_parse_wing_flags; i++) {
-		if (mcp_wing_flag_excluded(Parse_wing_flags[i].def))
-			continue;
-		out.flags.push_back(Parse_wing_flags[i]);
-		out.descs.push_back(Parse_wing_flag_descriptions[i]);
-	}
-	return out;
+	static const mcp_visible_wing_flags cache = []() {
+		mcp_visible_wing_flags out;
+		out.flags.reserve(Num_parse_wing_flags);
+		out.descs.reserve(Num_parse_wing_flags);
+		for (size_t i = 0; i < Num_parse_wing_flags; i++) {
+			if (mcp_wing_flag_excluded(Parse_wing_flags[i].def))
+				continue;
+			out.flags.push_back(Parse_wing_flags[i]);
+			out.descs.push_back(Parse_wing_flag_descriptions[i]);
+		}
+		return out;
+	}();
+	return cache;
 }
 
 // ---------------------------------------------------------------------------
@@ -3126,8 +3173,10 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 		return handle_list_ai_classes();
 	if (strcmp(tool_name, "list_subsystem_types") == 0)
 		return handle_list_subsystem_types();
-	if (strcmp(tool_name, "list_defined_ai_orders") == 0)
-		return handle_list_defined_ai_orders();
+	if (strcmp(tool_name, "list_defined_ai_goals") == 0)
+		return handle_list_defined_ai_goals();
+	if (strcmp(tool_name, "list_defined_player_orders") == 0)
+		return handle_list_defined_player_orders();
 	if (strcmp(tool_name, "list_ai_profiles") == 0)
 		return handle_list_ai_profiles();
 	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
@@ -3139,13 +3188,13 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 	if (strcmp(tool_name, "list_mission_flags") == 0)
 		return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
 	if (strcmp(tool_name, "list_ship_flags") == 0) {
-		const static auto v = get_mcp_visible_ship_flags();
+		const auto &v = get_mcp_visible_ship_flags();
 		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
 	}
 	if (strcmp(tool_name, "list_wing_formations") == 0)
 		return handle_list_wing_formations();
 	if (strcmp(tool_name, "list_wing_flags") == 0) {
-		const static auto v = get_mcp_visible_wing_flags();
+		const auto &v = get_mcp_visible_wing_flags();
 		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
 	}
 	if (strcmp(tool_name, "list_scripting_elements") == 0)
