@@ -2532,6 +2532,14 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 			sink.set_error("Node argument %d: node %d is not in use", arg_index, idx);
 			return -1;
 		}
+		// Locked singletons (true/false) are intentionally shared, so the root
+		// and attached checks below don't apply: the formula-root scan would
+		// report them "attached" to whatever entity's default cue it finds
+		// first.  Wrapping is safe because the wrapper's fields are modified,
+		// not the singleton's -- the same carve-out attach_sexp_node uses.
+		if (idx == Locked_sexp_true || idx == Locked_sexp_false) {
+			return wrap_node(idx, next);
+		}
 		FormulaRootInfo src_info = find_formula_root_and_type(idx);
 		if (src_info.root != idx) {
 			sink.set_error("Node argument %d: node %d is not the root of its own tree", arg_index, idx);
@@ -2737,6 +2745,8 @@ static void handle_create_sexp_node(json_t *input, McpToolRequest *req)
 	mcp_sexp_forest_mark_dirty({ op_node });
 
 	json_t *result_obj = build_sexp_node_json(op_node);
+	if (op_node == Locked_sexp_true || op_node == Locked_sexp_false)
+		json_object_set_new(result_obj, "shared_singleton", json_true());
 	if (warnings)
 		json_object_set_new(result_obj, "warnings", warnings);
 	req->result_json = make_json_tool_result(result_obj);
@@ -3737,7 +3747,10 @@ void mcp_register_sexp_tools(json_t *tools)
 			"formula -- the `operator_name` field is required. When role is 'argument', "
 			"creates a standalone argument node (number, string, or boolean) -- both "
 			"`argument_type` and `argument_value` are required. Does not enforce argument "
-			"count or check syntax.",
+			"count or check syntax. Note that the 'true' and 'false' operators are shared "
+			"singleton nodes rather than fresh allocations (the result will have "
+			"`shared_singleton: true`); they can be attached as entity formulas but not "
+			"updated, moved, or deleted.",
 			props, req);
 	}
 
