@@ -994,12 +994,12 @@ static void handle_find_sexp_text(json_t *input, McpToolRequest *req)
 // Any errors encountered will be stored in the Parse_errors vector.
 int parse_sexp_text(const char *text, const char *source)
 {
-	// Save global parse state (Mp, Current_filename, Warning_count, Error_count)
-	pause_parse();
-
 	SCP_string buf(text);
-	Mp = buf.data();
-	strcpy_s(Current_filename, source);
+
+	// Pause any current parsing and point the parser at our buffer; the guard
+	// restores the previous state on scope exit, even if get_sexp_main() throws.
+	// Declared after buf so the parse state is restored before buf is destroyed.
+	PauseParseGuard pause_guard(buf.data(), source);
 
 	int n;
 	{
@@ -1008,9 +1008,6 @@ int parse_sexp_text(const char *text, const char *source)
 		ParseErrorCollectionGuard collect_errors;
 		n = get_sexp_main();
 	}
-
-	// Restore global parse state
-	unpause_parse();
 
 	if (!Parse_errors.empty()) {
 		// Free any partially-allocated SEXP nodes
