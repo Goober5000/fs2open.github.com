@@ -62,6 +62,7 @@
 #include "species_defs/species_defs.h"
 #include "sound/audiostr.h"
 #include "mission/missiongrid.h"
+#include "mod_table/mod_table.h"
 #include "calcrelativecoordsdlg.h"
 #include "reorderdlg.h"
 #include "musicplayerdlg.h"
@@ -5171,8 +5172,11 @@ void CFREDView::OnToolsMcpServer()
 {
 	if (mcp_server_is_running()) {
 		mcp_server_stop();
-	} else {
-		mcp_server_start();
+	} else if (!mcp_server_start()) {
+		SCP_string msg;
+		sprintf(msg, "The MCP server failed to start on 127.0.0.1:%d.  The port may be in use by another application.\n\n"
+			"The port can be changed with the \"$Model Context Protocol Port:\" setting in game_settings.tbl.", Mcp_server_port);
+		MessageBox(msg.c_str(), "MCP Server", MB_ICONEXCLAMATION | MB_OK);
 	}
 }
 

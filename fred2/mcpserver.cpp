@@ -500,10 +500,10 @@ static void *mcp_request_handler(enum mg_event event, struct mg_connection *conn
 // Server lifecycle
 // ---------------------------------------------------------------------------
 
-void mcp_server_start()
+bool mcp_server_start()
 {
 	if (mcp_ctx != nullptr)
-		return;
+		return true;
 
 	SCP_string listen_addr;
 	sprintf(listen_addr, "127.0.0.1:%d", Mcp_server_port);
@@ -517,12 +517,13 @@ void mcp_server_start()
 	mcp_ctx = mg_start(mcp_request_handler, nullptr, options);
 	if (mcp_ctx == nullptr) {
 		Warning(LOCATION, "MCP server failed to start on 127.0.0.1:%d (port may be in use)", Mcp_server_port);
-		return;
+		return false;
 	}
 	mprintf(("MCP server listening on 127.0.0.1:%d\n", Mcp_server_port));
 	mcp_fred_ready.store(true);
 
 	mcp_reference_tools_init();
+	return true;
 }
 
 void mcp_server_stop()

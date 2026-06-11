@@ -37,7 +37,7 @@ struct McpToolRequest {
 	std::atomic<int> refcount;  // init to 2: one for caller, one for handler
 };
 
-void mcp_server_start();
+bool mcp_server_start();
 void mcp_server_stop();
 bool mcp_server_is_running();
 
