@@ -1021,8 +1021,8 @@ void parse_mod_table(const char *filename)
 
 			if (optional_string("$Model Context Protocol Port:")) {
 				stuff_int(&Mcp_server_port);
-				if (Mcp_server_port < 1 || Mcp_server_port > 65535) {
-					Warning(LOCATION, "$Model Context Protocol Port: must be between 1 and 65535, got %d. Using default 8080.", Mcp_server_port);
+				if (Mcp_server_port < 1024 || Mcp_server_port > 65535) {
+					Warning(LOCATION, "$Model Context Protocol Port: must be between 1024 and 65535, got %d. Using default 8080.", Mcp_server_port);
 					Mcp_server_port = 8080;
 				}
 			}
