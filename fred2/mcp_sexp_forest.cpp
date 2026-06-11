@@ -5,15 +5,21 @@
 #include "parse/sexp.h"
 
 #include <jansson.h>
-#include <mutex>
-#include <atomic>
 
 // ---------------------------------------------------------------------------
 // Forest state
 // ---------------------------------------------------------------------------
+// THREADING CONTRACT: everything in this file is main-thread-only.  Editor
+// dialogs mark roots dirty from the main thread, and MCP tool handlers run on
+// the main thread via the marshaled tool-call path (OnMcpToolCall), which is
+// also the only way worker threads can obtain forest data.  This is enforced
+// with assertions rather than locks: a mutex here could not provide real
+// thread safety anyway, because load_branch and get_listing_opf read the
+// unprotected Sexp_nodes[] array and main-thread-owned globals (Ships[],
+// Wings[], Messages[], Mission_events[], etc.).
 
 // The single cached headless sexp_tree that holds every live SEXP in the
-// mission.  Access is protected by g_sexp_forest_mutex.
+// mission.
 // NOTE: The reason we need to keep a sexp_tree here is so that we can use it
 // query for argument values.  Once get_opf_* functions are separated from
 // sexp_tree, this whole cache setup may no longer be needed.
@@ -25,17 +31,20 @@ static sexp_tree &get_sexp_forest()
 	static sexp_tree forest(true /* headless */);
 	return forest;
 }
-static std::mutex g_sexp_forest_mutex;
 
 // Full-dirty flag.  Initialized true so the forest is built on first use.
-static std::atomic<bool> g_sexp_forest_dirty(true);
+static bool g_sexp_forest_dirty = true;
 
 // Partial-dirty state: set of root Sexp_nodes[] indices to reload.
-// Protected by g_dirty_roots_mutex; g_dirty_roots_nonempty is an atomic
-// summary flag readable from any thread without holding the mutex.
-static std::atomic<bool>      g_dirty_roots_nonempty(false);
-static std::mutex             g_dirty_roots_mutex;
 static SCP_unordered_set<int> g_dirty_roots;
+
+// All public entry points must run on the main thread; see the threading
+// contract above.
+static void forest_assert_main_thread(const char *func)
+{
+	Assertion(GetCurrentThreadId() == AfxGetApp()->m_nThreadID,
+		"%s must be called on the main thread!  Worker threads must go through the marshaled tool-call path.", func);
+}
 
 // ---------------------------------------------------------------------------
 // Public interface
@@ -43,18 +52,19 @@ static SCP_unordered_set<int> g_dirty_roots;
 
 void mcp_sexp_forest_mark_dirty()
 {
-	g_sexp_forest_dirty.store(true);
+	forest_assert_main_thread("mcp_sexp_forest_mark_dirty");
+
+	g_sexp_forest_dirty = true;
 	// full rebuild supersedes any pending partial set
-	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
 	g_dirty_roots.clear();
-	g_dirty_roots_nonempty.store(false);
 }
 
 void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 {
-	if (g_sexp_forest_dirty.load())
+	forest_assert_main_thread("mcp_sexp_forest_mark_dirty");
+
+	if (g_sexp_forest_dirty)
 		return;  // full rebuild already pending; partial set is redundant
-	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
 
 	for (int r : roots) {
 		// skip out-of-range indexes, special root nodes, and unused nodes
@@ -62,14 +72,14 @@ void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 			continue;
 		g_dirty_roots.insert(r);
 	}
-	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 
 void mcp_sexp_forest_unmark_dirty(const SCP_vector<int> &roots)
 {
-	if (g_sexp_forest_dirty.load())
+	forest_assert_main_thread("mcp_sexp_forest_unmark_dirty");
+
+	if (g_sexp_forest_dirty)
 		return;  // full rebuild already pending; partial set is redundant
-	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
 
 	for (int r : roots) {
 		// skip out-of-range indexes, special root nodes, and unused nodes
@@ -77,21 +87,16 @@ void mcp_sexp_forest_unmark_dirty(const SCP_vector<int> &roots)
 			continue;
 		g_dirty_roots.erase(r);
 	}
-	g_dirty_roots_nonempty.store(!g_dirty_roots.empty());
 }
 
 void mcp_sexp_forest_rebuild()
 {
-	if (g_sexp_forest_dirty.load()) {
+	forest_assert_main_thread("mcp_sexp_forest_rebuild");
+
+	if (g_sexp_forest_dirty) {
 		// --- Full rebuild ---
 
-		// Clear partial state before taking the forest mutex (avoids holding two mutexes).
-		// Any mark_dirty(roots) call that races here will see g_sexp_forest_dirty==true and no-op.
-		{
-			std::lock_guard<std::mutex> dlock(g_dirty_roots_mutex);
-			g_dirty_roots.clear();
-			g_dirty_roots_nonempty.store(false);
-		}
+		g_dirty_roots.clear();
 
 		// Collect all Sexp_nodes[] indices that are referenced as .first or .rest
 		// by some other live node.  Any live node NOT in this set is a tree root.
@@ -108,9 +113,6 @@ void mcp_sexp_forest_rebuild()
 				referenced.insert(Sexp_nodes[i].rest);
 		}
 
-		// Rebuild the forest under the mutex so mongoose threads block during the swap.
-		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
-
 		get_sexp_forest().clear_tree();
 
 		// Pass 2: load each root subtree into the forest
@@ -121,22 +123,18 @@ void mcp_sexp_forest_rebuild()
 				get_sexp_forest().load_branch(i, -1);
 		}
 
-		g_sexp_forest_dirty.store(false);
+		g_sexp_forest_dirty = false;
 
-	} else if (g_dirty_roots_nonempty.load()) {
+	} else if (!g_dirty_roots.empty()) {
 		// --- Partial rebuild ---
 
-		SCP_vector<int> roots;
-		{
-			std::lock_guard<std::mutex> dlock(g_dirty_roots_mutex);
-			roots.assign(g_dirty_roots.begin(), g_dirty_roots.end());
-			g_dirty_roots.clear();
-			g_dirty_roots_nonempty.store(false);
-		}
+		// Snapshot and clear the dirty set first, so any roots marked while we
+		// load (however unlikely) are kept for the next rebuild rather than lost.
+		SCP_vector<int> roots(g_dirty_roots.begin(), g_dirty_roots.end());
+		g_dirty_roots.clear();
 
 		// load_branch in headless mode writes directly to tree_nodes[r] by Sexp_nodes index,
 		// overwriting any prior content.  No need to remove previous stale branches.
-		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
 		for (int r : roots) {
 			if (Sexp_nodes[r].type != SEXP_NOT_USED)
 				get_sexp_forest().load_branch(r, -1);
@@ -146,28 +144,25 @@ void mcp_sexp_forest_rebuild()
 
 void mcp_sexp_forest_cleanup()
 {
-	std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
+	forest_assert_main_thread("mcp_sexp_forest_cleanup");
+
 	get_sexp_forest().clear_tree();
 }
 
 // ---------------------------------------------------------------------------
-// Combined rebuild + listing (main thread only)
+// Combined rebuild + listing
 // ---------------------------------------------------------------------------
 // Rebuilds the forest if dirty, then calls get_listing_opf and converts
-// the result to a JSON array of strings.  This must run on the main thread
-// because the get_listing_opf_* helpers read main-thread-owned globals
-// (Ships[], Wings[], Messages[], Mission_events[], etc.).
+// the result to a JSON array of strings.
 
 json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int arg_index)
 {
+	forest_assert_main_thread("mcp_sexp_forest_get_listing_on_main_thread");
+
 	// Rebuild if needed — this is a no-op when the forest is already clean.
 	mcp_sexp_forest_rebuild();
 
-	sexp_list_item *list;
-	{
-		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
-		list = get_sexp_forest().get_listing_opf(opf, parent_node, arg_index);
-	}
+	sexp_list_item *list = get_sexp_forest().get_listing_opf(opf, parent_node, arg_index);
 
 	json_t *values = json_array();
 	for (sexp_list_item *item = list; item != nullptr; item = item->next)
