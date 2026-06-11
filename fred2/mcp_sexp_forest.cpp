@@ -17,7 +17,14 @@
 // NOTE: The reason we need to keep a sexp_tree here is so that we can use it
 // query for argument values.  Once get_opf_* functions are separated from
 // sexp_tree, this whole cache setup may no longer be needed.
-static sexp_tree g_sexp_forest(true /* headless */);
+// Constructed on first use (Meyers singleton) rather than at static-init time:
+// sexp_tree derives from CTreeCtrl and its constructor logs via mprintf, both
+// of which are only safe once MFC and FRED's logging are up.
+static sexp_tree &get_sexp_forest()
+{
+	static sexp_tree forest(true /* headless */);
+	return forest;
+}
 static std::mutex g_sexp_forest_mutex;
 
 // Full-dirty flag.  Initialized true so the forest is built on first use.
@@ -50,8 +57,8 @@ void mcp_sexp_forest_mark_dirty(const SCP_vector<int> &roots)
 	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
 
 	for (int r : roots) {
-		// skip special root nodes and unused nodes
-		if ((r < 0) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
+		// skip out-of-range indexes, special root nodes, and unused nodes
+		if ((r < 0) || (r >= Num_sexp_nodes) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
 			continue;
 		g_dirty_roots.insert(r);
 	}
@@ -65,8 +72,8 @@ void mcp_sexp_forest_unmark_dirty(const SCP_vector<int> &roots)
 	std::lock_guard<std::mutex> lock(g_dirty_roots_mutex);
 
 	for (int r : roots) {
-		// skip special root nodes and unused nodes
-		if ((r < 0) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
+		// skip out-of-range indexes, special root nodes, and unused nodes
+		if ((r < 0) || (r >= Num_sexp_nodes) || (r == Locked_sexp_true) || (r == Locked_sexp_false) || (Sexp_nodes[r].type == SEXP_NOT_USED))
 			continue;
 		g_dirty_roots.erase(r);
 	}
@@ -104,14 +111,14 @@ void mcp_sexp_forest_rebuild()
 		// Rebuild the forest under the mutex so mongoose threads block during the swap.
 		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
 
-		g_sexp_forest.clear_tree();
+		get_sexp_forest().clear_tree();
 
 		// Pass 2: load each root subtree into the forest
 		for (int i = 0; i < Num_sexp_nodes; i++) {
 			if (Sexp_nodes[i].type == SEXP_NOT_USED)
 				continue;
 			if (referenced.count(i) == 0)
-				g_sexp_forest.load_branch(i, -1);
+				get_sexp_forest().load_branch(i, -1);
 		}
 
 		g_sexp_forest_dirty.store(false);
@@ -132,7 +139,7 @@ void mcp_sexp_forest_rebuild()
 		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
 		for (int r : roots) {
 			if (Sexp_nodes[r].type != SEXP_NOT_USED)
-				g_sexp_forest.load_branch(r, -1);
+				get_sexp_forest().load_branch(r, -1);
 		}
 	}
 }
@@ -140,7 +147,7 @@ void mcp_sexp_forest_rebuild()
 void mcp_sexp_forest_cleanup()
 {
 	std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
-	g_sexp_forest.clear_tree();
+	get_sexp_forest().clear_tree();
 }
 
 // ---------------------------------------------------------------------------
@@ -159,7 +166,7 @@ json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int
 	sexp_list_item *list;
 	{
 		std::lock_guard<std::mutex> lock(g_sexp_forest_mutex);
-		list = g_sexp_forest.get_listing_opf(opf, parent_node, arg_index);
+		list = get_sexp_forest().get_listing_opf(opf, parent_node, arg_index);
 	}
 
 	json_t *values = json_array();
