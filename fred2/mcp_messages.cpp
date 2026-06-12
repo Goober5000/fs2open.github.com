@@ -174,7 +174,9 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	array_insert_slot(Messages, Num_messages, target_index);
 
 	MMessage &msg = Messages[target_index];
-	// we can't use memset here, so explicitly assign all fields
+	// The vacated slot is moved-from, so its media name pointers are already
+	// null (see MessageMediaRef).  We can't use memset here because of the
+	// SCP_string/SCP_vector members, so explicitly assign all fields.
 	strcpy_s(msg.name, name);
 	strcpy_s(msg.message, message);
 	msg.persona_index = persona_index;
@@ -337,10 +339,7 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 		return;
 
 	// Free allocated strings
-	if (Messages[idx].avi_info.name)
-		free(Messages[idx].avi_info.name);
-	if (Messages[idx].wave_info.name)
-		free(Messages[idx].wave_info.name);
+	message_free_media_names(Messages[idx]);
 
 	// Invalidate SEXP references (wrap name in angle brackets)
 	char buf[NAME_LENGTH + 4];
