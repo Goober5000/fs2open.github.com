@@ -110,7 +110,8 @@ static void handle_get_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	// Check for conflicting dialogs if this is a mission-specific message
+	// Check for conflicting dialogs if this is a mission-specific message;
+	// there is no chance a built-in message could be mutated
 	if (idx >= Num_builtin_messages) {
 		if (!validate(validate_dialog_for_messages, sink)) return;
 	}
