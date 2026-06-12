@@ -27,7 +27,7 @@ static const char *MCP_PROTOCOL_VERSION = "2025-06-18";
 
 static void send_json_response(struct mg_connection *conn, json_t *response)
 {
-	char *body = json_dumps(response, JSON_COMPACT | JSON_REAL_PRECISION(6));
+	char *body = json_dumps(response, JSON_COMPACT | JSON_REAL_PRECISION(FLT_DECIMAL_DIG));
 	if (body == nullptr) {
 		const char *fallback = "{\"jsonrpc\":\"2.0\",\"id\":null,\"error\":{\"code\":-32603,\"message\":\"JSON serialization failed\"}}";
 		mg_printf(conn,
@@ -363,13 +363,13 @@ static void handle_mcp_post(struct mg_connection *conn)
 	char chunk[4096];
 	int n;
 	while ((n = mg_read(conn, chunk, sizeof(chunk))) > 0) {
-		body.append(chunk, n);
-		if (body.size() > MAX_POST_BODY) {
+		if (body.size() + n > MAX_POST_BODY) {
 			json_t *resp = make_error_response(nullptr, -32700, "Request body too large");
 			send_json_response(conn, resp);
 			json_decref(resp);
 			return;
 		}
+		body.append(chunk, n);
 	}
 	if (body.empty()) {
 		json_t *resp = make_error_response(nullptr, -32700, "Empty request body");
@@ -500,6 +500,13 @@ static void *mcp_request_handler(enum mg_event event, struct mg_connection *conn
 // Server lifecycle
 // ---------------------------------------------------------------------------
 
+// True when a successful start has populated state (caches, warmup thread,
+// sexp forest) that a stop must release.  Cleared after each cleanup so that
+// redundant stop calls (e.g. OnClose followed by ExitInstance) don't re-run
+// cleanup -- which would needlessly construct the lazily-built sexp forest
+// during app teardown if the server never ran.
+static bool mcp_needs_cleanup = false;
+
 bool mcp_server_start()
 {
 	if (mcp_ctx != nullptr)
@@ -523,13 +530,17 @@ bool mcp_server_start()
 	mcp_fred_ready.store(true);
 
 	mcp_reference_tools_init();
+	mcp_needs_cleanup = true;
 	return true;
 }
 
 void mcp_server_stop()
 {
 	if (mcp_ctx == nullptr) {
-		mcp_reference_tools_cleanup();
+		if (mcp_needs_cleanup) {
+			mcp_reference_tools_cleanup();
+			mcp_needs_cleanup = false;
+		}
 		return;
 	}
 
@@ -564,6 +575,7 @@ void mcp_server_stop()
 
 	stop_thread.join();
 	mcp_reference_tools_cleanup();
+	mcp_needs_cleanup = false;
 }
 
 bool mcp_server_is_running()

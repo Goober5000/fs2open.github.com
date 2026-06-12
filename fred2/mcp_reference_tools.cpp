@@ -2016,7 +2016,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 
 				// Convert FOV from dot-product to degrees for readability
 				if (ss.turret_fov > -1.0f && ss.turret_fov < 1.0f) {
-					float fov_deg = acosf(ss.turret_fov) * (180.0f / PI);
+					float fov_deg = acosf(ss.turret_fov) * (180.0f / PI) * 2.0f;	// doubled since turret_fov is the half-angle
 					json_object_set_new(ss_obj, "turret_fov_degrees", json_real(fov_deg));
 				}
 
