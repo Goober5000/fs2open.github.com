@@ -79,7 +79,7 @@ const char *extract_tool_result_text(json_t *tool_result)
 
 json_t *make_json_tool_result(json_t *data)
 {
-	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(6));
+	char *text = json_dumps(data, JSON_INDENT(2) | JSON_REAL_PRECISION(FLT_DECIMAL_DIG));
 	json_t *result;
 	if (text) {
 		result = make_tool_result(text);
