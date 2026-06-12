@@ -34,7 +34,8 @@ static bool validate_dialog_for_fiction(SCP_string &error_msg)
 // Fiction Viewer stage tools
 // ---------------------------------------------------------------------------
 
-static const SCP_vector<const char *> fiction_ui_name_values = { "FS2", "WCS" };
+// "<default>" maps to an empty ui_name in the engine, which uses the mod's default UI
+static const SCP_vector<const char *> fiction_ui_name_values = { "<default>", "FS2", "WCS" };
 
 static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage, int index)
 {
@@ -43,7 +44,7 @@ static json_t *build_fiction_viewer_stage_json(const fiction_viewer_stage &stage
 	set_optional_filename(obj, "story_filename", stage.story_filename);
 	set_optional_filename(obj, "font_filename", stage.font_filename);
 	set_optional_filename(obj, "voice_filename", stage.voice_filename);
-	set_optional_string(obj, "ui_name", stage.ui_name, true);
+	set_optional_string(obj, "ui_name", stage.ui_name[0] ? stage.ui_name : fiction_ui_name_values[0], true);
 	set_optional_filename(obj, "background_640", stage.background[0]);
 	set_optional_filename(obj, "background_1024", stage.background[1]);
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
@@ -110,7 +111,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	strcpy_s(stage.story_filename, story);
 	if (font && font[0])  strcpy_s(stage.font_filename, font);
 	if (voice && voice[0]) strcpy_s(stage.voice_filename, voice);
-	if (ui && ui[0])    strcpy_s(stage.ui_name, ui);
+	if (ui && stricmp(ui, fiction_ui_name_values[0]) != 0)    strcpy_s(stage.ui_name, ui);
 	if (bg640 && bg640[0]) strcpy_s(stage.background[0], bg640);
 	if (bg1024 && bg1024[0]) strcpy_s(stage.background[1], bg1024);
 
@@ -149,10 +150,12 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
 
 	if (new_ui) {
-		if (!new_ui[0])
-			new_ui = fiction_ui_name_values[0];
-		else if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", sink))
+		// the empty string is rejected by the enum check; "<default>" clears
+		// the stage's UI so the engine uses the mod default
+		if (!check_string_enum(new_ui, fiction_ui_name_values, "ui_name", sink))
 			return;
+		if (!stricmp(new_ui, fiction_ui_name_values[0]))
+			new_ui = "";
 	}
 
 	fiction_viewer_stage &s = Fiction_viewer_stages[*index - 1];
@@ -290,7 +293,7 @@ void mcp_register_fiction_viewer_tools(json_t *tools)
 		add_string_prop(props, "voice_filename",
 			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
 		add_string_enum_prop(props, "ui_name",
-			"UI layout name. Defaults to empty (engine default).",
+			"UI layout name. Defaults to \"<default>\" (the mod's default UI).",
 			fiction_ui_name_values);
 		add_string_prop(props, "background_640",
 			"Background image for 640x480 resolution. Defaults to empty (standard background).");
@@ -322,7 +325,7 @@ void mcp_register_fiction_viewer_tools(json_t *tools)
 		add_string_prop(props, "voice_filename",
 			"New voice audio filename. Empty string clears the voice.");
 		add_string_enum_prop(props, "ui_name",
-			"New UI layout name. Empty string clears to engine default.",
+			"New UI layout name. Use \"<default>\" to clear to the mod's default UI.",
 			fiction_ui_name_values);
 		add_string_prop(props, "background_640",
 			"New background image for 640x480 resolution. Empty string clears.");
