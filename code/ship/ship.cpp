@@ -6914,6 +6914,18 @@ void ship_level_init()
 	Man_thruster_reset_timestamp = timestamp(0);
 }
 
+void ship_level_close()
+{
+	// at this point ships have all gone through ship_delete,
+	// so don't leave any stray references behind (e.g. for sexps)
+	Ship_registry.clear();
+	Ship_registry_map.clear();
+
+	ship_close_cockpit_displays(Player_ship);
+
+	Num_wings = 0;
+}
+
 /**
  * Add a ship onto the exited ships list.
  *
@@ -8745,6 +8757,7 @@ void ship_close_cockpit_displays(ship* shipp)
 {
 	if (shipp && shipp->cockpit_model_instance >= 0) {
 		model_delete_instance(shipp->cockpit_model_instance);
+		shipp->cockpit_model_instance = -1;
 	}
 
 	for ( int i = 0; i < (int)Player_displays.size(); i++ ) {
