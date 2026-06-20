@@ -13,6 +13,7 @@
 #include <algorithm>
 #include <climits>
 #include <cstring>
+#include <cstdarg>
 
 #include "globalincs/utility.h"
 
@@ -33,6 +34,194 @@
 
 #define PLACEHOLDER_STRING "<placeholder>"
 #define MAX_MCP_SEXP_LENGTH	65535
+
+// ---------------------------------------------------------------------------
+// Event-annotation maintenance for the sexp mutators
+//
+// Event annotations (code/mission/missiongoals.h) locate their node by a
+// positional path { event_index, 0, child_idx, child_idx, ... } through the event
+// editor's tree.  The second element is always 0: the event's tree item holds the
+// formula's root operator as its single child (create_tree -> add_sub_tree), so the
+// operator sits at child index 0 under the event item.  After that, each child index
+// is the node's position among its operator's arguments, exactly as
+// sexp_tree::load_branch builds the tree: list-wrapper nodes are transparent, so a
+// (wrapped) sub-operator counts as one position just like a literal argument.  These
+// helpers convert between a path and a Sexp_node so the mutators can keep annotations
+// attached to their node; see AnnotationRemapScope.
+// ---------------------------------------------------------------------------
+
+// Position of `cur` among its parent operator's arguments (the tree child index).
+static int mcp_sexp_arg_position(int cur)
+{
+	int parent_op = find_parent_operator(cur);
+
+	// the element representing cur in the parent's argument chain is the list
+	// wrapper when cur is a (wrapped) operator, otherwise cur itself
+	int elem = (Sexp_nodes[cur].subtype == SEXP_ATOM_OPERATOR) ? find_sexp_list(cur) : cur;
+
+	int pos = 0;
+	for (int a = find_sexp_antecedent(elem); a >= 0 && a != parent_op; a = find_sexp_antecedent(a))
+		pos++;
+	return pos;
+}
+
+// Build the annotation path for `node`, or an empty list if it is not under an event.
+static SCP_list<int> mcp_node_to_annotation_path(int node)
+{
+	SCP_list<int> path;
+	int cur = node;
+	for (int parent_op = find_parent_operator(cur); parent_op >= 0; parent_op = find_parent_operator(cur))
+	{
+		path.push_front(mcp_sexp_arg_position(cur));
+		cur = parent_op;
+	}
+
+	// cur is now the formula root operator; find which event owns it
+	for (int e = 0; e < (int)Mission_events.size(); e++)
+	{
+		if (Mission_events[e].formula == cur)
+		{
+			path.push_front(0);   // operator is child 0 of the event's tree item
+			path.push_front(e);
+			return path;
+		}
+	}
+	return SCP_list<int>();
+}
+
+// Resolve an annotation path to the Sexp_node it points at, or -1 if it cannot
+// be resolved (bad event index, freed node, or a path deeper than the tree).
+static int mcp_annotation_path_to_node(const SCP_list<int> &path)
+{
+	// size 1 is an annotation on the event's own tree item (not a SEXP node); leave
+	// those alone.  A node annotation is at least { event_index, 0 }.
+	if (path.size() < 2)
+		return -1;
+
+	auto it = path.begin();
+	int e = *it;
+	if (e < 0 || e >= (int)Mission_events.size())
+		return -1;
+
+	int node = Mission_events[e].formula;
+
+	// skip the second element: it is the formula operator's slot (child 0) under the
+	// event's tree item, which is `node` itself -- the argument descent starts after it
+	++it;
+	if (it != path.end())
+		++it;
+
+	for (; it != path.end(); ++it)
+	{
+		if (node < 0 || SEXP_NODE_TYPE(node) == SEXP_NOT_USED)
+			return -1;
+
+		// walk to the *it-th argument element of operator `node`
+		int elem = Sexp_nodes[node].rest;
+		for (int k = 0; k < *it && elem >= 0; k++)
+			elem = Sexp_nodes[elem].rest;
+		if (elem < 0)
+			return -1;
+
+		// unwrap a list wrapper to its enclosed sub-operator
+		node = (SEXP_NODE_TYPE(elem) == SEXP_LIST) ? Sexp_nodes[elem].first : elem;
+	}
+	return node;
+}
+
+// RAII guard for the MCP sexp mutators.  On construction it resolves every event
+// annotation to the Sexp_node it currently points at; commit() then rewrites each
+// annotation's path from that (index-stable) node, dropping annotations whose node
+// was freed or is no longer under an event.  Because Sexp_node indices are stable
+// across detach/attach and across rollback, this keeps annotations attached to
+// their node through move/swap (the node simply settles at its destination) and
+// drops them on delete -- with no per-operation shift arithmetic.  It is a no-op
+// when there are no annotations (e.g. no annotated mission is loaded).
+//
+// commit() must run after the mutation but BEFORE the autosave that mark_modified()
+// triggers, or the autosave would persist stale paths.  So the sexp mutators call
+// sexp_mark_modified() (below) instead of mark_modified(), which commits first; the
+// dtor is a safety net for paths that mutate without marking modified.  commit() is
+// idempotent.
+struct AnnotationRemapScope
+{
+	SCP_vector<std::pair<size_t, int>> snap;
+	AnnotationRemapScope *prev = nullptr;
+	bool committed = false;
+
+	AnnotationRemapScope();
+	~AnnotationRemapScope();
+	void commit();
+};
+
+// The in-flight guard, so sexp_mark_modified() can commit it before autosaving.  Not
+// a stack: the sexp mutators never nest guarded JSON handlers (move/swap compose the
+// static detach/attach overloads, which are unguarded), but we save/restore anyway.
+static AnnotationRemapScope *s_active_annotation_remap = nullptr;
+
+AnnotationRemapScope::AnnotationRemapScope()
+{
+	for (size_t i = 0; i < Event_annotations.size(); i++)
+		snap.emplace_back(i, mcp_annotation_path_to_node(Event_annotations[i].path));
+	prev = s_active_annotation_remap;
+	s_active_annotation_remap = this;
+}
+
+void AnnotationRemapScope::commit()
+{
+	if (committed)
+		return;
+	committed = true;
+
+	SCP_vector<bool> drop(Event_annotations.size(), false);
+	for (const auto &entry : snap)
+	{
+		size_t i = entry.first;
+		int n = entry.second;
+		if (i >= Event_annotations.size() || n < 0)
+			continue;  // size shouldn't change mid-op; n < 0 means it wasn't resolvable
+
+		if (SEXP_NODE_TYPE(n) == SEXP_NOT_USED)
+		{
+			drop[i] = true;
+			continue;
+		}
+
+		SCP_list<int> p = mcp_node_to_annotation_path(n);
+		if (p.empty())
+			drop[i] = true;
+		else
+			Event_annotations[i].path = std::move(p);
+	}
+
+	// erase dropped annotations back-to-front to keep indices valid
+	for (size_t i = Event_annotations.size(); i-- > 0; )
+		if (drop[i])
+			Event_annotations.erase(Event_annotations.begin() + i);
+}
+
+AnnotationRemapScope::~AnnotationRemapScope()
+{
+	commit();
+	s_active_annotation_remap = prev;
+}
+
+// mark_modified() for the sexp mutators.  Flushes the in-flight annotation remap
+// (no-op when none) BEFORE delegating to mark_modified(), so the autosave that
+// mark_modified() triggers persists up-to-date annotation paths.  The sexp mutators
+// call this instead of mark_modified() directly.
+static void sexp_mark_modified(const char *fmt, ...)
+{
+	if (s_active_annotation_remap)
+		s_active_annotation_remap->commit();
+
+	SCP_string desc;
+	va_list args;
+	va_start(args, fmt);
+	vsprintf(desc, fmt, args);
+	va_end(args);
+	mark_modified("%s", desc.c_str());
+}
 
 // Strip one leading '@' from a SEXP variable name.  The engine stores variable
 // names bare; the '@' is a display-time prefix emitted by sexp_to_text and
@@ -1466,6 +1655,9 @@ static void handle_detach_sexp_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
+	// keep event annotations attached to their node across this mutation
+	AnnotationRemapScope annotation_guard;
+
 	GeneralSEXPReference general_ref;
 	if (!parse_general_sexp_reference(input, nullptr, general_ref, sink))
 		return;
@@ -1557,7 +1749,7 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 		freed_count = release_subtree(n, do_delete);
 
 		if (!suppress_mark_modified)
-			mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
+			sexp_mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 
 	} else if (is_root) {
 		// Case B: Root of a free-standing tree
@@ -1602,7 +1794,7 @@ static detach_result handle_detach_sexp_node(const GeneralSEXPReference &general
 			}, "Detachment", sink))
 			return {};
 		if (is_attached && !suppress_mark_modified)
-			mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
+			sexp_mark_modified("MCP: detach SEXP node in %s", info.to_string().c_str());
 
 		// Commit: detach and optionally free the subtree
 		Sexp_nodes[n].rest = -1;	// don't walk into the live tree
@@ -1703,7 +1895,7 @@ static bool attach_as_entity_formula(
 		normalize_free_standing_root(displaced, freed_count);
 
 	if (!suppress_mark_modified)
-		mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
+		sexp_mark_modified("MCP: attach SEXP formula for %s", info.to_string().c_str());
 
 	mcp_sexp_forest_mark_dirty({ source, displaced });
 	return true;
@@ -1748,6 +1940,9 @@ static void handle_attach_sexp_node(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	// keep event annotations attached to their node across this mutation
+	AnnotationRemapScope annotation_guard;
 
 	// --- Parse parameters ---
 	auto source_opt = get_required_integer(input, "source_node", sink);
@@ -1921,7 +2116,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 					}, "Attachment", sink))
 					return {};
 				if (is_attached && !suppress_mark_modified)
-					mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
+					sexp_mark_modified("MCP: attach SEXP node in %s", info.to_string().c_str());
 
 				// Handle displaced subtree
 				freed_count = release_subtree(displaced, delete_displaced);
@@ -1961,7 +2156,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				}, "Insertion", sink))
 				return {};
 			if (is_attached && !suppress_mark_modified)
-				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
+				sexp_mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
 			mcp_sexp_forest_unmark_dirty({ source });
@@ -1987,7 +2182,7 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 				}, "Insertion", sink))
 				return {};
 			if (is_attached && !suppress_mark_modified)
-				mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
+				sexp_mark_modified("MCP: insert SEXP node in %s", info.to_string().c_str());
 
 			mcp_sexp_forest_mark_dirty({ info.root });
 			mcp_sexp_forest_unmark_dirty({ source });
@@ -2123,6 +2318,11 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
 
+	// keep event annotations attached to their node across this mutation; the
+	// guard brackets the whole composed detach+attach so a moved subtree's
+	// annotations follow it to the destination
+	AnnotationRemapScope annotation_guard;
+
 	GeneralSEXPReference src_ref;
 	if (!parse_general_sexp_reference(input, "source_", src_ref, sink)) return;
 	GeneralSEXPReference tgt_ref;
@@ -2220,7 +2420,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 		// If it failed, the mission is in a partial state; record one entry
 		// so the user can recover via the autosave history.
 		if (!restored)
-			mark_modified("MCP: move SEXP subtree (partial -- rollback failed)");
+			sexp_mark_modified("MCP: move SEXP subtree (partial -- rollback failed)");
 		report_composed_error(sink, attach_err, orphans, "Attach");
 		if (attach_err) json_decref(attach_err);
 		return;
@@ -2235,7 +2435,7 @@ static void handle_move_sexp_node(json_t *input, McpToolRequest *req)
 
 	// One high-level entry for the composed operation, in lieu of the inner
 	// detach + attach autosaves we suppressed.
-	mark_modified("MCP: move SEXP subtree from node %d to node %d", src_eff, tgt_eff);
+	sexp_mark_modified("MCP: move SEXP subtree from node %d to node %d", src_eff, tgt_eff);
 
 	req->result_json = make_json_tool_result(result_json);
 	req->success = true;
@@ -2245,6 +2445,11 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
 	if (!validate(validate_dialog_for_sexp_nodes, sink)) return;
+
+	// keep event annotations attached to their node across this mutation; the
+	// guard brackets the whole composed detach+attach so each swapped subtree's
+	// annotations follow it to its new slot
+	AnnotationRemapScope annotation_guard;
 
 	GeneralSEXPReference src_ref;
 	if (!parse_general_sexp_reference(input, "source_", src_ref, sink)) return;
@@ -2311,7 +2516,7 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		SCP_vector<int> orphans;
 		if (!a_restored) orphans.push_back(det_a.detached_node);
 		if (!a_restored)
-			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
+			sexp_mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, det_b_err, orphans, "Target detach");
 		if (det_b_err) json_decref(det_b_err);
 		return;
@@ -2338,7 +2543,7 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 		if (!b_restored) orphans.push_back(det_b.detached_node);
 		if (!a_restored) orphans.push_back(det_a.detached_node);
 		if (!b_restored || !a_restored)
-			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
+			sexp_mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, att_a_err, orphans, "First attach");
 		if (att_a_err) json_decref(att_a_err);
 		return;
@@ -2391,7 +2596,7 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 			if (!a_restored) orphans.push_back(det_a.detached_node);
 		}
 		if (!orphans.empty())
-			mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
+			sexp_mark_modified("MCP: swap SEXP subtrees (partial -- rollback failed)");
 		report_composed_error(sink, att_b_err, orphans, "Second attach");
 		if (att_b_err) json_decref(att_b_err);
 		return;
@@ -2408,7 +2613,7 @@ static void handle_swap_sexp_nodes(json_t *input, McpToolRequest *req)
 
 	// One high-level entry for the composed operation, in lieu of the inner
 	// detach + attach autosaves we suppressed.
-	mark_modified("MCP: swap SEXP subtrees at nodes %d and %d", src_eff, tgt_eff);
+	sexp_mark_modified("MCP: swap SEXP subtrees at nodes %d and %d", src_eff, tgt_eff);
 
 	req->result_json = make_json_tool_result(result);
 	req->success = true;
