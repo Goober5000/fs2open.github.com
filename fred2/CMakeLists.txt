@@ -199,6 +199,8 @@ set(FRED2_SOURCES
 	mcp_sexp_forest.h
 	mcp_ships.cpp
 	mcp_ships.h
+	mcp_submodels.cpp
+	mcp_submodels.h
 	mcp_wings.cpp
 	mcp_wings.h
 	fred.rc
