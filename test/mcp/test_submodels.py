@@ -21,6 +21,7 @@ from mcp_test_lib import (
     assert_equal,
     assert_error,
     assert_has_key,
+    assert_in,
     assert_is_dict,
     assert_is_list,
     assert_non_empty_list,
@@ -168,6 +169,17 @@ def register(suite, client):
             nm = s["submodel"]
             assert_true(nm not in seen_names, f"duplicate submodel name {nm!r} (LOD not filtered?)")
             seen_names.add(nm)
+
+        # The listing is restricted to the detail-0 render hierarchy, which is a
+        # single connected tree: exactly one entry (the hull root) is parentless,
+        # and every referenced parent is itself listed.  (Detached debris roots,
+        # which are also parentless, would break this if not filtered out.)
+        roots = [s for s in subs if "parent" not in s]
+        assert_equal(len(roots), 1, f"expected exactly one parentless root, got {len(roots)}")
+        for s in subs:
+            if "parent" in s:
+                assert_in(s["parent"], seen_names,
+                          f"parent {s['parent']!r} of {s['submodel']!r} is not in the listing")
 
     def test_get_ship_submodel_roundtrip_shape():
         ship = _ship()
