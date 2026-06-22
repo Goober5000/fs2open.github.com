@@ -7,10 +7,9 @@
 #include <jansson.h>
 #include <cstring>
 #include <optional>
-#include <set>
 
 #include "math/floating.h"            // fl_radians, fl_degrees
-#include "math/vecmat.h"              // vm_closest_angle_to_matrix, vm_vec_mag
+#include "math/vecmat.h"              // vm_closest_angle_to_matrix, vm_vec_dot
 #include "model/model.h"             // polymodel(_instance), submodel helpers, MOVEMENT_AXIS_*
 #include "ship/ship.h"               // Ships, Ship::Subsystem_Flags
 
@@ -211,11 +210,11 @@ static void handle_update_ship_submodel(json_t *input, McpToolRequest *req)
 	bool has_basic = basic != nullptr && json_is_object(basic);
 	bool has_advanced = advanced != nullptr && json_is_object(advanced);
 
-	if (basic != nullptr && !json_is_object(basic) && !json_is_null(basic)) {
+	if (basic != nullptr && !json_is_object(basic)) {
 		sink.set_error("'basic' must be an object with angle_degrees and/or offset_meters.");
 		return;
 	}
-	if (advanced != nullptr && !json_is_object(advanced) && !json_is_null(advanced)) {
+	if (advanced != nullptr && !json_is_object(advanced)) {
 		sink.set_error("'advanced' must be an object with orientation and/or offset.");
 		return;
 	}
@@ -284,7 +283,16 @@ static void handle_update_ship_submodel(json_t *input, McpToolRequest *req)
 	if (offset_vec.has_value()) {
 		smi->canonical_prev_offset = smi->canonical_offset;
 		smi->canonical_offset = *offset_vec;
-		smi->cur_offset = vm_vec_mag(&*offset_vec);
+		// Recover the signed scalar offset along the submodel's translation axis (the inverse
+		// of submodel_canonicalize_translation).  Leave it at zero when the submodel has no
+		// defined axis; canonical_offset is authoritative for rendering.
+		switch (sm->translation_axis_id) {
+			case MOVEMENT_AXIS_X:     smi->cur_offset = offset_vec->xyz.x; break;
+			case MOVEMENT_AXIS_Y:     smi->cur_offset = offset_vec->xyz.y; break;
+			case MOVEMENT_AXIS_Z:     smi->cur_offset = offset_vec->xyz.z; break;
+			case MOVEMENT_AXIS_OTHER: smi->cur_offset = vm_vec_dot(&*offset_vec, &sm->translation_axis); break;
+			default:                  smi->cur_offset = 0.0f; break;	// MOVEMENT_AXIS_NONE
+		}
 		smi->prev_offset = smi->cur_offset;
 		changed = true;
 	}
@@ -364,11 +372,12 @@ void mcp_register_submodel_tools(json_t *tools)
 
 		json_t *adv_props = json_object();
 		add_matrix_prop(adv_props, "orientation",
-			"Full submodel orientation matrix (rvec/uvec/fvec), relative to the parent. Allows "
-			"arbitrary posing of any submodel, including those without a defined rotation axis.");
+			"Full submodel orientation matrix (rvec/uvec/fvec), relative to the submodel's default "
+			"(unrotated) orientation; the identity matrix means unrotated. Allows arbitrary posing of "
+			"any submodel, including those without a defined rotation axis.");
 		add_vec3d_prop(adv_props, "offset",
-			"Full submodel translation offset vector, relative to the submodel's default offset "
-			"from its parent.");
+			"Full submodel translation offset vector, relative to the submodel's default offset from "
+			"its parent; the zero vector means unmoved.");
 		add_object_prop(props, "advanced",
 			"Arbitrary pose. Provide orientation and/or offset (each optional). Mutually exclusive "
 			"with 'basic'.", adv_props);
