@@ -72,6 +72,24 @@ static int resolve_submodel(polymodel *pm, const char *submodel_name, const char
 	return idx;
 }
 
+// Whether this submodel is part of the model's detail-0 render hierarchy.
+// The editor's normal model render draws the detail-0 root (the hull) and its
+// descendants; submodels outside that subtree -- e.g. detached debris pieces,
+// which are their own parentless roots -- are never reached by the traversal,
+// so posing them (offset/orientation/blown_off) has no visible effect.  Such
+// submodels are filtered out of list_ship_submodels entirely.
+static bool submodel_in_render_tree(const polymodel *pm, int sm_idx)
+{
+	int root = pm->detail[0];
+	int i = sm_idx;
+	// Walk up the parent chain; the bound guards against a malformed cycle.
+	for (int guard = 0; i >= 0 && guard <= pm->n_models; i = pm->submodel[i].parent, guard++) {
+		if (i == root)
+			return true;
+	}
+	return false;
+}
+
 // Build the shared per-submodel entry (used by both list and get).  Does not
 // include the ship name; callers add that where appropriate.
 static json_t *build_submodel_json(const polymodel *pm, const polymodel_instance *pmi, int sm_idx)
@@ -150,6 +168,10 @@ static void handle_list_ship_submodels(json_t *input, McpToolRequest *req)
 	json_t *arr = json_array();
 	for (int i = 0; i < pm->n_models; i++) {
 		if (lod_copies.count(i))
+			continue;
+		// Skip submodels outside the detail-0 render hierarchy (e.g. detached
+		// debris roots); the editor can't draw or otherwise act on them.
+		if (!submodel_in_render_tree(pm, i))
 			continue;
 		json_array_append_new(arr, build_submodel_json(pm, pmi, i));
 	}
@@ -326,13 +348,15 @@ void mcp_register_submodel_tools(json_t *tools)
 {
 	// list_ship_submodels
 	register_tool_with_required_string(tools, "list_ship_submodels",
-		"List a ship's submodels (subobjects) and their current instance pose. Lower-LOD "
-		"duplicate submodels are omitted. Each entry has the submodel name, parent submodel "
-		"(omitted for root submodels), whether it rotates/translates and on which axis, blown_off "
-		"state, and the current pose in both 'basic' (angle_degrees/offset_meters; omitted when the "
-		"submodel has no movement axis) and 'advanced' (full orientation matrix + offset vector) "
-		"forms. NOTE: submodel pose is transient editor "
-		"state for viewing configurations; it is not saved to the mission file.",
+		"List a ship's submodels (subobjects) and their current instance pose. Only submodels that "
+		"the editor actually draws are listed: lower-LOD duplicates and submodels outside the "
+		"detail-0 render hierarchy (e.g. detached debris pieces, which are their own parentless "
+		"roots) are omitted, since they can't be posed or viewed. Each entry has the submodel name, "
+		"parent submodel (omitted for the root hull), whether it rotates/translates and on which "
+		"axis, blown_off state, and the current pose in both 'basic' (angle_degrees/offset_meters; "
+		"omitted when the submodel has no movement axis) and 'advanced' (full orientation matrix + "
+		"offset vector) forms. NOTE: submodel pose is transient editor state for viewing "
+		"configurations; it is not saved to the mission file.",
 		"name", "Name of the ship");
 
 	// get_ship_submodel
@@ -384,7 +408,8 @@ void mcp_register_submodel_tools(json_t *tools)
 
 		add_bool_prop(props, "blown_off",
 			"Whether this submodel is in its blown-off (destroyed) state and hidden from rendering. "
-			"Optional; independent of basic/advanced.");
+			"Optional; independent of basic/advanced. CAVEAT: this is a no-op for the detail-root "
+			"hull submodel, which the engine always draws regardless.");
 
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
