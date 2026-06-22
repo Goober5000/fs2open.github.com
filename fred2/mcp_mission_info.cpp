@@ -743,12 +743,7 @@ void mcp_register_mission_info_tools(json_t *tools)
 			add_bool_prop(support_props, "disallowed", "If true, support ships are disallowed");
 			add_number_prop(support_props, "max_hull_repair", "Maximum hull repair percentage (0-100)");
 			add_number_prop(support_props, "max_subsys_repair", "Maximum subsystem repair percentage (0-100)");
-			json_t *support_schema = json_object();
-			json_object_set_new(support_schema, "type", json_string("object"));
-			json_object_set_new(support_schema, "description",
-				json_string("Support ship settings (partial update)."));
-			json_object_set_new(support_schema, "properties", support_props);
-			json_object_set_new(props, "support_ships", support_schema);
+			add_object_prop(props, "support_ships", "Support ship settings (partial update).", support_props);
 		}
 
 		// sound_environment: object or null
@@ -788,20 +783,13 @@ void mcp_register_mission_info_tools(json_t *tools)
 			add_string_prop(elem_props, "name", "Custom string name");
 			add_string_prop(elem_props, "value", "Custom string value");
 			add_string_prop(elem_props, "text", "Custom string text");
-			json_t *elem_schema = json_object();
-			json_object_set_new(elem_schema, "type", json_string("object"));
-			json_object_set_new(elem_schema, "properties", elem_props);
 			json_t *elem_req = json_array();
 			json_array_append_new(elem_req, json_string("name"));
 			json_array_append_new(elem_req, json_string("value"));
 			json_array_append_new(elem_req, json_string("text"));
-			json_object_set_new(elem_schema, "required", elem_req);
-			json_t *cs_schema = json_object();
-			json_object_set_new(cs_schema, "type", json_string("array"));
-			json_object_set_new(cs_schema, "description",
-				json_string("Mission custom_strings. REPLACES the existing vector; pass [] to clear."));
-			json_object_set_new(cs_schema, "items", elem_schema);
-			json_object_set_new(props, "custom_strings", cs_schema);
+			add_object_array_prop(props, "custom_strings",
+				"Mission custom_strings. REPLACES the existing vector; pass [] to clear.",
+				elem_props, elem_req);
 		}
 
 		register_tool(tools, "update_mission_info",
