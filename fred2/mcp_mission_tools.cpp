@@ -11,6 +11,7 @@
 #include "mcp_mission_info.h"
 #include "mcp_reinforcements.h"
 #include "mcp_ships.h"
+#include "mcp_submodels.h"
 #include "mcp_wings.h"
 #include "mcp_sexp.h"
 #include "mcpserver.h"
@@ -533,6 +534,9 @@ static const char *mission_tool_names[] = {
 	"update_ship_special_explosion",
 	"get_ship_special_hitpoints",
 	"update_ship_special_hitpoints",
+	"list_ship_submodels",
+	"get_ship_submodel",
+	"update_ship_submodel",
 	"list_wings",
 	"get_wing",
 	"form_wing",
@@ -569,6 +573,7 @@ void mcp_register_mission_tools(json_t *tools)
 	mcp_register_waypoint_tools(tools);
 	mcp_register_jump_node_tools(tools);
 	mcp_register_ship_tools(tools);
+	mcp_register_submodel_tools(tools);
 	mcp_register_wing_tools(tools);
 	mcp_register_reinforcement_tools(tools);
 
@@ -665,6 +670,8 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		// handled by jump_node unit
 	} else if (mcp_handle_ship_tool(tool_name, input_json, req)) {
 		// handled by ships unit
+	} else if (mcp_handle_submodel_tool(tool_name, input_json, req)) {
+		// handled by submodels unit
 	} else if (mcp_handle_wing_tool(tool_name, input_json, req)) {
 		// handled by wings unit
 	} else if (mcp_handle_reinforcement_tool(tool_name, input_json, req)) {
