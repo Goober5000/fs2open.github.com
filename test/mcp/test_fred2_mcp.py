@@ -32,6 +32,7 @@ import test_reference
 import test_mission_setup
 import test_crud
 import test_ships
+import test_submodels
 import test_wings
 import test_reinforcements
 import test_sexp_roundtrip
@@ -54,6 +55,7 @@ AREAS = [
     test_mission_setup,
     test_crud,
     test_ships,
+    test_submodels,
     test_wings,
     test_reinforcements,
     test_sexp_roundtrip,

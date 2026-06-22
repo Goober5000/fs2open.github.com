@@ -165,6 +165,18 @@ void add_object_array_prop(json_t *props, const char *name, const char *descript
 	json_object_set_new(props, name, p);
 }
 
+void add_object_prop(json_t *props, const char *name, const char *description,
+	json_t *sub_properties, json_t *sub_required)
+{
+	json_t *p = json_object();
+	json_object_set_new(p, "type", json_string("object"));
+	json_object_set_new(p, "description", json_string(description));
+	json_object_set_new(p, "properties", sub_properties);
+	if (sub_required)
+		json_object_set_new(p, "required", sub_required);
+	json_object_set_new(props, name, p);
+}
+
 void add_bool_map_prop(json_t *props, const char *name, const char *description)
 {
 	json_t *p = json_object();
