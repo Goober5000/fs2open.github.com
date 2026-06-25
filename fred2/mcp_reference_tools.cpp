@@ -198,8 +198,7 @@ void mcp_register_reference_tools(json_t *tools)
 	register_tool(tools, "list_sexp_categories",
 		"List all SEXP operator categories and their subcategories, with operator "
 		"counts per category. Use this to discover the category hierarchy before "
-		"listing operators. Includes 'Unlisted' (hidden operators) and "
-		"'Uncategorized' categories if any such operators exist.",
+		"listing operators.",
 		json_object());
 
 	// list_sexp_operators

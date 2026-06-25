@@ -898,5 +898,7 @@ json_t *json_safe_string(const char *text)
 	// json_string rejected the input due to invalid UTF-8.  Try converting it.
 	SCP_string utf8;
 	coerce_to_utf8(utf8, text);
-	return json_string(utf8.c_str());
+	auto coerced = json_string(utf8.c_str());
+
+	return coerced ? coerced : json_string("");
 }
