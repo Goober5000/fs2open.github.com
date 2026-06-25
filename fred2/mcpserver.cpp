@@ -178,6 +178,10 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
 		return make_tool_result("FRED2 main window is not available", true);
 
+	if (strlen(param) >= MAX_PATH_LEN) {
+		return make_tool_result("File path is too long!", true);
+	}
+
 	// Heap-allocate because the request may outlive this stack frame on timeout
 	auto *req = new McpToolRequest();
 	req->tool = tool;
@@ -226,6 +230,10 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t
 {
 	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
 		return make_tool_result("FRED2 main window is not available", true);
+
+	if (strlen(tool_name) >= MAX_PATH_LEN) {
+		return make_tool_result("File path is too long!", true);
+	}
 
 	auto *req = new McpToolRequest();
 	req->tool = tool;
