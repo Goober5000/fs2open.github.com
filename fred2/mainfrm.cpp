@@ -105,6 +105,8 @@ CStatic m_prop_label;
 
 CWnd* McpEditorInfo::getCWndPtr() const
 {
+	Assertion(GetCurrentThreadId() == AfxGetApp()->m_nThreadID, "getCWndPtr is main-thread-only");
+
 	return persistent ? std::get<CWnd*>(handle) : *std::get<CWnd**>(handle);
 }
 
