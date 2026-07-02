@@ -59,6 +59,63 @@ void array_move_element(T *arr, int count, int from, int to)
 }
 
 // ---------------------------------------------------------------------------
+// Swap-based raw array overloads (array + count + max_size)
+//
+// For element types that hold raw owning pointers (e.g. brief_stage's icons
+// and lines buffers), the assignment-based helpers above would duplicate a
+// pointer across two slots and orphan another buffer.  These variants
+// rearrange slots exclusively by swapping adjacent elements, so every slot
+// keeps a distinct buffer.  swap() is found via ADL, falling back to
+// std::swap.
+// ---------------------------------------------------------------------------
+
+// Open a slot at `index` by rotating elements [index, count] right by one.
+// The slot at `index` receives the former one-past-end element, so the
+// caller must reset its fields.  Increments count.  Returns false if the
+// array is already full.
+template <typename T>
+bool array_insert_slot_swap(T *arr, int &count, int max_size, int index)
+{
+	Assertion(index >= 0 && index <= count, "array_insert_slot_swap: index %d out of range [0, %d]", index, count);
+	if (count >= max_size)
+		return false;
+	using std::swap;
+	for (int i = count; i > index; i--)
+		swap(arr[i], arr[i - 1]);
+	count++;
+	return true;
+}
+
+// Close the slot at `index` by rotating elements [index, count) left by one.
+// The removed element is parked at the new one-past-end slot rather than
+// destroyed.  Decrements count.
+template <typename T>
+void array_remove_slot_swap(T *arr, int &count, int index)
+{
+	Assertion(index >= 0 && index < count, "array_remove_slot_swap: index %d out of range [0, %d)", index, count);
+	using std::swap;
+	for (int i = index; i < count - 1; i++)
+		swap(arr[i], arr[i + 1]);
+	count--;
+}
+
+// Move element at `from` to `to` by rotating the elements in between.
+template <typename T>
+void array_move_element_swap(T *arr, int count, int from, int to)
+{
+	Assertion(from >= 0 && from < count, "array_move_element_swap: from %d out of range [0, %d)", from, count);
+	Assertion(to >= 0 && to < count, "array_move_element_swap: to %d out of range [0, %d)", to, count);
+	using std::swap;
+	if (from < to) {
+		for (int i = from; i < to; i++)
+			swap(arr[i], arr[i + 1]);
+	} else {
+		for (int i = from; i > to; i--)
+			swap(arr[i], arr[i - 1]);
+	}
+}
+
+// ---------------------------------------------------------------------------
 // Vector overloads
 // ---------------------------------------------------------------------------
 
