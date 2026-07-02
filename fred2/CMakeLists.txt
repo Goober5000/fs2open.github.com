@@ -185,6 +185,8 @@ set(FRED2_SOURCES
 	mcp_goals.h
 	mcp_waypoints.cpp
 	mcp_waypoints.h
+	mcp_brief.cpp
+	mcp_brief.h
 	mcp_cmd_brief.cpp
 	mcp_cmd_brief.h
 	mcp_debrief.cpp

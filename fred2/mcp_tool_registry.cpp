@@ -5,6 +5,7 @@
 #include "mcp_mission_info.h"
 #include "mcp_fiction_viewer.h"
 #include "mcp_cmd_brief.h"
+#include "mcp_brief.h"
 #include "mcp_debrief.h"
 #include "mcp_messages.h"
 #include "mcp_sexp.h"
@@ -35,6 +36,7 @@ static const McpToolArea s_areas[] = {
 	{ "mission_info",   mcp_mission_info_tool_defs,   mcp_mission_info_tool_def_count   },
 	{ "fiction_viewer", mcp_fiction_viewer_tool_defs, mcp_fiction_viewer_tool_def_count },
 	{ "cmd_brief",      mcp_cmd_brief_tool_defs,      mcp_cmd_brief_tool_def_count      },
+	{ "brief",          mcp_brief_tool_defs,          mcp_brief_tool_def_count          },
 	{ "debrief",        mcp_debrief_tool_defs,        mcp_debrief_tool_def_count        },
 	{ "messages",       mcp_message_tool_defs,        mcp_message_tool_def_count        },
 	{ "sexp",           mcp_sexp_tool_defs,           mcp_sexp_tool_def_count           },
