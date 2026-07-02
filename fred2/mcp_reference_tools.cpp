@@ -41,6 +41,7 @@
 #include "ai/ai_profiles.h"
 #include "sound/ds.h"
 #include "mission/missionparse.h"
+#include "mission/missionbriefcommon.h"
 #include "gamesnd/eventmusic.h"
 
 
@@ -562,6 +563,16 @@ static void register_list_menu_music(json_t *tools)
 		"List all menu/briefing music tracks defined in music.tbl. "
 		"These are spooled music entries used for briefing, debriefing, and fiction viewer screens. "
 		"Returns each track's name.",
+		json_object());
+}
+
+static void register_list_icon_types(json_t *tools)
+{
+	register_tool(tools, "list_icon_types",
+		"List all briefing icon types (e.g. \"Fighter Wing\", \"Cargo\", \"Capital\", \"Jump Node\"). "
+		"Icon types determine the symbol drawn for an icon on the briefing map. "
+		"Returns the type names in engine order; a type's position in this list is its "
+		"numeric value in the mission file.",
 		json_object());
 }
 
@@ -2395,15 +2406,6 @@ static json_t *handle_coordinate_transform(json_t *arguments)
 // Persona and talking head reference tools
 // ---------------------------------------------------------------------------
 
-static json_t *handle_list_persona_types(json_t * /*arguments*/)
-{
-	json_t *arr = json_array();
-	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
-		json_array_append_new(arr, json_string(Persona_type_names[i]));
-
-	return make_json_tool_result(arr);
-}
-
 static json_t *handle_list_personas(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
@@ -2622,6 +2624,29 @@ static json_t *handle_list_names(const Container &items, GetName get_name)
 		json_array_append_new(arr, json_safe_string(get_name(item)));
 	}
 	return make_json_tool_result(arr);
+}
+
+// Similar to the above, but for arrays.
+template <typename Container, typename GetName>
+static json_t *handle_list_names(const Container &items, const size_t num, GetName get_name)
+{
+	json_t *arr = json_array();
+	for (size_t i = 0; i < num; ++i) {
+		json_array_append_new(arr, json_safe_string(get_name(items[i])));
+	}
+	return make_json_tool_result(arr);
+}
+
+static json_t *handle_list_persona_types(json_t * /*arguments*/)
+{
+	return handle_list_names(Persona_type_names, MAX_PERSONA_TYPES, [](const char *name) { return name; });
+}
+
+static json_t *handle_list_icon_types(json_t * /*arguments*/)
+{
+	// Icon_names is declared without a bound in missionparse.h, so use the
+	// sized-array overload.
+	return handle_list_names(Icon_names, MIN_BRIEF_ICONS, [](const char *name) { return name; });
 }
 
 // Shared handler for flag-listing tools.  The flags[] and descs[] arrays are
@@ -3399,6 +3424,7 @@ const McpToolDef mcp_reference_tool_defs[] = {
 	{ "list_sound_environment_presets", register_list_sound_environment_presets, handle_list_sound_environment_presets, nullptr, false },
 	{ "list_soundtracks", register_list_soundtracks, handle_list_soundtracks, nullptr, false },
 	{ "list_menu_music", register_list_menu_music, handle_list_menu_music, nullptr, false },
+	{ "list_icon_types", register_list_icon_types, handle_list_icon_types, nullptr, false },
 	{ "list_mission_flags", register_list_mission_flags, handle_list_mission_flags, nullptr, false },
 	{ "list_ship_flags", register_list_ship_flags, handle_list_ship_flags, nullptr, false },
 	{ "list_wing_flags", register_list_wing_flags, handle_list_wing_flags, nullptr, false },
