@@ -377,6 +377,104 @@ def register(suite, client):
                 except Exception:
                     break
 
+    # ----- Briefing Stages -----
+
+    def test_briefing_stages_crud():
+        try:
+            r = client.call_tool("create_briefing_stage", {
+                "text": "Brief stage 1: The situation",
+                "voice_filename": "test_brief.wav",
+                "camera_time": 750,
+            })
+            assert_success(r)
+
+            # Default copy_from_previous inherits camera settings from stage 1
+            r = client.call_tool("create_briefing_stage", {
+                "text": "Brief stage 2: The plan",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("camera_time"), 750,
+                "stage 2 should inherit camera_time from stage 1")
+
+            # copy_from_previous=False gets the engine defaults
+            r = client.call_tool("create_briefing_stage", {
+                "text": "Brief stage 3: The details",
+                "copy_from_previous": False,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("camera_time"), 500,
+                "stage 3 should have the default camera_time")
+
+            r = client.call_tool("list_briefing_stages")
+            assert_success(r)
+            d = tool_data(r)
+            assert_is_list(d)
+            assert_true(len(d) >= 3, f"Expected at least 3 stages, got {len(d)}")
+
+            r = client.call_tool("get_briefing_stage", {"index": 1})
+            assert_success(r)
+            d = tool_data(r)
+            assert_in("The situation", d.get("text", ""), "brief text")
+
+            # Grid settings round-trip
+            r = client.call_tool("update_briefing_stage", {
+                "index": 2,
+                "draw_grid": False,
+                "grid_color": {"red": 10, "green": 20, "blue": 30, "alpha": 40},
+            })
+            assert_success(r)
+            r = client.call_tool("get_briefing_stage", {"index": 2})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("draw_grid"), False, "draw_grid round-trip")
+            gc = d.get("grid_color", {})
+            assert_equal((gc.get("red"), gc.get("green"), gc.get("blue"), gc.get("alpha")),
+                (10, 20, 30, 40), "grid_color round-trip")
+
+            # Cut flags round-trip
+            r = client.call_tool("update_briefing_stage", {
+                "index": 3,
+                "cut_from_previous": True,
+            })
+            assert_success(r)
+            r = client.call_tool("get_briefing_stage", {"index": 3})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("cut_from_previous"), True, "cut_from_previous round-trip")
+            assert_equal(d.get("cut_to_next"), False, "cut_to_next untouched")
+
+            # Filename preservation: update stage 1's text without mentioning
+            # voice_filename, and verify voice_filename survives.
+            r = client.call_tool("update_briefing_stage", {
+                "index": 1,
+                "text": "Brief stage 1: The situation (updated)"
+            })
+            assert_success(r)
+            r = client.call_tool("get_briefing_stage", {"index": 1})
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("voice_filename"), "test_brief.wav",
+                "voice_filename should be preserved across update")
+
+            r = client.call_tool("swap_briefing_stages", {"index_a": 1, "index_b": 2})
+            assert_success(r)
+
+            r = client.call_tool("move_briefing_stage", {"from_index": 2, "to_index": 1})
+            assert_success(r)
+
+        finally:
+            for _ in range(5):
+                try:
+                    r = client.call_tool("list_briefing_stages")
+                    d = tool_data(r)
+                    if not d:
+                        break
+                    client.call_tool("delete_briefing_stage", {"index": len(d)})
+                except Exception:
+                    break
+
     # ----- Debriefing Stages -----
 
     def test_debriefing_stages_crud():
@@ -891,6 +989,7 @@ def register(suite, client):
     suite.add("crud_goals", test_goals_crud)
     suite.add("crud_cmd_brief_stages", test_cmd_brief_stages_crud)
     suite.add("crud_fiction_viewer_stages", test_fiction_viewer_stages_crud)
+    suite.add("crud_briefing_stages", test_briefing_stages_crud)
     suite.add("crud_debriefing_stages", test_debriefing_stages_crud)
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
