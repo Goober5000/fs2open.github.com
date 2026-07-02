@@ -246,13 +246,8 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 			changed = true;
 		}
 	}
-	if (formula.has_value() && goal.formula != *formula) {
-		if (goal.formula >= 0)
-			free_sexp2(goal.formula);
-		goal.formula = *formula;
+	if (formula.has_value() && replace_cue(goal.formula, *formula))
 		changed = true;
-		mcp_sexp_forest_mark_dirty({ *formula });
-	}
 	if (message && strcmp(goal.message.c_str(), message) != 0) {
 		goal.message = message;
 		changed = true;
@@ -327,8 +322,7 @@ static void handle_delete_goal(json_t *input, McpToolRequest *req)
 	mcp_sexp_forest_mark_dirty();
 
 	// Free the SEXP formula
-	if (Mission_goals[idx].formula >= 0)
-		free_sexp2(Mission_goals[idx].formula);
+	free_cue(Mission_goals[idx].formula);
 
 	Mission_goals.erase(Mission_goals.begin() + idx);
 
