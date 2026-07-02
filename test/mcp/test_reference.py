@@ -222,6 +222,15 @@ def register(suite, client):
         d = tool_data(r)
         assert_non_empty_list(d, "persona types should not be empty")
 
+    def test_list_icon_types():
+        r = client.call_tool("list_icon_types")
+        assert_success(r)
+        d = tool_data(r)
+        assert_non_empty_list(d, "icon types should not be empty")
+        # Icon_names is a hardcoded engine table; spot-check a few well-known entries
+        assert_in("Fighter", d, "icon types should include Fighter")
+        assert_in("Jump Node", d, "icon types should include Jump Node")
+
     def test_list_personas():
         r = client.call_tool("list_personas")
         assert_success(r)
@@ -466,6 +475,7 @@ def register(suite, client):
         ("reference_list_intel_entries", test_list_intel_entries),
         ("reference_get_intel_entry", test_get_intel_entry),
         ("reference_list_persona_types", test_list_persona_types),
+        ("reference_list_icon_types", test_list_icon_types),
         ("reference_list_personas", test_list_personas),
         ("reference_list_talking_heads", test_list_talking_heads),
         ("reference_list_fonts", test_list_fonts),
