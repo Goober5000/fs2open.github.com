@@ -403,13 +403,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	bool changed = false;
 
-	if (formula.has_value() && evt.formula != *formula) {
-		if (evt.formula >= 0)
-			free_sexp2(evt.formula);
-		evt.formula = *formula;
+	if (formula.has_value() && replace_cue(evt.formula, *formula))
 		changed = true;
-		mcp_sexp_forest_mark_dirty({ *formula });
-	}
 	if (repeat_count.has_value() && evt.repeat_count != *repeat_count) {
 		evt.repeat_count = *repeat_count;
 		changed = true;
@@ -488,8 +483,7 @@ static void handle_delete_event(json_t *input, McpToolRequest *req)
 	mcp_sexp_forest_mark_dirty();
 
 	// Free the SEXP formula
-	if (Mission_events[idx].formula >= 0)
-		free_sexp2(Mission_events[idx].formula);
+	free_cue(Mission_events[idx].formula);
 
 	// Update annotations and remove from vector
 	update_annotation_paths_for_delete(idx);

@@ -185,13 +185,8 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 		strcpy_s(s.background[1], new_bg1024);
 		changed = true;
 	}
-	if (new_formula.has_value() && s.formula != *new_formula) {
-		if (s.formula >= 0)
-			free_sexp2(s.formula);
-		s.formula = *new_formula;
+	if (new_formula.has_value() && replace_cue(s.formula, *new_formula))
 		changed = true;
-		mcp_sexp_forest_mark_dirty({ *new_formula });
-	}
 
 	if (changed)
 		mark_modified("MCP: update fiction viewer stage %d", *index);
@@ -210,9 +205,7 @@ static void handle_delete_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	if (!check_int_range(*index, 1, (int)Fiction_viewer_stages.size(), "index", sink)) return;
 
 	// Free the SEXP formula
-	int formula = Fiction_viewer_stages[*index - 1].formula;
-	if (formula >= 0)
-		free_sexp2(formula);
+	free_cue(Fiction_viewer_stages[*index - 1].formula);
 
 	Fiction_viewer_stages.erase(Fiction_viewer_stages.begin() + *index - 1);
 

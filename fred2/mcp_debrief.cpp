@@ -180,14 +180,8 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 		s.recommendation_text = new_rec_text;
 		changed = true;
 	}
-	if (new_formula.has_value() && s.formula != *new_formula) {
-		int old_formula = s.formula;
-		if (old_formula >= 0)
-			free_sexp2(old_formula);
-		s.formula = *new_formula;
-		mcp_sexp_forest_mark_dirty({ s.formula });
+	if (new_formula.has_value() && replace_cue(s.formula, *new_formula))
 		changed = true;
-	}
 
 	if (changed)
 		mark_modified("MCP: update debriefing stage %d", *index);
@@ -208,9 +202,7 @@ static void handle_delete_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
-	int formula = db->stages[*index - 1].formula;
-	if (formula >= 0)
-		free_sexp2(formula);
+	free_cue(db->stages[*index - 1].formula);
 
 	array_remove_slot(db->stages, db->num_stages, *index - 1);
 

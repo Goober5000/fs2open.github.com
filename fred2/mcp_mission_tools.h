@@ -89,6 +89,12 @@ SCP_string anchor_to_name(anchor_t anchor);
 // held new_cue (no-op).  Callers can use this to gate mark_modified.
 bool replace_cue(int &cue_slot, int new_cue);
 
+// Free a SEXP cue/formula root, skipping unset (-1) slots and the shared
+// Locked_sexp_true/false sentinels (which must never be freed).  Use this at
+// delete sites that free a formula without replacing it.  Returns true if a
+// node was actually freed.
+bool free_cue(int cue);
+
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
 struct MoveSwapConfig
