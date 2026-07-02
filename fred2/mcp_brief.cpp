@@ -320,9 +320,7 @@ static void handle_delete_briefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, br->num_stages, "index", sink)) return;
 
-	int formula = br->stages[*index - 1].formula;
-	if (formula >= 0 && formula != Locked_sexp_true && formula != Locked_sexp_false)
-		free_sexp2(formula);
+	free_cue(br->stages[*index - 1].formula);
 
 	array_remove_slot_swap(br->stages, br->num_stages, *index - 1);
 
