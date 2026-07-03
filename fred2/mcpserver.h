@@ -20,9 +20,12 @@ enum class McpToolId {
 
 struct McpToolRequest {
 	McpToolId tool;
+
+	// Tool name or entity name, depending on the tool id.  Mission file paths
+	// travel via input_json and are normalized by the app-tool handler.
 	char filepath[MAX_PATH_LEN];
 
-	// Structured input arguments for MISSION_TOOL calls (incref'd by caller)
+	// Structured input arguments (incref'd by caller); may be null
 	json_t *input_json;
 
 	// Result fields, filled by main thread handler
@@ -46,12 +49,11 @@ bool mcp_server_is_running();
 extern std::atomic<bool> mcp_fred_ready;
 
 // Marshal a tool call to the main MFC thread with a configurable timeout.
-// Heap-allocates the request internally. Returns MCP tool result JSON.
-json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param);
-
-// Overload for MISSION_TOOL: passes tool_name in filepath (no path normalization)
-// and structured JSON arguments via input_json.
-json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t *input_json);
+// Heap-allocates the request internally.  param is copied into req->filepath
+// and holds a tool name or entity name, depending on the tool id; input_json,
+// if non-null, is incref'd and passed as structured arguments.
+// Returns MCP tool result JSON.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param, json_t *input_json = nullptr);
 
 // Called by the UI thread handler after filling results. Signals the
 // completion event and handles cleanup if the caller already timed out.
