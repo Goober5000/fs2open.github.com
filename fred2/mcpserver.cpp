@@ -494,6 +494,12 @@ bool mcp_server_start()
 		nullptr
 	};
 
+	// Populate the eager caches (reference notes, mod info, talking heads)
+	// before mg_start so no worker thread can observe them mid-load.  If
+	// mg_start fails, mcp_server_stop's needs-cleanup path releases them.
+	mcp_reference_tools_init();
+	mcp_needs_cleanup = true;
+
 	mcp_ctx = mg_start(mcp_request_handler, nullptr, options);
 	if (mcp_ctx == nullptr) {
 		Warning(LOCATION, "MCP server failed to start on 127.0.0.1:%d (port may be in use)", Mcp_server_port);
@@ -502,8 +508,6 @@ bool mcp_server_start()
 	mprintf(("MCP server listening on 127.0.0.1:%d\n", Mcp_server_port));
 	mcp_fred_ready.store(true);
 
-	mcp_reference_tools_init();
-	mcp_needs_cleanup = true;
 	return true;
 }
 

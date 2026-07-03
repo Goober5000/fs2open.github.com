@@ -31,6 +31,7 @@
 #include "mcpserver.h"
 #include "mcp_app.h"
 #include "mcp_mission_tools.h"
+#include "mcp_reference_tools.h"
 #include "mcp_sexp_forest.h"
 #include "management.h"
 #include "ship/ship.h"
@@ -754,51 +755,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 	auto *req = reinterpret_cast<McpToolRequest*>(lParam);
 
 	switch (req->tool) {
-	case McpToolId::LOAD_SHIP_MODEL:
-		{
-			// req->filepath is repurposed to hold the ship class name
-			int sip_idx = ship_info_lookup(req->filepath);
-			if (sip_idx < 0) {
-				req->success = false;
-				sprintf(req->result_message,
-					"Ship class not found: %s", req->filepath);
-			} else {
-				int model_num = model_load(&Ship_info[sip_idx], false);
-				if (model_num >= 0) {
-					Ship_info[sip_idx].model_num = model_num;
-					req->success = true;
-					sprintf(req->result_message,
-						"Model loaded for %s", req->filepath);
-				} else {
-					req->success = false;
-					sprintf(req->result_message,
-						"Failed to load model for %s", req->filepath);
-				}
-			}
-		}
-		break;
-
-	case McpToolId::UNLOAD_SHIP_MODEL:
-		{
-			// req->filepath is repurposed to hold the ship class name
-			int sip_idx = ship_info_lookup(req->filepath);
-			if (sip_idx < 0) {
-				req->success = false;
-				sprintf(req->result_message,
-					"Ship class not found: %s", req->filepath);
-			} else if (Ship_info[sip_idx].model_num >= 0) {
-				model_unload(Ship_info[sip_idx].model_num);
-				req->success = true;
-				sprintf(req->result_message,
-					"Model unloaded for %s", req->filepath);
-			} else {
-				req->success = true;
-				sprintf(req->result_message,
-					"Model was not loaded for %s", req->filepath);
-			}
-		}
-		break;
-
 	case McpToolId::REBUILD_SEXP_FOREST:
 		mcp_sexp_forest_rebuild();
 		req->success = true;
@@ -822,6 +778,10 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 
 	case McpToolId::MISSION_TOOL:
 		mcp_handle_mission_tool(req->filepath, req->input_json, req);
+		break;
+
+	case McpToolId::REFERENCE_TOOL:
+		mcp_handle_reference_tool_on_main_thread(req->filepath, req->input_json, req);
 		break;
 
 	default:
