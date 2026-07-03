@@ -57,13 +57,24 @@
 // of table data while the server is active), a reader lock must be added to
 // all reference tool handlers.
 //
-// Lazy-init caches (model_details_cache, scripting_api_cache,
-// reference_notes_cache) are the exceptions: they are populated on first
-// access from worker threads and are protected by their respective mutexes.
+// Data that does NOT satisfy the startup-static invariant must never be read
+// from a worker thread:
+//  - polymodel data can be freed by the main thread at any time (mission load
+//    calls model_free_all), so model reads are marshaled via REFERENCE_TOOL;
+//  - cfile has global state the main thread uses freely (mission save/load,
+//    model/texture loads), so cfile reads either happen eagerly in
+//    mcp_reference_tools_init() (main thread, before the server starts) or
+//    are marshaled via REFERENCE_TOOL (list_missions, get_root_paths);
+//  - the Messages vector reallocates when mission messages are added, so
+//    the builtin talking heads are snapshotted at init.
 //
-// cfile operations (cfopen, cf_get_file_list, cf_create_default_path_string)
-// are also called from worker threads and are serialized via
-// cfile_access_mutex, defined near load_config_file below.
+// Shared JSON caches (model_details_cache, dockpoints_cache,
+// scripting_api_cache, reference_notes_cache) are immutable once populated
+// and may be READ concurrently, but jansson refcounts are NOT atomic: never
+// json_incref/json_copy a shared subtree into a response from a worker
+// thread -- use json_deep_copy, which only reads the source.  Cache writes
+// happen at init or on the main thread, with the map structure guarded by
+// its mutex where workers also probe it.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -121,7 +132,7 @@ static const SCP_vector<const char*> subtype_enum_values = { "primary", "seconda
 // Tool schema registration
 // ---------------------------------------------------------------------------
 
-static json_t *load_reference_notes();
+static json_t *get_reference_notes();
 
 void mcp_register_reference_tools(json_t *tools)
 {
@@ -236,7 +247,7 @@ void mcp_register_reference_tools(json_t *tools)
 
 		// Build category enum dynamically from the reference notes file
 		SCP_vector<const char *> category_values;
-		json_t *notes_for_categories = load_reference_notes();
+		json_t *notes_for_categories = get_reference_notes();
 		if (notes_for_categories && json_is_array(notes_for_categories)) {
 			size_t idx;
 			json_t *entry;
@@ -1510,30 +1521,24 @@ static json_t *handle_get_sexp_operator(json_t *arguments)
 // Config file loading helper
 // ---------------------------------------------------------------------------
 
-// Mutex protecting cfile operations (cf_exists_full, cfopen, cfread, cfclose,
-// cf_get_file_list, cf_create_default_path_string) called from mongoose
-// worker threads.  The cfile subsystem uses global state that is not
-// documented as thread-safe.
-static std::mutex cfile_access_mutex;
-
 // Load a file from the mod's data/config directory.  If try_defaults is true,
 // falls back to the built-in default embedded in the executable.  Returns the
 // file content as a string, or an empty string on failure.
+//
+// Main thread only (cfile has global state the main thread uses freely) --
+// called from mcp_reference_tools_init() before the server starts.
 static SCP_string load_config_file(const char *filename, bool try_defaults)
 {
 	SCP_string content;
 
-	{
-		std::lock_guard<std::mutex> lock(cfile_access_mutex);
-		if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
-			CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
-			if (fp) {
-				int len = cfilelength(fp);
-				content.resize(len);		// expand to fit expected data
-				int read_len = cfread(content.data(), 1, len, fp);
-				content.resize(read_len);	// trim trailing null bytes
-				cfclose(fp);
-			}
+	if (cf_exists_full(filename, CF_TYPE_CONFIG)) {
+		CFILE *fp = cfopen(filename, "rt", CF_TYPE_CONFIG);
+		if (fp) {
+			int len = cfilelength(fp);
+			content.resize(len);		// expand to fit expected data
+			int read_len = cfread(content.data(), 1, len, fp);
+			content.resize(read_len);	// trim trailing null bytes
+			cfclose(fp);
 		}
 	}
 
@@ -1550,52 +1555,49 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 // get_mod_info — mod context for AI agents
 // ---------------------------------------------------------------------------
 
+// Loaded eagerly by mcp_reference_tools_init(); immutable afterwards.
+static SCP_string mod_info_content;
+
 static json_t *handle_get_mod_info()
 {
-	SCP_string content = load_config_file("MOD_INFO.md", false);
-	if (content.empty())
+	if (mod_info_content.empty())
 		return make_tool_result(
 			"No MOD_INFO.md was provided for this mod. No mod-specific context is available.");
 
-	return make_tool_result(content.c_str());
+	return make_tool_result(mod_info_content.c_str());
 }
 
 // ---------------------------------------------------------------------------
 // Reference notes — domain knowledge for AI agents
 // ---------------------------------------------------------------------------
 
+// Loaded eagerly by mcp_reference_tools_init() on the main thread; immutable
+// afterwards.  Workers may read the tree, but must copy values out with
+// json_deep_copy (see thread safety note at the top of this file).
 static json_t *reference_notes_cache = nullptr;
 
-// Returns a borrowed reference to the cached notes array.
-// Caller must NOT call json_decref on the result.
-// Protected by cfile_access_mutex to prevent concurrent first-call races
-// (load_config_file also acquires this mutex, but std::mutex is not
-// recursive, so we must not hold it across that call -- instead we
-// load outside the lock and then write the cache under the lock).
-static json_t *load_reference_notes()
+// Parse the notes file into the cache.  Main thread only (cfile), called
+// once from mcp_reference_tools_init().
+static void load_reference_notes()
 {
-	{
-		std::lock_guard<std::mutex> lock(cfile_access_mutex);
-		if (reference_notes_cache)
-			return reference_notes_cache;
-	}
-
 	SCP_string content = load_config_file("mcp_reference_notes.json", true);
 	if (content.empty())
-		return nullptr;
+		return;
 
 	json_error_t err;
 	json_t *root = json_loads(content.c_str(), 0, &err);
 	if (!root) {
 		mprintf(("MCP: Failed to parse mcp_reference_notes.json: %s (line %d)\n", err.text, err.line));
-		return nullptr;
+		return;
 	}
 
-	std::lock_guard<std::mutex> lock(cfile_access_mutex);
-	if (!reference_notes_cache)
-		reference_notes_cache = root;
-	else
-		json_decref(root);  // another thread beat us
+	reference_notes_cache = root;
+}
+
+// Returns a borrowed reference to the cached notes array (or nullptr if the
+// file was missing or malformed).  Caller must NOT call json_decref on it.
+static json_t *get_reference_notes()
+{
 	return reference_notes_cache;
 }
 
@@ -1608,7 +1610,7 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	auto filter_search = get_optional_string(arguments, "search", sink);
 	if (err) return err;
 
-	json_t *notes = load_reference_notes();
+	json_t *notes = get_reference_notes();
 	if (!notes)
 		return make_tool_result("Failed to load reference notes.", true);
 
@@ -1637,9 +1639,11 @@ static json_t *handle_list_reference_notes(json_t *arguments)
 	for (const auto &match : matches) {
 		json_t *e = json_array_get(notes, match.first);
 		json_t *item = json_object();
-		json_object_set_new(item, "category", json_copy(json_object_get(e, "category")));
-		json_object_set_new(item, "topic", json_copy(json_object_get(e, "topic")));
-		json_object_set_new(item, "description", json_copy(json_object_get(e, "description")));
+		// json_deep_copy, not json_copy: the notes tree is shared across
+		// worker threads and jansson refcounts are not atomic
+		json_object_set_new(item, "category", json_deep_copy(json_object_get(e, "category")));
+		json_object_set_new(item, "topic", json_deep_copy(json_object_get(e, "topic")));
+		json_object_set_new(item, "description", json_deep_copy(json_object_get(e, "description")));
 		json_array_append_new(arr, item);
 	}
 	return make_json_tool_result(arr);
@@ -1652,7 +1656,7 @@ static json_t *handle_get_reference_note(json_t *arguments)
 	auto topic = get_required_string(arguments, "topic", sink, true);
 	if (!topic) return err;
 
-	json_t *notes = load_reference_notes();
+	json_t *notes = get_reference_notes();
 	if (!notes)
 		return make_tool_result("Failed to load reference notes.", true);
 
@@ -1666,10 +1670,12 @@ static json_t *handle_get_reference_note(json_t *arguments)
 		const char *t = json_string_value(json_object_get(entry, "topic"));
 		if (t && stricmp(topic, t) == 0) {
 			json_t *obj = json_object();
-			json_object_set_new(obj, "topic", json_copy(json_object_get(entry, "topic")));
-			json_object_set_new(obj, "description", json_copy(json_object_get(entry, "description")));
-			json_object_set_new(obj, "see_also", json_copy(json_object_get(entry, "see_also")));
-			json_object_set_new(obj, "text", json_copy(json_object_get(entry, "text")));
+			// json_deep_copy, not json_copy: a shallow copy of see_also would
+			// incref its members, racing with other workers (non-atomic refcounts)
+			json_object_set_new(obj, "topic", json_deep_copy(json_object_get(entry, "topic")));
+			json_object_set_new(obj, "description", json_deep_copy(json_object_get(entry, "description")));
+			json_object_set_new(obj, "see_also", json_deep_copy(json_object_get(entry, "see_also")));
+			json_object_set_new(obj, "text", json_deep_copy(json_object_get(entry, "text")));
 			return make_json_tool_result(obj);
 		}
 	}
@@ -1758,63 +1764,89 @@ static json_t *handle_get_sexp_return_type(json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
-// get_ship_class_model_details — requires model loading on main thread
+// get_ship_class_model_details / list_ship_class_dockpoints
+//
+// Polymodel data may be freed by the main thread at any time (mission load
+// calls model_free_all), so everything that touches a polymodel runs on the
+// main thread: the worker-side handlers probe the JSON cache and otherwise
+// marshal the call via REFERENCE_TOOL.  The main-thread handlers load the
+// model if needed, build the JSON, cache it, and unload the model again --
+// all within one marshaled call, so a worker timeout cannot orphan a load.
 // ---------------------------------------------------------------------------
 
 extern void find_adjusted_dockpoint_info(vec3d *global_dock_point, matrix *global_dock_orient, object *objp, polymodel *pm, int submodel, int dock_index);
 
-static json_t *handle_get_ship_class_model_details(json_t *arguments)
+// Build one docking-bay entry: name, dock_types, position, normal, and
+// optionally the spline path names.  Main thread only (reads polymodel).
+static json_t *build_dock_entry_json(polymodel *pm, int d, bool include_spline_paths)
 {
-	json_t *err = nullptr;
-	McpErrorSink sink(&err);
-	auto name = get_required_string(arguments, "name", sink, true);
-	if (!name) return err;
+	const auto &bay = pm->docking_bays[d];
+	json_t *dock_obj = json_object();
 
-	int sip_idx = ship_info_lookup(name);
-	if (sip_idx < 0)
-		return make_not_found_error("Ship class", name);
+	json_object_set_new(dock_obj, "name", json_safe_string(bay.name));
 
-	// Check cache (use canonical name from Ship_info for consistent keys)
-	const char *canonical_name = Ship_info[sip_idx].name;
-	{
-		std::lock_guard<std::mutex> lock(model_cache_mutex);
-		auto it = model_details_cache.find(canonical_name);
-		if (it != model_details_cache.end())
-			return json_incref(it->second);
+	// Type flags as array of strings
+	json_t *type_arr = json_array();
+	if (bay.type_flags & DOCK_TYPE_CARGO)
+		json_array_append_new(type_arr, json_string("cargo"));
+	if (bay.type_flags & DOCK_TYPE_REARM)
+		json_array_append_new(type_arr, json_string("rearm"));
+	if (bay.type_flags & DOCK_TYPE_GENERIC)
+		json_array_append_new(type_arr, json_string("generic"));
+	json_object_set_new(dock_obj, "dock_types", type_arr);
+
+	// Slot position and normal
+	vec3d local_dock_point;
+	matrix local_dock_orient;
+	find_adjusted_dockpoint_info(&local_dock_point, &local_dock_orient, nullptr, pm, -1, d);
+	json_object_set_new(dock_obj, "position", build_vec3d_json(local_dock_point));
+	json_object_set_new(dock_obj, "normal", build_vec3d_json(local_dock_orient.vec.uvec));
+
+	if (include_spline_paths) {
+		json_t *spline_names = json_array();
+		for (int sp = 0; sp < bay.num_spline_paths; sp++) {
+			int spline_idx = bay.splines[sp];
+			if (spline_idx >= 0 && spline_idx < pm->n_paths)
+				json_array_append_new(spline_names, json_safe_string(pm->paths[spline_idx].name));
+		}
+		json_object_set_new(dock_obj, "path_names", spline_names);
 	}
 
-	// Hold the cache mutex across the entire load-read-cache-unload cycle to
-	// prevent a use-after-free if two threads request the same uncached class:
-	// without this, Thread A could unload the model while Thread B still reads it.
-	std::lock_guard<std::mutex> cache_lock(model_cache_mutex);
+	return dock_obj;
+}
 
-	// Re-check cache — another thread may have populated it while we waited.
-	{
-		auto it = model_details_cache.find(canonical_name);
-		if (it != model_details_cache.end())
-			return json_incref(it->second);
-	}
-
-	// Load the model if not already loaded
-	const auto &sip = Ship_info[sip_idx];
-	bool we_loaded_model = false;
+// Ensure the ship class's model is loaded, returning the polymodel (or null
+// with an error in the sink).  Sets we_loaded so the caller can unload
+// afterwards.  Main thread only.
+static polymodel *main_thread_acquire_model(ship_info &sip, bool &we_loaded, McpErrorSink &sink)
+{
+	we_loaded = false;
 	if (sip.model_num < 0) {
-		json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
-
-		json_t *is_err = json_object_get(load_result, "isError");
-		if (is_err && json_is_true(is_err))
-			return load_result;
-		json_decref(load_result);
-
-		if (sip.model_num < 0)
-			return make_tool_result("Model failed to load", true);
-		we_loaded_model = true;
+		int model_num = model_load(&sip, false);
+		if (model_num < 0) {
+			sink.set_error("Failed to load model for %s", sip.name);
+			return nullptr;
+		}
+		sip.model_num = model_num;
+		we_loaded = true;
 	}
 
-	// Model is now loaded — read polymodel data
 	polymodel *pm = model_get(sip.model_num);
-	if (!pm)
-		return make_tool_result("Model data unavailable", true);
+	if (!pm) {
+		sink.set_error("Model data unavailable for %s", sip.name);
+		if (we_loaded) {
+			model_unload(sip.model_num);
+			we_loaded = false;
+		}
+	}
+	return pm;
+}
+
+// Build the full model-details JSON for a ship class whose model is loaded.
+// Main thread only (reads polymodel).
+static json_t *build_model_details_json(int sip_idx, polymodel *pm)
+{
+	const auto &sip = Ship_info[sip_idx];
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_safe_string(sip.name));
@@ -1868,40 +1900,8 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 	// Docking bays
 	{
 		json_t *docks = json_array();
-		for (int d = 0; d < pm->n_docks; d++) {
-			const auto &bay = pm->docking_bays[d];
-			json_t *dock_obj = json_object();
-
-			json_object_set_new(dock_obj, "name", json_safe_string(bay.name));
-
-			// Type flags as array of strings
-			json_t *type_arr = json_array();
-			if (bay.type_flags & DOCK_TYPE_CARGO)
-				json_array_append_new(type_arr, json_string("cargo"));
-			if (bay.type_flags & DOCK_TYPE_REARM)
-				json_array_append_new(type_arr, json_string("rearm"));
-			if (bay.type_flags & DOCK_TYPE_GENERIC)
-				json_array_append_new(type_arr, json_string("generic"));
-			json_object_set_new(dock_obj, "dock_types", type_arr);
-
-			// Slot position and normal
-			vec3d local_dock_point;
-			matrix local_dock_orient;
-			find_adjusted_dockpoint_info(&local_dock_point, &local_dock_orient, nullptr, pm, -1, d);
-			json_object_set_new(dock_obj, "position", build_vec3d_json(local_dock_point));
-			json_object_set_new(dock_obj, "normal", build_vec3d_json(local_dock_orient.vec.uvec));
-
-			// Spline path names
-			json_t *spline_names = json_array();
-			for (int sp = 0; sp < bay.num_spline_paths; sp++) {
-				int spline_idx = bay.splines[sp];
-				if (spline_idx >= 0 && spline_idx < pm->n_paths)
-					json_array_append_new(spline_names, json_safe_string(pm->paths[spline_idx].name));
-			}
-			json_object_set_new(dock_obj, "path_names", spline_names);
-
-			json_array_append_new(docks, dock_obj);
-		}
+		for (int d = 0; d < pm->n_docks; d++)
+			json_array_append_new(docks, build_dock_entry_json(pm, d, true));
 		json_object_set_new(obj, "docking_bays", docks);
 	}
 
@@ -2047,19 +2047,84 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 		json_object_set_new(obj, "subsystems", subsys);
 	}
 
-	json_t *result = make_json_tool_result(obj);
+	return obj;
+}
 
-	// Cache the result for future calls (cache mutex already held)
-	if (model_details_cache.find(canonical_name) == model_details_cache.end())
-		model_details_cache.emplace(SCP_string(canonical_name), json_incref(result));
+// Main-thread handler: load the model if needed, build the details JSON,
+// cache it, and unload the model again.
+static void main_thread_get_model_details(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	auto name = get_required_string(input, "name", sink, true);
+	if (!name) return;
 
-	// Unload the model if we were the ones who loaded it
-	if (we_loaded_model) {
-		json_t *unload_result = mcp_execute_on_main_thread(McpToolId::UNLOAD_SHIP_MODEL, canonical_name);
-		json_decref(unload_result);
+	int sip_idx = ship_info_lookup(name);
+	if (sip_idx < 0) {
+		set_not_found_error(sink, "Ship class", name);
+		return;
 	}
 
-	return result;
+	auto &sip = Ship_info[sip_idx];
+	const char *canonical_name = sip.name;
+
+	// Re-check the cache -- another request may have populated it while this
+	// one was queued.
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		auto it = model_details_cache.find(canonical_name);
+		if (it != model_details_cache.end()) {
+			req->result_json = json_deep_copy(it->second);
+			req->success = true;
+			return;
+		}
+	}
+
+	bool we_loaded_model;
+	polymodel *pm = main_thread_acquire_model(sip, we_loaded_model, sink);
+	if (!pm) return;
+
+	json_t *result = make_json_tool_result(build_model_details_json(sip_idx, pm));
+
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		model_details_cache.emplace(SCP_string(canonical_name), json_incref(result));
+	}
+
+	// Unload the model if we were the ones who loaded it (model_unload also
+	// resets sip.model_num to -1)
+	if (we_loaded_model)
+		model_unload(pm->id);
+
+	req->result_json = result;
+	req->success = true;
+}
+
+// Worker-side handler: probe the cache, otherwise marshal to the main thread.
+// Reading polymodel data here would race with model_free_all() on the main
+// thread during mission load.
+static json_t *handle_get_ship_class_model_details(json_t *arguments)
+{
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto name = get_required_string(arguments, "name", sink, true);
+	if (!name) return err;
+
+	int sip_idx = ship_info_lookup(name);
+	if (sip_idx < 0)
+		return make_not_found_error("Ship class", name);
+
+	// Check cache (use canonical name from Ship_info for consistent keys).
+	// Deep-copy the hit: jansson refcounts are not atomic, so a shared cache
+	// tree must not be incref'd from a worker thread.
+	const char *canonical_name = Ship_info[sip_idx].name;
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		auto it = model_details_cache.find(canonical_name);
+		if (it != model_details_cache.end())
+			return json_deep_copy(it->second);
+	}
+
+	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "get_ship_class_model_details", arguments);
 }
 
 // ---------------------------------------------------------------------------
@@ -2069,6 +2134,58 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 // don't need a second tool call.
 // ---------------------------------------------------------------------------
 
+// Main-thread handler: load the model if needed, build the dockpoint JSON,
+// cache it, and unload the model again.
+static void main_thread_list_dockpoints(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	auto name = get_required_string(input, "ship_class", sink, true);
+	if (!name) return;
+
+	int sip_idx = ship_info_lookup(name);
+	if (sip_idx < 0) {
+		set_not_found_error(sink, "Ship class", name);
+		return;
+	}
+
+	auto &sip = Ship_info[sip_idx];
+	const char *canonical_name = sip.name;
+
+	// Re-check the cache -- another request may have populated it while this
+	// one was queued.
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		auto it = dockpoints_cache.find(canonical_name);
+		if (it != dockpoints_cache.end()) {
+			req->result_json = json_deep_copy(it->second);
+			req->success = true;
+			return;
+		}
+	}
+
+	bool we_loaded_model;
+	polymodel *pm = main_thread_acquire_model(sip, we_loaded_model, sink);
+	if (!pm) return;
+
+	json_t *arr = json_array();
+	for (int d = 0; d < pm->n_docks; d++)
+		json_array_append_new(arr, build_dock_entry_json(pm, d, false));
+
+	json_t *result = make_json_tool_result(arr);
+
+	{
+		std::lock_guard<std::mutex> lock(model_cache_mutex);
+		dockpoints_cache.emplace(SCP_string(canonical_name), json_incref(result));
+	}
+
+	if (we_loaded_model)
+		model_unload(pm->id);
+
+	req->result_json = result;
+	req->success = true;
+}
+
+// Worker-side handler: probe the cache, otherwise marshal to the main thread.
 static json_t *handle_list_ship_class_dockpoints(json_t *arguments)
 {
 	json_t *err = nullptr;
@@ -2080,83 +2197,17 @@ static json_t *handle_list_ship_class_dockpoints(json_t *arguments)
 	if (sip_idx < 0)
 		return make_not_found_error("Ship class", name);
 
-	// Check cache (use canonical name from Ship_info for consistent keys)
+	// Deep-copy the hit: jansson refcounts are not atomic (see thread safety
+	// note at the top of this file).
 	const char *canonical_name = Ship_info[sip_idx].name;
 	{
 		std::lock_guard<std::mutex> lock(model_cache_mutex);
 		auto it = dockpoints_cache.find(canonical_name);
 		if (it != dockpoints_cache.end())
-			return json_incref(it->second);
+			return json_deep_copy(it->second);
 	}
 
-	// Hold the model cache mutex across the entire load-read-cache-unload cycle
-	// to prevent a use-after-free if two threads request the same uncached class:
-	// without this, Thread A could unload the model while Thread B still reads it.
-	// Also serializes with get_ship_class_model_details, which may load/unload
-	// the same polymodel.
-	std::lock_guard<std::mutex> cache_lock(model_cache_mutex);
-
-	// Re-check cache — another thread may have populated it while we waited.
-	{
-		auto it = dockpoints_cache.find(canonical_name);
-		if (it != dockpoints_cache.end())
-			return json_incref(it->second);
-	}
-
-	const auto &sip = Ship_info[sip_idx];
-	bool we_loaded_model = false;
-	if (sip.model_num < 0) {
-		json_t *load_result = mcp_execute_on_main_thread(McpToolId::LOAD_SHIP_MODEL, name);
-		json_t *is_err = json_object_get(load_result, "isError");
-		if (is_err && json_is_true(is_err))
-			return load_result;
-		json_decref(load_result);
-		if (sip.model_num < 0)
-			return make_tool_result("Model failed to load", true);
-		we_loaded_model = true;
-	}
-
-	polymodel *pm = model_get(sip.model_num);
-	if (!pm)
-		return make_tool_result("Model data unavailable", true);
-
-	json_t *arr = json_array();
-	for (int d = 0; d < pm->n_docks; d++) {
-		const auto &bay = pm->docking_bays[d];
-		json_t *entry = json_object();
-		json_object_set_new(entry, "name", json_safe_string(bay.name));
-
-		json_t *type_arr = json_array();
-		if (bay.type_flags & DOCK_TYPE_CARGO)
-			json_array_append_new(type_arr, json_string("cargo"));
-		if (bay.type_flags & DOCK_TYPE_REARM)
-			json_array_append_new(type_arr, json_string("rearm"));
-		if (bay.type_flags & DOCK_TYPE_GENERIC)
-			json_array_append_new(type_arr, json_string("generic"));
-		json_object_set_new(entry, "dock_types", type_arr);
-
-		// Slot position and normal (same source as get_ship_class_model_details).
-		vec3d local_dock_point;
-		matrix local_dock_orient;
-		find_adjusted_dockpoint_info(&local_dock_point, &local_dock_orient, nullptr, pm, -1, d);
-		json_object_set_new(entry, "position", build_vec3d_json(local_dock_point));
-		json_object_set_new(entry, "normal", build_vec3d_json(local_dock_orient.vec.uvec));
-
-		json_array_append_new(arr, entry);
-	}
-
-	json_t *result = make_json_tool_result(arr);
-
-	// Cache the result for future calls (cache mutex already held)
-	if (dockpoints_cache.find(canonical_name) == dockpoints_cache.end())
-		dockpoints_cache.emplace(SCP_string(canonical_name), json_incref(result));
-
-	if (we_loaded_model) {
-		json_t *unload_result = mcp_execute_on_main_thread(McpToolId::UNLOAD_SHIP_MODEL, canonical_name);
-		json_decref(unload_result);
-	}
-
-	return result;
+	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "list_ship_class_dockpoints", arguments);
 }
 
 // ---------------------------------------------------------------------------
@@ -2326,10 +2377,17 @@ static json_t *handle_list_personas()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_talking_heads()
+// Snapshotted by mcp_reference_tools_init() on the main thread; immutable
+// afterwards.  The head list only depends on startup-static data, but it is
+// read out of the Messages vector, which REALLOCATES when mission messages
+// are added on the main thread -- so workers must not walk Messages directly.
+static SCP_vector<SCP_string> talking_heads_snapshot;
+
+// Collect unique head names, matching event_editor::OnInitDialog() logic.
+// Main thread only, called once from mcp_reference_tools_init().
+static void snapshot_talking_heads()
 {
-	// Collect unique head names, matching event_editor::OnInitDialog() logic
-	SCP_vector<SCP_string> heads;
+	auto &heads = talking_heads_snapshot;
 	auto maybe_add = [&](const char *name) {
 		if (!SCP_vector_contains_lcase(heads, name))
 			heads.push_back(name);
@@ -2356,9 +2414,12 @@ static json_t *handle_list_talking_heads()
 	for (const auto &h : Custom_head_anis) {
 		maybe_add(h.c_str());
 	}
+}
 
+static json_t *handle_list_talking_heads()
+{
 	json_t *arr = json_array();
-	for (const auto &h : heads)
+	for (const auto &h : talking_heads_snapshot)
 		json_array_append_new(arr, json_safe_string(h.c_str()));
 
 	return make_json_tool_result(arr);
@@ -2700,8 +2761,10 @@ static json_t *handle_get_scripting_element(json_t *arguments)
 		const char *el_name = json_string_value(json_object_get(el, "name"));
 		const char *el_short = json_string_value(json_object_get(el, "shortName"));
 
+		// json_deep_copy, not json_incref: the doc tree is shared across
+		// worker threads and jansson refcounts are not atomic
 		if ((el_name && !stricmp(name, el_name)) || (el_short && el_short[0] && !stricmp(name, el_short)))
-			return make_json_tool_result(json_incref(el));
+			return make_json_tool_result(json_deep_copy(el));
 	}
 
 	return make_not_found_error("Scripting element", name);
@@ -2838,8 +2901,9 @@ static json_t *handle_list_scripting_hooks(json_t *arguments)
 		json_t *action;
 		json_array_foreach(actions, idx, action) {
 			const char *name = json_string_value(json_object_get(action, "name"));
+			// json_deep_copy, not json_incref: shared doc tree, non-atomic refcounts
 			if (name && stricmp(filter_name, name) == 0)
-				return make_json_tool_result(json_incref(action));
+				return make_json_tool_result(json_deep_copy(action));
 		}
 		return make_not_found_error("Scripting hook", filter_name);
 	}
@@ -2936,7 +3000,9 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 		for (const auto &match : matches) {
 			json_t *item = json_object();
 			json_object_set_new(item, "name", json_string(match.first));
-			json_object_set_new(item, "value", json_copy(json_object_get(enums, match.first)));
+			// json_deep_copy, not json_copy: a shallow copy would incref the
+			// shared doc tree's members (non-atomic refcounts)
+			json_object_set_new(item, "value", json_deep_copy(json_object_get(enums, match.first)));
 			json_array_append_new(arr, item);
 		}
 		return make_json_tool_result(arr);
@@ -2947,7 +3013,8 @@ static json_t *handle_list_scripting_enums(json_t *arguments)
 	const char *key;
 	json_t *value;
 	json_object_foreach(enums, key, value) {
-		json_object_set_new(result, key, json_incref(value));
+		// json_deep_copy, not json_incref: shared doc tree, non-atomic refcounts
+		json_object_set_new(result, key, json_deep_copy(value));
 	}
 
 	return make_json_tool_result(result);
@@ -2967,24 +3034,29 @@ static json_t *handle_get_scripting_misc(json_t *arguments)
 	if (!data)
 		return make_tool_result(true, "Unknown section '%s'. Valid values: conditions, options, globalVars.", section);
 
-	return make_json_tool_result(json_incref(data));
+	// json_deep_copy, not json_incref: shared doc tree, non-atomic refcounts
+	return make_json_tool_result(json_deep_copy(data));
 }
 
 // ---------------------------------------------------------------------------
 // Mission file listing
+//
+// cf_* functions read cfile global state that the main thread also uses
+// freely (mission save/load, model/texture loads), so these tools marshal to
+// the main thread rather than racing with it.  The listing must stay live
+// (missions are saved while the server runs), so it cannot be snapshotted
+// at init like the other cfile reads.
 // ---------------------------------------------------------------------------
 
-static json_t *handle_list_missions()
+// Main thread only.
+static json_t *main_thread_build_list_missions()
 {
 	SCP_vector<SCP_string> names;
 	SCP_vector<file_list_info> info;
 	SCP_string directory;
 
-	{
-		std::lock_guard<std::mutex> lock(cfile_access_mutex);
-		cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
-		cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
-	}
+	cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
+	cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
 
 	json_t *arr = json_array();
 	for (size_t i = 0; i < names.size(); i++) {
@@ -3014,7 +3086,14 @@ static json_t *handle_list_missions()
 	return make_json_tool_result(obj);
 }
 
-static json_t *handle_get_root_paths()
+// Worker-side handler: marshal to the main thread (cfile access).
+static json_t *handle_list_missions()
+{
+	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "list_missions");
+}
+
+// Main thread only.
+static json_t *main_thread_build_root_paths()
 {
 	// Build an array of all known root paths with their labels.
 	// We query cf_create_default_path_string with specific location flag
@@ -3035,20 +3114,23 @@ static json_t *handle_get_root_paths()
 	json_t *arr = json_array();
 	SCP_string buf;
 
-	{
-		std::lock_guard<std::mutex> lock(cfile_access_mutex);
-		for (auto &q : queries) {
-			buf.clear();
-			if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
-				json_t *entry = json_object();
-				json_object_set_new(entry, "label", json_string(q.label));
-				json_object_set_new(entry, "path", json_safe_string(buf.c_str()));
-				json_array_append_new(arr, entry);
-			}
+	for (auto &q : queries) {
+		buf.clear();
+		if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
+			json_t *entry = json_object();
+			json_object_set_new(entry, "label", json_string(q.label));
+			json_object_set_new(entry, "path", json_safe_string(buf.c_str()));
+			json_array_append_new(arr, entry);
 		}
 	}
 
 	return make_json_tool_result(arr);
+}
+
+// Worker-side handler: marshal to the main thread (cfile access).
+static json_t *handle_get_root_paths()
+{
+	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "get_root_paths");
 }
 
 // ---------------------------------------------------------------------------
@@ -3217,15 +3299,47 @@ json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
 }
 
 // ---------------------------------------------------------------------------
-// Cleanup
+// Main-thread dispatch (REFERENCE_TOOL)
+// ---------------------------------------------------------------------------
+
+void mcp_handle_reference_tool_on_main_thread(const char *tool_name, json_t *input_json, McpToolRequest *req)
+{
+	if (strcmp(tool_name, "get_ship_class_model_details") == 0) {
+		main_thread_get_model_details(input_json, req);
+	} else if (strcmp(tool_name, "list_ship_class_dockpoints") == 0) {
+		main_thread_list_dockpoints(input_json, req);
+	} else if (strcmp(tool_name, "list_missions") == 0) {
+		req->result_json = main_thread_build_list_missions();
+		req->success = true;
+	} else if (strcmp(tool_name, "get_root_paths") == 0) {
+		req->result_json = main_thread_build_root_paths();
+		req->success = true;
+	} else {
+		McpErrorSink sink(req);
+		sink.set_error("Unknown main-thread reference tool: %s", tool_name);
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Init / cleanup
 // ---------------------------------------------------------------------------
 
 void mcp_reference_tools_init()
 {
+	// Runs on the main thread before mg_start(), so no worker can observe
+	// these caches mid-load.  Everything that would otherwise read cfile or
+	// the Messages vector from a worker thread is loaded eagerly here.
+	load_reference_notes();
+	mod_info_content = load_config_file("MOD_INFO.md", false);
+	snapshot_talking_heads();
+
 	// Warm the scripting API cache on a background thread so the first
 	// scripting tool call doesn't pay the full 30-60s generation cost.
 	// get_scripting_api_doc() is mutex-protected, so concurrent tool calls
 	// will simply block on the lock until the cache is ready.
+	// NOTE: this assumes Script_system.OutputDocumentation only reads
+	// scripting state that is static after startup (FRED does not run
+	// scripts); if that ever changes, the warmup must move to the main thread.
 	s_cache_warmup_thread = std::thread([]() {
 		get_scripting_api_doc();
 	});
@@ -3255,6 +3369,9 @@ void mcp_reference_tools_cleanup()
 		json_decref(scripting_api_cache);
 		scripting_api_cache = nullptr;
 	}
+
+	mod_info_content.clear();
+	talking_heads_snapshot.clear();
 
 	mcp_sexp_forest_cleanup();
 }
