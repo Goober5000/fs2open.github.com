@@ -5,6 +5,7 @@
 #include "mcp_app.h"
 #include "mcp_mission_tools.h"
 #include "mcp_sexp_forest.h"
+#include "mcp_loadout.h"
 #include "mcp_reference_tools.h"
 #include "mcp_utils.h"
 #include "sexp_tree.h"
@@ -3393,6 +3394,18 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 		type_bits = old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING);
 	}
 
+	// Block a number<->string change while the team loadout references the
+	// variable (a loadout class must stay a string and a count a number),
+	// mirroring the check in FRED's Modify Variable dialog.
+	if (type_bits != (old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING))) {
+		int loadout_refs = mcp_count_loadout_variable_refs(old_name);
+		if (loadout_refs > 0) {
+			sink.set_error("Cannot change the type of SEXP variable '%s': it is used in %d team loadout location(s). "
+				"Update the team loadout first (see get_team_loadout).", old_name, loadout_refs);
+			return;
+		}
+	}
+
 	int flag_bits;
 	auto flags_arr = get_optional_string_array(input, "variable_flags", sink);
 	if (!flags_arr.has_value() && json_object_get(input, "variable_flags"))
@@ -3421,10 +3434,11 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 
 	bool changed = false;
 
-	// Update SEXP node references if name changed
+	// Update SEXP node and team loadout references if name changed
 	bool renamed = new_name && strcmp(old_name, new_name) != 0;
 	if (renamed) {
 		update_sexp_node_variable_references(old_name, new_name);
+		mcp_rename_loadout_variable_refs(old_name, new_name);
 		changed = true;
 	}
 
@@ -3480,10 +3494,18 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 				"Use force=true to delete anyway (references will be reset to placeholder values).", name);
 			return;
 		}
+		int loadout_refs = mcp_count_loadout_variable_refs(name);
+		if (loadout_refs > 0) {
+			sink.set_error("SEXP variable '%s' is used in %d team loadout location(s). "
+				"Use force=true to delete anyway (loadout entries using it as a class will be removed; "
+				"count references will fall back to their cached literal values).", name, loadout_refs);
+			return;
+		}
 	}
 
-	// Reset any SEXP node references
+	// Reset any SEXP node and team loadout references
 	int num_reset = reset_sexp_node_variable_references(name);
+	int num_loadout_cleared = mcp_clear_loadout_variable_refs(name);
 
 	sexp_variable_delete(idx);
 	sexp_variable_sort();
@@ -3491,7 +3513,11 @@ static void handle_delete_sexp_variable(json_t *input, McpToolRequest *req)
 		mcp_sexp_forest_mark_dirty();
 	mark_modified("MCP: delete SEXP variable %s", name);
 
-	sprintf(req->result_message, "Deleted SEXP variable: %s", name);
+	if (num_loadout_cleared > 0)
+		sprintf(req->result_message, "Deleted SEXP variable: %s (cleared %d team loadout reference(s))",
+			name, num_loadout_cleared);
+	else
+		sprintf(req->result_message, "Deleted SEXP variable: %s", name);
 	req->success = true;
 }
 
