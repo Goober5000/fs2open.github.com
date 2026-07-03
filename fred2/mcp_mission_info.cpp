@@ -105,6 +105,9 @@ static json_t *build_mission_info_json()
 	json_object_set_new(info, "respawns", json_integer((int)The_mission.num_respawns));
 	json_object_set_new(info, "max_respawn_delay", json_integer(The_mission.max_respawn_delay));
 
+	// Player entry delay (edited in FRED's team loadout editor, but mission-level data)
+	json_object_set_new(info, "player_entry_delay", json_integer(f2i(Entry_delay_time)));
+
 	// Mission flags — list only the names of flags that are set
 	{
 		json_t *flags_arr = json_array();
@@ -223,6 +226,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	auto game_type_str     = get_optional_string(input, "game_type", sink);
 	auto respawns_opt      = get_optional_integer(input, "respawns", sink);
 	auto max_delay_opt     = get_optional_integer(input, "max_respawn_delay", sink);
+	auto entry_delay_opt   = get_optional_integer(input, "player_entry_delay", sink);
 	auto contrail_opt      = get_optional_integer(input, "contrail_threshold", sink);
 	auto all_war_opt       = get_optional_bool(input, "all_teams_at_war", sink);
 	auto command_sender    = get_optional_string(input, "command_sender", sink, NAME_LENGTH - 1);
@@ -239,6 +243,17 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	if (respawns_opt.has_value() && !check_int_range(*respawns_opt, 0, 99, "respawns", sink)) return;
 	if (max_delay_opt.has_value() && !check_int_range(*max_delay_opt, -1, 999, "max_respawn_delay", sink)) return;
 	if (contrail_opt.has_value() && !check_int_range(*contrail_opt, -1, 1000, "contrail_threshold", sink)) return;
+
+	// player_entry_delay lives in the team loadout editor, so it gets that
+	// dialog's guard (only when actually being changed)
+	if (entry_delay_opt.has_value()) {
+		if (!check_int_range(*entry_delay_opt, 0, 30, "player_entry_delay", sink)) return;
+		SCP_string guard_msg;
+		if (!validate_single_dialog("the player entry delay", "player start", guard_msg)) {
+			sink.set_error("%s", guard_msg.c_str());
+			return;
+		}
+	}
 
 	// Enum / lookup validation
 	int new_game_type = 0;
@@ -467,6 +482,10 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	}
 	if (max_delay_opt.has_value() && The_mission.max_respawn_delay != *max_delay_opt) {
 		The_mission.max_respawn_delay = *max_delay_opt;
+		changed = true;
+	}
+	if (entry_delay_opt.has_value() && f2i(Entry_delay_time) != *entry_delay_opt) {
+		Entry_delay_time = i2f(*entry_delay_opt);
 		changed = true;
 	}
 	if (contrail_opt.has_value()) {
@@ -720,6 +739,8 @@ void mcp_register_mission_info_tools(json_t *tools)
 			  "multiplayer co-op", "multiplayer team-versus-team", "multiplayer dogfight" });
 		add_integer_prop(props, "respawns", "Number of respawns allowed (multiplayer, 0-99)");
 		add_integer_prop(props, "max_respawn_delay", "Max respawn delay in seconds (-1 to 999; -1 = no limit)");
+		add_integer_prop(props, "player_entry_delay",
+			"Seconds the mission runs before the player enters it (0-30). Shown in FRED's team loadout editor.");
 		add_integer_prop(props, "contrail_threshold",
 			"Speed threshold at which ships produce contrails (0-1000); -1 to restore the default (45)");
 		add_bool_prop(props, "all_teams_at_war", "All teams target each other");
