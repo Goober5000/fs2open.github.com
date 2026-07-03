@@ -1001,14 +1001,20 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		}
 	}
 
+	bool moved = false;
 	if (new_pos.has_value() && !vm_vec_equal(objp.pos, *new_pos)) {
 		objp.pos = *new_pos;
-		changed = true;
+		changed = moved = true;
 	}
 	if (new_orient.has_value() && !vm_matrix_equal(objp.orient, *new_orient)) {
 		objp.orient = *new_orient;
-		changed = true;
+		changed = moved = true;
 	}
+	// Same post-move bookkeeping as the FRED UI move paths (fredview,
+	// orient editor): drag any docked partners along, otherwise the docked
+	// group silently desyncs
+	if (moved)
+		object_moved(&objp);
 
 	// Arrival group (gated by wing membership)
 	auto skip_arr_dep = [&](const char *field) {
