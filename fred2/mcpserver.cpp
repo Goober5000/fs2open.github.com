@@ -10,8 +10,8 @@
 #include <cstring>
 #include <thread>
 
-#include "mission/missionparse.h"
 #include "mod_table/mod_table.h"
+#include "parse/parselo.h"		// sprintf(SCP_string&, ...)
 #include "mainfrm.h"
 #include "globalincs/pstypes.h"
 
@@ -87,7 +87,7 @@ static json_t *make_error_response(json_t *id, int code, const char *message)
 // MCP method handlers
 // ---------------------------------------------------------------------------
 
-static json_t *handle_initialize(json_t * /*params*/, int &error_code, SCP_string &error_msg)
+static json_t *handle_initialize()
 {
 	json_t *result = json_object();
 	json_object_set_new(result, "protocolVersion", json_string(MCP_PROTOCOL_VERSION));
@@ -104,7 +104,7 @@ static json_t *handle_initialize(json_t * /*params*/, int &error_code, SCP_strin
 	return result;
 }
 
-static json_t *handle_tools_list(json_t * /*params*/, int &error_code, SCP_string &error_msg)
+static json_t *handle_tools_list()
 {
 	json_t *result = json_object();
 	json_t *tools = json_array();
@@ -173,13 +173,17 @@ static json_t *mcp_wait_for_result(McpToolRequest *req)
 // Marshal a tool call to the main MFC thread with a configurable timeout.
 // Uses PostMessage so the mongoose thread is not blocked indefinitely
 // if the UI thread handler triggers a modal dialog.
-json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
+//
+// param holds a tool name or entity name, depending on the tool id, so no
+// path-separator normalization is done here.  Mission file paths travel via
+// input_json and are normalized by the app-tool handler on the main thread.
+json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param, json_t *input_json)
 {
 	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
 		return make_tool_result("FRED2 main window is not available", true);
 
 	if (strlen(param) >= MAX_PATH_LEN) {
-		return make_tool_result("File path is too long!", true);
+		return make_tool_result("Tool call parameter is too long!", true);
 	}
 
 	// Heap-allocate because the request may outlive this stack frame on timeout
@@ -195,13 +199,8 @@ json_t *mcp_execute_on_main_thread(McpToolId tool, const char *param)
 		delete req;
 		return make_tool_result("Failed to create completion event", true);
 	}
+	req->input_json = input_json ? json_incref(input_json) : nullptr;
 	req->refcount.store(2, std::memory_order_relaxed);
-
-	// Normalize path separators for the FreeSpace engine
-	for (char *p = req->filepath; *p; ++p) {
-		if (*p == '/' || *p == '\\')
-			*p = DIR_SEPARATOR_CHAR;
-	}
 
 	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
 		// PostMessage failed — we are the sole owner
@@ -222,40 +221,6 @@ void mcp_signal_completion(McpToolRequest *req)
 	// Release handler's reference; if caller already timed out, we clean up
 	if (req->refcount.fetch_sub(1, std::memory_order_acq_rel) == 1)
 		mcp_cleanup_request(req);
-}
-
-// Overload for MISSION_TOOL: passes tool_name in filepath (no path normalization)
-// and structured JSON arguments via input_json.
-json_t *mcp_execute_on_main_thread(McpToolId tool, const char *tool_name, json_t *input_json)
-{
-	if (!Fred_main_wnd || !Fred_main_wnd->m_hWnd)
-		return make_tool_result("FRED2 main window is not available", true);
-
-	if (strlen(tool_name) >= MAX_PATH_LEN) {
-		return make_tool_result("File path is too long!", true);
-	}
-
-	auto *req = new McpToolRequest();
-	req->tool = tool;
-	strncpy(req->filepath, tool_name, sizeof(req->filepath) - 1);
-	req->filepath[sizeof(req->filepath) - 1] = '\0';
-	// No path separator normalization — filepath holds a tool name, not a path
-	req->input_json = input_json ? json_incref(input_json) : nullptr;
-	req->success = false;
-	req->result_json = nullptr;
-	req->completion_event = CreateEvent(NULL, TRUE, FALSE, NULL);
-	if (!req->completion_event) {
-		delete req;
-		return make_tool_result("Failed to create completion event", true);
-	}
-	req->refcount.store(2, std::memory_order_relaxed);
-
-	if (!::PostMessage(Fred_main_wnd->m_hWnd, WM_MCP_TOOL_CALL, 0, (LPARAM)req)) {
-		mcp_cleanup_request(req);
-		return make_tool_result("Failed to post tool call to FRED2 main thread", true);
-	}
-
-	return mcp_wait_for_result(req);
 }
 
 static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &error_msg)
@@ -430,9 +395,9 @@ static void handle_mcp_post(struct mg_connection *conn)
 	SCP_string error_msg;
 
 	if (strcmp(method, "initialize") == 0) {
-		result = handle_initialize(params, error_code, error_msg);
+		result = handle_initialize();
 	} else if (strcmp(method, "tools/list") == 0) {
-		result = handle_tools_list(params, error_code, error_msg);
+		result = handle_tools_list();
 	} else if (strcmp(method, "tools/call") == 0) {
 		result = handle_tools_call(params, error_code, error_msg);
 	} else {
