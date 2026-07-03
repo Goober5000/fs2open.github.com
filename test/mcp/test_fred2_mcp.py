@@ -35,6 +35,7 @@ import test_ships
 import test_submodels
 import test_wings
 import test_reinforcements
+import test_team_loadout
 import test_sexp_roundtrip
 import test_sexp_detach
 import test_sexp_attach
@@ -58,6 +59,7 @@ AREAS = [
     test_submodels,
     test_wings,
     test_reinforcements,
+    test_team_loadout,
     test_sexp_roundtrip,
     test_sexp_detach,
     test_sexp_attach,
