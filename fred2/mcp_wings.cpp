@@ -814,6 +814,10 @@ static void handle_arrange_in_formation(json_t *input, McpToolRequest *req)
 		object *objp = &Objects[Ships[wingp.ship_index[i]].objnum];
 		get_absolute_wing_pos(&objp->pos, leader_objp, wing_idx, i, false);
 		objp->orient = leader_objp->orient;
+
+		// Post-move bookkeeping the FRED Align button omits: drag any docked
+		// partners along (no-op for undocked ships)
+		object_moved(objp);
 	}
 
 	// Restore the wing's persistent formation/scale; overrides applied only to this call.
