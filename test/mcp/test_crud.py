@@ -492,7 +492,7 @@ def register(suite, client):
                 })
                 assert_success(r)
 
-            # Default propagate copies the icon (same id) into stage 2
+            # Default propagate copies the icon (same continuity_id) into stage 2
             r = client.call_tool("create_briefing_icon", {
                 "stage": 1,
                 "position": {"x": 100, "y": 0, "z": 200},
@@ -501,14 +501,15 @@ def register(suite, client):
             })
             assert_success(r)
             d = tool_data(r)
-            icon_id = d.get("id")
-            assert_true(icon_id is not None and icon_id >= 0, "icon id assigned")
+            icon_id = d.get("continuity_id")
+            assert_true(icon_id is not None and icon_id >= 0, "continuity_id assigned")
             assert_equal(d.get("icon_type"), "Fighter", "icon type round-trip")
 
             s1, s2 = stage_icons(1), stage_icons(2)
             assert_equal(len(s1), 1, "stage 1 icon count")
             assert_equal(len(s2), 1, "propagate should copy the icon into stage 2")
-            assert_equal(s2[0].get("id"), icon_id, "propagated icon keeps the same id")
+            assert_equal(s2[0].get("continuity_id"), icon_id,
+                "propagated icon keeps the same continuity_id")
 
             # propagate=False stays local
             r = client.call_tool("create_briefing_icon", {
@@ -522,16 +523,16 @@ def register(suite, client):
             assert_equal(len(stage_icons(1)), 2, "stage 1 has both icons")
             assert_equal(len(stage_icons(2)), 1, "local icon stays out of stage 2")
 
-            # Duplicate explicit id in the same stage is rejected
+            # Duplicate explicit continuity_id in the same stage is rejected
             r = client.call_tool("create_briefing_icon", {
                 "stage": 1,
                 "position": {"x": 0, "y": 0, "z": 0},
                 "icon_type": "Fighter",
-                "id": icon_id,
+                "continuity_id": icon_id,
             })
             assert_error(r)
 
-            # Propagated update: label follows the id into stage 2
+            # Propagated update: label follows the continuity_id into stage 2
             r = client.call_tool("update_briefing_icon", {
                 "stage": 1, "index": 1,
                 "label": "Alpha wing (renamed)",
