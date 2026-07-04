@@ -497,7 +497,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 
 	int formation_idx = -1;
 	if (formation_str) {
-		if (!*formation_str || !stricmp(formation_str, "default")) {
+		if (!*formation_str || !stricmp(formation_str, "<default>")) {
 			formation_idx = -1;	// default retail formation
 		} else {
 			formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
@@ -743,7 +743,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 
 	if (formation_str) {
 		int new_formation;
-		if (!*formation_str || !stricmp(formation_str, "default")) {
+		if (!*formation_str || !stricmp(formation_str, "<default>")) {
 			new_formation = -1;
 		} else {
 			new_formation = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
@@ -800,7 +800,7 @@ static void handle_arrange_in_formation(json_t *input, McpToolRequest *req)
 	// Temporarily apply optional overrides.  Validation happens before mutation,
 	// so if a bad formation name is given we return without touching the wing.
 	if (formation_str) {
-		if (!*formation_str || !stricmp(formation_str, "default")) {
+		if (!*formation_str || !stricmp(formation_str, "<default>")) {
 			wingp.formation = -1;
 		} else {
 			int formation_idx = check_lookup(formation_str, wing_formation_lookup, "formation", sink);
@@ -1029,7 +1029,8 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_enum_prop(props, "arrival_location",
 			"How the wing arrives. Default \"Hyperspace\".", arrival_location_enum_values);
 		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by arrival_location.");
+			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by arrival_location. "
+			"Empty/\"<none>\" clears.");
 		add_integer_prop(props, "arrival_distance", "Distance offset (meters) from the arrival target.");
 		add_integer_prop(props, "arrival_delay", "Seconds to wait after the arrival cue is true.");
 		add_integer_prop(props, "arrival_cue",
@@ -1037,12 +1038,14 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_enum_prop(props, "departure_location",
 			"How the wing departs. Default \"Hyperspace\".", departure_location_enum_values);
 		add_string_prop(props, "departure_target",
-			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\").");
+			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
+			"Empty/\"<none>\" clears.");
 		add_integer_prop(props, "departure_delay", "Seconds to wait after the departure cue is true.");
 		add_integer_prop(props, "departure_cue",
 			"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
 		add_string_prop(props, "formation",
-			"Formation name. See list_wing_formations for valid values.");
+			"Formation name. See list_wing_formations for valid values. "
+			"Empty/\"<default>\" selects the standard retail formation.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale (default 1.0).");
 		add_bool_map_prop(props, "wing_flags",
 			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
@@ -1085,15 +1088,16 @@ void mcp_register_wing_tools(json_t *tools)
 		add_integer_prop(props, "wave_delay_min", "Minimum delay between waves.");
 		add_integer_prop(props, "wave_delay_max", "Maximum delay between waves.");
 		add_string_enum_prop(props, "arrival_location", "Arrival mode.", arrival_location_enum_values);
-		add_string_prop(props, "arrival_target", "Arrival anchor (ship name or special token).");
+		add_string_prop(props, "arrival_target", "Arrival anchor (ship name or special token). Empty/\"<none>\" clears.");
 		add_integer_prop(props, "arrival_distance", "Arrival distance offset.");
 		add_integer_prop(props, "arrival_delay", "Arrival delay.");
 		add_integer_prop(props, "arrival_cue", "SEXP node ID for the arrival cue. Previous user-allocated cue is freed.");
 		add_string_enum_prop(props, "departure_location", "Departure mode.", departure_location_enum_values);
-		add_string_prop(props, "departure_target", "Departure anchor.");
+		add_string_prop(props, "departure_target", "Departure anchor. Empty/\"<none>\" clears.");
 		add_integer_prop(props, "departure_delay", "Departure delay.");
 		add_integer_prop(props, "departure_cue", "SEXP node ID for the departure cue.");
-		add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values.");
+		add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values. "
+			"Empty/\"<default>\" selects the standard retail formation.");
 		add_number_prop(props, "formation_scale", "Formation spacing scale.");
 		add_bool_map_prop(props, "wing_flags",
 			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
@@ -1113,7 +1117,8 @@ void mcp_register_wing_tools(json_t *tools)
 		add_string_prop(props, "formation",
 			"Optional formation name to override the wing's current formation for this arrangement only. "
 			"The wing's persistent formation is not changed. "
-			"See list_wing_formations for valid values.");
+			"See list_wing_formations for valid values. "
+			"Empty/\"<default>\" selects the standard retail formation.");
 		add_number_prop(props, "formation_scale",
 			"Optional formation scale to override the wing's current scale for this arrangement only. "
 			"The wing's persistent scale is not changed.");

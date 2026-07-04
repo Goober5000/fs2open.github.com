@@ -180,5 +180,14 @@
     "description": "How the search parameter works in list tools",
     "see_also": [],
     "text": "All list tools that accept a `search` parameter use **fuzzy matching** against names (not descriptions or other long text). The search does not require an exact substring — it tolerates missing, extra, or reordered characters, making it useful for approximate lookups when the exact name is not known.\n\n**Ranking**: When a search is active, results are sorted by match quality (best match first) rather than the default order. Exact and near-exact matches appear at the top.\n\n**Short queries**: Very short search strings (1-2 characters) may return many results because the fuzzy matcher is permissive with few input characters. Use 3 or more characters for more focused results.\n\n**Scope**: The search matches against the primary name field of each item (e.g., operator name, topic name, element name, hook name, enum name). It does not search descriptions, categories, or other fields."
+  },
+  {
+    "category": "mcp_operations",
+    "topic": "string_field_conventions",
+    "description": "Sentinel values for clearing or defaulting optional string fields",
+    "see_also": [
+      "names_and_display_names"
+    ],
+    "text": "Optional string fields follow two uniform sentinel conventions:\n\n- **Clear a value**: pass an empty string or `\"<none>\"`. This applies to lookup-backed fields (persona, cargo, weapon banks, arrival/departure targets, alt class names, callsigns) and filename fields (talking heads, voice files, squad logos).\n- **Revert to a default**: pass an empty string or `\"<default>\"` where the field has a meaningful default rather than an empty state — turret and ship `ai_class` (ship class default) and wing `formation` (standard retail formation).\n\n**Exceptions**:\n- `display_name`: a blank display name is itself a valid value, so the empty string does NOT clear it. Pass `\"<none>\"` or a string matching the entity's regular name to clear.\n- Music fields (`update_mission_music`): `\"None\"` is the value that get_mission_music reports for unset fields, so `\"none\"` is also accepted to clear, in addition to the universal empty string and `\"<none>\"`.\n\nFree-text fields (message text, briefing text, objective text, etc.) need no sentinel — the empty string is simply the value."
   }
 ]

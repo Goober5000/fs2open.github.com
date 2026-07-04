@@ -140,7 +140,9 @@ const SCP_vector<const char *> departure_location_enum_values =
 
 bool resolve_target_name_to_anchor(const char *name, anchor_t &out, McpErrorSink &sink)
 {
-	if (!name || !*name) {
+	// "<none>" is the universal clear convention; it cannot collide with the
+	// special anchors ("<any friendly>" etc.), which are checked below.
+	if (!name || !*name || !stricmp(name, "<none>")) {
 		out = anchor_t::invalid();
 		return true;
 	}
