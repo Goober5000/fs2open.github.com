@@ -291,7 +291,14 @@ def register(suite, client):
             # list_wings should include the new wing
             r = client.call_tool("list_wings")
             assert_success(r)
-            assert_in(wing_name, [w.get("name") for w in tool_data(r)])
+            entries = tool_data(r)
+            assert_in(wing_name, [w.get("name") for w in entries])
+
+            # Each entry's index field is the move/swap index and equals the
+            # 1-based list position.
+            for pos, entry in enumerate(entries, start=1):
+                assert_equal(entry.get("index"), pos,
+                    f"list_wings index field matches list position for {entry.get('name')}")
 
             # update_wing round-trip
             r = client.call_tool("update_wing", {

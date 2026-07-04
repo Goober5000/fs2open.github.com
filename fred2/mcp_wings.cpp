@@ -37,6 +37,23 @@ static bool validate_dialog_for_wings(SCP_string &error_msg)
 // Wing JSON serialization
 // ---------------------------------------------------------------------------
 
+// Reverse of wing_slot_at_public_index (below): returns the 1-based public
+// index of an occupied Wings[] slot -- its position among occupied slots in
+// slot order, i.e. the index move_wing/swap_wings refer to.  Returns -1 for
+// an empty or out-of-range slot.
+static int wing_public_index_of_slot(int slot)
+{
+	if (slot < 0 || slot >= MAX_WINGS || Wings[slot].wave_count == 0)
+		return -1;
+
+	int count = 0;
+	for (int i = 0; i <= slot; ++i) {
+		if (Wings[i].wave_count > 0)
+			count++;
+	}
+	return count;
+}
+
 static json_t *build_wing_flags_array(int wing_idx);
 
 static json_t *build_wing_json(int wing_idx, bool include_details)
@@ -45,6 +62,7 @@ static json_t *build_wing_json(int wing_idx, bool include_details)
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_safe_string(wingp.name));
+	json_object_set_new(obj, "index", json_integer(wing_public_index_of_slot(wing_idx)));
 	json_object_set_new(obj, "wave_count", json_integer(wingp.wave_count));
 	json_object_set_new(obj, "num_waves", json_integer(wingp.num_waves));
 
@@ -991,8 +1009,9 @@ static void register_list_wings(json_t *tools)
 {
 	register_tool(tools, "list_wings",
 		"List all wings in the mission, in the same order that move_wing/swap_wings "
-		"indices refer to: a wing's 1-based position in this list is its index. "
-		"Each entry has the wing's name, "
+		"indices refer to: each entry's \"index\" field is that index, and equals "
+		"the entry's 1-based position in this list. "
+		"Each entry has the wing's name, index, "
 		"wave_count (current ship count), num_waves, "
 		"and the names of its member ships in slot order.",
 		json_object());
