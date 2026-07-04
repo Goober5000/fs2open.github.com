@@ -222,8 +222,8 @@ static void set_missing_param_error(McpErrorSink &sink, const char *param_name)
 
 // If val is an explicit JSON null, report an error and return true.  Use at the
 // top of each get_optional_* helper: silently treating null as "field absent"
-// is misleading; callers that genuinely need to distinguish explicit-null from
-// absence should use is_parameter_present_and_null() before calling here.
+// is misleading, and no MCP tool uses null as a meaningful value (fields that
+// need a "disable" state use in-band sentinels like -1 or "<none>" instead).
 static bool reject_explicit_null(json_t *val, const char *param_name, McpErrorSink &sink)
 {
 	if (val && json_is_null(val)) {
@@ -355,14 +355,6 @@ bool validate(std::function<bool(SCP_string&)> validate_fn, McpErrorSink &sink)
 		return false;
 	}
 	return true;
-}
-
-bool is_parameter_present_and_null(json_t *input, const char *param_name)
-{
-	auto val = json_object_get(input, param_name);
-	if (!val)
-		return false;
-	return json_is_null(val);
 }
 
 const char *get_required_string(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len)

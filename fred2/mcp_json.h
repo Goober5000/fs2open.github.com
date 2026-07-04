@@ -111,8 +111,6 @@ bool validate(const T& input, std::function<bool(const T&, SCP_string&)> validat
 	return true;
 }
 
-bool is_parameter_present_and_null(json_t *input, const char *param_name);
-
 // Extracts a required string parameter from input JSON.
 // Returns nullptr and reports an error via sink if the parameter is missing, has the wrong type,
 // exceeds max_len, or (with disallow_empty=true) is the empty string.  Returns a non-null string
@@ -148,8 +146,8 @@ const char *get_optional_filename(json_t *arguments, const char *param_name, Mcp
 
 // Extracts optional typed parameters from arguments JSON.
 // Returns std::nullopt if the parameter is missing; reports an error via sink if present but
-// the wrong type, or if present as JSON null.  Callers that need to distinguish explicit null
-// from absence should use is_parameter_present_and_null() before calling these.
+// the wrong type, or if present as JSON null.  No MCP tool uses null as a meaningful value;
+// fields that need a "disable" state use in-band sentinels like -1 or "<none>" instead.
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink);
 std::optional<double> get_optional_double(json_t *arguments, const char *param_name, McpErrorSink &sink);
 std::optional<float> get_optional_float(json_t *arguments, const char *param_name, McpErrorSink &sink);

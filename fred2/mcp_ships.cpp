@@ -618,8 +618,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto escort_priority   = get_optional_integer(input, "escort_priority", sink);
 	auto kamikaze_damage   = get_optional_integer(input, "kamikaze_damage", sink);
 
-	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
-	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
+	auto destroy_before_mission = get_optional_integer(input, "destroy_before_mission_seconds", sink);
 
 	auto initial_hull   = get_optional_integer(input, "initial_hull_percent", sink);
 	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
@@ -636,7 +635,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 		return;
 	if (kamikaze_damage.has_value() && !check_int_range(*kamikaze_damage, 0, INT_MAX, "kamikaze_damage", sink))
 		return;
-	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
+	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, -1, INT_MAX, "destroy_before_mission_seconds", sink))
 		return;
 	if (initial_hull.has_value()   && !check_int_range(*initial_hull,   0, 100, "initial_hull_percent",   sink)) return;
 	if (initial_shield.has_value() && !check_int_range(*initial_shield, 0, 100, "initial_shield_percent", sink)) return;
@@ -812,13 +811,16 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	if (kamikaze_damage.has_value())
 		Ai_info[shipp.ai_index].kamikaze_damage = *kamikaze_damage;
 
-	// destroy_before_mission_seconds: scalar IS the flag.  Non-null number sets
-	// both; null clears the flag (final_death_time is preserved as residual).
-	if (destroy_before_mission_is_explicit_null) {
-		shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
-	} else if (destroy_before_mission.has_value()) {
-		shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
-		shipp.final_death_time = *destroy_before_mission;
+	// destroy_before_mission_seconds: the scalar IS the flag.  A non-negative
+	// value sets both; -1 clears the flag (final_death_time is preserved as
+	// residual).
+	if (destroy_before_mission.has_value()) {
+		if (*destroy_before_mission < 0) {
+			shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+		} else {
+			shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
+			shipp.final_death_time = *destroy_before_mission;
+		}
 	}
 
 	// Initial state at mission start.  In FRED edit mode the engine stores
@@ -878,8 +880,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto escort_priority   = get_optional_integer(input, "escort_priority", sink);
 	auto kamikaze_damage   = get_optional_integer(input, "kamikaze_damage", sink);
 
-	bool destroy_before_mission_is_explicit_null = is_parameter_present_and_null(input, "destroy_before_mission_seconds");
-	auto destroy_before_mission = destroy_before_mission_is_explicit_null ? std::nullopt : get_optional_integer(input, "destroy_before_mission_seconds", sink);
+	auto destroy_before_mission = get_optional_integer(input, "destroy_before_mission_seconds", sink);
 
 	auto initial_hull   = get_optional_integer(input, "initial_hull_percent", sink);
 	auto initial_shield = get_optional_integer(input, "initial_shield_percent", sink);
@@ -896,7 +897,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		return;
 	if (kamikaze_damage.has_value() && !check_int_range(*kamikaze_damage, 0, INT_MAX, "kamikaze_damage", sink))
 		return;
-	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, 0, INT_MAX, "destroy_before_mission_seconds", sink))
+	if (destroy_before_mission.has_value() && !check_int_range(*destroy_before_mission, -1, INT_MAX, "destroy_before_mission_seconds", sink))
 		return;
 	if (initial_hull.has_value()   && !check_int_range(*initial_hull,   0, 100, "initial_hull_percent",   sink)) return;
 	if (initial_shield.has_value() && !check_int_range(*initial_shield, 0, 100, "initial_shield_percent", sink)) return;
@@ -1181,19 +1182,22 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 
-	// destroy_before_mission_seconds: scalar IS the flag.  Non-null number sets
-	// both; null clears the flag (final_death_time is preserved as residual).
-	if (destroy_before_mission_is_explicit_null) {
-		if (shipp.flags[Ship::Ship_Flags::Kill_before_mission]) {
-			shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
-			changed = true;
-		}
-	} else if (destroy_before_mission.has_value()) {
-		bool had_flag = shipp.flags[Ship::Ship_Flags::Kill_before_mission];
-		if (!had_flag || shipp.final_death_time != *destroy_before_mission) {
-			shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
-			shipp.final_death_time = *destroy_before_mission;
-			changed = true;
+	// destroy_before_mission_seconds: the scalar IS the flag.  A non-negative
+	// value sets both; -1 clears the flag (final_death_time is preserved as
+	// residual).
+	if (destroy_before_mission.has_value()) {
+		if (*destroy_before_mission < 0) {
+			if (shipp.flags[Ship::Ship_Flags::Kill_before_mission]) {
+				shipp.flags.remove(Ship::Ship_Flags::Kill_before_mission);
+				changed = true;
+			}
+		} else {
+			bool had_flag = shipp.flags[Ship::Ship_Flags::Kill_before_mission];
+			if (!had_flag || shipp.final_death_time != *destroy_before_mission) {
+				shipp.flags.set(Ship::Ship_Flags::Kill_before_mission);
+				shipp.final_death_time = *destroy_before_mission;
+				changed = true;
+			}
 		}
 	}
 
@@ -2729,46 +2733,32 @@ static void handle_update_ship_special_hitpoints(json_t *input, McpToolRequest *
 	int ship_idx = lookup_ship(name, sink);
 	if (ship_idx < 0) return;
 
-	// null = disable, numeric = enable+set, omitted = leave unchanged.
-	bool hull_null = is_parameter_present_and_null(input, "hull");
-	auto hull_arg = hull_null ? std::nullopt : get_optional_integer(input, "hull", sink);
-	bool shield_null = is_parameter_present_and_null(input, "shield");
-	auto shield_arg = shield_null ? std::nullopt : get_optional_integer(input, "shield", sink);
+	// The disable sentinels match the engine's stored "disabled" values, so
+	// the scalar IS the state: hull 0 disables, >= 1 enables+sets; shield -1
+	// disables, >= 0 enables+sets.  Omitted fields are left unchanged.
+	auto hull_arg = get_optional_integer(input, "hull", sink);
+	auto shield_arg = get_optional_integer(input, "shield", sink);
 	if (sink.has_error()) return;
 
-	if (hull_arg.has_value() && *hull_arg < 1) {
-		sink.set_error("hull must be at least 1 (got %d).  Pass null to disable.", *hull_arg);
+	if (hull_arg.has_value() && *hull_arg < 0) {
+		sink.set_error("hull must be at least 1, or 0 to disable the override (got %d).", *hull_arg);
 		return;
 	}
-	if (shield_arg.has_value() && *shield_arg < 0) {
-		sink.set_error("shield must be non-negative (got %d).  Pass null to disable.", *shield_arg);
+	if (shield_arg.has_value() && *shield_arg < -1) {
+		sink.set_error("shield must be non-negative, or -1 to disable the override (got %d).", *shield_arg);
 		return;
 	}
 
 	ship &shipp = Ships[ship_idx];
 	bool changed_hull = false, changed_shield = false;
 
-	if (hull_null) {
-		if (shipp.special_hitpoints != 0) {
-			shipp.special_hitpoints = 0;
-			changed_hull = true;
-		}
-	} else if (hull_arg.has_value()) {
-		if (shipp.special_hitpoints != *hull_arg) {
-			shipp.special_hitpoints = *hull_arg;
-			changed_hull = true;
-		}
+	if (hull_arg.has_value() && shipp.special_hitpoints != *hull_arg) {
+		shipp.special_hitpoints = *hull_arg;
+		changed_hull = true;
 	}
-	if (shield_null) {
-		if (shipp.special_shield != -1) {
-			shipp.special_shield = -1;
-			changed_shield = true;
-		}
-	} else if (shield_arg.has_value()) {
-		if (shipp.special_shield != *shield_arg) {
-			shipp.special_shield = *shield_arg;
-			changed_shield = true;
-		}
+	if (shield_arg.has_value() && shipp.special_shield != *shield_arg) {
+		shipp.special_shield = *shield_arg;
+		changed_shield = true;
 	}
 
 	if (changed_hull) {
@@ -2895,7 +2885,7 @@ void mcp_register_ship_tools(json_t *tools)
 			"FRED defaults this to min(1000, 200 + hull/4) on ship creation. Non-negative.");
 		add_integer_prop(props, "destroy_before_mission_seconds",
 			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
-			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
+			"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
 			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
 		add_integer_prop(props, "initial_hull_percent",
 			"Initial hull strength at mission start, as a percent of class max (0-100). FRED defaults to 100.");
@@ -2974,7 +2964,7 @@ void mcp_register_ship_tools(json_t *tools)
 			"stored unconditionally but only matters at runtime when \"kamikaze\" is set. Non-negative.");
 		add_integer_prop(props, "destroy_before_mission_seconds",
 			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
-			"This scalar IS the flag: a non-negative integer enables the behavior; null clears it. "
+			"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
 			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
 		add_integer_prop(props, "initial_hull_percent",
 			"Initial hull strength at mission start, as a percent of class max (0-100).");
@@ -3341,19 +3331,19 @@ void mcp_register_ship_tools(json_t *tools)
 		json_t *props = json_object();
 		add_string_prop(props, "name", "Name of the ship.");
 		add_integer_prop(props, "hull",
-			"Hull strength override.  Numeric value (>= 1) enables and sets; explicit null "
-			"disables the override; omitting the field leaves it unchanged.");
+			"Hull strength override.  A value >= 1 enables and sets it; 0 disables the "
+			"override; omitting the field leaves it unchanged.");
 		add_integer_prop(props, "shield",
-			"Shield strength override.  Numeric value (>= 0; 0 is a valid no-shields config) "
-			"enables and sets; explicit null disables the override; omitting the field leaves "
-			"it unchanged.");
+			"Shield strength override.  A value >= 0 enables and sets it (0 is a valid "
+			"no-shields config); -1 disables the override; omitting the field leaves it "
+			"unchanged.");
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("name"));
 		register_tool(tools, "update_ship_special_hitpoints",
 			"Update the per-ship Special Hitpoints overrides.  Each of 'hull' and 'shield' is "
-			"independently optional: numeric value enables+sets, explicit null disables, "
-			"omitting leaves unchanged.  When either field changes, "
-			"kamikaze_damage is also recalculated, but the kamikaze flag is not changed.",
+			"independently optional: a value in range enables+sets, the below-range sentinel "
+			"(hull: 0, shield: -1) disables, omitting leaves unchanged.  When either field "
+			"changes, kamikaze_damage is also recalculated, but the kamikaze flag is not changed.",
 			props, req);
 	}
 }
