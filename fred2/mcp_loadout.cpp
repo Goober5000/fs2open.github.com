@@ -285,7 +285,7 @@ static bool parse_loadout_entries(json_t *arr, const LoadoutEntrySpec &spec, con
 	size_t idx;
 	json_t *elem;
 	json_array_foreach(arr, idx, elem) {
-		sprintf(ctx, "%s[%zu]", param_name, idx);
+		sprintf(ctx, "%s[" SIZE_T_ARG "]", param_name, idx);
 
 		if (!json_is_object(elem)) {
 			sink.set_error("%s must be an object", ctx);

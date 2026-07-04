@@ -271,8 +271,8 @@ static bool preflight_member_ships(const SCP_vector<SCP_string> &member_names,
 		return false;
 	}
 	if ((int)member_names.size() > MAX_SHIPS_PER_WING) {
-		sink.set_error("Wing can have at most %d ships; got %d.",
-			MAX_SHIPS_PER_WING, (int)member_names.size());
+		sink.set_error("Wing can have at most %d ships; got " SIZE_T_ARG ".",
+			MAX_SHIPS_PER_WING, member_names.size());
 		return false;
 	}
 

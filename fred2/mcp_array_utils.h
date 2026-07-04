@@ -65,10 +65,10 @@ void array_move_element(T *arr, int count, int from, int to)
 // Open a slot at `index` by shifting elements [index, count) right by one.
 // Grows the vector if needed.  Increments count.
 template <typename T>
-void array_insert_slot(std::vector<T> &vec, int &count, int index)
+void array_insert_slot(SCP_vector<T> &vec, int &count, int index)
 {
 	Assertion(index >= 0 && index <= count, "array_insert_slot: index %d out of range [0, %d]", index, count);
-	if (count >= (int)vec.size())
+	if (count >= sz2i(vec.size()))
 		vec.resize(count + 1);
 	for (int i = count; i > index; i--)
 		vec[i] = std::move(vec[i - 1]);
@@ -78,7 +78,7 @@ void array_insert_slot(std::vector<T> &vec, int &count, int index)
 // Close a slot at `index` by shifting elements (index, count) left by one.
 // Decrements count.  Does not shrink the vector.
 template <typename T>
-void array_remove_slot(std::vector<T> &vec, int &count, int index)
+void array_remove_slot(SCP_vector<T> &vec, int &count, int index)
 {
 	Assertion(index >= 0 && index < count, "array_remove_slot: index %d out of range [0, %d)", index, count);
 	for (int i = index; i < count - 1; i++)
@@ -88,10 +88,10 @@ void array_remove_slot(std::vector<T> &vec, int &count, int index)
 
 // Move element at `from` to `to`, shifting intermediate elements.
 template <typename T>
-void array_move_element(std::vector<T> &vec, int from, int to)
+void array_move_element(SCP_vector<T> &vec, int from, int to)
 {
-	Assertion(from >= 0 && from < (int)vec.size(), "array_move_element: from %d out of range [0, %d)", from, (int)vec.size());
-	Assertion(to >= 0 && to < (int)vec.size(), "array_move_element: to %d out of range [0, %d)", to, (int)vec.size());
+	Assertion(vec.in_bounds(from), "array_move_element: from %d out of range [0, " SIZE_T_ARG ")", from, vec.size());
+	Assertion(vec.in_bounds(to), "array_move_element: to %d out of range [0, " SIZE_T_ARG ")", to, vec.size());
 	if (from == to)
 		return;
 	T temp = std::move(vec[from]);
