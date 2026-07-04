@@ -12,15 +12,22 @@
 #include <jansson.h>
 #include <climits>
 #include <cstring>
+#include <iterator>
 
 #include "globalincs/utility.h"
 
 #include "globalincs/alphacolors.h"
 #include "graphics/2d.h"
+#include "iff_defs/iff_defs.h"
+#include "jumpnode/jumpnode.h"
 #include "math/vecmat.h"
 #include "mission/missionbriefcommon.h"
+#include "mission/missionparse.h"
+#include "object/object.h"
+#include "object/waypoint.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
+#include "ship/ship.h"
 
 // ---------------------------------------------------------------------------
 // Dialog conflict guards
@@ -65,6 +72,28 @@ static void reset_stage_preserving_buffers(brief_stage &s)
 	s.lines = lines;
 }
 
+static json_t *build_brief_icon_json(const brief_icon &icon, int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "index", json_integer(index + 1));
+	json_object_set_new(obj, "id", json_integer(icon.id));
+	if (icon.type >= 0 && icon.type < MIN_BRIEF_ICONS)
+		json_object_set_new(obj, "type", json_string(Icon_names[icon.type]));
+	if (icon.team >= 0 && icon.team < (int)Iff_info.size())
+		json_object_set_new(obj, "iff", json_safe_string(Iff_info[icon.team].iff_name));
+	if (icon.ship_class >= 0 && icon.ship_class < ship_info_size())
+		json_object_set_new(obj, "ship_class", json_safe_string(Ship_info[icon.ship_class].name));
+	json_object_set_new(obj, "position", build_vec3d_json(icon.pos));
+	json_object_set_new(obj, "label", json_safe_string(icon.label));
+	set_optional_string(obj, "closeup_label", icon.closeup_label, true);
+	json_object_set_new(obj, "scale", json_integer(static_cast<int>(icon.scale_factor * 100.0f)));
+	json_object_set_new(obj, "highlight", json_boolean((icon.flags & BI_HIGHLIGHT) != 0));
+	json_object_set_new(obj, "mirror", json_boolean((icon.flags & BI_MIRROR_ICON) != 0));
+	json_object_set_new(obj, "use_wing_icon", json_boolean((icon.flags & BI_USE_WING_ICON) != 0));
+	json_object_set_new(obj, "use_cargo_icon", json_boolean((icon.flags & BI_USE_CARGO_ICON) != 0));
+	return obj;
+}
+
 static json_t *build_brief_stage_json(const brief_stage &stage, int index)
 {
 	json_t *obj = json_object();
@@ -79,6 +108,23 @@ static json_t *build_brief_stage_json(const brief_stage &stage, int index)
 	json_object_set_new(obj, "draw_grid", json_boolean(stage.draw_grid));
 	json_object_set_new(obj, "grid_color", build_color_json(stage.grid_color, true));
 	json_object_set_new(obj, "formula", json_integer(stage.formula));
+
+	json_t *icons = json_array();
+	for (int i = 0; i < stage.num_icons; i++)
+		json_array_append_new(icons, build_brief_icon_json(stage.icons[i], i));
+	json_object_set_new(obj, "icons", icons);
+
+	// Lines are read-only until the line tools exist; icon indices are 1-based
+	// to match the icons array above.
+	json_t *lines = json_array();
+	for (int i = 0; i < stage.num_lines; i++) {
+		json_t *line = json_object();
+		json_object_set_new(line, "start_icon", json_integer(stage.lines[i].start_icon + 1));
+		json_object_set_new(line, "end_icon", json_integer(stage.lines[i].end_icon + 1));
+		json_array_append_new(lines, line);
+	}
+	json_object_set_new(obj, "lines", lines);
+
 	return obj;
 }
 
@@ -376,6 +422,474 @@ static void handle_swap_briefing_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Briefing icon tools
+// ---------------------------------------------------------------------------
+
+static const SCP_vector<const char *> &icon_type_enum_values()
+{
+	static const SCP_vector<const char *> values(Icon_names, Icon_names + MIN_BRIEF_ICONS);
+	return values;
+}
+
+// Resolve the required "stage" parameter to a 0-based stage index.
+// Returns -1 and sets an error on failure.
+static int get_stage_param(json_t *input, const briefing *br, McpErrorSink &sink)
+{
+	auto stage = get_required_integer(input, "stage", sink);
+	if (!stage.has_value()) return -1;
+	if (!check_int_range(*stage, 1, br->num_stages, "stage", sink)) return -1;
+	return *stage - 1;
+}
+
+// Find the icon with the given id in a stage, or -1.
+static int find_icon_in_stage(const brief_stage &s, int id)
+{
+	if (id >= 0)
+		for (int i = 0; i < s.num_icons; i++)
+			if (s.icons[i].id == id)
+				return i;
+	return -1;
+}
+
+// Find the first navbuoy ship class, used for waypoint and jump node icons
+// (which have no real ship class).  Returns -1 if the mod has none.
+static int first_navbuoy_class()
+{
+	for (auto it = Ship_info.cbegin(); it != Ship_info.cend(); ++it)
+		if (it->flags[Ship::Info_Flags::Navbuoy])
+			return (int)std::distance(Ship_info.cbegin(), it);
+	return -1;
+}
+
+// Pick the icon type for a ship the way the briefing editor's Make Icon
+// button does for a single (non-wing) ship with no docked cargo.
+static int icon_type_for_ship(const ship_info *sip)
+{
+	if (sip->flags[Ship::Info_Flags::Knossos_device])
+		return ICON_KNOSSOS_DEVICE;
+	if (sip->flags[Ship::Info_Flags::Corvette])
+		return ICON_CORVETTE;
+	if (sip->flags[Ship::Info_Flags::Gas_miner])
+		return ICON_GAS_MINER;
+	if (sip->flags[Ship::Info_Flags::Supercap])
+		return ICON_SUPERCAP;
+	if (sip->flags[Ship::Info_Flags::Sentrygun])
+		return ICON_SENTRYGUN;
+	if (sip->flags[Ship::Info_Flags::Awacs])
+		return ICON_AWACS;
+	if (sip->flags[Ship::Info_Flags::Cargo])
+		return ICON_CARGO;
+	if (sip->flags[Ship::Info_Flags::Support])
+		return ICON_SUPPORT_SHIP;
+	if (sip->flags[Ship::Info_Flags::Fighter])
+		return ICON_FIGHTER;
+	if (sip->flags[Ship::Info_Flags::Bomber])
+		return ICON_BOMBER;
+	if (sip->flags[Ship::Info_Flags::Freighter])
+		return ICON_FREIGHTER_NO_CARGO;
+	if (sip->flags[Ship::Info_Flags::Cruiser])
+		return ICON_CRUISER;
+	if (sip->flags[Ship::Info_Flags::Transport])
+		return ICON_TRANSPORT;
+	if (sip->flags[Ship::Info_Flags::Capital] || sip->flags[Ship::Info_Flags::Drydock])
+		return ICON_CAPITAL;
+	if (sip->flags[Ship::Info_Flags::Navbuoy])
+		return ICON_WAYPOINT;
+	return ICON_ASTEROID_FIELD;
+}
+
+struct derived_icon_props
+{
+	vec3d pos = vmd_zero_vector;
+	int type = -1;
+	int team = 0;         // IFF index
+	int ship_class = -1;
+	SCP_string label;
+};
+
+// Derive icon properties from a named mission entity, the way the briefing
+// editor's Make Icon button does.  Tries ships, then waypoints (either an
+// individual "List:n" waypoint or a list name, which uses the first point),
+// then jump nodes.
+static bool derive_icon_from_source(const char *source, derived_icon_props &out, McpErrorSink &sink)
+{
+	int ship = ship_name_lookup(source, 1);
+	if (ship >= 0) {
+		out.pos = Objects[Ships[ship].objnum].pos;
+		out.team = Ships[ship].team;
+		out.ship_class = Ships[ship].ship_info_index;
+		out.type = icon_type_for_ship(&Ship_info[out.ship_class]);
+		out.label = Ships[ship].ship_name;
+		return true;
+	}
+
+	waypoint *wpt = find_matching_waypoint(source);
+	if (!wpt) {
+		waypoint_list *wp_list = find_matching_waypoint_list(source);
+		if (wp_list && !wp_list->get_waypoints().empty())
+			wpt = &wp_list->get_waypoints().front();
+	}
+	if (wpt) {
+		out.pos = *wpt->get_pos();
+		out.type = ICON_WAYPOINT;
+		out.ship_class = first_navbuoy_class();
+		out.label = wpt->get_parent_list()->get_name();
+		return true;
+	}
+
+	CJumpNode *jnp = jumpnode_get_by_name(source);
+	if (jnp) {
+		out.pos = jnp->GetSCPObject()->pos;
+		out.type = ICON_JUMP_NODE;
+		out.ship_class = first_navbuoy_class();
+		out.label = jnp->GetName();
+		return true;
+	}
+
+	sink.set_error("No ship, waypoint, or jump node named '%s'", source);
+	return false;
+}
+
+static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	int stage_idx = get_stage_param(input, br, sink);
+	if (stage_idx < 0) return;
+
+	brief_stage &s = br->stages[stage_idx];
+	if (s.num_icons >= MAX_STAGE_ICONS) {
+		sink.set_error("Cannot add more than %d icons to a briefing stage", MAX_STAGE_ICONS);
+		return;
+	}
+
+	auto source         = get_optional_string(input, "source", sink);
+	auto position       = get_optional_vec3d(input, "position", sink);
+	auto type_str       = get_optional_string(input, "type", sink);
+	auto iff_str        = get_optional_string(input, "iff", sink);
+	auto class_str      = get_optional_string(input, "ship_class", sink);
+	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
+	auto closeup_label  = get_optional_string(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
+	auto scale          = get_optional_integer(input, "scale", sink);
+	auto highlight      = get_optional_bool(input, "highlight", sink);
+	auto mirror         = get_optional_bool(input, "mirror", sink);
+	auto use_wing_icon  = get_optional_bool(input, "use_wing_icon", sink);
+	auto use_cargo_icon = get_optional_bool(input, "use_cargo_icon", sink);
+	auto id             = get_optional_integer(input, "id", sink);
+	auto propagate      = get_optional_bool(input, "propagate", sink);
+	if (sink.has_error()) return;
+
+	// Resolve enums up-front so we fail before mutation
+	int type_idx = -1;
+	if (type_str) {
+		type_idx = check_lookup(type_str, icon_type_enum_values(), "type", sink);
+		if (type_idx < 0) return;
+	}
+	int iff_idx = -1;
+	if (iff_str) {
+		iff_idx = check_lookup(iff_str, iff_lookup, "iff", sink);
+		if (iff_idx < 0) return;
+	}
+	int class_idx = -1;
+	if (class_str) {
+		class_idx = check_lookup(class_str, ship_info_lookup, "ship_class", sink);
+		if (class_idx < 0) return;
+	}
+	if (scale.has_value() && !check_int_range(*scale, 1, INT_MAX, "scale", sink)) return;
+	if (id.has_value() && !check_int_range(*id, 0, INT_MAX, "id", sink)) return;
+
+	derived_icon_props derived;
+	if (source) {
+		if (!derive_icon_from_source(source, derived, sink))
+			return;
+	} else {
+		if (!position.has_value()) {
+			sink.set_error("The position parameter is required when source is not given");
+			return;
+		}
+		if (!type_str) {
+			sink.set_error("The type parameter is required when source is not given");
+			return;
+		}
+	}
+
+	// Explicit parameters override derived values
+	if (position.has_value())
+		derived.pos = *position;
+	if (type_str)
+		derived.type = type_idx;
+	if (iff_str)
+		derived.team = iff_idx;
+	if (class_str)
+		derived.ship_class = class_idx;
+	if (label)
+		derived.label = label;
+
+	// Icon id: default a fresh one; explicit ids must be unique in this stage
+	int icon_id;
+	if (id.has_value()) {
+		if (find_icon_in_stage(s, *id) >= 0) {
+			sink.set_error("Icon id %d is already used in stage %d", *id, stage_idx + 1);
+			return;
+		}
+		icon_id = *id;
+		if (icon_id >= Cur_brief_id)
+			Cur_brief_id = icon_id + 1;
+	} else {
+		icon_id = Cur_brief_id++;
+	}
+
+	brief_icon &icon = s.icons[s.num_icons++];
+	memset(&icon, 0, sizeof(icon));
+	icon.modelnum = -1;
+	icon.model_instance_num = -1;
+	icon.bitmap_id = -1;
+	icon.id = icon_id;
+	icon.pos = derived.pos;
+	icon.type = derived.type;
+	icon.team = derived.team;
+	icon.ship_class = derived.ship_class;
+	strcpy_s(icon.label, derived.label.c_str());
+	if (closeup_label)
+		strcpy_s(icon.closeup_label, closeup_label);
+	icon.scale_factor = scale.has_value() ? *scale / 100.0f : 1.0f;
+	if (highlight.value_or(false))
+		icon.flags |= BI_HIGHLIGHT;
+	if (mirror.value_or(false))
+		icon.flags |= BI_MIRROR_ICON;
+	if (use_wing_icon.value_or(false))
+		icon.flags |= BI_USE_WING_ICON;
+	if (use_cargo_icon.value_or(false))
+		icon.flags |= BI_USE_CARGO_ICON;
+
+	// Copy the icon into every later stage that has room and doesn't already
+	// contain the id, as the briefing editor does when "change locally" is off
+	if (propagate.value_or(true)) {
+		for (int t = stage_idx + 1; t < br->num_stages; t++) {
+			brief_stage &later = br->stages[t];
+			if (later.num_icons >= MAX_STAGE_ICONS)
+				continue;
+			if (find_icon_in_stage(later, icon.id) >= 0)
+				continue;
+			later.icons[later.num_icons++] = icon;
+		}
+	}
+
+	mark_modified("MCP: create briefing icon in stage %d", stage_idx + 1);
+
+	req->result_json = make_json_tool_result(build_brief_icon_json(icon, s.num_icons - 1));
+	req->success = true;
+}
+
+static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	int stage_idx = get_stage_param(input, br, sink);
+	if (stage_idx < 0) return;
+	brief_stage &s = br->stages[stage_idx];
+
+	auto index = get_required_integer(input, "index", sink);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 1, s.num_icons, "index", sink)) return;
+
+	auto position       = get_optional_vec3d(input, "position", sink);
+	auto type_str       = get_optional_string(input, "type", sink);
+	auto iff_str        = get_optional_string(input, "iff", sink);
+	auto class_str      = get_optional_string(input, "ship_class", sink);
+	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
+	auto closeup_label  = get_optional_string(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
+	auto scale          = get_optional_integer(input, "scale", sink);
+	auto highlight      = get_optional_bool(input, "highlight", sink);
+	auto mirror         = get_optional_bool(input, "mirror", sink);
+	auto use_wing_icon  = get_optional_bool(input, "use_wing_icon", sink);
+	auto use_cargo_icon = get_optional_bool(input, "use_cargo_icon", sink);
+	auto new_id         = get_optional_integer(input, "id", sink);
+	auto propagate      = get_optional_bool(input, "propagate", sink);
+	if (sink.has_error()) return;
+
+	int type_idx = -1;
+	if (type_str) {
+		type_idx = check_lookup(type_str, icon_type_enum_values(), "type", sink);
+		if (type_idx < 0) return;
+	}
+	int iff_idx = -1;
+	if (iff_str) {
+		iff_idx = check_lookup(iff_str, iff_lookup, "iff", sink);
+		if (iff_idx < 0) return;
+	}
+	int class_idx = -1;
+	if (class_str) {
+		class_idx = check_lookup(class_str, ship_info_lookup, "ship_class", sink);
+		if (class_idx < 0) return;
+	}
+	if (scale.has_value() && !check_int_range(*scale, 1, INT_MAX, "scale", sink)) return;
+	if (new_id.has_value() && !check_int_range(*new_id, 0, INT_MAX, "id", sink)) return;
+
+	brief_icon &icon = s.icons[*index - 1];
+	bool do_propagate = propagate.value_or(true);
+	int old_id = icon.id;
+
+	// Validate an id change before mutating anything
+	if (new_id.has_value() && *new_id != old_id) {
+		int other = find_icon_in_stage(s, *new_id);
+		if (other >= 0 && other != *index - 1) {
+			sink.set_error("Icon id %d is already used in stage %d", *new_id, stage_idx + 1);
+			return;
+		}
+		if (do_propagate) {
+			for (int t = stage_idx + 1; t < br->num_stages; t++) {
+				if (find_icon_in_stage(br->stages[t], *new_id) >= 0) {
+					sink.set_error("Icon id %d is already used in stage %d. "
+						"Pass propagate=false to change the id only in this stage.", *new_id, t + 1);
+					return;
+				}
+			}
+		}
+	}
+
+	bool changed = false;
+	bool prop_pos = false, prop_type = false, prop_team = false, prop_class = false;
+	bool prop_label = false, prop_closeup = false, prop_id = false;
+
+	if (position.has_value() && !vm_vec_same(&icon.pos, &*position)) {
+		icon.pos = *position;
+		prop_pos = changed = true;
+	}
+	if (type_str && icon.type != type_idx) {
+		icon.type = type_idx;
+		prop_type = changed = true;
+	}
+	if (iff_str && icon.team != iff_idx) {
+		icon.team = iff_idx;
+		prop_team = changed = true;
+	}
+	if (class_str && icon.ship_class != class_idx) {
+		icon.ship_class = class_idx;
+		prop_class = changed = true;
+	}
+	if (label && strcmp(icon.label, label) != 0) {
+		strcpy_s(icon.label, label);
+		prop_label = changed = true;
+	}
+	if (closeup_label && strcmp(icon.closeup_label, closeup_label) != 0) {
+		strcpy_s(icon.closeup_label, closeup_label);
+		prop_closeup = changed = true;
+	}
+	if (new_id.has_value() && *new_id != old_id) {
+		icon.id = *new_id;
+		if (*new_id >= Cur_brief_id)
+			Cur_brief_id = *new_id + 1;
+		prop_id = changed = true;
+	}
+
+	// Scale and the display flags are stage-local in FRED and stay local here
+	if (scale.has_value()) {
+		float sf = *scale / 100.0f;
+		if (icon.scale_factor != sf) {
+			icon.scale_factor = sf;
+			changed = true;
+		}
+	}
+	int flags = icon.flags;
+	if (highlight.has_value())
+		flags = *highlight ? (flags | BI_HIGHLIGHT) : (flags & ~BI_HIGHLIGHT);
+	if (mirror.has_value())
+		flags = *mirror ? (flags | BI_MIRROR_ICON) : (flags & ~BI_MIRROR_ICON);
+	if (use_wing_icon.has_value())
+		flags = *use_wing_icon ? (flags | BI_USE_WING_ICON) : (flags & ~BI_USE_WING_ICON);
+	if (use_cargo_icon.has_value())
+		flags = *use_cargo_icon ? (flags | BI_USE_CARGO_ICON) : (flags & ~BI_USE_CARGO_ICON);
+	if (flags != icon.flags) {
+		icon.flags = flags;
+		changed = true;
+	}
+
+	// Apply the identity-carrying changes to same-id icons in later stages,
+	// as the briefing editor does when "change locally" is off
+	if (do_propagate && (prop_pos || prop_type || prop_team || prop_class || prop_label || prop_closeup || prop_id)) {
+		for (int t = stage_idx + 1; t < br->num_stages; t++) {
+			int z = find_icon_in_stage(br->stages[t], old_id);
+			if (z < 0)
+				continue;
+			brief_icon &other = br->stages[t].icons[z];
+			if (prop_pos)
+				other.pos = icon.pos;
+			if (prop_type)
+				other.type = icon.type;
+			if (prop_team)
+				other.team = icon.team;
+			if (prop_class)
+				other.ship_class = icon.ship_class;
+			if (prop_label)
+				strcpy_s(other.label, icon.label);
+			if (prop_closeup)
+				strcpy_s(other.closeup_label, icon.closeup_label);
+			if (prop_id)
+				other.id = icon.id;
+		}
+	}
+
+	if (changed)
+		mark_modified("MCP: update briefing icon %d in stage %d", *index, stage_idx + 1);
+
+	req->result_json = make_json_tool_result(build_brief_icon_json(icon, *index - 1));
+	req->success = true;
+}
+
+static void handle_delete_briefing_icon(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	int stage_idx = get_stage_param(input, br, sink);
+	if (stage_idx < 0) return;
+	brief_stage &s = br->stages[stage_idx];
+
+	auto index = get_required_integer(input, "index", sink);
+	if (!index.has_value()) return;
+	if (!check_int_range(*index, 1, s.num_icons, "index", sink)) return;
+
+	int num = *index - 1;  // 0-based
+
+	// Remove any lines that reference the icon being deleted
+	int i = s.num_lines;
+	while (i--) {
+		if (s.lines[i].start_icon == num || s.lines[i].end_icon == num) {
+			s.num_lines--;
+			for (int l = i; l < s.num_lines; l++)
+				s.lines[l] = s.lines[l + 1];
+		}
+	}
+
+	// Fix the indexes of lines that reference the icons being shifted down
+	for (i = 0; i < s.num_lines; i++) {
+		if (s.lines[i].start_icon > num)
+			s.lines[i].start_icon--;
+		if (s.lines[i].end_icon > num)
+			s.lines[i].end_icon--;
+	}
+
+	array_remove_slot(s.icons, s.num_icons, num);
+
+	mark_modified("MCP: delete briefing icon %d in stage %d", *index, stage_idx + 1);
+	sprintf(req->result_message,
+		"Deleted briefing icon %d from stage %d", *index, stage_idx + 1);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -531,6 +1045,119 @@ static void register_swap_briefing_stages(json_t *tools)
 		props, req);
 }
 
+static const char *icon_iff_desc =
+	"IFF affiliation of the icon (e.g. \"Friendly\", \"Hostile\"), which "
+	"determines its color. Use list_iffs to see valid names. Note: this is "
+	"unrelated to the \"team\" parameter, which selects whose briefing to edit.";
+
+static void register_create_briefing_icon(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "stage",
+		"1-based index of the stage to add the icon to");
+	add_string_prop(props, "source",
+		"Name of a ship, waypoint, or jump node in the mission to derive the "
+		"icon from, like the FRED editor's Make Icon button: position, label, "
+		"IFF, ship class, and icon type are taken from the entity. Waypoints "
+		"may be an individual point (\"List name:1\") or a list name (uses the "
+		"first point). Explicit parameters override derived values.");
+	add_vec3d_prop(props, "position",
+		"Position of the icon on the briefing map. Required if source is not given.");
+	add_string_enum_prop(props, "type",
+		"Icon type, which determines the symbol drawn on the briefing map. "
+		"Required if source is not given.",
+		icon_type_enum_values());
+	add_string_prop(props, "iff", icon_iff_desc);
+	add_string_prop(props, "ship_class",
+		"Ship class of the icon, used for the closeup view. Defaults to none.");
+	add_string_prop(props, "label",
+		"Label displayed next to the icon. Defaults to empty (or the source entity's name).");
+	add_string_prop(props, "closeup_label",
+		"Label displayed in the closeup view. If empty, the ship class name is used.");
+	add_integer_prop(props, "scale",
+		"Icon scale in percent. Defaults to 100.");
+	add_bool_prop(props, "highlight",
+		"Highlight the icon when the stage is shown. Defaults to false.");
+	add_bool_prop(props, "mirror",
+		"Mirror the icon so it points the other way. Defaults to false.");
+	add_bool_prop(props, "use_wing_icon",
+		"Use the wing variant of the icon (only for ship classes that define one). Defaults to false.");
+	add_bool_prop(props, "use_cargo_icon",
+		"Use the cargo variant of the icon (only for ship classes that define one). Defaults to false.");
+	add_integer_prop(props, "id",
+		"Icon id linking the same icon across stages (for animation continuity). "
+		"Defaults to a freshly assigned id. Must be unique within the stage.");
+	add_bool_prop(props, "propagate",
+		"Also copy the icon into every later stage that doesn't already contain "
+		"its id, as the FRED editor does. Defaults to true.");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("stage"));
+	register_tool(tools, "create_briefing_icon",
+		"Add an icon to a briefing stage. Icons mark ships, waypoints, and jump "
+		"nodes on the briefing map. Either derive the icon from a mission entity "
+		"via source, or supply position and type explicitly. "
+		"Maximum " SCP_TOKEN_TO_STR(MAX_STAGE_ICONS) " icons per stage.",
+		props, req);
+}
+
+static void register_update_briefing_icon(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "stage",
+		"1-based index of the stage containing the icon");
+	add_integer_prop(props, "index",
+		"1-based index of the icon within the stage");
+	add_vec3d_prop(props, "position",
+		"New position of the icon on the briefing map");
+	add_string_enum_prop(props, "type",
+		"New icon type", icon_type_enum_values());
+	add_string_prop(props, "iff", icon_iff_desc);
+	add_string_prop(props, "ship_class", "New ship class of the icon");
+	add_string_prop(props, "label", "New label. Empty string clears it.");
+	add_string_prop(props, "closeup_label",
+		"New closeup label. Empty string clears it (the ship class name is then used).");
+	add_integer_prop(props, "scale", "New icon scale in percent");
+	add_bool_prop(props, "highlight", "Highlight the icon when the stage is shown");
+	add_bool_prop(props, "mirror", "Mirror the icon so it points the other way");
+	add_bool_prop(props, "use_wing_icon", "Use the wing variant of the icon");
+	add_bool_prop(props, "use_cargo_icon", "Use the cargo variant of the icon");
+	add_integer_prop(props, "id",
+		"New icon id. Must be unique within the stage (and, when propagating, "
+		"not used in any later stage).");
+	add_bool_prop(props, "propagate",
+		"Also apply position, type, iff, ship_class, label, closeup_label, and "
+		"id changes to icons with the same id in later stages, as the FRED "
+		"editor does. Scale and the display flags are always stage-local. "
+		"Defaults to true.");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("stage"));
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "update_briefing_icon",
+		"Update properties of an existing briefing icon. Only specified "
+		"fields are changed; omitted fields are left unchanged.",
+		props, req);
+}
+
+static void register_delete_briefing_icon(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "stage",
+		"1-based index of the stage containing the icon");
+	add_integer_prop(props, "index",
+		"1-based index of the icon to delete");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("stage"));
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "delete_briefing_icon",
+		"Delete an icon from a briefing stage. Lines connected to the icon are "
+		"removed and remaining icons are shifted down. Only affects the given "
+		"stage; same-id icons in other stages are untouched.",
+		props, req);
+}
+
 // ---------------------------------------------------------------------------
 // Tool table
 // ---------------------------------------------------------------------------
@@ -543,5 +1170,8 @@ const McpToolDef mcp_brief_tool_defs[] = {
 	{ "delete_briefing_stage", register_delete_briefing_stage, nullptr, handle_delete_briefing_stage, false },
 	{ "move_briefing_stage",   register_move_briefing_stage,   nullptr, handle_move_briefing_stage,   false },
 	{ "swap_briefing_stages",  register_swap_briefing_stages,  nullptr, handle_swap_briefing_stages,  false },
+	{ "create_briefing_icon",  register_create_briefing_icon,  nullptr, handle_create_briefing_icon,  false },
+	{ "update_briefing_icon",  register_update_briefing_icon,  nullptr, handle_update_briefing_icon,  false },
+	{ "delete_briefing_icon",  register_delete_briefing_icon,  nullptr, handle_delete_briefing_icon,  false },
 };
 const size_t mcp_brief_tool_def_count = sizeof(mcp_brief_tool_defs) / sizeof(mcp_brief_tool_defs[0]);
