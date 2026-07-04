@@ -76,7 +76,7 @@ static json_t *build_brief_icon_json(const brief_icon &icon, int index)
 {
 	json_t *obj = json_object();
 	json_object_set_new(obj, "index", json_integer(index + 1));
-	json_object_set_new(obj, "id", json_integer(icon.id));
+	json_object_set_new(obj, "continuity_id", json_integer(icon.id));
 	if (icon.type >= 0 && icon.type < MIN_BRIEF_ICONS)
 		json_object_set_new(obj, "icon_type", json_string(Icon_names[icon.type]));
 	if (icon.team >= 0 && icon.team < (int)Iff_info.size())
@@ -583,7 +583,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	auto mirror         = get_optional_bool(input, "mirror", sink);
 	auto use_wing_icon  = get_optional_bool(input, "use_wing_icon", sink);
 	auto use_cargo_icon = get_optional_bool(input, "use_cargo_icon", sink);
-	auto id             = get_optional_integer(input, "id", sink);
+	auto continuity_id  = get_optional_integer(input, "continuity_id", sink);
 	auto propagate      = get_optional_bool(input, "propagate", sink);
 	if (sink.has_error()) return;
 
@@ -604,7 +604,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 		if (class_idx < 0) return;
 	}
 	if (scale.has_value() && !check_int_range(*scale, 1, INT_MAX, "scale", sink)) return;
-	if (id.has_value() && !check_int_range(*id, 0, INT_MAX, "id", sink)) return;
+	if (continuity_id.has_value() && !check_int_range(*continuity_id, 0, INT_MAX, "continuity_id", sink)) return;
 
 	derived_icon_props derived;
 	if (source) {
@@ -633,14 +633,14 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	if (label)
 		derived.label = label;
 
-	// Icon id: default a fresh one; explicit ids must be unique in this stage
+	// Continuity id: default a fresh one; explicit ids must be unique in this stage
 	int icon_id;
-	if (id.has_value()) {
-		if (find_icon_in_stage(s, *id) >= 0) {
-			sink.set_error("Icon id %d is already used in stage %d", *id, stage_idx + 1);
+	if (continuity_id.has_value()) {
+		if (find_icon_in_stage(s, *continuity_id) >= 0) {
+			sink.set_error("Continuity id %d is already used in stage %d", *continuity_id, stage_idx + 1);
 			return;
 		}
-		icon_id = *id;
+		icon_id = *continuity_id;
 		if (icon_id >= Cur_brief_id)
 			Cur_brief_id = icon_id + 1;
 	} else {
@@ -671,7 +671,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 		icon.flags |= BI_USE_CARGO_ICON;
 
 	// Copy the icon into every later stage that has room and doesn't already
-	// contain the id, as the briefing editor does when "change locally" is off
+	// contain its continuity_id, as the briefing editor does when "change locally" is off
 	if (propagate.value_or(true)) {
 		for (int t = stage_idx + 1; t < br->num_stages; t++) {
 			brief_stage &later = br->stages[t];
@@ -716,7 +716,7 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 	auto mirror         = get_optional_bool(input, "mirror", sink);
 	auto use_wing_icon  = get_optional_bool(input, "use_wing_icon", sink);
 	auto use_cargo_icon = get_optional_bool(input, "use_cargo_icon", sink);
-	auto new_id         = get_optional_integer(input, "id", sink);
+	auto new_id         = get_optional_integer(input, "continuity_id", sink);
 	auto propagate      = get_optional_bool(input, "propagate", sink);
 	if (sink.has_error()) return;
 
@@ -736,24 +736,24 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 		if (class_idx < 0) return;
 	}
 	if (scale.has_value() && !check_int_range(*scale, 1, INT_MAX, "scale", sink)) return;
-	if (new_id.has_value() && !check_int_range(*new_id, 0, INT_MAX, "id", sink)) return;
+	if (new_id.has_value() && !check_int_range(*new_id, 0, INT_MAX, "continuity_id", sink)) return;
 
 	brief_icon &icon = s.icons[*index - 1];
 	bool do_propagate = propagate.value_or(true);
 	int old_id = icon.id;
 
-	// Validate an id change before mutating anything
+	// Validate a continuity_id change before mutating anything
 	if (new_id.has_value() && *new_id != old_id) {
 		int other = find_icon_in_stage(s, *new_id);
 		if (other >= 0 && other != *index - 1) {
-			sink.set_error("Icon id %d is already used in stage %d", *new_id, stage_idx + 1);
+			sink.set_error("Continuity id %d is already used in stage %d", *new_id, stage_idx + 1);
 			return;
 		}
 		if (do_propagate) {
 			for (int t = stage_idx + 1; t < br->num_stages; t++) {
 				if (find_icon_in_stage(br->stages[t], *new_id) >= 0) {
-					sink.set_error("Icon id %d is already used in stage %d. "
-						"Pass propagate=false to change the id only in this stage.", *new_id, t + 1);
+					sink.set_error("Continuity id %d is already used in stage %d. "
+						"Pass propagate=false to change the continuity_id only in this stage.", *new_id, t + 1);
 					return;
 				}
 			}
@@ -817,7 +817,7 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 
-	// Apply the identity-carrying changes to same-id icons in later stages,
+	// Apply the identity-carrying changes to same-continuity_id icons in later stages,
 	// as the briefing editor does when "change locally" is off
 	if (do_propagate && (prop_pos || prop_type || prop_team || prop_class || prop_label || prop_closeup || prop_id)) {
 		for (int t = stage_idx + 1; t < br->num_stages; t++) {
@@ -1264,12 +1264,14 @@ static void register_create_briefing_icon(json_t *tools)
 		"Use the wing variant of the icon (only for ship classes that define one). Defaults to false.");
 	add_bool_prop(props, "use_cargo_icon",
 		"Use the cargo variant of the icon (only for ship classes that define one). Defaults to false.");
-	add_integer_prop(props, "id",
-		"Icon id linking the same icon across stages (for animation continuity). "
-		"Defaults to a freshly assigned id. Must be unique within the stage.");
+	add_integer_prop(props, "continuity_id",
+		"Identifies the same icon across stages. Icons sharing a continuity_id are "
+		"treated as one icon by the briefing player: it slides to its new position "
+		"and fades in/out as the briefing advances between stages. Defaults to a "
+		"freshly assigned id. Must be unique within the stage.");
 	add_bool_prop(props, "propagate",
 		"Also copy the icon into every later stage that doesn't already contain "
-		"its id, as the FRED editor does. Defaults to true.");
+		"its continuity_id, as the FRED editor does. Defaults to true.");
 	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
 	json_t *req = json_array();
 	json_array_append_new(req, json_string("stage"));
@@ -1302,13 +1304,13 @@ static void register_update_briefing_icon(json_t *tools)
 	add_bool_prop(props, "mirror", "Mirror the icon so it points the other way");
 	add_bool_prop(props, "use_wing_icon", "Use the wing variant of the icon");
 	add_bool_prop(props, "use_cargo_icon", "Use the cargo variant of the icon");
-	add_integer_prop(props, "id",
-		"New icon id. Must be unique within the stage (and, when propagating, "
-		"not used in any later stage).");
+	add_integer_prop(props, "continuity_id",
+		"New continuity id (identifies the same icon across stages). Must be unique "
+		"within the stage (and, when propagating, not used in any later stage).");
 	add_bool_prop(props, "propagate",
 		"Also apply position, type, iff, ship_class, label, closeup_label, and "
-		"id changes to icons with the same id in later stages, as the FRED "
-		"editor does. Scale and the display flags are always stage-local. "
+		"continuity_id changes to icons with the same continuity_id in later stages, "
+		"as the FRED editor does. Scale and the display flags are always stage-local. "
 		"Defaults to true.");
 	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
 	json_t *req = json_array();
@@ -1334,7 +1336,7 @@ static void register_delete_briefing_icon(json_t *tools)
 	register_tool(tools, "delete_briefing_icon",
 		"Delete an icon from a briefing stage. Lines connected to the icon are "
 		"removed and remaining icons are shifted down. Only affects the given "
-		"stage; same-id icons in other stages are untouched.",
+		"stage; icons with the same continuity_id in other stages are untouched.",
 		props, req);
 }
 
