@@ -254,6 +254,59 @@ static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Debriefing background tools
+// ---------------------------------------------------------------------------
+
+static json_t *build_debriefing_background_json(const debriefing &db)
+{
+	json_t *obj = json_object();
+	set_optional_filename(obj, "background_640", db.background[GR_640]);
+	set_optional_filename(obj, "background_1024", db.background[GR_1024]);
+	return obj;
+}
+
+static void handle_get_debriefing_background(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
+
+	auto *db = get_debriefing_for_team(input, sink);
+	if (!db) return;
+
+	req->result_json = make_json_tool_result(build_debriefing_background_json(*db));
+	req->success = true;
+}
+
+static void handle_update_debriefing_background(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_debriefing, sink)) return;
+
+	auto *db = get_debriefing_for_team(input, sink);
+	if (!db) return;
+
+	auto bg640  = get_optional_filename(input, "background_640", sink, false);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, false);
+	if (sink.has_error()) return;
+
+	bool changed = false;
+	if (bg640 && strcmp(db->background[GR_640], bg640) != 0) {
+		strcpy_s(db->background[GR_640], bg640);
+		changed = true;
+	}
+	if (bg1024 && strcmp(db->background[GR_1024], bg1024) != 0) {
+		strcpy_s(db->background[GR_1024], bg1024);
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update debriefing background");
+
+	req->result_json = make_json_tool_result(build_debriefing_background_json(*db));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -374,6 +427,33 @@ static void register_swap_debriefing_stages(json_t *tools)
 		props, req);
 }
 
+static void register_get_debriefing_background(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	register_tool(tools, "get_debriefing_background",
+		"Get the custom background images for a team's debriefing screen. "
+		"The 640 variant is used at resolutions below 1024x768; the 1024 variant "
+		"otherwise. Fields are omitted when no custom background is set (the "
+		"standard background is used).",
+		props);
+}
+
+static void register_update_debriefing_background(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "background_640",
+		"Debriefing screen background, 640x480 variant");
+	add_string_prop(props, "background_1024",
+		"Debriefing screen background, 1024x768 variant");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	register_tool(tools, "update_debriefing_background",
+		"Update the custom background images for a team's debriefing screen. "
+		"Only specified fields are changed; pass an empty string to clear a "
+		"field back to the standard background.",
+		props);
+}
+
 // ---------------------------------------------------------------------------
 // Tool table
 // ---------------------------------------------------------------------------
@@ -386,5 +466,7 @@ const McpToolDef mcp_debrief_tool_defs[] = {
 	{ "delete_debriefing_stage", register_delete_debriefing_stage, nullptr, handle_delete_debriefing_stage, false },
 	{ "move_debriefing_stage",   register_move_debriefing_stage,   nullptr, handle_move_debriefing_stage,   false },
 	{ "swap_debriefing_stages",  register_swap_debriefing_stages,  nullptr, handle_swap_debriefing_stages,  false },
+	{ "get_debriefing_background",    register_get_debriefing_background,    nullptr, handle_get_debriefing_background,    false },
+	{ "update_debriefing_background", register_update_debriefing_background, nullptr, handle_update_debriefing_background, false },
 };
 const size_t mcp_debrief_tool_def_count = sizeof(mcp_debrief_tool_defs) / sizeof(mcp_debrief_tool_defs[0]);
