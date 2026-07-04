@@ -556,6 +556,8 @@ static const char *mission_tool_names[] = {
 	"set_reinforcement",
 	"get_team_loadout",
 	"update_team_loadout",
+	"set_team_loadout_ship",
+	"set_team_loadout_weapon",
 	nullptr
 };
 

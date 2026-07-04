@@ -214,6 +214,7 @@ struct PendingLoadoutEntry {
 struct LoadoutEntrySpec {
 	const char *class_param;			// "ship_class" / "weapon_class"
 	const char *class_label;			// for error messages
+	const char *pool_label;				// "ship pool" / "weapon pool", for error messages
 	const char *flag_requirement;		// for error messages
 	int (*lookup)(const char *);		// class name -> index, or -1
 	bool (*player_flagged)(int);		// eligibility flag check
@@ -231,12 +232,12 @@ static bool weapon_player_flagged(int idx)
 }
 
 static const LoadoutEntrySpec Ship_entry_spec = {
-	"ship_class", "ship class", "flagged as a player ship",
+	"ship_class", "ship class", "ship pool", "flagged as a player ship",
 	ship_info_lookup, ship_player_flagged, MAX_SHIP_CLASSES
 };
 
 static const LoadoutEntrySpec Weapon_entry_spec = {
-	"weapon_class", "weapon class", "flagged as player-allowed",
+	"weapon_class", "weapon class", "weapon pool", "flagged as player-allowed",
 	weapon_info_lookup, weapon_player_flagged, MAX_WEAPON_TYPES
 };
 
@@ -433,6 +434,30 @@ static void apply_weapon_entries(team_data &td, const SCP_vector<PendingLoadoutE
 	td.num_weapon_choices = (int)entries.size();
 }
 
+// Remove one entry from a team's ship pool, shifting later entries down.
+static void remove_ship_entry(team_data &td, int idx)
+{
+	for (int j = idx; j < td.num_ship_choices - 1; j++) {
+		td.ship_list[j] = td.ship_list[j + 1];
+		strcpy_s(td.ship_list_variables[j], td.ship_list_variables[j + 1]);
+		td.ship_count[j] = td.ship_count[j + 1];
+		strcpy_s(td.ship_count_variables[j], td.ship_count_variables[j + 1]);
+	}
+	td.num_ship_choices--;
+}
+
+// Remove one entry from a team's weapon pool, shifting later entries down.
+static void remove_weapon_entry(team_data &td, int idx)
+{
+	for (int j = idx; j < td.num_weapon_choices - 1; j++) {
+		td.weaponry_pool[j] = td.weaponry_pool[j + 1];
+		strcpy_s(td.weaponry_pool_variable[j], td.weaponry_pool_variable[j + 1]);
+		td.weaponry_count[j] = td.weaponry_count[j + 1];
+		strcpy_s(td.weaponry_amount_variable[j], td.weaponry_amount_variable[j + 1]);
+	}
+	td.num_weapon_choices--;
+}
+
 // ---------------------------------------------------------------------------
 // Tool handlers
 // ---------------------------------------------------------------------------
@@ -498,6 +523,224 @@ static void handle_update_team_loadout(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+// A uniform view over the ship or weapon parallel arrays in team_data, so the
+// upsert handler can be written once for both pools.
+struct LoadoutPoolView {
+	int *class_arr;
+	char (*class_var_arr)[TOKEN_LENGTH];
+	int *count_arr;
+	char (*count_var_arr)[TOKEN_LENGTH];
+	int *num_choices;
+};
+
+static LoadoutPoolView ship_pool_view(team_data &td)
+{
+	return { td.ship_list, td.ship_list_variables, td.ship_count, td.ship_count_variables, &td.num_ship_choices };
+}
+
+static LoadoutPoolView weapon_pool_view(team_data &td)
+{
+	return { td.weaponry_pool, td.weaponry_pool_variable, td.weaponry_count, td.weaponry_amount_variable, &td.num_weapon_choices };
+}
+
+// set_team_loadout_ship / set_team_loadout_weapon: upsert or remove a single
+// pool entry, keyed by its static class or class-variable name.  Follows the
+// set_reinforcement pattern: enable=false removes; otherwise the entry is
+// created (count required) or partially updated (only provided fields change).
+static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
+	const LoadoutEntrySpec &spec, bool is_weapon)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_loadout, sink)) return;
+
+	int team = resolve_loadout_team(input, sink);
+	if (team < 0) return;
+
+	team_data &td = Team_data[team];
+	LoadoutPoolView pool = is_weapon ? weapon_pool_view(td) : ship_pool_view(td);
+
+	// --- Phase 1: parse and validate everything (no mutations yet) ---
+
+	// key: static class XOR class variable
+	auto class_str = get_optional_string(input, spec.class_param, sink, NAME_LENGTH - 1);
+	if (sink.has_error()) return;
+	auto class_var_str = get_optional_string(input, "class_variable", sink, TOKEN_LENGTH - 1);
+	if (sink.has_error()) return;
+
+	if ((class_str != nullptr) == (class_var_str != nullptr)) {
+		sink.set_error("Exactly one of '%s' or 'class_variable' is required", spec.class_param);
+		return;
+	}
+
+	int class_idx = -1;
+	const char *class_var_name = nullptr;	// canonical spelling
+	int class_var_idx = -1;
+	if (class_str) {
+		class_idx = spec.lookup(class_str);
+		if (class_idx < 0) {
+			sink.set_error("%s not found: %s", spec.class_label, class_str);
+			return;
+		}
+	} else {
+		class_var_idx = lookup_loadout_variable(class_var_str, SEXP_VARIABLE_STRING, "string",
+			"class_variable", sink);
+		if (class_var_idx < 0) return;
+		class_var_name = Sexp_variables[class_var_idx].variable_name;
+	}
+
+	auto enable = get_optional_bool(input, "enable", sink);
+	if (sink.has_error()) return;
+	bool removing = enable.has_value() && !*enable;
+
+	// Eligibility only matters when the entry will remain in the pool, so an
+	// ineligible class that somehow got into a mission can still be removed.
+	if (!removing) {
+		if (class_str) {
+			if (!spec.player_flagged(class_idx)) {
+				sink.set_error("%s '%s' cannot appear in the loadout because it is not %s",
+					spec.class_label, class_str, spec.flag_requirement);
+				return;
+			}
+		} else if (spec.lookup(Sexp_variables[class_var_idx].text) < 0) {
+			sink.set_error("SEXP variable '%s' currently holds '%s', which is not a valid %s",
+				class_var_name, Sexp_variables[class_var_idx].text, spec.class_label);
+			return;
+		}
+	}
+
+	// find the existing entry for this key
+	int found = -1;
+	for (int i = 0; i < *pool.num_choices; i++) {
+		if (class_var_name) {
+			if (!strcmp(pool.class_var_arr[i], class_var_name)) {
+				found = i;
+				break;
+			}
+		} else if (pool.class_var_arr[i][0] == '\0' && pool.class_arr[i] == class_idx) {
+			found = i;
+			break;
+		}
+	}
+
+	if (removing) {
+		if (found < 0) {
+			set_not_found_error(sink, "Loadout entry", class_str ? class_str : class_var_name);
+			return;
+		}
+		if (is_weapon && pool.class_var_arr[found][0] == '\0' && pool.class_arr[found] >= 0)
+			td.weapon_required[pool.class_arr[found]] = false;
+		if (is_weapon)
+			remove_weapon_entry(td, found);
+		else
+			remove_ship_entry(td, found);
+
+		mark_modified("MCP: remove %s loadout entry for %s", spec.class_label, team_name_from_index(team));
+		req->result_json = make_json_tool_result(build_team_loadout_json(team));
+		req->success = true;
+		return;
+	}
+
+	// count: literal XOR number variable; required on create, optional on update
+	bool has_count = input && json_object_get(input, "count") != nullptr;
+	auto count_var_str = get_optional_string(input, "count_variable", sink, TOKEN_LENGTH - 1);
+	if (sink.has_error()) return;
+	if (has_count && count_var_str) {
+		sink.set_error("Provide at most one of 'count' or 'count_variable'");
+		return;
+	}
+
+	bool count_touched = false;
+	int new_count = 0;
+	const char *new_count_var = "";
+	if (has_count) {
+		auto count_opt = get_required_integer(input, "count", sink);
+		if (!count_opt.has_value()) return;
+		if (!check_int_range(*count_opt, LOADOUT_COUNT_MIN, LOADOUT_COUNT_MAX, "count", sink)) return;
+		new_count = *count_opt;
+		count_touched = true;
+	} else if (count_var_str) {
+		int var_idx = lookup_loadout_variable(count_var_str, SEXP_VARIABLE_NUMBER, "number",
+			"count_variable", sink);
+		if (var_idx < 0) return;
+		new_count_var = Sexp_variables[var_idx].variable_name;
+		new_count = atoi(Sexp_variables[var_idx].text);	// cached value, same as the dialog's OnOK
+		count_touched = true;
+	}
+
+	if (found < 0) {
+		if (!count_touched) {
+			sink.set_error("Creating a new loadout entry requires 'count' or 'count_variable'");
+			return;
+		}
+		if (*pool.num_choices >= spec.max_entries) {
+			sink.set_error("Cannot add more than %d %s entries", spec.max_entries, spec.pool_label);
+			return;
+		}
+	}
+
+	// required (weapons only): same constraints as update_team_loadout
+	std::optional<bool> required_opt;
+	if (is_weapon) {
+		required_opt = get_optional_bool(input, "required", sink);
+		if (sink.has_error()) return;
+		if (required_opt.has_value() && *required_opt) {
+			if (class_var_name) {
+				sink.set_error("Only static weapon classes can be required for the mission "
+					"(this entry's class comes from a variable)");
+				return;
+			}
+			int effective_count = count_touched ? new_count : pool.count_arr[found];
+			if (effective_count < 1) {
+				sink.set_error("A required weapon must have a count of at least 1");
+				return;
+			}
+		}
+	}
+
+	// --- Phase 2: apply ---
+	bool changed = false;
+	if (found < 0) {
+		int slot = (*pool.num_choices)++;
+		if (class_var_name) {
+			strcpy_s(pool.class_var_arr[slot], class_var_name);
+			pool.class_arr[slot] = -1;
+		} else {
+			pool.class_arr[slot] = class_idx;
+			pool.class_var_arr[slot][0] = '\0';
+		}
+		pool.count_arr[slot] = new_count;
+		strcpy_s(pool.count_var_arr[slot], new_count_var);
+		changed = true;
+	} else if (count_touched &&
+		(strcmp(pool.count_var_arr[found], new_count_var) != 0 || pool.count_arr[found] != new_count)) {
+		pool.count_arr[found] = new_count;
+		strcpy_s(pool.count_var_arr[found], new_count_var);
+		changed = true;
+	}
+
+	if (is_weapon && required_opt.has_value() && class_idx >= 0
+		&& td.weapon_required[class_idx] != *required_opt) {
+		td.weapon_required[class_idx] = *required_opt;
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: set %s loadout entry for %s", spec.class_label, team_name_from_index(team));
+
+	req->result_json = make_json_tool_result(build_team_loadout_json(team));
+	req->success = true;
+}
+
+static void handle_set_team_loadout_ship(json_t *input, McpToolRequest *req)
+{
+	handle_set_team_loadout_entry(input, req, Ship_entry_spec, false);
+}
+
+static void handle_set_team_loadout_weapon(json_t *input, McpToolRequest *req)
+{
+	handle_set_team_loadout_entry(input, req, Weapon_entry_spec, true);
+}
+
 // ---------------------------------------------------------------------------
 // Loadout variable-reference helpers (see header)
 // ---------------------------------------------------------------------------
@@ -556,30 +799,6 @@ int mcp_rename_loadout_variable_refs(const char *old_name, const char *new_name)
 		}
 	}
 	return count;
-}
-
-// Remove one entry from a team's ship pool, shifting later entries down.
-static void remove_ship_entry(team_data &td, int idx)
-{
-	for (int j = idx; j < td.num_ship_choices - 1; j++) {
-		td.ship_list[j] = td.ship_list[j + 1];
-		strcpy_s(td.ship_list_variables[j], td.ship_list_variables[j + 1]);
-		td.ship_count[j] = td.ship_count[j + 1];
-		strcpy_s(td.ship_count_variables[j], td.ship_count_variables[j + 1]);
-	}
-	td.num_ship_choices--;
-}
-
-// Remove one entry from a team's weapon pool, shifting later entries down.
-static void remove_weapon_entry(team_data &td, int idx)
-{
-	for (int j = idx; j < td.num_weapon_choices - 1; j++) {
-		td.weaponry_pool[j] = td.weaponry_pool[j + 1];
-		strcpy_s(td.weaponry_pool_variable[j], td.weaponry_pool_variable[j + 1]);
-		td.weaponry_count[j] = td.weaponry_count[j + 1];
-		strcpy_s(td.weaponry_amount_variable[j], td.weaponry_amount_variable[j + 1]);
-	}
-	td.num_weapon_choices--;
 }
 
 int mcp_clear_loadout_variable_refs(const char *var_name)
@@ -695,6 +914,63 @@ void mcp_register_loadout_tools(json_t *tools)
 			"are left unchanged. Returns the team's full updated loadout.",
 			props);
 	}
+
+	// set_team_loadout_ship
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "team", loadout_team_desc, team_enum_values);
+		add_string_prop(props, "ship_class",
+			"Ship class of the entry to create, update, or remove (must be flagged as a player ship). "
+			"Mutually exclusive with class_variable.");
+		add_string_prop(props, "class_variable",
+			"Name of a string SEXP variable identifying the entry (its value must be a ship class name). "
+			"Mutually exclusive with ship_class.");
+		add_integer_prop(props, "count",
+			"Number of ships of this class available beyond those used by starting wings (0-9999). "
+			"Required when creating a new entry (unless count_variable is given); optional on update. "
+			"Mutually exclusive with count_variable.");
+		add_string_prop(props, "count_variable",
+			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+		add_bool_prop(props, "enable",
+			"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
+		register_tool(tools, "set_team_loadout_ship",
+			"Create, update, or remove a single ship pool entry in a team's loadout, keyed by "
+			"ship_class or class_variable. Existing entries are partially updated (only provided "
+			"fields change); enable=false removes the entry. Use update_team_loadout to replace "
+			"the whole pool at once. Returns the team's full updated loadout.",
+			props);
+	}
+
+	// set_team_loadout_weapon
+	{
+		json_t *props = json_object();
+		add_string_enum_prop(props, "team", loadout_team_desc, team_enum_values);
+		add_string_prop(props, "weapon_class",
+			"Weapon class of the entry to create, update, or remove (must be flagged as player-allowed). "
+			"Mutually exclusive with class_variable.");
+		add_string_prop(props, "class_variable",
+			"Name of a string SEXP variable identifying the entry (its value must be a weapon class name). "
+			"Mutually exclusive with weapon_class.");
+		add_integer_prop(props, "count",
+			"Number of weapons of this class available beyond those carried by starting wings (0-9999). "
+			"Required when creating a new entry (unless count_variable is given); optional on update. "
+			"Mutually exclusive with count_variable.");
+		add_string_prop(props, "count_variable",
+			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+		add_bool_prop(props, "required",
+			"If true, the player must take at least one of this weapon into the mission. "
+			"Only valid for a static weapon_class with a count of at least 1. "
+			"Removing the entry clears the flag.");
+		add_bool_prop(props, "enable",
+			"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
+		register_tool(tools, "set_team_loadout_weapon",
+			"Create, update, or remove a single weapon pool entry in a team's loadout, keyed by "
+			"weapon_class or class_variable. Existing entries are partially updated (only provided "
+			"fields change); enable=false removes the entry and clears its required flag. Use "
+			"update_team_loadout to replace the whole pool at once. Returns the team's full "
+			"updated loadout.",
+			props);
+	}
 }
 
 // ---------------------------------------------------------------------------
@@ -707,6 +983,10 @@ bool mcp_handle_loadout_tool(const char *tool_name, json_t *input_json, McpToolR
 		handle_get_team_loadout(input_json, req);
 	} else if (strcmp(tool_name, "update_team_loadout") == 0) {
 		handle_update_team_loadout(input_json, req);
+	} else if (strcmp(tool_name, "set_team_loadout_ship") == 0) {
+		handle_set_team_loadout_ship(input_json, req);
+	} else if (strcmp(tool_name, "set_team_loadout_weapon") == 0) {
+		handle_set_team_loadout_weapon(input_json, req);
 	} else {
 		return false;
 	}
