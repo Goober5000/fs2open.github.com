@@ -144,9 +144,9 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	// Look up persona by name
+	// Look up persona by name (empty / "<none>" = no persona)
 	int persona_index = -1;
-	if (persona_str && persona_str[0]) {
+	if (persona_str && persona_str[0] && stricmp(persona_str, "<none>") != 0) {
 		persona_index = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
 		if (persona_index < 0) return;
 	}
@@ -232,7 +232,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 	std::optional<int> persona_index = std::nullopt;
 	if (persona_str) {
-		if (persona_str[0]) {
+		if (persona_str[0] && stricmp(persona_str, "<none>") != 0) {
 			int persona_idx = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
 			if (persona_idx < 0) return;
 			persona_index = persona_idx;
@@ -435,7 +435,8 @@ void mcp_register_message_tools(json_t *tools)
 		add_string_prop(props, "name", "Unique name for the message");
 		add_string_prop(props, "message", "The message text displayed in-game");
 		add_string_prop(props, "persona",
-			"Name of the persona who delivers this message (e.g. \"Wingman 1\")");
+			"Name of the persona who delivers this message (e.g. \"Wingman 1\"). "
+			"Empty string or \"<none>\" for no persona.");
 		add_string_prop(props, "talking_head", "Filename for the talking head animation");
 		add_string_prop(props, "voice_filename", "Filename for the voice audio");
 		add_string_enum_prop(props, "team",
@@ -460,9 +461,9 @@ void mcp_register_message_tools(json_t *tools)
 		add_string_prop(props, "new_name", "New name for the message");
 		add_string_prop(props, "message", "New message text");
 		add_string_prop(props, "persona",
-			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string to clear)");
-		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string to clear)");
-		add_string_prop(props, "voice_filename", "Filename for the voice audio (empty string to clear)");
+			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string or \"<none>\" to clear)");
+		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string or \"<none>\" to clear)");
+		add_string_prop(props, "voice_filename", "Filename for the voice audio (empty string or \"<none>\" to clear)");
 		add_string_enum_prop(props, "team",
 			"Multiplayer team assignment (\"none\" for all teams)",
 			team_enum_values);

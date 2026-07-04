@@ -309,9 +309,8 @@ static bool apply_helper(int ship_idx, const char *new_text, apply_type type)
 
 	char *slot = apply_array[ship_idx];
 
-	// Treat empty / "<none>" / "none" as clearing.
-	bool clearing = !new_text || !*new_text
-		|| !stricmp(new_text, "<none>") || !stricmp(new_text, "none");
+	// Treat empty / "<none>" as clearing (the universal clear convention).
+	bool clearing = !new_text || !*new_text || !stricmp(new_text, "<none>");
 
 	if (clearing) {
 		if (!*slot)
@@ -669,7 +668,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	}
 
 	int ai_class_idx = -1;
-	if (ai_class_str) {
+	if (ai_class_str && *ai_class_str && stricmp(ai_class_str, "<default>") != 0) {
 		ai_class_idx = check_lookup(ai_class_str,
 			[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
 			"ai_class", sink);
@@ -677,7 +676,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	}
 
 	int persona_idx = -1;
-	if (persona_str && *persona_str) {
+	if (persona_str && *persona_str && stricmp(persona_str, "<none>") != 0) {
 		persona_idx = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
 		if (persona_idx < 0) return;
 	}
@@ -945,10 +944,15 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	}
 
 	if (ai_class_str) {
-		int ai_class_idx = check_lookup(ai_class_str,
-			[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
-			"ai_class", sink);
-		if (ai_class_idx < 0) return;
+		int ai_class_idx;
+		if (!*ai_class_str || !stricmp(ai_class_str, "<default>")) {
+			ai_class_idx = Ship_info[shipp.ship_info_index].ai_class;
+		} else {
+			ai_class_idx = check_lookup(ai_class_str,
+				[](const char *s) { return string_lookup(s, Ai_class_names, (size_t)Num_ai_classes); },
+				"ai_class", sink);
+			if (ai_class_idx < 0) return;
+		}
 		if (shipp.weapons.ai_class != ai_class_idx) {
 			shipp.weapons.ai_class = ai_class_idx;
 			changed = true;
@@ -976,7 +980,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 
 	if (persona_str) {
 		int new_persona;
-		if (!*persona_str) {
+		if (!*persona_str || !stricmp(persona_str, "<none>")) {
 			new_persona = -1;
 		} else {
 			new_persona = check_lookup(persona_str, message_persona_name_lookup, "persona", sink);
@@ -2367,7 +2371,7 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 				subsystem_name, shipp.ship_name, Subsystem_types[type]);
 			return;
 		}
-		if (!stricmp(ai_arg, "<default>")) {
+		if (!*ai_arg || !stricmp(ai_arg, "<default>")) {
 			ai_class_idx = Ship_info[shipp.ship_info_index].ai_class;
 		} else {
 			ai_class_idx = check_lookup(ai_arg,
@@ -2839,13 +2843,14 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_prop(props, "team",
 			"IFF team name (e.g. \"Friendly\", \"Hostile\"). Defaults to the ship class's species default IFF.");
 		add_string_prop(props, "ai_class",
-			"AI class name (e.g. \"General\", \"Captain\"). Defaults to the ship class's default AI.");
+			"AI class name (e.g. \"General\", \"Captain\"). Omit, or pass empty/\"<default>\", "
+			"for the ship class's default AI.");
 		add_string_prop(props, "cargo",
 			"Cargo name. Auto-added to the mission cargo pool if new (subject to MAX_CARGO).");
 		add_integer_prop(props, "hotkey",
 			"Hotkey assignment 0-9, or omit for no hotkey.");
 		add_string_prop(props, "persona",
-			"Persona name. Empty string clears.");
+			"Persona name. Empty/\"<none>\" for no persona.");
 		add_string_prop(props, "alt_class_name",
 			"Alternate ship class name (display alias). Empty/\"<none>\" clears.");
 		add_string_prop(props, "callsign",
@@ -2859,7 +2864,8 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_enum_prop(props, "arrival_location",
 			"How the ship arrives. Default \"Hyperspace\".", arrival_location_enum_values);
 		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by the arrival_location.");
+			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by the arrival_location. "
+			"Empty/\"<none>\" clears.");
 		add_integer_prop(props, "arrival_distance",
 			"Distance offset (meters) from the arrival target.");
 		add_integer_prop(props, "arrival_delay",
@@ -2870,7 +2876,8 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_enum_prop(props, "departure_location",
 			"How the ship departs. Default \"Hyperspace\".", departure_location_enum_values);
 		add_string_prop(props, "departure_target",
-			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\").");
+			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
+			"Empty/\"<none>\" clears.");
 		add_integer_prop(props, "departure_delay",
 			"Seconds to wait after the departure cue evaluates true before the ship actually departs.");
 		add_integer_prop(props, "departure_cue",
@@ -2928,10 +2935,10 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_prop(props, "ship_class",
 			"Change the ship's class. Triggers a model/subsystem swap via change_ship_type.");
 		add_string_prop(props, "team", "IFF team name.");
-		add_string_prop(props, "ai_class", "AI class name.");
+		add_string_prop(props, "ai_class", "AI class name. Empty/\"<default>\" resets to the ship class default.");
 		add_string_prop(props, "cargo", "Cargo name (auto-added if new).");
 		add_integer_prop(props, "hotkey", "Hotkey 0-9.");
-		add_string_prop(props, "persona", "Persona name. Empty string clears.");
+		add_string_prop(props, "persona", "Persona name. Empty/\"<none>\" clears.");
 		add_string_prop(props, "alt_class_name", "Alternate ship class name. Empty/\"<none>\" clears.");
 		add_string_prop(props, "callsign", "Pilot callsign. Empty/\"<none>\" clears.");
 		add_bool_prop(props, "is_player_start",
@@ -2943,7 +2950,7 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_enum_prop(props, "arrival_location",
 			"Arrival mode (ignored if ship is in a wing).", arrival_location_enum_values);
 		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (ignored if ship is in a wing).");
+			"Ship name or special anchor (ignored if ship is in a wing). Empty/\"<none>\" clears.");
 		add_integer_prop(props, "arrival_distance", "Arrival distance (ignored if ship is in a wing).");
 		add_integer_prop(props, "arrival_delay", "Arrival delay (ignored if ship is in a wing).");
 		add_integer_prop(props, "arrival_cue",
@@ -2951,7 +2958,7 @@ void mcp_register_ship_tools(json_t *tools)
 		add_string_enum_prop(props, "departure_location",
 			"Departure mode (ignored if ship is in a wing).", departure_location_enum_values);
 		add_string_prop(props, "departure_target",
-			"Departure target (ignored if ship is in a wing).");
+			"Departure target (ignored if ship is in a wing). Empty/\"<none>\" clears.");
 		add_integer_prop(props, "departure_delay", "Departure delay (ignored if ship is in a wing).");
 		add_integer_prop(props, "departure_cue",
 			"SEXP node ID for the departure cue (ignored if ship is in a wing). The previous cue tree is freed.");
@@ -3257,7 +3264,7 @@ void mcp_register_ship_tools(json_t *tools)
 			"pass \"<none>\" or an empty string to clear.");
 		add_string_prop(props, "ai_class",
 			"AI class name. Turret subsystems only; rejected on any other subsystem type. "
-			"Use list_ai_classes for valid names. Pass \"<default>\" to reset to the "
+			"Use list_ai_classes for valid names. Pass empty/\"<default>\" to reset to the "
 			"ship class default.");
 		add_bool_prop(props, "force",
 			"If true, bypass the scannable-subsystems gate on cargo/cargo_title writes. By "
