@@ -33,6 +33,7 @@
 #include "mcp_mission_tools.h"
 #include "mcp_reference_tools.h"
 #include "mcp_sexp_forest.h"
+#include "mcp_tool_registry.h"
 #include "management.h"
 #include "ship/ship.h"
 #include "fredrender.h"
@@ -772,8 +773,16 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		}
 		break;
 
-	case McpToolId::APP_TOOL:
-		mcp_handle_app_tool(req->filepath, req->input_json, req);
+	case McpToolId::REGISTRY_TOOL:
+		{
+			const McpToolDef *def = mcp_find_tool(req->filepath);
+			if (def != nullptr && def->main_handler != nullptr) {
+				def->main_handler(req->input_json, req);
+			} else {
+				req->success = false;
+				sprintf(req->result_message, "Unknown MCP tool: %s", req->filepath);
+			}
+		}
 		break;
 
 	case McpToolId::MISSION_TOOL:

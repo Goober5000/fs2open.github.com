@@ -4,6 +4,7 @@
 #include "mcp_app.h"
 #include "mcp_reference_tools.h"
 #include "mcp_mission_tools.h"
+#include "mcp_tool_registry.h"
 #include "mongoose.h"
 
 #include <jansson.h>
@@ -109,13 +110,14 @@ static json_t *handle_tools_list()
 	json_t *result = json_object();
 	json_t *tools = json_array();
 
-	// App-level tools (server info, UI status, timeout, mission lifecycle)
-	mcp_register_app_tools(tools);
+	// Table-driven registry (converted areas: app, messages, ...)
+	mcp_register_all_tools(tools);
 
+	// Legacy registration for areas not yet migrated to the registry
 	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
 	mcp_register_reference_tools(tools);
 
-	// Mission CRUD tools (messages, etc.)
+	// Mission CRUD tools
 	mcp_register_mission_tools(tools);
 
 	json_object_set_new(result, "tools", tools);
@@ -244,14 +246,24 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		return nullptr;
 	}
 
-	// Try app-level tools (timeout/server info/UI status/mission lifecycle)
+	// Table-driven registry (converted areas).  Tools not found here fall
+	// through to the legacy routing cascade below until migration completes.
 	{
-		json_t *app_result = mcp_route_app_tool(tool_name, params);
-		if (app_result)
-			return app_result;
+		const McpToolDef *def = mcp_find_tool(tool_name);
+		if (def != nullptr) {
+			if (!def->works_before_ready && !mcp_fred_ready.load())
+				return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
+
+			json_t *arguments = json_object_get(params, "arguments");
+
+			if (def->worker_handler != nullptr)
+				return def->worker_handler(arguments);
+
+			return mcp_execute_on_main_thread(McpToolId::REGISTRY_TOOL, tool_name, arguments);
+		}
 	}
 
-	// All tools below require FRED2 to be fully initialized
+	// All legacy tools below require FRED2 to be fully initialized
 	if (!mcp_fred_ready.load())
 		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
 
@@ -499,6 +511,10 @@ bool mcp_server_start()
 	// mg_start fails, mcp_server_stop's needs-cleanup path releases them.
 	mcp_reference_tools_init();
 	mcp_needs_cleanup = true;
+
+	// Build the tool registry lookup before any worker threads exist; it is
+	// read-only (lock-free) afterwards.
+	mcp_tool_registry_init();
 
 	mcp_ctx = mg_start(mcp_request_handler, nullptr, options);
 	if (mcp_ctx == nullptr) {
