@@ -598,6 +598,127 @@ def register(suite, client):
                 except Exception:
                     break
 
+    # ----- Briefing Lines -----
+
+    def test_briefing_lines_crud():
+        def stage_lines(stage=1):
+            r = client.call_tool("get_briefing_stage", {"index": stage})
+            assert_success(r)
+            return tool_data(r).get("lines", [])
+
+        try:
+            r = client.call_tool("create_briefing_stage", {
+                "text": "Line test stage",
+                "copy_from_previous": False,
+            })
+            assert_success(r)
+
+            for n, x in (("One", -100), ("Two", 0), ("Three", 100)):
+                r = client.call_tool("create_briefing_icon", {
+                    "stage": 1,
+                    "position": {"x": x, "y": 0, "z": 0},
+                    "icon_type": "Fighter",
+                    "label": n,
+                    "propagate": False,
+                })
+                assert_success(r)
+
+            # Create 1-2 and 2-3
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 1, "end_icon": 2,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("index"), 1, "first line index")
+            assert_equal((d.get("start_icon"), d.get("end_icon")), (1, 2),
+                "line endpoints round-trip")
+
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 2, "end_icon": 3,
+            })
+            assert_success(r)
+            assert_equal(len(stage_lines()), 2, "two lines exist")
+
+            # Duplicates are rejected in both directions
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 1, "end_icon": 2,
+            })
+            assert_error(r)
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 2, "end_icon": 1,
+            })
+            assert_error(r)
+
+            # Self-lines and out-of-range endpoints are rejected
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 2, "end_icon": 2,
+            })
+            assert_error(r)
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 1, "end_icon": 4,
+            })
+            assert_error(r)
+
+            # Delete by endpoint pair, in reversed order
+            r = client.call_tool("delete_briefing_line", {
+                "stage": 1, "start_icon": 3, "end_icon": 2,
+            })
+            assert_success(r)
+            lines = stage_lines()
+            assert_equal(len(lines), 1, "one line left after pair delete")
+            assert_equal((lines[0].get("start_icon"), lines[0].get("end_icon")), (1, 2),
+                "the 1-2 line survives")
+
+            # Recreate 2-3, then delete by index
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 2, "end_icon": 3,
+            })
+            assert_success(r)
+            r = client.call_tool("delete_briefing_line", {"stage": 1, "index": 2})
+            assert_success(r)
+            assert_equal(len(stage_lines()), 1, "one line left after index delete")
+
+            # Addressing-form validation: both forms, and a partial pair
+            r = client.call_tool("delete_briefing_line", {
+                "stage": 1, "index": 1, "start_icon": 1, "end_icon": 2,
+            })
+            assert_error(r)
+            r = client.call_tool("delete_briefing_line", {
+                "stage": 1, "start_icon": 1,
+            })
+            assert_error(r)
+
+            # Icon-delete line repair (deferred from the icon tools phase):
+            # with lines 1-2, 2-3, 1-3, deleting icon 2 must remove the two
+            # lines touching it and remap 1-3 to the shifted indices 1-2.
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 2, "end_icon": 3,
+            })
+            assert_success(r)
+            r = client.call_tool("create_briefing_line", {
+                "stage": 1, "start_icon": 1, "end_icon": 3,
+            })
+            assert_success(r)
+            assert_equal(len(stage_lines()), 3, "three lines before icon delete")
+
+            r = client.call_tool("delete_briefing_icon", {"stage": 1, "index": 2})
+            assert_success(r)
+            lines = stage_lines()
+            assert_equal(len(lines), 1, "lines touching the deleted icon are removed")
+            assert_equal((lines[0].get("start_icon"), lines[0].get("end_icon")), (1, 2),
+                "surviving line endpoints are remapped to the shifted icon indices")
+
+        finally:
+            for _ in range(5):
+                try:
+                    r = client.call_tool("list_briefing_stages")
+                    d = tool_data(r)
+                    if not d:
+                        break
+                    client.call_tool("delete_briefing_stage", {"index": len(d)})
+                except Exception:
+                    break
+
     # ----- Debriefing Stages -----
 
     def test_debriefing_stages_crud():
@@ -1114,6 +1235,7 @@ def register(suite, client):
     suite.add("crud_fiction_viewer_stages", test_fiction_viewer_stages_crud)
     suite.add("crud_briefing_stages", test_briefing_stages_crud)
     suite.add("crud_briefing_icons", test_briefing_icons_crud)
+    suite.add("crud_briefing_lines", test_briefing_lines_crud)
     suite.add("crud_debriefing_stages", test_debriefing_stages_crud)
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
