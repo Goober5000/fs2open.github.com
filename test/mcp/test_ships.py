@@ -92,9 +92,16 @@ def register(suite, client):
             # List should include both
             r = client.call_tool("list_ships")
             assert_success(r)
-            names = [s.get("name") for s in tool_data(r)]
+            entries = tool_data(r)
+            names = [s.get("name") for s in entries]
             assert_in("MCP Test Alpha", names)
             assert_in("MCP Test Bravo", names)
+
+            # Each entry's index field is the move/swap index and equals the
+            # 1-based list position.
+            for pos, entry in enumerate(entries, start=1):
+                assert_equal(entry.get("index"), pos,
+                    f"list_ships index field matches list position for {entry.get('name')}")
 
             # Get should round-trip the populated fields
             r = client.call_tool("get_ship", {"name": "MCP Test Bravo"})
