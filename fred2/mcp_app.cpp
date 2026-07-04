@@ -3,6 +3,7 @@
 #include "mcpserver.h"
 #include "mcp_json.h"
 #include "mcp_mission_tools.h"
+#include "mcp_tool_registry.h"
 
 #include "FRED.h"
 #include "MainFrm.h"
@@ -34,7 +35,7 @@ DWORD mcp_get_tool_timeout_ms()
 // Main-thread helpers (moved from mainfrm.cpp)
 // ---------------------------------------------------------------------------
 
-static void handle_get_server_info(McpToolRequest *req)
+static void handle_get_server_info(json_t * /*input*/, McpToolRequest *req)
 {
 	json_t *info = json_object();
 	json_object_set_new(info, "status", json_string("running"));
@@ -58,8 +59,13 @@ static void handle_get_server_info(McpToolRequest *req)
 	req->success = true;
 }
 
-static void handle_new_mission(McpToolRequest *req)
+static void handle_new_mission(json_t * /*input*/, McpToolRequest *req)
 {
+	if (!validate_no_dialogs_open(req->result_message)) {
+		req->success = false;
+		return;
+	}
+
 	create_new_mission();
 	if (Fred_view_wnd)
 		Fred_view_wnd->Invalidate();
@@ -141,7 +147,78 @@ static void handle_save_mission(McpToolRequest *req, MissionFormat format)
 	}
 }
 
-static void handle_get_ui_status(McpToolRequest *req)
+// Shared front half of the load/save tool handlers: extract "filepath" from
+// input into req->filepath with separator normalization, and check that no
+// editor dialogs are open.  Returns false with the error already set in req.
+static bool extract_mission_filepath(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	auto filepath = get_required_string(input, "filepath", sink, true, MAX_PATH_LEN - 1);
+	if (!filepath)
+		return false;
+
+	strncpy(req->filepath, filepath, sizeof(req->filepath) - 1);
+	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	for (char *p = req->filepath; *p; ++p) {
+		if (*p == '/' || *p == '\\')
+			*p = DIR_SEPARATOR_CHAR;
+	}
+
+	if (!validate_no_dialogs_open(req->result_message)) {
+		req->success = false;
+		return false;
+	}
+	return true;
+}
+
+static void handle_load_mission_tool(json_t *input, McpToolRequest *req)
+{
+	if (!extract_mission_filepath(input, req))
+		return;
+	handle_load_mission(req);
+}
+
+static void handle_save_mission_tool(json_t *input, McpToolRequest *req)
+{
+	if (!extract_mission_filepath(input, req))
+		return;
+	handle_save_mission(req, MissionFormat::STANDARD);
+}
+
+// ---------------------------------------------------------------------------
+// Worker-thread handlers (run directly on the mongoose thread; must work
+// even before mcp_fred_ready)
+// ---------------------------------------------------------------------------
+
+static json_t *worker_get_timeout(json_t * /*arguments*/)
+{
+	DWORD seconds = s_mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000;
+	json_t *result = make_tool_result(false, "timeout (seconds): %u", seconds);
+	json_t *sc = json_object();
+	json_object_set_new(sc, "seconds", json_integer(seconds));
+	json_object_set_new(result, "structuredContent", sc);
+	return result;
+}
+
+static json_t *worker_set_timeout(json_t *arguments)
+{
+	json_t *err = nullptr;
+	McpErrorSink sink(&err);
+	auto seconds = get_required_integer(arguments, "seconds", sink);
+	if (!seconds.has_value())
+		return err;
+	if (!check_int_range(*seconds, 1, 300, "seconds", sink))
+		return err;
+
+	s_mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
+	json_t *result = make_tool_result(false, "timeout (seconds): %d", *seconds);
+	json_t *sc = json_object();
+	json_object_set_new(sc, "seconds", json_integer(*seconds));
+	json_object_set_new(result, "structuredContent", sc);
+	return result;
+}
+
+static void handle_get_ui_status(json_t * /*input*/, McpToolRequest *req)
 {
 	SCP_string buf;
 
@@ -217,179 +294,70 @@ bool validate_no_dialogs_open(SCP_string &error_msg)
 // Registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_app_tools(json_t *tools)
+static void register_get_server_info(json_t *tools)
 {
-	// get_server_info
 	register_tool(tools, "get_server_info",
 		"Returns information about the running FRED2 instance, including whether Unicode is supported, and the currently loaded mission and active mod if applicable",
 		nullptr);
+}
 
-	// new_mission
+static void register_new_mission(json_t *tools)
+{
 	register_tool(tools, "new_mission",
 		"Create a new empty mission, replacing any currently loaded mission",
 		nullptr);
+}
 
-	// load_mission
+static void register_load_mission(json_t *tools)
+{
 	register_tool_with_required_string(tools, "load_mission",
 		"Load a mission file into FRED2",
 		"filepath", "Absolute path to the mission file (.fs2 extension)");
+}
 
-	// save_mission
+static void register_save_mission(json_t *tools)
+{
 	register_tool_with_required_string(tools, "save_mission",
 		"Save the current mission in standard (.fs2) format",
 		"filepath", "Absolute path to save the mission file to");
+}
 
-	// get_ui_status
+static void register_get_ui_status(json_t *tools)
+{
 	register_tool(tools, "get_ui_status",
 		"Returns the state of FRED2's UI windows: whether a modal dialog is blocking, and which modeless editor windows are open",
 		nullptr);
+}
 
-	// get_timeout
+static void register_get_timeout(json_t *tools)
+{
 	register_tool(tools, "get_timeout",
 		"Returns the current timeout (in seconds) for MCP operations that run on the FRED2 UI thread",
 		nullptr);
-
-	// set_timeout
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "seconds", "Timeout in seconds (1-300)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("seconds"));
-		register_tool(tools, "set_timeout",
-			"Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Routing (mongoose thread)
-// ---------------------------------------------------------------------------
-
-json_t *mcp_route_app_tool(const char *tool_name, json_t *params)
+static void register_set_timeout(json_t *tools)
 {
-	// get_timeout / set_timeout run directly on the mongoose thread — they
-	// don't touch main-thread state and must work even before FRED is ready.
-	if (strcmp(tool_name, "get_timeout") == 0) {
-		DWORD seconds = s_mcp_tool_timeout_ms.load(std::memory_order_relaxed) / 1000;
-		json_t *result = make_tool_result(false, "timeout (seconds): %u", seconds);
-		json_t *sc = json_object();
-		json_object_set_new(sc, "seconds", json_integer(seconds));
-		json_object_set_new(result, "structuredContent", sc);
-		return result;
-	}
-
-	if (strcmp(tool_name, "set_timeout") == 0) {
-		json_t *arguments = json_object_get(params, "arguments");
-		json_t *err = nullptr;
-		McpErrorSink sink(&err);
-		auto seconds = get_required_integer(arguments, "seconds", sink);
-		if (!seconds.has_value())
-			return err;
-		if (!check_int_range(*seconds, 1, 300, "seconds", sink))
-			return err;
-
-		s_mcp_tool_timeout_ms.store((DWORD)(*seconds * 1000), std::memory_order_relaxed);
-		json_t *result = make_tool_result(false, "timeout (seconds): %d", *seconds);
-		json_t *sc = json_object();
-		json_object_set_new(sc, "seconds", json_integer(*seconds));
-		json_object_set_new(result, "structuredContent", sc);
-		return result;
-	}
-
-	// All remaining app tools marshal to the main thread via APP_TOOL and
-	// require FRED2 to be fully initialized.
-	bool is_app_tool =
-		strcmp(tool_name, "get_server_info") == 0 ||
-		strcmp(tool_name, "new_mission") == 0 ||
-		strcmp(tool_name, "load_mission") == 0 ||
-		strcmp(tool_name, "save_mission") == 0 ||
-		strcmp(tool_name, "get_ui_status") == 0;
-
-	if (!is_app_tool)
-		return nullptr;
-
-	if (!mcp_fred_ready.load())
-		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
-
-	json_t *arguments = json_object_get(params, "arguments");
-
-	// load_mission / save_mission require a filepath argument
-	if (strcmp(tool_name, "load_mission") == 0 || strcmp(tool_name, "save_mission") == 0) {
-		json_t *err = nullptr;
-		McpErrorSink sink(&err);
-		auto filepath = get_required_string(arguments, "filepath", sink, true);
-		if (!filepath) return err;
-
-		// Build an input_json carrying the filepath so the main-thread
-		// dispatcher can extract it uniformly.
-		json_t *input = json_object();
-		json_object_set_new(input, "filepath", json_string(filepath));
-		json_t *result = mcp_execute_on_main_thread(McpToolId::APP_TOOL, tool_name, input);
-		json_decref(input);
-		return result;
-	}
-
-	// get_server_info / get_ui_status / new_mission — no args
-	return mcp_execute_on_main_thread(McpToolId::APP_TOOL, tool_name, nullptr);
+	json_t *props = json_object();
+	add_integer_prop(props, "seconds", "Timeout in seconds (1-300)");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("seconds"));
+	register_tool(tools, "set_timeout",
+		"Set the timeout (in seconds) for MCP operations that run on the FRED2 UI thread. Range: 1-300 seconds. Default: 10.",
+		props, req);
 }
 
 // ---------------------------------------------------------------------------
-// Main-thread dispatch
+// Tool table
 // ---------------------------------------------------------------------------
 
-void mcp_handle_app_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
-{
-	if (strcmp(tool_name, "get_server_info") == 0) {
-		handle_get_server_info(req);
-	} else if (strcmp(tool_name, "get_ui_status") == 0) {
-		handle_get_ui_status(req);
-	} else if (strcmp(tool_name, "load_mission") == 0) {
-		// Extract filepath from input_json into req->filepath, normalize separators
-		const char *filepath = json_string_value(json_object_get(input_json, "filepath"));
-		if (!filepath) {
-			req->success = false;
-			req->result_message = "load_mission: missing filepath";
-			return;
-		}
-		strncpy(req->filepath, filepath, sizeof(req->filepath) - 1);
-		req->filepath[sizeof(req->filepath) - 1] = '\0';
-		for (char *p = req->filepath; *p; ++p) {
-			if (*p == '/' || *p == '\\')
-				*p = DIR_SEPARATOR_CHAR;
-		}
-
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			handle_load_mission(req);
-		}
-	} else if (strcmp(tool_name, "save_mission") == 0) {
-		const char *filepath = json_string_value(json_object_get(input_json, "filepath"));
-		if (!filepath) {
-			req->success = false;
-			req->result_message = "save_mission: missing filepath";
-			return;
-		}
-		strncpy(req->filepath, filepath, sizeof(req->filepath) - 1);
-		req->filepath[sizeof(req->filepath) - 1] = '\0';
-		for (char *p = req->filepath; *p; ++p) {
-			if (*p == '/' || *p == '\\')
-				*p = DIR_SEPARATOR_CHAR;
-		}
-
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			handle_save_mission(req, MissionFormat::STANDARD);
-		}
-	} else if (strcmp(tool_name, "new_mission") == 0) {
-		if (!validate_no_dialogs_open(req->result_message)) {
-			req->success = false;
-		} else {
-			handle_new_mission(req);
-		}
-	} else {
-		req->success = false;
-		sprintf(req->result_message, "Unknown app tool: %s", tool_name);
-	}
-}
+const McpToolDef mcp_app_tool_defs[] = {
+	{ "get_server_info", register_get_server_info, nullptr,            handle_get_server_info,   false },
+	{ "new_mission",     register_new_mission,     nullptr,            handle_new_mission,       false },
+	{ "load_mission",    register_load_mission,    nullptr,            handle_load_mission_tool, false },
+	{ "save_mission",    register_save_mission,    nullptr,            handle_save_mission_tool, false },
+	{ "get_ui_status",   register_get_ui_status,   nullptr,            handle_get_ui_status,     false },
+	{ "get_timeout",     register_get_timeout,     worker_get_timeout, nullptr,                  true  },
+	{ "set_timeout",     register_set_timeout,     worker_set_timeout, nullptr,                  true  },
+};
+const size_t mcp_app_tool_def_count = sizeof(mcp_app_tool_defs) / sizeof(mcp_app_tool_defs[0]);
