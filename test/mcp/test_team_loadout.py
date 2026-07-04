@@ -421,6 +421,175 @@ def register(suite, client):
         assert_error(r)
         assert_in("player", tool_text(r).lower())
 
+    # ---------- single-entry upsert tools ----------
+
+    def test_loadout_upsert_ship():
+        snap = _snapshot_team(client)
+        try:
+            ship_cls, _ = _pick_pool_classes(client)
+            r = client.call_tool("update_team_loadout", {"ships": []})
+            assert_success(r)
+
+            # create
+            r = client.call_tool("set_team_loadout_ship", {
+                "ship_class": ship_cls, "count": 3})
+            assert_success(r)
+            assert_equal(_settable(tool_data(r)["ships"], SHIP_ENTRY_KEYS),
+                [{"ship_class": ship_cls, "count": 3}], "upsert created the entry")
+
+            # update in place
+            r = client.call_tool("set_team_loadout_ship", {
+                "ship_class": ship_cls, "count": 8})
+            assert_success(r)
+            assert_equal(_settable(tool_data(r)["ships"], SHIP_ENTRY_KEYS),
+                [{"ship_class": ship_cls, "count": 8}],
+                "upsert updated the entry instead of duplicating it")
+
+            # remove
+            r = client.call_tool("set_team_loadout_ship", {
+                "ship_class": ship_cls, "enable": False})
+            assert_success(r)
+            assert_equal(tool_data(r)["ships"], [], "enable=false removed the entry")
+
+            # remove of a nonexistent entry errors
+            r = client.call_tool("set_team_loadout_ship", {
+                "ship_class": ship_cls, "enable": False})
+            assert_error(r)
+        finally:
+            _restore_team(client, snap)
+
+    def test_loadout_upsert_weapon():
+        snap = _snapshot_team(client)
+        vars_ = []
+        try:
+            _, weapon_cls = _pick_pool_classes(client)
+            r = client.call_tool("update_team_loadout", {"weapons": []})
+            assert_success(r)
+
+            # create with required
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "count": 2, "required": True})
+            assert_success(r)
+            wep = tool_data(r)["weapons"][0]
+            assert_equal(wep.get("count"), 2, "upsert created the weapon entry")
+            assert_equal(wep.get("required"), True, "required applied on create")
+
+            # partial update: flip required only, count untouched
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "required": False})
+            assert_success(r)
+            wep = tool_data(r)["weapons"][0]
+            assert_equal(wep.get("required"), False, "required flipped by partial update")
+            assert_equal(wep.get("count"), 2, "count preserved by partial update")
+
+            # switch the count from a literal to a variable
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tl_up_count", "default_value": "6",
+                "variable_type": "number"})
+            assert_success(r)
+            vars_.append("tl_up_count")
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "count_variable": "tl_up_count"})
+            assert_success(r)
+            wep = tool_data(r)["weapons"][0]
+            assert_equal(wep.get("count_variable"), "tl_up_count",
+                "count switched from literal to variable")
+            assert_true("count" not in wep, "literal count replaced by the variable")
+
+            # removal clears the required flag: re-require, remove, re-add
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "required": True})
+            assert_success(r)
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "enable": False})
+            assert_success(r)
+            assert_equal(tool_data(r)["weapons"], [], "entry removed")
+            r = client.call_tool("set_team_loadout_weapon", {
+                "weapon_class": weapon_cls, "count": 1})
+            assert_success(r)
+            assert_equal(tool_data(r)["weapons"][0].get("required"), False,
+                "required flag was cleared by the removal")
+        finally:
+            _restore_team(client, snap)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    def test_loadout_upsert_variable_entry():
+        snap = _snapshot_team(client)
+        vars_ = []
+        try:
+            ship_cls, _ = _pick_pool_classes(client)
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tl_up_cls", "default_value": ship_cls,
+                "variable_type": "string"})
+            assert_success(r)
+            vars_.append("tl_up_cls")
+
+            r = client.call_tool("update_team_loadout", {"ships": []})
+            assert_success(r)
+
+            r = client.call_tool("set_team_loadout_ship", {
+                "class_variable": "tl_up_cls", "count": 2})
+            assert_success(r)
+            assert_equal(_settable(tool_data(r)["ships"], SHIP_ENTRY_KEYS),
+                [{"class_variable": "tl_up_cls", "count": 2}],
+                "variable-keyed entry created")
+
+            # a static entry of the same class is a distinct key
+            r = client.call_tool("set_team_loadout_ship", {
+                "ship_class": ship_cls, "count": 1})
+            assert_success(r)
+            assert_equal(len(tool_data(r)["ships"]), 2,
+                "static entry coexists with the variable entry")
+
+            r = client.call_tool("set_team_loadout_ship", {
+                "class_variable": "tl_up_cls", "enable": False})
+            assert_success(r)
+            ships = tool_data(r)["ships"]
+            assert_equal(_settable(ships, SHIP_ENTRY_KEYS),
+                [{"ship_class": ship_cls, "count": 1}],
+                "variable entry removed; static entry untouched")
+        finally:
+            _restore_team(client, snap)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    def test_loadout_upsert_negative():
+        snap = _snapshot_team(client)
+        try:
+            ship_cls, weapon_cls = _pick_pool_classes(client)
+            r = client.call_tool("update_team_loadout", {"ships": [], "weapons": []})
+            assert_success(r)
+
+            cases = [
+                ("set_team_loadout_ship", {"ship_class": "DOES_NOT_EXIST_xyz", "count": 1}),
+                # create without a count
+                ("set_team_loadout_ship", {"ship_class": ship_cls}),
+                # both count forms
+                ("set_team_loadout_ship", {"ship_class": ship_cls, "count": 1,
+                                           "count_variable": "x"}),
+                # key XOR violations
+                ("set_team_loadout_ship", {"count": 1}),
+                ("set_team_loadout_ship", {"ship_class": ship_cls,
+                                           "class_variable": "x", "count": 1}),
+                # count range
+                ("set_team_loadout_ship", {"ship_class": ship_cls, "count": 10000}),
+                # required with a zero count
+                ("set_team_loadout_weapon", {"weapon_class": weapon_cls, "count": 0,
+                                             "required": True}),
+                ("set_team_loadout_ship", {"team": "none", "ship_class": ship_cls,
+                                           "count": 1}),
+            ]
+            for tool, args in cases:
+                r = client.call_tool(tool, args)
+                assert_error(r)
+
+            team = _get_team(client)
+            assert_equal(team["ships"], [], "rejected upserts created no ship entries")
+            assert_equal(team["weapons"], [], "rejected upserts created no weapon entries")
+        finally:
+            _restore_team(client, snap)
+
     # ---------- player entry delay (mission info) ----------
 
     def test_loadout_player_entry_delay():
@@ -457,6 +626,10 @@ def register(suite, client):
     suite.add("loadout_rejects_bad_entries", test_loadout_rejects_bad_entries)
     suite.add("loadout_variable_type_mismatch_rejected", test_loadout_variable_type_mismatch_rejected)
     suite.add("loadout_non_player_ship_rejected", test_loadout_non_player_ship_rejected)
+    suite.add("loadout_upsert_ship", test_loadout_upsert_ship)
+    suite.add("loadout_upsert_weapon", test_loadout_upsert_weapon)
+    suite.add("loadout_upsert_variable_entry", test_loadout_upsert_variable_entry)
+    suite.add("loadout_upsert_negative", test_loadout_upsert_negative)
     suite.add("loadout_player_entry_delay", test_loadout_player_entry_delay)
 
 
