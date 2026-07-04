@@ -1003,6 +1003,73 @@ static void handle_delete_briefing_line(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Briefing background tools
+// ---------------------------------------------------------------------------
+
+static json_t *build_briefing_backgrounds_json(const briefing &br)
+{
+	json_t *obj = json_object();
+	set_optional_filename(obj, "background_640", br.background[GR_640]);
+	set_optional_filename(obj, "background_1024", br.background[GR_1024]);
+	set_optional_filename(obj, "ship_select_background_640", br.ship_select_background[GR_640]);
+	set_optional_filename(obj, "ship_select_background_1024", br.ship_select_background[GR_1024]);
+	set_optional_filename(obj, "weapon_select_background_640", br.weapon_select_background[GR_640]);
+	set_optional_filename(obj, "weapon_select_background_1024", br.weapon_select_background[GR_1024]);
+	return obj;
+}
+
+static void handle_get_briefing_backgrounds(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	req->result_json = make_json_tool_result(build_briefing_backgrounds_json(*br));
+	req->success = true;
+}
+
+static void handle_update_briefing_backgrounds(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	struct bg_field { const char *param; char *slot; const char *value; };
+	bg_field fields[] = {
+		{ "background_640",                br->background[GR_640],                nullptr },
+		{ "background_1024",               br->background[GR_1024],               nullptr },
+		{ "ship_select_background_640",    br->ship_select_background[GR_640],    nullptr },
+		{ "ship_select_background_1024",   br->ship_select_background[GR_1024],   nullptr },
+		{ "weapon_select_background_640",  br->weapon_select_background[GR_640],  nullptr },
+		{ "weapon_select_background_1024", br->weapon_select_background[GR_1024], nullptr },
+	};
+
+	// Parse everything before mutating anything
+	for (auto &f : fields) {
+		f.value = get_optional_filename(input, f.param, sink, false);
+		if (sink.has_error()) return;
+	}
+
+	bool changed = false;
+	for (auto &f : fields) {
+		if (f.value && strcmp(f.slot, f.value) != 0) {
+			strcpy_s(f.slot, MAX_FILENAME_LEN, f.value);
+			changed = true;
+		}
+	}
+
+	if (changed)
+		mark_modified("MCP: update briefing backgrounds");
+
+	req->result_json = make_json_tool_result(build_briefing_backgrounds_json(*br));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -1315,6 +1382,42 @@ static void register_delete_briefing_line(json_t *tools)
 		props, req);
 }
 
+static void register_get_briefing_backgrounds(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	register_tool(tools, "get_briefing_backgrounds",
+		"Get the custom background images for a team's briefing map, ship "
+		"selection, and weapon selection screens. Each has a 640 variant (used "
+		"at resolutions below 1024x768) and a 1024 variant. Fields are omitted "
+		"when no custom background is set (the standard background is used).",
+		props);
+}
+
+static void register_update_briefing_backgrounds(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "background_640",
+		"Background image behind the briefing map, 640x480 variant");
+	add_string_prop(props, "background_1024",
+		"Background image behind the briefing map, 1024x768 variant");
+	add_string_prop(props, "ship_select_background_640",
+		"Ship selection screen background, 640x480 variant");
+	add_string_prop(props, "ship_select_background_1024",
+		"Ship selection screen background, 1024x768 variant");
+	add_string_prop(props, "weapon_select_background_640",
+		"Weapon selection screen background, 640x480 variant");
+	add_string_prop(props, "weapon_select_background_1024",
+		"Weapon selection screen background, 1024x768 variant");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	register_tool(tools, "update_briefing_backgrounds",
+		"Update the custom background images for a team's briefing map, ship "
+		"selection, and weapon selection screens. Only specified fields are "
+		"changed; pass an empty string to clear a field back to the standard "
+		"background. The 640 variants are used at resolutions below 1024x768.",
+		props);
+}
+
 // ---------------------------------------------------------------------------
 // Tool table
 // ---------------------------------------------------------------------------
@@ -1332,5 +1435,7 @@ const McpToolDef mcp_brief_tool_defs[] = {
 	{ "delete_briefing_icon",  register_delete_briefing_icon,  nullptr, handle_delete_briefing_icon,  false },
 	{ "create_briefing_line",  register_create_briefing_line,  nullptr, handle_create_briefing_line,  false },
 	{ "delete_briefing_line",  register_delete_briefing_line,  nullptr, handle_delete_briefing_line,  false },
+	{ "get_briefing_backgrounds",    register_get_briefing_backgrounds,    nullptr, handle_get_briefing_backgrounds,    false },
+	{ "update_briefing_backgrounds", register_update_briefing_backgrounds, nullptr, handle_update_briefing_backgrounds, false },
 };
 const size_t mcp_brief_tool_def_count = sizeof(mcp_brief_tool_defs) / sizeof(mcp_brief_tool_defs[0]);
