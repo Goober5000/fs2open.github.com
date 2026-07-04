@@ -1,7 +1,23 @@
 #include "stdafx.h"
 #include "mcp_tool_registry.h"
 #include "mcp_app.h"
+#include "mcp_reference_tools.h"
+#include "mcp_mission_info.h"
+#include "mcp_fiction_viewer.h"
+#include "mcp_cmd_brief.h"
+#include "mcp_debrief.h"
 #include "mcp_messages.h"
+#include "mcp_sexp.h"
+#include "mcp_events.h"
+#include "mcp_goals.h"
+#include "mcp_waypoints.h"
+#include "mcp_jump_node.h"
+#include "mcp_ships.h"
+#include "mcp_submodels.h"
+#include "mcp_wings.h"
+#include "mcp_reinforcements.h"
+#include "mcp_loadout.h"
+#include "mcp_mission_tools.h"
 
 #include <cstring>
 
@@ -11,15 +27,27 @@
 // ---------------------------------------------------------------------------
 // Canonical area order == client-visible tools/list order.
 // Do not reorder — clients and tests see this order.
-//
-// During the registry migration, areas are added here as they are converted;
-// unconverted areas are still registered/dispatched by the legacy cascade in
-// mcpserver.cpp / mcp_mission_tools.cpp.
 // ---------------------------------------------------------------------------
 
 static const McpToolArea s_areas[] = {
-	{ "app",      mcp_app_tool_defs,     mcp_app_tool_def_count     },
-	{ "messages", mcp_message_tool_defs, mcp_message_tool_def_count },
+	{ "app",            mcp_app_tool_defs,            mcp_app_tool_def_count            },
+	{ "reference",      mcp_reference_tool_defs,      mcp_reference_tool_def_count      },
+	{ "mission_info",   mcp_mission_info_tool_defs,   mcp_mission_info_tool_def_count   },
+	{ "fiction_viewer", mcp_fiction_viewer_tool_defs, mcp_fiction_viewer_tool_def_count },
+	{ "cmd_brief",      mcp_cmd_brief_tool_defs,      mcp_cmd_brief_tool_def_count      },
+	{ "debrief",        mcp_debrief_tool_defs,        mcp_debrief_tool_def_count        },
+	{ "messages",       mcp_message_tool_defs,        mcp_message_tool_def_count        },
+	{ "sexp",           mcp_sexp_tool_defs,           mcp_sexp_tool_def_count           },
+	{ "events",         mcp_event_tool_defs,          mcp_event_tool_def_count          },
+	{ "goals",          mcp_goal_tool_defs,           mcp_goal_tool_def_count           },
+	{ "waypoints",      mcp_waypoint_tool_defs,       mcp_waypoint_tool_def_count       },
+	{ "jump_nodes",     mcp_jump_node_tool_defs,      mcp_jump_node_tool_def_count      },
+	{ "ships",          mcp_ship_tool_defs,           mcp_ship_tool_def_count           },
+	{ "submodels",      mcp_submodel_tool_defs,       mcp_submodel_tool_def_count       },
+	{ "wings",          mcp_wing_tool_defs,           mcp_wing_tool_def_count           },
+	{ "reinforcements", mcp_reinforcement_tool_defs,  mcp_reinforcement_tool_def_count  },
+	{ "loadout",        mcp_loadout_tool_defs,        mcp_loadout_tool_def_count        },
+	{ "mission_misc",   mcp_mission_misc_tool_defs,   mcp_mission_misc_tool_def_count   },
 };
 
 static SCP_unordered_map<SCP_string, const McpToolDef *> s_tool_lookup;

@@ -987,9 +987,8 @@ static void handle_swap_wings(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_wing_tools(json_t *tools)
+static void register_list_wings(json_t *tools)
 {
-	// list_wings
 	register_tool(tools, "list_wings",
 		"List all wings in the mission, in the same order that move_wing/swap_wings "
 		"indices refer to: a wing's 1-based position in this list is its index. "
@@ -997,232 +996,221 @@ void mcp_register_wing_tools(json_t *tools)
 		"wave_count (current ship count), num_waves, "
 		"and the names of its member ships in slot order.",
 		json_object());
+}
 
-	// get_wing
+static void register_get_wing(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_wing",
 		"Get full details of a wing by name.  Returns identity, waves, "
 		"arrival/departure settings (including SEXP cue node IDs you can edit "
 		"via the SEXP tools), formation, and the member ship list.",
 		"name", "Name of the wing to retrieve");
-
-	// form_wing
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Unique name for the wing (must not collide with any existing ship, wing, waypoint, or jump node).");
-		add_string_array_prop(props, "members",
-			"List of existing ship names to form the wing from (at least 1, at most MAX_SHIPS_PER_WING). "
-			"All members must share the same team and must not already belong to a wing. "
-			"Member ships are renamed to \"<wing_name> 1\", \"<wing_name> 2\", etc.",
-			SCP_vector<const char *>{});
-		add_string_prop(props, "display_name",
-			"Optional display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
-			"a blank string is a valid display name and will be stored as-is.");
-		add_integer_prop(props, "hotkey",
-			"Hotkey assignment 0-9, or omit for no hotkey.");
-		add_string_prop(props, "wing_squad_logo_filename",
-			"Squadron logo filename, or omit.");
-		add_integer_prop(props, "num_waves", "Number of waves for the wing.");
-		add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
-		add_integer_prop(props, "wave_delay_min", "Minimum delay between waves (seconds).");
-		add_integer_prop(props, "wave_delay_max", "Maximum delay between waves (seconds).");
-		add_string_enum_prop(props, "arrival_location",
-			"How the wing arrives. Default \"Hyperspace\".", arrival_location_enum_values);
-		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by arrival_location. "
-			"Empty/\"<none>\" clears.");
-		add_integer_prop(props, "arrival_distance", "Distance offset (meters) from the arrival target.");
-		add_integer_prop(props, "arrival_delay", "Seconds to wait after the arrival cue is true.");
-		add_integer_prop(props, "arrival_cue",
-			"SEXP node ID of the boolean formula that gates arrival. Defaults to a locked \"true\" cue.");
-		add_string_enum_prop(props, "departure_location",
-			"How the wing departs. Default \"Hyperspace\".", departure_location_enum_values);
-		add_string_prop(props, "departure_target",
-			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
-			"Empty/\"<none>\" clears.");
-		add_integer_prop(props, "departure_delay", "Seconds to wait after the departure cue is true.");
-		add_integer_prop(props, "departure_cue",
-			"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
-		add_string_prop(props, "formation",
-			"Formation name. See list_wing_formations for valid values. "
-			"Empty/\"<default>\" selects the standard retail formation.");
-		add_number_prop(props, "formation_scale", "Formation spacing scale (default 1.0).");
-		add_bool_map_prop(props, "wing_flags",
-			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
-			"Only listed keys are touched.");
-		add_bool_prop(props, "reform",
-			"If true and a wing with this name already exists, re-form it in place: release the "
-			"current members and attach the supplied members instead.  The wing's other settings "
-			"(cues, formation, hotkey, wing_flags, num_waves, threshold, wave delays, "
-			"arrival/departure location/target/distance/delay, etc.) are preserved.  Members that "
-			"are currently in the wing being re-formed are accepted (they are released first).  "
-			"Released members go back to standalone ships with engine-default names.  Members not "
-			"in the original roster are bashed to \"<wing_name> N\" as usual.  If the wing does not "
-			"already exist, this flag is ignored.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("members"));
-		register_tool(tools, "form_wing",
-			"Form a new wing from existing ships.  Member ships must share a team, must not "
-			"already be in a wing, and must have ship classes that allow wing membership. "
-			"On success the members are renamed to \"<wing_name> 1\", etc., and their own "
-			"arrival/departure cues are disabled (the wing's cues become authoritative). "
-			"Pass reform=true to re-form an existing wing of the same name in place.",
-			props, req);
-	}
-
-	// update_wing
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the wing to update.");
-		add_string_prop(props, "new_name",
-			"New name for the wing.  SEXP references, AI goals, texture replacements, and "
-			"member ship names are updated automatically (each member is re-bashed to \"<new_name> N\").");
-		add_string_prop(props, "display_name",
-			"Display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
-			"a blank string is a valid display name and will be stored as-is.");
-		add_integer_prop(props, "hotkey", "Hotkey 0-9.");
-		add_string_prop(props, "wing_squad_logo_filename", "Squadron logo filename.");
-		add_integer_prop(props, "num_waves", "Number of waves.");
-		add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
-		add_integer_prop(props, "wave_delay_min", "Minimum delay between waves.");
-		add_integer_prop(props, "wave_delay_max", "Maximum delay between waves.");
-		add_string_enum_prop(props, "arrival_location", "Arrival mode.", arrival_location_enum_values);
-		add_string_prop(props, "arrival_target", "Arrival anchor (ship name or special token). Empty/\"<none>\" clears.");
-		add_integer_prop(props, "arrival_distance", "Arrival distance offset.");
-		add_integer_prop(props, "arrival_delay", "Arrival delay.");
-		add_integer_prop(props, "arrival_cue", "SEXP node ID for the arrival cue. Previous user-allocated cue is freed.");
-		add_string_enum_prop(props, "departure_location", "Departure mode.", departure_location_enum_values);
-		add_string_prop(props, "departure_target", "Departure anchor. Empty/\"<none>\" clears.");
-		add_integer_prop(props, "departure_delay", "Departure delay.");
-		add_integer_prop(props, "departure_cue", "SEXP node ID for the departure cue.");
-		add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values. "
-			"Empty/\"<default>\" selects the standard retail formation.");
-		add_number_prop(props, "formation_scale", "Formation spacing scale.");
-		add_bool_map_prop(props, "wing_flags",
-			"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
-			"Only listed keys are touched.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_wing",
-			"Update properties of an existing wing.  Only specified fields are changed. "
-			"Member list is read-only here; use other tools to change membership.",
-			props, req);
-	}
-
-	// arrange_in_formation
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Wing name.");
-		add_string_prop(props, "formation",
-			"Optional formation name to override the wing's current formation for this arrangement only. "
-			"The wing's persistent formation is not changed. "
-			"See list_wing_formations for valid values. "
-			"Empty/\"<default>\" selects the standard retail formation.");
-		add_number_prop(props, "formation_scale",
-			"Optional formation scale to override the wing's current scale for this arrangement only. "
-			"The wing's persistent scale is not changed.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "arrange_in_formation",
-			"Arrange the members of a wing into their formation positions, relative to the wing leader "
-			"(the first ship in the member list). Each non-leader member is moved to its formation position "
-			"and reoriented to match the leader. The 'formation' and 'formation_scale' parameters are optional "
-			"temporary overrides applied only to this arrangement; the wing's persistent formation settings "
-			"are not modified (use update_wing for that). Mirrors the \"Align\" button on FRED's wing editor "
-			"dialog. Wings with only a leader (wave_count == 1) are a no-op.",
-			props, req);
-	}
-
-	// delete_wing
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the wing to delete.");
-		add_bool_prop(props, "force",
-			"If true, delete even when the wing is referenced in SEXPs or AI goals "
-			"(references are invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_wing",
-			"Delete a wing and ALL its member ships.  Mirrors the editor's \"Delete Wing\" command. "
-			"Refuses if the wing is referenced in SEXPs or AI goals unless force=true. "
-			"To dissolve the wing while keeping ships standalone, use disband_wing.",
-			props, req);
-	}
-
-	// disband_wing
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the wing to disband.");
-		add_bool_prop(props, "force",
-			"If true, disband even when the wing is referenced in SEXPs or AI goals "
-			"(references are invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "disband_wing",
-			"Dissolve a wing slot but leave its member ships intact.  The ships have their "
-			"wingnum reset and are renamed back to default names by the engine. "
-			"Refuses if the wing is referenced in SEXPs or AI goals unless force=true.",
-			props, req);
-	}
-
-	// move_wing
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"1-based index of the wing to move");
-		add_integer_prop(props, "to_index",
-			"1-based destination index");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_wing",
-			"Move a wing from one list position to another.  Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_wings
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first wing");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second wing");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_wings",
-			"Swap two wings at the given list positions.  Indices are 1-based.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_wing_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_form_wing(json_t *tools)
 {
-	if (strcmp(tool_name, "list_wings") == 0) {
-		handle_list_wings(input_json, req);
-	} else if (strcmp(tool_name, "get_wing") == 0) {
-		handle_get_wing(input_json, req);
-	} else if (strcmp(tool_name, "form_wing") == 0) {
-		handle_form_wing(input_json, req);
-	} else if (strcmp(tool_name, "update_wing") == 0) {
-		handle_update_wing(input_json, req);
-	} else if (strcmp(tool_name, "arrange_in_formation") == 0) {
-		handle_arrange_in_formation(input_json, req);
-	} else if (strcmp(tool_name, "delete_wing") == 0) {
-		handle_delete_wing(input_json, req);
-	} else if (strcmp(tool_name, "disband_wing") == 0) {
-		handle_disband_wing(input_json, req);
-	} else if (strcmp(tool_name, "move_wing") == 0) {
-		handle_move_wing(input_json, req);
-	} else if (strcmp(tool_name, "swap_wings") == 0) {
-		handle_swap_wings(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Unique name for the wing (must not collide with any existing ship, wing, waypoint, or jump node).");
+	add_string_array_prop(props, "members",
+		"List of existing ship names to form the wing from (at least 1, at most MAX_SHIPS_PER_WING). "
+		"All members must share the same team and must not already belong to a wing. "
+		"Member ships are renamed to \"<wing_name> 1\", \"<wing_name> 2\", etc.",
+		SCP_vector<const char *>{});
+	add_string_prop(props, "display_name",
+		"Optional display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
+		"a blank string is a valid display name and will be stored as-is.");
+	add_integer_prop(props, "hotkey",
+		"Hotkey assignment 0-9, or omit for no hotkey.");
+	add_string_prop(props, "wing_squad_logo_filename",
+		"Squadron logo filename, or omit.");
+	add_integer_prop(props, "num_waves", "Number of waves for the wing.");
+	add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
+	add_integer_prop(props, "wave_delay_min", "Minimum delay between waves (seconds).");
+	add_integer_prop(props, "wave_delay_max", "Maximum delay between waves (seconds).");
+	add_string_enum_prop(props, "arrival_location",
+		"How the wing arrives. Default \"Hyperspace\".", arrival_location_enum_values);
+	add_string_prop(props, "arrival_target",
+		"Ship name or special anchor (e.g. \"<any friendly>\") referenced by arrival_location. "
+		"Empty/\"<none>\" clears.");
+	add_integer_prop(props, "arrival_distance", "Distance offset (meters) from the arrival target.");
+	add_integer_prop(props, "arrival_delay", "Seconds to wait after the arrival cue is true.");
+	add_integer_prop(props, "arrival_cue",
+		"SEXP node ID of the boolean formula that gates arrival. Defaults to a locked \"true\" cue.");
+	add_string_enum_prop(props, "departure_location",
+		"How the wing departs. Default \"Hyperspace\".", departure_location_enum_values);
+	add_string_prop(props, "departure_target",
+		"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
+		"Empty/\"<none>\" clears.");
+	add_integer_prop(props, "departure_delay", "Seconds to wait after the departure cue is true.");
+	add_integer_prop(props, "departure_cue",
+		"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
+	add_string_prop(props, "formation",
+		"Formation name. See list_wing_formations for valid values. "
+		"Empty/\"<default>\" selects the standard retail formation.");
+	add_number_prop(props, "formation_scale", "Formation spacing scale (default 1.0).");
+	add_bool_map_prop(props, "wing_flags",
+		"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
+		"Only listed keys are touched.");
+	add_bool_prop(props, "reform",
+		"If true and a wing with this name already exists, re-form it in place: release the "
+		"current members and attach the supplied members instead.  The wing's other settings "
+		"(cues, formation, hotkey, wing_flags, num_waves, threshold, wave delays, "
+		"arrival/departure location/target/distance/delay, etc.) are preserved.  Members that "
+		"are currently in the wing being re-formed are accepted (they are released first).  "
+		"Released members go back to standalone ships with engine-default names.  Members not "
+		"in the original roster are bashed to \"<wing_name> N\" as usual.  If the wing does not "
+		"already exist, this flag is ignored.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("members"));
+	register_tool(tools, "form_wing",
+		"Form a new wing from existing ships.  Member ships must share a team, must not "
+		"already be in a wing, and must have ship classes that allow wing membership. "
+		"On success the members are renamed to \"<wing_name> 1\", etc., and their own "
+		"arrival/departure cues are disabled (the wing's cues become authoritative). "
+		"Pass reform=true to re-form an existing wing of the same name in place.",
+		props, req);
 }
+
+static void register_update_wing(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the wing to update.");
+	add_string_prop(props, "new_name",
+		"New name for the wing.  SEXP references, AI goals, texture replacements, and "
+		"member ship names are updated automatically (each member is re-bashed to \"<new_name> N\").");
+	add_string_prop(props, "display_name",
+		"Display name. Pass \"<none>\" or a string matching the wing's `name` to clear; "
+		"a blank string is a valid display name and will be stored as-is.");
+	add_integer_prop(props, "hotkey", "Hotkey 0-9.");
+	add_string_prop(props, "wing_squad_logo_filename", "Squadron logo filename.");
+	add_integer_prop(props, "num_waves", "Number of waves.");
+	add_integer_prop(props, "new_wave_threshold", "Wave-respawn threshold.");
+	add_integer_prop(props, "wave_delay_min", "Minimum delay between waves.");
+	add_integer_prop(props, "wave_delay_max", "Maximum delay between waves.");
+	add_string_enum_prop(props, "arrival_location", "Arrival mode.", arrival_location_enum_values);
+	add_string_prop(props, "arrival_target", "Arrival anchor (ship name or special token). Empty/\"<none>\" clears.");
+	add_integer_prop(props, "arrival_distance", "Arrival distance offset.");
+	add_integer_prop(props, "arrival_delay", "Arrival delay.");
+	add_integer_prop(props, "arrival_cue", "SEXP node ID for the arrival cue. Previous user-allocated cue is freed.");
+	add_string_enum_prop(props, "departure_location", "Departure mode.", departure_location_enum_values);
+	add_string_prop(props, "departure_target", "Departure anchor. Empty/\"<none>\" clears.");
+	add_integer_prop(props, "departure_delay", "Departure delay.");
+	add_integer_prop(props, "departure_cue", "SEXP node ID for the departure cue.");
+	add_string_prop(props, "formation", "Formation name. See list_wing_formations for valid values. "
+		"Empty/\"<default>\" selects the standard retail formation.");
+	add_number_prop(props, "formation_scale", "Formation spacing scale.");
+	add_bool_map_prop(props, "wing_flags",
+		"Partial map of {flag_name: bool} for this wing's flags. Names come from list_wing_flags. "
+		"Only listed keys are touched.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_wing",
+		"Update properties of an existing wing.  Only specified fields are changed. "
+		"Member list is read-only here; use other tools to change membership.",
+		props, req);
+}
+
+static void register_arrange_in_formation(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Wing name.");
+	add_string_prop(props, "formation",
+		"Optional formation name to override the wing's current formation for this arrangement only. "
+		"The wing's persistent formation is not changed. "
+		"See list_wing_formations for valid values. "
+		"Empty/\"<default>\" selects the standard retail formation.");
+	add_number_prop(props, "formation_scale",
+		"Optional formation scale to override the wing's current scale for this arrangement only. "
+		"The wing's persistent scale is not changed.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "arrange_in_formation",
+		"Arrange the members of a wing into their formation positions, relative to the wing leader "
+		"(the first ship in the member list). Each non-leader member is moved to its formation position "
+		"and reoriented to match the leader. The 'formation' and 'formation_scale' parameters are optional "
+		"temporary overrides applied only to this arrangement; the wing's persistent formation settings "
+		"are not modified (use update_wing for that). Mirrors the \"Align\" button on FRED's wing editor "
+		"dialog. Wings with only a leader (wave_count == 1) are a no-op.",
+		props, req);
+}
+
+static void register_delete_wing(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the wing to delete.");
+	add_bool_prop(props, "force",
+		"If true, delete even when the wing is referenced in SEXPs or AI goals "
+		"(references are invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_wing",
+		"Delete a wing and ALL its member ships.  Mirrors the editor's \"Delete Wing\" command. "
+		"Refuses if the wing is referenced in SEXPs or AI goals unless force=true. "
+		"To dissolve the wing while keeping ships standalone, use disband_wing.",
+		props, req);
+}
+
+static void register_disband_wing(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the wing to disband.");
+	add_bool_prop(props, "force",
+		"If true, disband even when the wing is referenced in SEXPs or AI goals "
+		"(references are invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "disband_wing",
+		"Dissolve a wing slot but leave its member ships intact.  The ships have their "
+		"wingnum reset and are renamed back to default names by the engine. "
+		"Refuses if the wing is referenced in SEXPs or AI goals unless force=true.",
+		props, req);
+}
+
+static void register_move_wing(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"1-based index of the wing to move");
+	add_integer_prop(props, "to_index",
+		"1-based destination index");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_wing",
+		"Move a wing from one list position to another.  Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_wings(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first wing");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second wing");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_wings",
+		"Swap two wings at the given list positions.  Indices are 1-based.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_wing_tool_defs[] = {
+	{ "list_wings",           register_list_wings,           nullptr, handle_list_wings,           false },
+	{ "get_wing",             register_get_wing,             nullptr, handle_get_wing,             false },
+	{ "form_wing",            register_form_wing,            nullptr, handle_form_wing,            false },
+	{ "update_wing",          register_update_wing,          nullptr, handle_update_wing,          false },
+	{ "arrange_in_formation", register_arrange_in_formation, nullptr, handle_arrange_in_formation, false },
+	{ "delete_wing",          register_delete_wing,          nullptr, handle_delete_wing,          false },
+	{ "disband_wing",         register_disband_wing,         nullptr, handle_disband_wing,         false },
+	{ "move_wing",            register_move_wing,            nullptr, handle_move_wing,            false },
+	{ "swap_wings",           register_swap_wings,           nullptr, handle_swap_wings,           false },
+};
+const size_t mcp_wing_tool_def_count = sizeof(mcp_wing_tool_defs) / sizeof(mcp_wing_tool_defs[0]);

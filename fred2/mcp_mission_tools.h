@@ -5,6 +5,7 @@
 #include <functional>
 #include <optional>
 #include "globalincs/vmallocator.h"
+#include "mcp_tool_registry.h"
 
 struct McpToolRequest;
 class McpErrorSink;
@@ -14,17 +15,10 @@ class anchor_t;
 // Sets the mission as modified and autosaves it.
 void mark_modified(const char *fmt, ...);
 
-// Append mission CRUD tool schemas to the tools array used by tools/list.
-void mcp_register_mission_tools(json_t *tools);
-
-// Try to route a mission tool call.  Returns a json_t* result if the tool
-// name matched one of the mission tools (marshaled to main thread), or
-// nullptr if the name is not recognized.
-json_t *mcp_route_mission_tool(const char *tool_name, json_t *arguments);
-
-// Main-thread handler for MISSION_TOOL calls.
-// Called from OnMcpToolCall when req->tool == McpToolId::MISSION_TOOL.
-void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolRequest *req);
+// Misc mission tools not belonging to an entity area
+// (mission music, editor view).
+extern const McpToolDef mcp_mission_misc_tool_defs[];
+extern const size_t mcp_mission_misc_tool_def_count;
 
 // ---------------------------------------------------------------------------
 // Shared helpers for entity submodules (messages, sexp, mission_info, etc.)

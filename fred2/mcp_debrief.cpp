@@ -265,152 +265,134 @@ static void handle_swap_debriefing_stages(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_debrief_tools(json_t *tools)
+static const char *debrief_team_desc =
+	"Which team's debriefing to operate on (\"Team 1\" or \"Team 2\"). "
+	"Defaults to \"Team 1\". \"none\" is not valid for debriefings.";
+
+static void register_list_debriefing_stages(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// Debriefing stage tools
-	// -----------------------------------------------------------------------
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	register_tool(tools, "list_debriefing_stages",
+		"List all debriefing stages for a team. Returns each stage's index, "
+		"text, voice, recommendation text, and SEXP formula root node.",
+		props);
+}
 
-	static const char *debrief_team_desc =
-		"Which team's debriefing to operate on (\"Team 1\" or \"Team 2\"). "
-		"Defaults to \"Team 1\". \"none\" is not valid for debriefings.";
+static void register_get_debriefing_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to retrieve");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "get_debriefing_stage",
+		"Get full details of a debriefing stage by index.",
+		props, req);
+}
 
-	// list_debriefing_stages
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		register_tool(tools, "list_debriefing_stages",
-			"List all debriefing stages for a team. Returns each stage's index, "
-			"text, voice, recommendation text, and SEXP formula root node.",
-			props);
-	}
+static void register_create_debriefing_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "text", "The debriefing text displayed during this stage");
+	add_string_prop(props, "voice_filename",
+		"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
+	add_string_prop(props, "recommendation_text",
+		"Recommendation text displayed during this stage. Defaults to empty.");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
+		"Defaults to true (stage always shown).");
+	add_integer_prop(props, "index",
+		"Position to insert the stage (1 = first). If omitted, appends to the end.");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("text"));
+	register_tool(tools, "create_debriefing_stage",
+		"Create a new debriefing stage. Debriefing stages are shown after a mission "
+		"completes; each stage has a SEXP formula controlling whether it is displayed. "
+		"Maximum " SCP_TOKEN_TO_STR(MAX_DEBRIEF_STAGES) " stages per team.",
+		props, req);
+}
 
-	// get_debriefing_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to retrieve");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "get_debriefing_stage",
-			"Get full details of a debriefing stage by index.",
-			props, req);
-	}
+static void register_update_debriefing_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to update");
+	add_string_prop(props, "text", "New debriefing text for this stage");
+	add_string_prop(props, "voice_filename",
+		"New voice audio filename. Empty string clears the voice.");
+	add_string_prop(props, "recommendation_text",
+		"New recommendation text. Empty string clears the recommendation.");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "update_debriefing_stage",
+		"Update properties of an existing debriefing stage. Only specified "
+		"fields are changed; omitted fields are left unchanged.",
+		props, req);
+}
 
-	// create_debriefing_stage
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "text", "The debriefing text displayed during this stage");
-		add_string_prop(props, "voice_filename",
-			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
-		add_string_prop(props, "recommendation_text",
-			"Recommendation text displayed during this stage. Defaults to empty.");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
-			"Defaults to true (stage always shown).");
-		add_integer_prop(props, "index",
-			"Position to insert the stage (1 = first). If omitted, appends to the end.");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("text"));
-		register_tool(tools, "create_debriefing_stage",
-			"Create a new debriefing stage. Debriefing stages are shown after a mission "
-			"completes; each stage has a SEXP formula controlling whether it is displayed. "
-			"Maximum " SCP_TOKEN_TO_STR(MAX_DEBRIEF_STAGES) " stages per team.",
-			props, req);
-	}
+static void register_delete_debriefing_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to delete");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "delete_debriefing_stage",
+		"Delete a debriefing stage. Frees its SEXP formula. "
+		"Remaining stages are shifted down.",
+		props, req);
+}
 
-	// update_debriefing_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to update");
-		add_string_prop(props, "text", "New debriefing text for this stage");
-		add_string_prop(props, "voice_filename",
-			"New voice audio filename. Empty string clears the voice.");
-		add_string_prop(props, "recommendation_text",
-			"New recommendation text. Empty string clears the recommendation.");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "update_debriefing_stage",
-			"Update properties of an existing debriefing stage. Only specified "
-			"fields are changed; omitted fields are left unchanged.",
-			props, req);
-	}
+static void register_move_debriefing_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the stage");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the stage to");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_debriefing_stage",
+		"Move a debriefing stage from one position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
 
-	// delete_debriefing_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to delete");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "delete_debriefing_stage",
-			"Delete a debriefing stage. Frees its SEXP formula. "
-			"Remaining stages are shifted down.",
-			props, req);
-	}
-
-	// move_debriefing_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the stage");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the stage to");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_debriefing_stage",
-			"Move a debriefing stage from one position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_debriefing_stages
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first stage");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second stage");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_debriefing_stages",
-			"Swap two debriefing stages at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
+static void register_swap_debriefing_stages(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first stage");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second stage");
+	add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_debriefing_stages",
+		"Swap two debriefing stages at the given positions. "
+		"Indices are 1-based.",
+		props, req);
 }
 
 // ---------------------------------------------------------------------------
-// Main-thread dispatch
+// Tool table
 // ---------------------------------------------------------------------------
 
-bool mcp_handle_debrief_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
-{
-	if (strcmp(tool_name, "list_debriefing_stages") == 0) {
-		handle_list_debriefing_stages(input_json, req);
-	} else if (strcmp(tool_name, "get_debriefing_stage") == 0) {
-		handle_get_debriefing_stage(input_json, req);
-	} else if (strcmp(tool_name, "create_debriefing_stage") == 0) {
-		handle_create_debriefing_stage(input_json, req);
-	} else if (strcmp(tool_name, "update_debriefing_stage") == 0) {
-		handle_update_debriefing_stage(input_json, req);
-	} else if (strcmp(tool_name, "delete_debriefing_stage") == 0) {
-		handle_delete_debriefing_stage(input_json, req);
-	} else if (strcmp(tool_name, "move_debriefing_stage") == 0) {
-		handle_move_debriefing_stage(input_json, req);
-	} else if (strcmp(tool_name, "swap_debriefing_stages") == 0) {
-		handle_swap_debriefing_stages(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
-}
+const McpToolDef mcp_debrief_tool_defs[] = {
+	{ "list_debriefing_stages",  register_list_debriefing_stages,  nullptr, handle_list_debriefing_stages,  false },
+	{ "get_debriefing_stage",    register_get_debriefing_stage,    nullptr, handle_get_debriefing_stage,    false },
+	{ "create_debriefing_stage", register_create_debriefing_stage, nullptr, handle_create_debriefing_stage, false },
+	{ "update_debriefing_stage", register_update_debriefing_stage, nullptr, handle_update_debriefing_stage, false },
+	{ "delete_debriefing_stage", register_delete_debriefing_stage, nullptr, handle_delete_debriefing_stage, false },
+	{ "move_debriefing_stage",   register_move_debriefing_stage,   nullptr, handle_move_debriefing_stage,   false },
+	{ "swap_debriefing_stages",  register_swap_debriefing_stages,  nullptr, handle_swap_debriefing_stages,  false },
+};
+const size_t mcp_debrief_tool_def_count = sizeof(mcp_debrief_tool_defs) / sizeof(mcp_debrief_tool_defs[0]);
