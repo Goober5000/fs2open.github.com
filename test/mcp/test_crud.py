@@ -475,6 +475,129 @@ def register(suite, client):
                 except Exception:
                     break
 
+    # ----- Briefing Icons -----
+
+    def test_briefing_icons_crud():
+        def stage_icons(stage):
+            r = client.call_tool("get_briefing_stage", {"index": stage})
+            assert_success(r)
+            return tool_data(r).get("icons", [])
+
+        try:
+            # Two icon-free stages
+            for n in (1, 2):
+                r = client.call_tool("create_briefing_stage", {
+                    "text": f"Icon test stage {n}",
+                    "copy_from_previous": False,
+                })
+                assert_success(r)
+
+            # Default propagate copies the icon (same id) into stage 2
+            r = client.call_tool("create_briefing_icon", {
+                "stage": 1,
+                "position": {"x": 100, "y": 0, "z": 200},
+                "type": "Fighter",
+                "label": "Alpha wing",
+            })
+            assert_success(r)
+            d = tool_data(r)
+            icon_id = d.get("id")
+            assert_true(icon_id is not None and icon_id >= 0, "icon id assigned")
+            assert_equal(d.get("type"), "Fighter", "icon type round-trip")
+
+            s1, s2 = stage_icons(1), stage_icons(2)
+            assert_equal(len(s1), 1, "stage 1 icon count")
+            assert_equal(len(s2), 1, "propagate should copy the icon into stage 2")
+            assert_equal(s2[0].get("id"), icon_id, "propagated icon keeps the same id")
+
+            # propagate=False stays local
+            r = client.call_tool("create_briefing_icon", {
+                "stage": 1,
+                "position": {"x": -100, "y": 0, "z": 200},
+                "type": "Cargo",
+                "label": "Depot",
+                "propagate": False,
+            })
+            assert_success(r)
+            assert_equal(len(stage_icons(1)), 2, "stage 1 has both icons")
+            assert_equal(len(stage_icons(2)), 1, "local icon stays out of stage 2")
+
+            # Duplicate explicit id in the same stage is rejected
+            r = client.call_tool("create_briefing_icon", {
+                "stage": 1,
+                "position": {"x": 0, "y": 0, "z": 0},
+                "type": "Fighter",
+                "id": icon_id,
+            })
+            assert_error(r)
+
+            # Propagated update: label follows the id into stage 2
+            r = client.call_tool("update_briefing_icon", {
+                "stage": 1, "index": 1,
+                "label": "Alpha wing (renamed)",
+            })
+            assert_success(r)
+            assert_equal(stage_icons(2)[0].get("label"), "Alpha wing (renamed)",
+                "label change should propagate to stage 2")
+
+            # Scale is stage-local even when propagating
+            r = client.call_tool("update_briefing_icon", {
+                "stage": 1, "index": 1,
+                "scale": 150,
+            })
+            assert_success(r)
+            assert_equal(stage_icons(1)[0].get("scale"), 150, "scale updated in stage 1")
+            assert_equal(stage_icons(2)[0].get("scale"), 100, "scale change stays local")
+
+            # propagate=False update stays local
+            r = client.call_tool("update_briefing_icon", {
+                "stage": 1, "index": 1,
+                "label": "Alpha wing (local)",
+                "propagate": False,
+            })
+            assert_success(r)
+            assert_equal(stage_icons(2)[0].get("label"), "Alpha wing (renamed)",
+                "propagate=False should not touch stage 2")
+
+            # Derivation from the player start ship (name varies by install,
+            # so discover it via list_ships)
+            r = client.call_tool("list_ships")
+            assert_success(r)
+            ships = tool_data(r)
+            assert_true(len(ships) > 0, "fresh mission should have a player start")
+            ship_name = ships[0].get("name")
+            r = client.call_tool("create_briefing_icon", {
+                "stage": 1,
+                "source": ship_name,
+                "propagate": False,
+            })
+            assert_success(r)
+            d = tool_data(r)
+            assert_equal(d.get("label"), ship_name, "derived label")
+            assert_true(d.get("ship_class"), "derived ship class")
+            assert_true(d.get("position") is not None, "derived position")
+
+            # Delete from stage 1 only; stage 2 unaffected; indices shift down
+            before = stage_icons(1)
+            r = client.call_tool("delete_briefing_icon", {"stage": 1, "index": 1})
+            assert_success(r)
+            after = stage_icons(1)
+            assert_equal(len(after), len(before) - 1, "icon removed from stage 1")
+            assert_equal(after[0].get("label"), before[1].get("label"),
+                "remaining icons shift down")
+            assert_equal(len(stage_icons(2)), 1, "stage 2 unaffected by delete")
+
+        finally:
+            for _ in range(5):
+                try:
+                    r = client.call_tool("list_briefing_stages")
+                    d = tool_data(r)
+                    if not d:
+                        break
+                    client.call_tool("delete_briefing_stage", {"index": len(d)})
+                except Exception:
+                    break
+
     # ----- Debriefing Stages -----
 
     def test_debriefing_stages_crud():
@@ -990,6 +1113,7 @@ def register(suite, client):
     suite.add("crud_cmd_brief_stages", test_cmd_brief_stages_crud)
     suite.add("crud_fiction_viewer_stages", test_fiction_viewer_stages_crud)
     suite.add("crud_briefing_stages", test_briefing_stages_crud)
+    suite.add("crud_briefing_icons", test_briefing_icons_crud)
     suite.add("crud_debriefing_stages", test_debriefing_stages_crud)
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
