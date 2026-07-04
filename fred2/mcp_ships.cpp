@@ -545,10 +545,14 @@ static void handle_list_ships(json_t * /*input*/, McpToolRequest *req)
 	if (!validate(validate_dialog_for_ships, sink)) return;
 
 	json_t *arr = json_array();
-	for (auto objp : list_range(&obj_used_list)) {
-		if (objp->type != OBJ_SHIP && objp->type != OBJ_START)
+	// Walk Ships[] in slot order -- the same order the move_ship/swap_ships
+	// indices refer to (see ship_slot_at_public_index), so a ship's 1-based
+	// position in this list is its public index.  obj_used_list order would
+	// diverge from it after deletions.
+	for (int i = 0; i < MAX_SHIPS; ++i) {
+		if (Ships[i].objnum < 0)
 			continue;
-		json_array_append_new(arr, build_ship_json(objp->instance, false));
+		json_array_append_new(arr, build_ship_json(i, false));
 	}
 
 	req->result_json = make_json_tool_result(arr);
@@ -2806,8 +2810,9 @@ void mcp_register_ship_tools(json_t *tools)
 {
 	// list_ships
 	register_tool(tools, "list_ships",
-		"List all ships in the mission (including player-start ships) in mission iteration order. "
-		"Each entry has the ship's name, index, class, team (IFF), player-start flag, wing membership, and position.",
+		"List all ships in the mission (including player-start ships), in the same order that "
+		"move_ship/swap_ships indices refer to: a ship's 1-based position in this list is its index. "
+		"Each entry has the ship's name, class, team (IFF), player-start flag, wing membership, and position.",
 		json_object());
 
 	// get_ship
