@@ -3,7 +3,6 @@
 #include "mcp_json.h"
 #include "mcp_app.h"
 #include "mcp_reference_tools.h"
-#include "mcp_mission_tools.h"
 #include "mcp_tool_registry.h"
 #include "mongoose.h"
 
@@ -110,15 +109,7 @@ static json_t *handle_tools_list()
 	json_t *result = json_object();
 	json_t *tools = json_array();
 
-	// Table-driven registry (converted areas: app, messages, ...)
 	mcp_register_all_tools(tools);
-
-	// Legacy registration for areas not yet migrated to the registry
-	// Reference/discovery tools (ships, weapons, species, SEXPs, intel)
-	mcp_register_reference_tools(tools);
-
-	// Mission CRUD tools
-	mcp_register_mission_tools(tools);
 
 	json_object_set_new(result, "tools", tools);
 
@@ -246,44 +237,21 @@ static json_t *handle_tools_call(json_t *params, int &error_code, SCP_string &er
 		return nullptr;
 	}
 
-	// Table-driven registry (converted areas).  Tools not found here fall
-	// through to the legacy routing cascade below until migration completes.
-	{
-		const McpToolDef *def = mcp_find_tool(tool_name);
-		if (def != nullptr) {
-			if (!def->works_before_ready && !mcp_fred_ready.load())
-				return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
+	const McpToolDef *def = mcp_find_tool(tool_name);
+	if (def == nullptr)
+		return make_tool_result("Unknown tool", true);
 
-			json_t *arguments = json_object_get(params, "arguments");
-
-			if (def->worker_handler != nullptr)
-				return def->worker_handler(arguments);
-
-			return mcp_execute_on_main_thread(McpToolId::REGISTRY_TOOL, tool_name, arguments);
-		}
-	}
-
-	// All legacy tools below require FRED2 to be fully initialized
-	if (!mcp_fred_ready.load())
+	if (!def->works_before_ready && !mcp_fred_ready.load())
 		return make_tool_result("FRED2 is still initializing. Please wait and try again.", true);
 
-	// Try mission CRUD tools (marshaled to main thread)
-	{
-		json_t *arguments = json_object_get(params, "arguments");
-		json_t *mission_result = mcp_route_mission_tool(tool_name, arguments);
-		if (mission_result)
-			return mission_result;
-	}
+	json_t *arguments = json_object_get(params, "arguments");
 
-	// Try reference/discovery tools
-	{
-		json_t *arguments = json_object_get(params, "arguments");
-		json_t *ref_result = mcp_handle_reference_tool(tool_name, arguments);
-		if (ref_result)
-			return ref_result;
-	}
+	// Worker-thread tools run right here on the mongoose thread; everything
+	// else marshals to the main MFC thread.
+	if (def->worker_handler != nullptr)
+		return def->worker_handler(arguments);
 
-	return make_tool_result("Unknown tool", true);
+	return mcp_execute_on_main_thread(McpToolId::REGISTRY_TOOL, tool_name, arguments);
 }
 
 // ---------------------------------------------------------------------------

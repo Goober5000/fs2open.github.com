@@ -3602,586 +3602,529 @@ static void add_general_sexp_ref_props(json_t *props, const char *prefix,
 		formula_entity_tag_values);
 }
 
-void mcp_register_sexp_tools(json_t *tools)
+static void register_sexp_to_text(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// SEXP tools
-	// -----------------------------------------------------------------------
+	json_t *props = json_object();
+	add_integer_prop(props, "node", "Root node index of the SEXP tree to serialize");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("node"));
+	register_tool(tools, "sexp_to_text",
+		"Convert a SEXP node tree to its text representation. "
+		"Takes a root node index and returns the S-expression as a formatted string, "
+		"suitable for copy/paste or inspection. Read-only; does not modify any nodes.",
+		props, req);
+}
 
-	// sexp_to_text
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Root node index of the SEXP tree to serialize");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "sexp_to_text",
-			"Convert a SEXP node tree to its text representation. "
-			"Takes a root node index and returns the S-expression as a formatted string, "
-			"suitable for copy/paste or inspection. Read-only; does not modify any nodes.",
-			props, req);
-	}
+static void register_get_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "node", "Index of the SEXP node to inspect");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("node"));
+	register_tool(tools, "get_sexp_node",
+		"Get details about a single SEXP node: its kind, value, value type, "
+		"child/sibling indices (node_first/node_rest), and operator return type. "
+		"Use 'node_first' to descend into a child list (CAR) and 'node_rest' to move "
+		"to the next sibling (CDR).",
+		props, req);
+}
 
-	// get_sexp_node
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Index of the SEXP node to inspect");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "get_sexp_node",
-			"Get details about a single SEXP node: its kind, value, value type, "
-			"child/sibling indices (node_first/node_rest), and operator return type. "
-			"Use 'node_first' to descend into a child list (CAR) and 'node_rest' to move "
-			"to the next sibling (CDR).",
-			props, req);
-	}
+static void register_get_sexp_formula_info(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "node", "Node index of the SEXP node to query");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("node"));
+	register_tool(tools, "get_sexp_formula_info",
+		"Get information about which mission entity (if any) owns the formula "
+		"tree containing the given SEXP node. Returns the tree root, whether it "
+		"is attached to a mission entity, and if so, the entity type, identifier, "
+		"and expected return type.",
+		props, req);
+}
 
-	// get_sexp_formula_info
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Node index of the SEXP node to query");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "get_sexp_formula_info",
-			"Get information about which mission entity (if any) owns the formula "
-			"tree containing the given SEXP node. Returns the tree root, whether it "
-			"is attached to a mission entity, and if so, the entity type, identifier, "
-			"and expected return type.",
-			props, req);
-	}
+static void register_walk_sexp_tree(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "node", "Root node index to start traversal from");
+	add_integer_prop(props, "depth",
+		"Maximum recursion depth. 0 returns only the root node; N returns the root "
+		"plus N levels of descendants. Omit or pass a negative value for unlimited depth.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("node"));
+	register_tool(tools, "walk_sexp_tree",
+		"Walk the SEXP subtree rooted at the given node. Returns a flat array "
+		"of node descriptors with kind, value, value_type, role "
+		"(operator/argument/list_wrapper), child/sibling indices, and "
+		"walk_first/walk_rest indices into the array for easy traversal. "
+		"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
+		"operators deeper in the tree are wrapped in list nodes. "
+		"The result is capped at " SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the response "
+		"includes 'truncated': true. To inspect a larger tree, call again with a "
+		"deeper sub-node as the root, or use the 'depth' parameter to limit the walk.",
+		props, req);
+}
 
-	// walk_sexp_tree
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Root node index to start traversal from");
-		add_integer_prop(props, "depth",
-			"Maximum recursion depth. 0 returns only the root node; N returns the root "
-			"plus N levels of descendants. Omit or pass a negative value for unlimited depth.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "walk_sexp_tree",
-			"Walk the SEXP subtree rooted at the given node. Returns a flat array "
-			"of node descriptors with kind, value, value_type, role "
-			"(operator/argument/list_wrapper), child/sibling indices, and "
-			"walk_first/walk_rest indices into the array for easy traversal. "
-			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
-			"operators deeper in the tree are wrapped in list nodes. "
-			"The result is capped at " SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the response "
-			"includes 'truncated': true. To inspect a larger tree, call again with a "
-			"deeper sub-node as the root, or use the 'depth' parameter to limit the walk.",
-			props, req);
-	}
+static void register_find_sexp_text(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "text",
+		"Text to search for in SEXP node values.  Must be non-empty.  "
+		"A leading '@' is stripped before matching (the '@' prefix is a "
+		"SEXP display convention for variable references and is never "
+		"stored in node text).");
+	add_string_enum_prop(props, "match_mode",
+		"How to compare 'text' against each node's value.  'substring' (default) "
+		"matches if 'text' appears anywhere in the node's value.  'exact' matches "
+		"only when the node's value equals 'text'.  'fuzzy' allows typos and "
+		"missing characters via a Levenshtein-style cost; fuzzy results are "
+		"returned ordered by relevance (best match first), unlike substring and "
+		"exact which preserve traversal order.  All three modes are case-insensitive.",
+		find_match_mode_values);
+	add_integer_prop(props, "root_node",
+		"Optional root node index.  When provided, the search is restricted to "
+		"the subtree rooted at this node.  When omitted, every live SEXP node in "
+		"the mission is searched.");
+	add_string_enum_prop(props, "role",
+		"Optional role filter.  When provided, only nodes with this role are "
+		"considered.  list_wrapper nodes are structural and are never returned "
+		"regardless of this filter.",
+		sexp_searchable_role_values);
+	add_string_enum_prop(props, "value_type",
+		"Optional value-type filter.  When provided, only nodes whose value_type "
+		"matches are considered.  Mirrors the value_type field returned by "
+		"get_sexp_node and walk_sexp_tree.",
+		sexp_value_type_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("text"));
+	register_tool(tools, "find_sexp_text",
+		"Find SEXP nodes whose text matches a given query.  Useful for locating "
+		"every reference to an entity name (a ship, a wing, a variable, a literal) "
+		"across the mission, or within a single tree.  By default the search is "
+		"mission-wide; pass root_node to restrict to one tree.  Matching is "
+		"case-insensitive; choose substring (default) or exact via match_mode.  "
+		"Optional role and value_type filters narrow the candidate set; "
+		"list_wrapper nodes are always excluded.  The response is "
+		"{nodes: [<node_object>...], truncated?: true}, where each node_object "
+		"matches the shape returned by get_sexp_node.  The result is capped at "
+		SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the "
+		"response includes 'truncated': true and the caller should narrow the "
+		"query (use a more specific text or add filters).",
+		props, req);
+}
 
-	// find_sexp_text
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "text",
-			"Text to search for in SEXP node values.  Must be non-empty.  "
-			"A leading '@' is stripped before matching (the '@' prefix is a "
-			"SEXP display convention for variable references and is never "
-			"stored in node text).");
-		add_string_enum_prop(props, "match_mode",
-			"How to compare 'text' against each node's value.  'substring' (default) "
-			"matches if 'text' appears anywhere in the node's value.  'exact' matches "
-			"only when the node's value equals 'text'.  'fuzzy' allows typos and "
-			"missing characters via a Levenshtein-style cost; fuzzy results are "
-			"returned ordered by relevance (best match first), unlike substring and "
-			"exact which preserve traversal order.  All three modes are case-insensitive.",
-			find_match_mode_values);
-		add_integer_prop(props, "root_node",
-			"Optional root node index.  When provided, the search is restricted to "
-			"the subtree rooted at this node.  When omitted, every live SEXP node in "
-			"the mission is searched.");
-		add_string_enum_prop(props, "role",
-			"Optional role filter.  When provided, only nodes with this role are "
-			"considered.  list_wrapper nodes are structural and are never returned "
-			"regardless of this filter.",
-			sexp_searchable_role_values);
-		add_string_enum_prop(props, "value_type",
-			"Optional value-type filter.  When provided, only nodes whose value_type "
-			"matches are considered.  Mirrors the value_type field returned by "
-			"get_sexp_node and walk_sexp_tree.",
-			sexp_value_type_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("text"));
-		register_tool(tools, "find_sexp_text",
-			"Find SEXP nodes whose text matches a given query.  Useful for locating "
-			"every reference to an entity name (a ship, a wing, a variable, a literal) "
-			"across the mission, or within a single tree.  By default the search is "
-			"mission-wide; pass root_node to restrict to one tree.  Matching is "
-			"case-insensitive; choose substring (default) or exact via match_mode.  "
-			"Optional role and value_type filters narrow the candidate set; "
-			"list_wrapper nodes are always excluded.  The response is "
-			"{nodes: [<node_object>...], truncated?: true}, where each node_object "
-			"matches the shape returned by get_sexp_node.  The result is capped at "
-			SCP_TOKEN_TO_STR(MAX_SEXP_WALK_ENTRIES) " nodes; if the cap is reached the "
-			"response includes 'truncated': true and the caller should narrow the "
-			"query (use a more specific text or add filters).",
-			props, req);
-	}
+static void register_text_to_sexp(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "text",
+		"SEXP text to parse, e.g. \"( when ( true ) ( do-nothing ) )\". Maximum "
+		SCP_TOKEN_TO_STR(MAX_MCP_SEXP_LENGTH) " characters.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("text"));
+	register_tool(tools, "text_to_sexp",
+		"Parse SEXP text into a node tree. Returns the index of the root node. "
+		"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
+		"operators deeper in the tree are wrapped in list nodes. The caller is "
+		"responsible for attaching the tree to a mission entity's formula, attaching the tree to "
+		"another tree, or deleting the tree. Also returns the round-tripped "
+		"text, any parsing errors encountered, and the first (if any) syntax error.",
+		props, req);
+}
 
-	// text_to_sexp
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "text",
-			"SEXP text to parse, e.g. \"( when ( true ) ( do-nothing ) )\". Maximum "
-			SCP_TOKEN_TO_STR(MAX_MCP_SEXP_LENGTH) " characters.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("text"));
-		register_tool(tools, "text_to_sexp",
-			"Parse SEXP text into a node tree. Returns the index of the root node. "
-			"In FreeSpace SEXP trees, the top-level operator is a bare atom node, while "
-			"operators deeper in the tree are wrapped in list nodes. The caller is "
-			"responsible for attaching the tree to a mission entity's formula, attaching the tree to "
-			"another tree, or deleting the tree. Also returns the round-tripped "
-			"text, any parsing errors encountered, and the first (if any) syntax error.",
-			props, req);
-	}
+static void register_detach_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_general_sexp_ref_props(props, "", {
+		"Node index of the SEXP node to detach",                       // node_intro
+		"detached",                                                     // retarget_verb
+		"detach",                                                       // arg_action_verb
+		"Entity type whose formula to detach",                          // entity_type_role
+		"The entity's formula is replaced with a default.",             // entity_type_extra
+	});
+	add_bool_prop(props, "shrink",
+		"If true, remove the node and shift subsequent siblings up by one "
+		"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
+	add_bool_prop(props, "delete",
+		"If true, free the detached node and its subtree. If false (the default), "
+		"the detached node is preserved and returned in the response.");
+	register_tool(tools, "detach_sexp_node",
+		"Detach a SEXP node from its tree. Provide exactly one targeting form: either "
+		"`node` (optionally with `argument_index`) OR both `entity_type` and `entity_id` "
+		"(optionally with `entity_tag`). `argument_index` requires `node`; `entity_id` and "
+		"`entity_tag` require `entity_type`. Mixing forms is rejected. "
+		"If the target is an operator inside a list wrapper, the "
+		"wrapper is automatically detached as well. If the node is the root of a "
+		"mission entity's formula (or entity mode is used), it is replaced with an "
+		"appropriate default (e.g. do-nothing for action formulas, true for boolean "
+		"formulas). If the node is embedded within a tree, it is replaced with "
+		PLACEHOLDER_STRING ", unless 'shrink' is true, in which case subsequent "
+		"siblings shift up by one position. By default, the detached node is "
+		"preserved and returned; set 'delete' to true to free it. The response "
+		"includes detached_node (int index), detached_node_data (full node object when "
+		"the node was not deleted), replacement_node (int or null), replacement_node_data "
+		"(full node object when a replacement was inserted), deleted (bool, true only when "
+		"'delete' was requested and at least one node was actually freed), and freed_count "
+		"(int, total number of nodes freed during the operation). Note - freed_count may be "
+		"non-zero even when 'delete' is false: if the detached subtree's root is a "
+		"redundant list wrapper, it is unwrapped so the new free-standing root is the "
+		"bare operator atom, and the wrapper counts toward freed_count. For mission-attached "
+		"trees, a syntax check is performed after modification; if the check fails, "
+		"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
+		"be targeted directly; use argument_index with the parent operator.",
+		props);
+}
 
-	// detach_sexp_node
-	{
-		json_t *props = json_object();
-		add_general_sexp_ref_props(props, "", {
-			"Node index of the SEXP node to detach",                       // node_intro
-			"detached",                                                     // retarget_verb
-			"detach",                                                       // arg_action_verb
-			"Entity type whose formula to detach",                          // entity_type_role
-			"The entity's formula is replaced with a default.",             // entity_type_extra
-		});
-		add_bool_prop(props, "shrink",
-			"If true, remove the node and shift subsequent siblings up by one "
-			"position instead of inserting a " PLACEHOLDER_STRING ". Defaults to false.");
-		add_bool_prop(props, "delete",
-			"If true, free the detached node and its subtree. If false (the default), "
-			"the detached node is preserved and returned in the response.");
-		register_tool(tools, "detach_sexp_node",
-			"Detach a SEXP node from its tree. Provide exactly one targeting form: either "
-			"`node` (optionally with `argument_index`) OR both `entity_type` and `entity_id` "
-			"(optionally with `entity_tag`). `argument_index` requires `node`; `entity_id` and "
-			"`entity_tag` require `entity_type`. Mixing forms is rejected. "
-			"If the target is an operator inside a list wrapper, the "
-			"wrapper is automatically detached as well. If the node is the root of a "
-			"mission entity's formula (or entity mode is used), it is replaced with an "
-			"appropriate default (e.g. do-nothing for action formulas, true for boolean "
-			"formulas). If the node is embedded within a tree, it is replaced with "
-			PLACEHOLDER_STRING ", unless 'shrink' is true, in which case subsequent "
-			"siblings shift up by one position. By default, the detached node is "
-			"preserved and returned; set 'delete' to true to free it. The response "
-			"includes detached_node (int index), detached_node_data (full node object when "
-			"the node was not deleted), replacement_node (int or null), replacement_node_data "
-			"(full node object when a replacement was inserted), deleted (bool, true only when "
-			"'delete' was requested and at least one node was actually freed), and freed_count "
-			"(int, total number of nodes freed during the operation). Note - freed_count may be "
-			"non-zero even when 'delete' is false: if the detached subtree's root is a "
-			"redundant list wrapper, it is unwrapped so the new free-standing root is the "
-			"bare operator atom, and the wrapper counts toward freed_count. For mission-attached "
-			"trees, a syntax check is performed after modification; if the check fails, "
-			"the operation is rolled back. Shared locked singleton nodes (true/false) cannot "
-			"be targeted directly; use argument_index with the parent operator.",
-			props);
-	}
+static void register_attach_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "source_node",
+		"Node index of the free-standing root to attach. Must have parent == -1 "
+		"and not be attached to any mission entity.");
+	add_general_sexp_ref_props(props, "target_", {
+		"Node index of an existing tree node to position the source relative to", // node_intro
+		"targeted",                                                                // retarget_verb
+		"attach",                                                                  // arg_action_verb
+		"Entity type whose formula the source will become",                        // entity_type_role
+		nullptr,                                                                   // entity_type_extra
+	});
+	add_string_enum_prop(props, "position",
+		"How to position the source relative to the target node. "
+		"'replace' (default) replaces the target; 'before' inserts before the target; "
+		"'after' inserts after the target. Only used with target_node.",
+		attach_position_values);
+	add_bool_prop(props, "delete_displaced",
+		"If true, free the displaced subtree when replacing. If false (the default), "
+		"the displaced subtree is preserved as a free-standing root and returned in "
+		"the response. Only meaningful for replace mode and entity mode.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("source_node"));
+	register_tool(tools, "attach_sexp_node",
+		"Attach a free-standing SEXP subtree to a position in another tree or as a "
+		"mission entity's formula. The source must be a free-standing root (parent == -1, "
+		"not attached to any entity); use detach_sexp_node first if needed. "
+		"Provide exactly one targeting form: either `target_node` (optionally with "
+		"`target_argument_index` and/or `position`) OR both `target_entity_type` and "
+		"`target_entity_id` (optionally with `target_entity_tag`). `target_argument_index` "
+		"and `position` require `target_node`; `target_entity_id` and `target_entity_tag` "
+		"require `target_entity_type`. Mixing forms is rejected. "
+		"In node-relative mode (target_node), position can be 'replace' (default, swaps "
+		"the target with the source), 'before' (inserts source before target), or 'after' "
+		"(inserts source after target). In entity mode (target_entity_type + target_entity_id), "
+		"the source replaces the entity's current formula. For mission-attached trees, a "
+		"syntax check is performed after modification; if the check fails, the operation "
+		"is rolled back. Shared locked singleton nodes (true/false) cannot be targeted "
+		"directly; use target_argument_index with the parent operator. The response "
+		"includes source_node (int), source_node_data (full node object), position (string), "
+		"displaced_node (int or null), displaced_node_data (full node object when preserved), "
+		"deleted_displaced (bool, true only when 'delete_displaced' was requested and at least "
+		"one node was actually freed; a locked singleton displaced from an entity formula "
+		"cannot be freed and will report false), and freed_count (int, total number of "
+		"nodes freed during the operation). Note - freed_count may be non-zero even when "
+		"'delete_displaced' is false: if the displaced subtree's root is a redundant list "
+		"wrapper, it is unwrapped so the preserved free-standing root is the bare operator "
+		"atom, and the wrapper counts toward freed_count.",
+		props, req);
+}
 
-	// attach_sexp_node
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "source_node",
-			"Node index of the free-standing root to attach. Must have parent == -1 "
-			"and not be attached to any mission entity.");
-		add_general_sexp_ref_props(props, "target_", {
-			"Node index of an existing tree node to position the source relative to", // node_intro
-			"targeted",                                                                // retarget_verb
-			"attach",                                                                  // arg_action_verb
-			"Entity type whose formula the source will become",                        // entity_type_role
-			nullptr,                                                                   // entity_type_extra
-		});
-		add_string_enum_prop(props, "position",
-			"How to position the source relative to the target node. "
-			"'replace' (default) replaces the target; 'before' inserts before the target; "
-			"'after' inserts after the target. Only used with target_node.",
-			attach_position_values);
-		add_bool_prop(props, "delete_displaced",
-			"If true, free the displaced subtree when replacing. If false (the default), "
-			"the displaced subtree is preserved as a free-standing root and returned in "
-			"the response. Only meaningful for replace mode and entity mode.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("source_node"));
-		register_tool(tools, "attach_sexp_node",
-			"Attach a free-standing SEXP subtree to a position in another tree or as a "
-			"mission entity's formula. The source must be a free-standing root (parent == -1, "
-			"not attached to any entity); use detach_sexp_node first if needed. "
-			"Provide exactly one targeting form: either `target_node` (optionally with "
-			"`target_argument_index` and/or `position`) OR both `target_entity_type` and "
-			"`target_entity_id` (optionally with `target_entity_tag`). `target_argument_index` "
-			"and `position` require `target_node`; `target_entity_id` and `target_entity_tag` "
-			"require `target_entity_type`. Mixing forms is rejected. "
-			"In node-relative mode (target_node), position can be 'replace' (default, swaps "
-			"the target with the source), 'before' (inserts source before target), or 'after' "
-			"(inserts source after target). In entity mode (target_entity_type + target_entity_id), "
-			"the source replaces the entity's current formula. For mission-attached trees, a "
-			"syntax check is performed after modification; if the check fails, the operation "
-			"is rolled back. Shared locked singleton nodes (true/false) cannot be targeted "
-			"directly; use target_argument_index with the parent operator. The response "
-			"includes source_node (int), source_node_data (full node object), position (string), "
-			"displaced_node (int or null), displaced_node_data (full node object when preserved), "
-			"deleted_displaced (bool, true only when 'delete_displaced' was requested and at least "
-			"one node was actually freed; a locked singleton displaced from an entity formula "
-			"cannot be freed and will report false), and freed_count (int, total number of "
-			"nodes freed during the operation). Note - freed_count may be non-zero even when "
-			"'delete_displaced' is false: if the displaced subtree's root is a redundant list "
-			"wrapper, it is unwrapped so the preserved free-standing root is the bare operator "
-			"atom, and the wrapper counts toward freed_count.",
-			props, req);
-	}
+static void register_move_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_general_sexp_ref_props(props, "source_", {
+		"Node index of the SEXP node to move",                          // node_intro
+		"moved",                                                         // retarget_verb
+		"move",                                                          // arg_action_verb
+		"Entity type whose formula to move",                             // entity_type_role
+		"The entity's formula is replaced with a default.",              // entity_type_extra
+	});
+	add_general_sexp_ref_props(props, "target_", {
+		"Node index of an existing tree node to position the source relative to", // node_intro
+		"targeted",                                                                // retarget_verb
+		"move",                                                                    // arg_action_verb
+		"Entity type whose formula the source will become",                        // entity_type_role
+		nullptr,                                                                   // entity_type_extra
+	});
 
-	// move_sexp_node
-	{
-		json_t *props = json_object();
-		add_general_sexp_ref_props(props, "source_", {
-			"Node index of the SEXP node to move",                          // node_intro
-			"moved",                                                         // retarget_verb
-			"move",                                                          // arg_action_verb
-			"Entity type whose formula to move",                             // entity_type_role
-			"The entity's formula is replaced with a default.",              // entity_type_extra
-		});
-		add_general_sexp_ref_props(props, "target_", {
-			"Node index of an existing tree node to position the source relative to", // node_intro
-			"targeted",                                                                // retarget_verb
-			"move",                                                                    // arg_action_verb
-			"Entity type whose formula the source will become",                        // entity_type_role
-			nullptr,                                                                   // entity_type_extra
-		});
+	add_string_enum_prop(props, "position",
+		"How to position the source relative to the target node. "
+		"'replace' (default) replaces the target; 'before' inserts before the target; "
+		"'after' inserts after the target. Only used with target_node.",
+		attach_position_values);
+	add_bool_prop(props, "shrink",
+		"If true, when removing the source from a sibling chain, shift subsequent "
+		"siblings up by one position instead of leaving a " PLACEHOLDER_STRING ". "
+		"Defaults to false.");
+	add_bool_prop(props, "delete_displaced",
+		"If true, free the displaced subtree at the target slot when in 'replace' "
+		"mode or entity target mode. If false (the default), the displaced subtree "
+		"is preserved as a free-standing root and reported in the 'attached' "
+		"sub-object's 'displaced_node' field. No effect for 'before'/'after' "
+		"positions, which never displace anything.");
 
-		add_string_enum_prop(props, "position",
-			"How to position the source relative to the target node. "
-			"'replace' (default) replaces the target; 'before' inserts before the target; "
-			"'after' inserts after the target. Only used with target_node.",
-			attach_position_values);
-		add_bool_prop(props, "shrink",
-			"If true, when removing the source from a sibling chain, shift subsequent "
-			"siblings up by one position instead of leaving a " PLACEHOLDER_STRING ". "
-			"Defaults to false.");
-		add_bool_prop(props, "delete_displaced",
-			"If true, free the displaced subtree at the target slot when in 'replace' "
-			"mode or entity target mode. If false (the default), the displaced subtree "
-			"is preserved as a free-standing root and reported in the 'attached' "
-			"sub-object's 'displaced_node' field. No effect for 'before'/'after' "
-			"positions, which never displace anything.");
+	register_tool(tools, "move_sexp_node",
+		"Move a SEXP subtree from one location to another in a single atomic operation. "
+		"Composes detach_sexp_node + attach_sexp_node internally: the source is detached "
+		"into a free-standing tree, then attached at the target.  If the attach fails "
+		"(e.g. due to a syntax check), the detach is rolled back so the original tree is "
+		"left unchanged. Provide exactly one source targeting form: either `source_node` "
+		"(optionally with `source_argument_index`) OR both `source_entity_type` and "
+		"`source_entity_id` (optionally with `source_entity_tag`). Provide exactly one "
+		"target targeting form independently with the same rules but `target_` prefixes; "
+		"`position` requires `target_node`. Companion-field dependencies "
+		"(`*_argument_index` requires the matching `*_node`; `*_entity_id` and "
+		"`*_entity_tag` require the matching `*_entity_type`) are enforced. "
+		"In node-relative target mode, position can be 'replace' (default), 'before', or "
+		"'after' -- same semantics as attach_sexp_node. In entity target mode, the source "
+		"replaces the entity's current formula. If source and target resolve to the same "
+		"slot, the call is a trivial no-op (success with an empty response, no autosave). "
+		"Otherwise the response includes 'moved_node' (int, the absolute index of the "
+		"relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
+		"(see detach_sexp_node and attach_sexp_node for their fields). By default, "
+		"anything already at the target slot is preserved as a free-standing root and "
+		"reported in the response; pass delete_displaced=true to free it instead.",
+		props);
+}
 
-		register_tool(tools, "move_sexp_node",
-			"Move a SEXP subtree from one location to another in a single atomic operation. "
-			"Composes detach_sexp_node + attach_sexp_node internally: the source is detached "
-			"into a free-standing tree, then attached at the target.  If the attach fails "
-			"(e.g. due to a syntax check), the detach is rolled back so the original tree is "
-			"left unchanged. Provide exactly one source targeting form: either `source_node` "
-			"(optionally with `source_argument_index`) OR both `source_entity_type` and "
-			"`source_entity_id` (optionally with `source_entity_tag`). Provide exactly one "
-			"target targeting form independently with the same rules but `target_` prefixes; "
-			"`position` requires `target_node`. Companion-field dependencies "
-			"(`*_argument_index` requires the matching `*_node`; `*_entity_id` and "
-			"`*_entity_tag` require the matching `*_entity_type`) are enforced. "
-			"In node-relative target mode, position can be 'replace' (default), 'before', or "
-			"'after' -- same semantics as attach_sexp_node. In entity target mode, the source "
-			"replaces the entity's current formula. If source and target resolve to the same "
-			"slot, the call is a trivial no-op (success with an empty response, no autosave). "
-			"Otherwise the response includes 'moved_node' (int, the absolute index of the "
-			"relocated subtree's root) and the full 'detached' and 'attached' sub-objects "
-			"(see detach_sexp_node and attach_sexp_node for their fields). By default, "
-			"anything already at the target slot is preserved as a free-standing root and "
-			"reported in the response; pass delete_displaced=true to free it instead.",
-			props);
-	}
+static void register_swap_sexp_nodes(json_t *tools)
+{
+	json_t *props = json_object();
+	add_general_sexp_ref_props(props, "source_", {
+		"Node index of the first SEXP node to swap",      // node_intro
+		"swapped",                                         // retarget_verb
+		"swap",                                            // arg_action_verb
+		"Entity type for the first formula in the swap",   // entity_type_role
+		nullptr,                                           // entity_type_extra
+	});
+	add_general_sexp_ref_props(props, "target_", {
+		"Node index of the second SEXP node to swap",      // node_intro
+		"swapped",                                         // retarget_verb
+		"swap",                                            // arg_action_verb
+		"Entity type for the second formula in the swap",  // entity_type_role
+		nullptr,                                           // entity_type_extra
+	});
 
-	// swap_sexp_nodes
-	{
-		json_t *props = json_object();
-		add_general_sexp_ref_props(props, "source_", {
-			"Node index of the first SEXP node to swap",      // node_intro
-			"swapped",                                         // retarget_verb
-			"swap",                                            // arg_action_verb
-			"Entity type for the first formula in the swap",   // entity_type_role
-			nullptr,                                           // entity_type_extra
-		});
-		add_general_sexp_ref_props(props, "target_", {
-			"Node index of the second SEXP node to swap",      // node_intro
-			"swapped",                                         // retarget_verb
-			"swap",                                            // arg_action_verb
-			"Entity type for the second formula in the swap",  // entity_type_role
-			nullptr,                                           // entity_type_extra
-		});
+	register_tool(tools, "swap_sexp_nodes",
+		"Exchange two SEXP subtrees in place, preserving each other's structural "
+		"position. Composes detach_sexp_node + attach_sexp_node internally and is "
+		"atomic: if any sub-step fails, all earlier steps are rolled back. Each "
+		"endpoint must provide exactly one targeting form: either `source_node` / "
+		"`target_node` (optionally with the matching `*_argument_index`) OR both "
+		"`*_entity_type` and `*_entity_id` (optionally with `*_entity_tag`). All four "
+		"mode combinations are supported (node/node, entity/entity, node/entity, "
+		"entity/node). Companion-field dependencies (`*_argument_index` requires the "
+		"matching `*_node`; `*_entity_id` and `*_entity_tag` require the matching "
+		"`*_entity_type`) are enforced. If source and target resolve to the same slot, "
+		"the call is a trivial no-op (success with an empty response, no autosave). "
+		"Otherwise the response includes 'first_attach' and 'second_attach' (see "
+		"attach_sexp_node for their fields). 'first_attach' reports the source attached "
+		"at the target's vacated slot; 'second_attach' reports the target attached at "
+		"the source's vacated slot.",
+		props);
+}
 
-		register_tool(tools, "swap_sexp_nodes",
-			"Exchange two SEXP subtrees in place, preserving each other's structural "
-			"position. Composes detach_sexp_node + attach_sexp_node internally and is "
-			"atomic: if any sub-step fails, all earlier steps are rolled back. Each "
-			"endpoint must provide exactly one targeting form: either `source_node` / "
-			"`target_node` (optionally with the matching `*_argument_index`) OR both "
-			"`*_entity_type` and `*_entity_id` (optionally with `*_entity_tag`). All four "
-			"mode combinations are supported (node/node, entity/entity, node/entity, "
-			"entity/node). Companion-field dependencies (`*_argument_index` requires the "
-			"matching `*_node`; `*_entity_id` and `*_entity_tag` require the matching "
-			"`*_entity_type`) are enforced. If source and target resolve to the same slot, "
-			"the call is a trivial no-op (success with an empty response, no autosave). "
-			"Otherwise the response includes 'first_attach' and 'second_attach' (see "
-			"attach_sexp_node for their fields). 'first_attach' reports the source attached "
-			"at the target's vacated slot; 'second_attach' reports the target attached at "
-			"the source's vacated slot.",
-			props);
-	}
+static void register_create_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "role",
+		"Role of the node to create. 'operator' creates an operator node "
+		"(requires the 'operator_name' parameter). 'argument' creates a standalone "
+		"argument node (requires 'argument_type' and 'argument_value' parameters). "
+		"The 'list_wrapper' role is not supported.",
+		sexp_role_values);
+	add_string_prop(props, "operator_name",
+		"Name of the SEXP operator (e.g. \"when\", \"is-destroyed-delay\"). "
+		"Required when role is 'operator'.");
 
-	// create_sexp_node
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "role",
-			"Role of the node to create. 'operator' creates an operator node "
-			"(requires the 'operator_name' parameter). 'argument' creates a standalone "
-			"argument node (requires 'argument_type' and 'argument_value' parameters). "
-			"The 'list_wrapper' role is not supported.",
-			sexp_role_values);
-		add_string_prop(props, "operator_name",
-			"Name of the SEXP operator (e.g. \"when\", \"is-destroyed-delay\"). "
-			"Required when role is 'operator'.");
+	json_t *arg_props = json_object();
+	add_string_enum_prop(arg_props, "argument_type",
+		"Argument type",
+		sexp_arg_type_values);
+	add_string_prop(arg_props, "argument_value",
+		"Argument value. For number/string: literal value (prefix with @ "
+		"for SEXP variable). For boolean: \"true\" or \"false\". "
+		"For node: a node index, or \"-1\" as a placeholder. "
+		"A node value of -1 or a string value of " PLACEHOLDER_STRING
+		" bypasses type checking, serves as a placeholder, and can be "
+		"used in any argument position as an empty slot to fill later.");
+	json_t *arg_req = json_array();
+	json_array_append_new(arg_req, json_string("argument_type"));
+	json_array_append_new(arg_req, json_string("argument_value"));
+	add_object_array_prop(props, "operator_arguments",
+		"List of arguments for the operator. Each argument has an 'argument_type' "
+		"(number, string, boolean, node) and an 'argument_value'. "
+		"Only used when role is 'operator'.",
+		arg_props, arg_req);
 
-		json_t *arg_props = json_object();
-		add_string_enum_prop(arg_props, "argument_type",
-			"Argument type",
-			sexp_arg_type_values);
-		add_string_prop(arg_props, "argument_value",
-			"Argument value. For number/string: literal value (prefix with @ "
-			"for SEXP variable). For boolean: \"true\" or \"false\". "
-			"For node: a node index, or \"-1\" as a placeholder. "
-			"A node value of -1 or a string value of " PLACEHOLDER_STRING
-			" bypasses type checking, serves as a placeholder, and can be "
-			"used in any argument position as an empty slot to fill later.");
-		json_t *arg_req = json_array();
-		json_array_append_new(arg_req, json_string("argument_type"));
-		json_array_append_new(arg_req, json_string("argument_value"));
-		add_object_array_prop(props, "operator_arguments",
-			"List of arguments for the operator. Each argument has an 'argument_type' "
-			"(number, string, boolean, node) and an 'argument_value'. "
-			"Only used when role is 'operator'.",
-			arg_props, arg_req);
+	add_string_enum_prop(props, "argument_type",
+		"Argument type for standalone argument creation. "
+		"Required when role is 'argument'.",
+		sexp_mutable_arg_type_values);
+	add_string_prop(props, "argument_value",
+		"Argument value for standalone argument creation. "
+		"For number/string: literal value (prefix with @ for SEXP variable). "
+		"For boolean: \"true\" or \"false\". "
+		"Required when role is 'argument'.");
 
-		add_string_enum_prop(props, "argument_type",
-			"Argument type for standalone argument creation. "
-			"Required when role is 'argument'.",
-			sexp_mutable_arg_type_values);
-		add_string_prop(props, "argument_value",
-			"Argument value for standalone argument creation. "
-			"For number/string: literal value (prefix with @ for SEXP variable). "
-			"For boolean: \"true\" or \"false\". "
-			"Required when role is 'argument'.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("role"));
+	register_tool(tools, "create_sexp_node",
+		"Create a SEXP node. When role is 'operator', creates an operator node "
+		"with optional arguments, suitable for assigning as a mission entity's "
+		"formula -- the `operator_name` field is required. When role is 'argument', "
+		"creates a standalone argument node (number, string, or boolean) -- both "
+		"`argument_type` and `argument_value` are required. Does not enforce argument "
+		"count or check syntax. Note that the 'true' and 'false' operators are shared "
+		"singleton nodes rather than fresh allocations (the result will have "
+		"`shared_singleton: true`); they can be attached as entity formulas but not "
+		"updated, moved, or deleted.",
+		props, req);
+}
 
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("role"));
-		register_tool(tools, "create_sexp_node",
-			"Create a SEXP node. When role is 'operator', creates an operator node "
-			"with optional arguments, suitable for assigning as a mission entity's "
-			"formula -- the `operator_name` field is required. When role is 'argument', "
-			"creates a standalone argument node (number, string, or boolean) -- both "
-			"`argument_type` and `argument_value` are required. Does not enforce argument "
-			"count or check syntax. Note that the 'true' and 'false' operators are shared "
-			"singleton nodes rather than fresh allocations (the result will have "
-			"`shared_singleton: true`); they can be attached as entity formulas but not "
-			"updated, moved, or deleted.",
-			props, req);
-	}
+static void register_update_sexp_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "node", "Node index of the SEXP node to update");
+	add_string_prop(props, "operator_name",
+		"New operator name. Required when updating an operator node.");
+	add_string_enum_prop(props, "argument_type",
+		"New argument type. Required when updating an argument node. "
+		"Boolean is only valid for boolean wrapper nodes.",
+		sexp_mutable_arg_type_values);
+	add_string_prop(props, "argument_value",
+		"New argument value. For number/string: literal value (prefix with @ "
+		"for SEXP variable). For boolean: \"true\" or \"false\". "
+		"Required when updating an argument node.");
 
-	// update_sexp_node
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "node", "Node index of the SEXP node to update");
-		add_string_prop(props, "operator_name",
-			"New operator name. Required when updating an operator node.");
-		add_string_enum_prop(props, "argument_type",
-			"New argument type. Required when updating an argument node. "
-			"Boolean is only valid for boolean wrapper nodes.",
-			sexp_mutable_arg_type_values);
-		add_string_prop(props, "argument_value",
-			"New argument value. For number/string: literal value (prefix with @ "
-			"for SEXP variable). For boolean: \"true\" or \"false\". "
-			"Required when updating an argument node.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("node"));
+	register_tool(tools, "update_sexp_node",
+		"Update a SEXP node in place. Operators can be changed to other operators; "
+		"arguments can be changed to other argument types (number/string) or between "
+		"literal and variable. Boolean arguments can be toggled between true and false. "
+		"Node reference wrappers and non-boolean list wrappers cannot be updated with "
+		"this tool. If the node belongs to a mission formula and the change would cause "
+		"a syntax error, the edit is rolled back.",
+		props, req);
+}
 
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("node"));
-		register_tool(tools, "update_sexp_node",
-			"Update a SEXP node in place. Operators can be changed to other operators; "
-			"arguments can be changed to other argument types (number/string) or between "
-			"literal and variable. Boolean arguments can be toggled between true and false. "
-			"Node reference wrappers and non-boolean list wrappers cannot be updated with "
-			"this tool. If the node belongs to a mission formula and the change would cause "
-			"a syntax error, the edit is rolled back.",
-			props, req);
-	}
+static void register_list_sexp_variables(json_t *tools)
+{
+	auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+	json_t *props = json_object();
+	add_string_enum_prop(props, "variable_type",
+		"Filter to variables of this type only.",
+		sexp_var_type_values);
+	add_string_array_prop(props, "variable_flags",
+		"Filter to variables that have ALL of the specified flags set.",
+		flag_names);
+	register_tool(tools, "list_sexp_variables",
+		"List all SEXP variables defined in this mission. "
+		"Returns each variable's name, default value, type (number or string), and flags. "
+		"Optionally filter by variable_type and/or variable_flags.",
+		props);
+}
 
-	// list_sexp_variables
-	{
-		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
-		json_t *props = json_object();
-		add_string_enum_prop(props, "variable_type",
-			"Filter to variables of this type only.",
-			sexp_var_type_values);
-		add_string_array_prop(props, "variable_flags",
-			"Filter to variables that have ALL of the specified flags set.",
-			flag_names);
-		register_tool(tools, "list_sexp_variables",
-			"List all SEXP variables defined in this mission. "
-			"Returns each variable's name, default value, type (number or string), and flags. "
-			"Optionally filter by variable_type and/or variable_flags.",
-			props);
-	}
-
-	// get_sexp_variable
+static void register_get_sexp_variable(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_sexp_variable",
 		"Get full details of a SEXP variable by name, including default value, "
 		"type (number or string), and flags.",
 		"name", "Name of the variable to retrieve.  A single leading '@' is "
 		"stripped (the '@' is a SEXP display convention and is not part of the "
 		"stored name).");
-
-	// create_sexp_variable
-	{
-		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Unique variable name.  Cannot contain spaces or the characters (, ).  "
-			"A single leading '@' is stripped before the name is stored (the '@' "
-			"is a SEXP display convention and is not part of the stored name).");
-		add_string_prop(props, "default_value",
-			"Default value for the variable. Must be a valid integer for number type.");
-		add_string_enum_prop(props, "variable_type",
-			"Data type of the variable",
-			sexp_var_type_values);
-		add_string_array_prop(props, "variable_flags",
-			"Persistence and network flags. save_on_mission_progress and save_on_mission_close "
-			"are mutually exclusive.",
-			flag_names);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("default_value"));
-		json_array_append_new(req, json_string("variable_type"));
-		register_tool(tools, "create_sexp_variable",
-			"Create a new SEXP variable. Variables are automatically kept in sorted alphabetical order.",
-			props, req);
-	}
-
-	// update_sexp_variable
-	{
-		auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Name of the existing variable to update.  A single leading '@' is "
-			"stripped before lookup.");
-		add_string_prop(props, "new_name",
-			"New name for the variable.  All SEXP node references will be updated "
-			"automatically.  A single leading '@' is stripped before the name is stored.");
-		add_string_prop(props, "default_value",
-			"New default value. Must be a valid integer for number type.");
-		add_string_enum_prop(props, "variable_type",
-			"New data type. Changing type may invalidate existing SEXP references.",
-			sexp_var_type_values);
-		add_string_array_prop(props, "variable_flags",
-			"New persistence and network flags. Specify the complete set you want — "
-			"this replaces all existing flags rather than merging. "
-			"save_on_mission_progress and save_on_mission_close are mutually exclusive.",
-			flag_names);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_sexp_variable",
-			"Update a SEXP variable's properties. Omitted fields are unchanged; "
-			"provided fields replace existing values (variable_flags replaces the full flag set, not a delta). "
-			"If renaming, all SEXP node references are updated automatically.",
-			props, req);
-	}
-
-	// delete_sexp_variable
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Name of the variable to delete.  A single leading '@' is stripped before lookup.");
-		add_bool_prop(props, "force",
-			"If true, delete even if referenced in SEXP expressions "
-			"(references will be reset to placeholder values)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_sexp_variable",
-			"Delete a SEXP variable. By default, refuses to delete if the variable "
-			"is referenced in any SEXP expressions.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_sexp_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_sexp_variable(json_t *tools)
 {
-	if (strcmp(tool_name, "sexp_to_text") == 0) {
-		handle_sexp_to_text(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "get_sexp_node") == 0) {
-		handle_get_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "get_sexp_formula_info") == 0) {
-		handle_get_sexp_formula_info(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "walk_sexp_tree") == 0) {
-		handle_walk_sexp_tree(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "find_sexp_text") == 0) {
-		handle_find_sexp_text(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "text_to_sexp") == 0) {
-		handle_text_to_sexp(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "detach_sexp_node") == 0) {
-		handle_detach_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "attach_sexp_node") == 0) {
-		handle_attach_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "move_sexp_node") == 0) {
-		handle_move_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "swap_sexp_nodes") == 0) {
-		handle_swap_sexp_nodes(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "create_sexp_node") == 0) {
-		handle_create_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "update_sexp_node") == 0) {
-		handle_update_sexp_node(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "list_sexp_variables") == 0) {
-		handle_list_sexp_variables(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "get_sexp_variable") == 0) {
-		handle_get_sexp_variable(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "create_sexp_variable") == 0) {
-		handle_create_sexp_variable(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "update_sexp_variable") == 0) {
-		handle_update_sexp_variable(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "delete_sexp_variable") == 0) {
-		handle_delete_sexp_variable(input_json, req);
-		return true;
-	}
-	return false;
+	auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Unique variable name.  Cannot contain spaces or the characters (, ).  "
+		"A single leading '@' is stripped before the name is stored (the '@' "
+		"is a SEXP display convention and is not part of the stored name).");
+	add_string_prop(props, "default_value",
+		"Default value for the variable. Must be a valid integer for number type.");
+	add_string_enum_prop(props, "variable_type",
+		"Data type of the variable",
+		sexp_var_type_values);
+	add_string_array_prop(props, "variable_flags",
+		"Persistence and network flags. save_on_mission_progress and save_on_mission_close "
+		"are mutually exclusive.",
+		flag_names);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("default_value"));
+	json_array_append_new(req, json_string("variable_type"));
+	register_tool(tools, "create_sexp_variable",
+		"Create a new SEXP variable. Variables are automatically kept in sorted alphabetical order.",
+		props, req);
 }
+
+static void register_update_sexp_variable(json_t *tools)
+{
+	auto flag_names = flags_to_list(sexp_var_flag_entries, sexp_var_flag_entries_count);
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Name of the existing variable to update.  A single leading '@' is "
+		"stripped before lookup.");
+	add_string_prop(props, "new_name",
+		"New name for the variable.  All SEXP node references will be updated "
+		"automatically.  A single leading '@' is stripped before the name is stored.");
+	add_string_prop(props, "default_value",
+		"New default value. Must be a valid integer for number type.");
+	add_string_enum_prop(props, "variable_type",
+		"New data type. Changing type may invalidate existing SEXP references.",
+		sexp_var_type_values);
+	add_string_array_prop(props, "variable_flags",
+		"New persistence and network flags. Specify the complete set you want — "
+		"this replaces all existing flags rather than merging. "
+		"save_on_mission_progress and save_on_mission_close are mutually exclusive.",
+		flag_names);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_sexp_variable",
+		"Update a SEXP variable's properties. Omitted fields are unchanged; "
+		"provided fields replace existing values (variable_flags replaces the full flag set, not a delta). "
+		"If renaming, all SEXP node references are updated automatically.",
+		props, req);
+}
+
+static void register_delete_sexp_variable(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Name of the variable to delete.  A single leading '@' is stripped before lookup.");
+	add_bool_prop(props, "force",
+		"If true, delete even if referenced in SEXP expressions "
+		"(references will be reset to placeholder values)");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_sexp_variable",
+		"Delete a SEXP variable. By default, refuses to delete if the variable "
+		"is referenced in any SEXP expressions.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_sexp_tool_defs[] = {
+	{ "sexp_to_text",          register_sexp_to_text,          nullptr, handle_sexp_to_text,          false },
+	{ "get_sexp_node",         register_get_sexp_node,         nullptr, handle_get_sexp_node,         false },
+	{ "get_sexp_formula_info", register_get_sexp_formula_info, nullptr, handle_get_sexp_formula_info, false },
+	{ "walk_sexp_tree",        register_walk_sexp_tree,        nullptr, handle_walk_sexp_tree,        false },
+	{ "find_sexp_text",        register_find_sexp_text,        nullptr, handle_find_sexp_text,        false },
+	{ "text_to_sexp",          register_text_to_sexp,          nullptr, handle_text_to_sexp,          false },
+	{ "detach_sexp_node",      register_detach_sexp_node,      nullptr, handle_detach_sexp_node,      false },
+	{ "attach_sexp_node",      register_attach_sexp_node,      nullptr, handle_attach_sexp_node,      false },
+	{ "move_sexp_node",        register_move_sexp_node,        nullptr, handle_move_sexp_node,        false },
+	{ "swap_sexp_nodes",       register_swap_sexp_nodes,       nullptr, handle_swap_sexp_nodes,       false },
+	{ "create_sexp_node",      register_create_sexp_node,      nullptr, handle_create_sexp_node,      false },
+	{ "update_sexp_node",      register_update_sexp_node,      nullptr, handle_update_sexp_node,      false },
+	{ "list_sexp_variables",   register_list_sexp_variables,   nullptr, handle_list_sexp_variables,   false },
+	{ "get_sexp_variable",     register_get_sexp_variable,     nullptr, handle_get_sexp_variable,     false },
+	{ "create_sexp_variable",  register_create_sexp_variable,  nullptr, handle_create_sexp_variable,  false },
+	{ "update_sexp_variable",  register_update_sexp_variable,  nullptr, handle_update_sexp_variable,  false },
+	{ "delete_sexp_variable",  register_delete_sexp_variable,  nullptr, handle_delete_sexp_variable,  false },
+};
+const size_t mcp_sexp_tool_def_count = sizeof(mcp_sexp_tool_defs) / sizeof(mcp_sexp_tool_defs[0]);

@@ -2,24 +2,23 @@
 #define _MCP_REFERENCE_TOOLS_H
 
 #include <jansson.h>
+#include "mcp_tool_registry.h"
 
 struct McpToolRequest;
 
-// Append reference/discovery tool schemas to the tools array used by tools/list.
-void mcp_register_reference_tools(json_t *tools);
+// Reference/discovery tools (static game data, SEXP metadata, scripting docs).
+extern const McpToolDef mcp_reference_tool_defs[];
+extern const size_t mcp_reference_tool_def_count;
 
 // Warm up lazy-init caches (e.g., scripting API documentation) on a background
 // thread so the first tool call doesn't pay the full generation cost.
 void mcp_reference_tools_init();
 
-// Try to handle a reference tool call.  Returns a json_t* result if the tool
-// name matched one of the reference tools, or nullptr if the name is not
-// recognized (so the caller can fall through to other handlers).
-json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments);
-
-// Main-thread handler for REFERENCE_TOOL calls (reference tools that must not
-// run on a mongoose worker thread: polymodel reads and cfile access).
-// Called from OnMcpToolCall when req->tool == McpToolId::REFERENCE_TOOL.
+// Internal marshal target for the four tools whose worker handlers post
+// REFERENCE_TOOL to the main thread (get_ship_class_model_details,
+// list_ship_class_dockpoints, list_missions, get_root_paths); this is not
+// registry dispatch.  Called from OnMcpToolCall when
+// req->tool == McpToolId::REFERENCE_TOOL.
 void mcp_handle_reference_tool_on_main_thread(const char *tool_name, json_t *input_json, McpToolRequest *req);
 
 // Release cached model detail results.

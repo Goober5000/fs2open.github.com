@@ -377,147 +377,137 @@ static void handle_swap_goals(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_goal_tools(json_t *tools)
+static void register_list_goals(json_t *tools)
 {
-	// list_goals
 	register_tool(tools, "list_goals",
 		"List all mission goals. Returns each goal's name, index, type "
 		"(Primary/Secondary/Bonus), and SEXP formula root node.",
 		json_object());
+}
 
-	// get_goal
+static void register_get_goal(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_goal",
 		"Get full details of a mission goal by name, including type, message, "
 		"score, team, validity, no_music flag, and SEXP formula root node.",
 		"name", "Name of the goal to retrieve");
-
-	// create_goal
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Unique name for the goal");
-		add_string_enum_prop(props, "goal_type",
-			"Goal type (default: \"Primary\")",
-			goal_type_enum_values);
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
-		add_string_prop(props, "message", "Brief description of the goal objective");
-		add_integer_prop(props, "score", "Score awarded when goal is completed");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (default: \"Team 1\")",
-			team_enum_values);
-		add_bool_prop(props, "invalid",
-			"If true, the goal is marked as invalid (not evaluated during a mission). "
-			"Note that goals can be validated and invalidated during a mission.");
-		add_bool_prop(props, "no_music",
-			"If true, no event music plays when goal is achieved");
-		add_integer_prop(props, "index",
-			"Position to insert the goal (1 = first). If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "create_goal",
-			"Create a new mission goal. Mission goals are objectives for the player to "
-			"accomplish during a mission.",
-			props, req);
-	}
-
-	// update_goal
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the existing goal to update");
-		add_string_prop(props, "new_name", "New name for the goal");
-		add_string_enum_prop(props, "goal_type",
-			"Goal type",
-			goal_type_enum_values);
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
-		add_string_prop(props, "message",
-			"Brief description of the goal objective");
-		add_integer_prop(props, "score", "Score awarded when goal is completed");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment",
-			team_enum_values);
-		add_bool_prop(props, "invalid",
-			"If true, the goal is marked as invalid (not evaluated during a mission). "
-			"Note that goals can be validated and invalidated during a mission.");
-		add_bool_prop(props, "no_music",
-			"If true, no event music plays when goal is achieved");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_goal",
-			"Update properties of an existing mission goal. Only specified fields are "
-			"changed; omitted fields are left unchanged. Renaming automatically updates "
-			"all SEXP references to the goal.",
-			props, req);
-	}
-
-	// delete_goal
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the goal to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the goal is referenced in SEXPs (references "
-			"will be invalidated). Default: false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_goal",
-			"Delete a mission goal. Frees its SEXP formula. "
-			"SEXP references to the deleted goal are invalidated (wrapped in angle brackets).",
-			props, req);
-	}
-
-	// move_goal
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the goal");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the goal to");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_goal",
-			"Move a mission goal from one position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_goals
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first goal");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second goal");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_goals",
-			"Swap two mission goals at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_goal_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_goal(json_t *tools)
 {
-	if (strcmp(tool_name, "list_goals") == 0) {
-		handle_list_goals(input_json, req);
-	} else if (strcmp(tool_name, "get_goal") == 0) {
-		handle_get_goal(input_json, req);
-	} else if (strcmp(tool_name, "create_goal") == 0) {
-		handle_create_goal(input_json, req);
-	} else if (strcmp(tool_name, "update_goal") == 0) {
-		handle_update_goal(input_json, req);
-	} else if (strcmp(tool_name, "delete_goal") == 0) {
-		handle_delete_goal(input_json, req);
-	} else if (strcmp(tool_name, "move_goal") == 0) {
-		handle_move_goal(input_json, req);
-	} else if (strcmp(tool_name, "swap_goals") == 0) {
-		handle_swap_goals(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Unique name for the goal");
+	add_string_enum_prop(props, "goal_type",
+		"Goal type (default: \"Primary\")",
+		goal_type_enum_values);
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
+	add_string_prop(props, "message", "Brief description of the goal objective");
+	add_integer_prop(props, "score", "Score awarded when goal is completed");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment (default: \"Team 1\")",
+		team_enum_values);
+	add_bool_prop(props, "invalid",
+		"If true, the goal is marked as invalid (not evaluated during a mission). "
+		"Note that goals can be validated and invalidated during a mission.");
+	add_bool_prop(props, "no_music",
+		"If true, no event music plays when goal is achieved");
+	add_integer_prop(props, "index",
+		"Position to insert the goal (1 = first). If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "create_goal",
+		"Create a new mission goal. Mission goals are objectives for the player to "
+		"accomplish during a mission.",
+		props, req);
 }
+
+static void register_update_goal(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the existing goal to update");
+	add_string_prop(props, "new_name", "New name for the goal");
+	add_string_enum_prop(props, "goal_type",
+		"Goal type",
+		goal_type_enum_values);
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this goal");
+	add_string_prop(props, "message",
+		"Brief description of the goal objective");
+	add_integer_prop(props, "score", "Score awarded when goal is completed");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment",
+		team_enum_values);
+	add_bool_prop(props, "invalid",
+		"If true, the goal is marked as invalid (not evaluated during a mission). "
+		"Note that goals can be validated and invalidated during a mission.");
+	add_bool_prop(props, "no_music",
+		"If true, no event music plays when goal is achieved");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_goal",
+		"Update properties of an existing mission goal. Only specified fields are "
+		"changed; omitted fields are left unchanged. Renaming automatically updates "
+		"all SEXP references to the goal.",
+		props, req);
+}
+
+static void register_delete_goal(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the goal to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the goal is referenced in SEXPs (references "
+		"will be invalidated). Default: false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_goal",
+		"Delete a mission goal. Frees its SEXP formula. "
+		"SEXP references to the deleted goal are invalidated (wrapped in angle brackets).",
+		props, req);
+}
+
+static void register_move_goal(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the goal");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the goal to");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_goal",
+		"Move a mission goal from one position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_goals(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first goal");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second goal");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_goals",
+		"Swap two mission goals at the given positions. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_goal_tool_defs[] = {
+	{ "list_goals",  register_list_goals,  nullptr, handle_list_goals,  false },
+	{ "get_goal",    register_get_goal,    nullptr, handle_get_goal,    false },
+	{ "create_goal", register_create_goal, nullptr, handle_create_goal, false },
+	{ "update_goal", register_update_goal, nullptr, handle_update_goal, false },
+	{ "delete_goal", register_delete_goal, nullptr, handle_delete_goal, false },
+	{ "move_goal",   register_move_goal,   nullptr, handle_move_goal,   false },
+	{ "swap_goals",  register_swap_goals,  nullptr, handle_swap_goals,  false },
+};
+const size_t mcp_goal_tool_def_count = sizeof(mcp_goal_tool_defs) / sizeof(mcp_goal_tool_defs[0]);

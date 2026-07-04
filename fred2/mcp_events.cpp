@@ -542,161 +542,151 @@ static void handle_swap_events(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_event_tools(json_t *tools)
+static void register_list_events(json_t *tools)
 {
-	// list_events
 	register_tool(tools, "list_events",
 		"List all mission events. Returns each event's name, index, SEXP formula root node, "
 		"and whether it is chained.",
 		json_object());
+}
 
-	// get_event
+static void register_get_event(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_event",
 		"Get full details of a mission event by name, including repeat/trigger counts, "
 		"interval, score, chain delay, team, objective text, flags, and log flags.",
 		"name", "Name of the event to retrieve");
-
-	// create_event
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Unique name for the event");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
-		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
-			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
-		add_integer_prop(props, "repeat_count",
-			"Number of times to test this event (1 = once, -1 = infinite)");
-		add_integer_prop(props, "trigger_count",
-			"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
-		add_integer_prop(props, "interval",
-			"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
-		add_string_enum_prop(props, "chain_and_interval_units",
-			"Units for 'interval' and 'chain_delay' (defaults to seconds)",
-			event_unit_enum_values);
-		add_integer_prop(props, "score", "Score awarded when event is satisfied");
-		add_integer_prop(props, "chain_delay",
-			"Delay before evaluating this chained event (-1 = not chained)");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (\"none\" for all teams; default: \"none\". "
-			"Note that create_goal defaults to \"Team 1\" -- each mirrors its engine default.)",
-			team_enum_values);
-		add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
-		add_string_prop(props, "objective_key_text", "Localization key for the objective text");
-		add_integer_prop(props, "index",
-			"Position to insert the event (1 = first). If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "create_event",
-			"Create a new mission event. Mission events cause actions to occur during a mission, "
-			"subject to their conditions.",
-			props, req);
-	}
-
-	// update_event
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the existing event to update");
-		add_string_prop(props, "new_name", "New name for the event");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
-		add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
-			"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
-		add_integer_prop(props, "repeat_count",
-			"Number of times to test this event (1 = once, -1 = infinite)");
-		add_integer_prop(props, "trigger_count",
-			"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
-		add_integer_prop(props, "interval",
-			"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
-		add_string_enum_prop(props, "chain_and_interval_units",
-			"Units for 'interval' and 'chain_delay' (defaults to seconds)",
-			event_unit_enum_values);
-		add_integer_prop(props, "score", "Score awarded when event is satisfied");
-		add_integer_prop(props, "chain_delay",
-			"Delay before evaluating this chained event (-1 = not chained)");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (\"none\" for all teams)",
-			team_enum_values);
-		add_string_prop(props, "objective_text",
-			"Directive text displayed in the HUD (empty string to clear)");
-		add_string_prop(props, "objective_key_text",
-			"Localization key for the objective text (empty string to clear)");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_event",
-			"Update properties of an existing mission event. Only specified fields are "
-			"changed; omitted fields are left unchanged. Renaming automatically updates "
-			"all SEXP references to the event.",
-			props, req);
-	}
-
-	// delete_event
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the event to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the event is referenced in SEXPs (references "
-			"will be invalidated). Default: false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_event",
-			"Delete a mission event. Frees its SEXP formula and updates annotation paths. "
-			"SEXP references to the deleted event are invalidated (wrapped in angle brackets).",
-			props, req);
-	}
-
-	// move_event
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the event");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the event to");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_event",
-			"Move a mission event from one position to another. "
-			"Indices are 1-based. Updates event annotation paths.",
-			props, req);
-	}
-
-	// swap_events
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first event");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second event");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_events",
-			"Swap two mission events at the given positions. "
-			"Indices are 1-based. Updates event annotation paths.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_event_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_event(json_t *tools)
 {
-	if (strcmp(tool_name, "list_events") == 0) {
-		handle_list_events(input_json, req);
-	} else if (strcmp(tool_name, "get_event") == 0) {
-		handle_get_event(input_json, req);
-	} else if (strcmp(tool_name, "create_event") == 0) {
-		handle_create_event(input_json, req);
-	} else if (strcmp(tool_name, "update_event") == 0) {
-		handle_update_event(input_json, req);
-	} else if (strcmp(tool_name, "delete_event") == 0) {
-		handle_delete_event(input_json, req);
-	} else if (strcmp(tool_name, "move_event") == 0) {
-		handle_move_event(input_json, req);
-	} else if (strcmp(tool_name, "swap_events") == 0) {
-		handle_swap_events(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Unique name for the event");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
+	add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
+		"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
+	add_integer_prop(props, "repeat_count",
+		"Number of times to test this event (1 = once, -1 = infinite)");
+	add_integer_prop(props, "trigger_count",
+		"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
+	add_integer_prop(props, "interval",
+		"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
+	add_string_enum_prop(props, "chain_and_interval_units",
+		"Units for 'interval' and 'chain_delay' (defaults to seconds)",
+		event_unit_enum_values);
+	add_integer_prop(props, "score", "Score awarded when event is satisfied");
+	add_integer_prop(props, "chain_delay",
+		"Delay before evaluating this chained event (-1 = not chained)");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment (\"none\" for all teams; default: \"none\". "
+		"Note that create_goal defaults to \"Team 1\" -- each mirrors its engine default.)",
+		team_enum_values);
+	add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
+	add_string_prop(props, "objective_key_text", "Localization key for the objective text");
+	add_integer_prop(props, "index",
+		"Position to insert the event (1 = first). If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "create_event",
+		"Create a new mission event. Mission events cause actions to occur during a mission, "
+		"subject to their conditions.",
+		props, req);
 }
+
+static void register_update_event(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the existing event to update");
+	add_string_prop(props, "new_name", "New name for the event");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this event");
+	add_bool_prop(props, "is_chained", "Whether this event is chained to the one preceding it "
+		"(if this is provided and chain_delay is not, true sets the delay to 0 and false clears it)");
+	add_integer_prop(props, "repeat_count",
+		"Number of times to test this event (1 = once, -1 = infinite)");
+	add_integer_prop(props, "trigger_count",
+		"Number of times to allow this event to trigger (auto-sets using_trigger_count flag)");
+	add_integer_prop(props, "interval",
+		"Evaluation interval in seconds (or milliseconds if use_msecs flag is set)");
+	add_string_enum_prop(props, "chain_and_interval_units",
+		"Units for 'interval' and 'chain_delay' (defaults to seconds)",
+		event_unit_enum_values);
+	add_integer_prop(props, "score", "Score awarded when event is satisfied");
+	add_integer_prop(props, "chain_delay",
+		"Delay before evaluating this chained event (-1 = not chained)");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment (\"none\" for all teams)",
+		team_enum_values);
+	add_string_prop(props, "objective_text",
+		"Directive text displayed in the HUD (empty string to clear)");
+	add_string_prop(props, "objective_key_text",
+		"Localization key for the objective text (empty string to clear)");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_event",
+		"Update properties of an existing mission event. Only specified fields are "
+		"changed; omitted fields are left unchanged. Renaming automatically updates "
+		"all SEXP references to the event.",
+		props, req);
+}
+
+static void register_delete_event(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the event to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the event is referenced in SEXPs (references "
+		"will be invalidated). Default: false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_event",
+		"Delete a mission event. Frees its SEXP formula and updates annotation paths. "
+		"SEXP references to the deleted event are invalidated (wrapped in angle brackets).",
+		props, req);
+}
+
+static void register_move_event(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the event");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the event to");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_event",
+		"Move a mission event from one position to another. "
+		"Indices are 1-based. Updates event annotation paths.",
+		props, req);
+}
+
+static void register_swap_events(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first event");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second event");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_events",
+		"Swap two mission events at the given positions. "
+		"Indices are 1-based. Updates event annotation paths.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_event_tool_defs[] = {
+	{ "list_events",  register_list_events,  nullptr, handle_list_events,  false },
+	{ "get_event",    register_get_event,    nullptr, handle_get_event,    false },
+	{ "create_event", register_create_event, nullptr, handle_create_event, false },
+	{ "update_event", register_update_event, nullptr, handle_update_event, false },
+	{ "delete_event", register_delete_event, nullptr, handle_delete_event, false },
+	{ "move_event",   register_move_event,   nullptr, handle_move_event,   false },
+	{ "swap_events",  register_swap_events,  nullptr, handle_swap_events,  false },
+};
+const size_t mcp_event_tool_def_count = sizeof(mcp_event_tool_defs) / sizeof(mcp_event_tool_defs[0]);

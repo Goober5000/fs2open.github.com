@@ -432,271 +432,72 @@ static void handle_set_editor_view(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
-// Known mission tool names (for routing)
-// ---------------------------------------------------------------------------
-
-static const char *mission_tool_names[] = {
-	"get_mission_info",
-	"update_mission_info",
-	"get_custom_wing_names",
-	"update_custom_wing_names",
-	"list_fiction_viewer_stages",
-	"get_fiction_viewer_stage",
-	"create_fiction_viewer_stage",
-	"update_fiction_viewer_stage",
-	"delete_fiction_viewer_stage",
-	"move_fiction_viewer_stage",
-	"swap_fiction_viewer_stages",
-	"list_cmd_brief_stages",
-	"get_cmd_brief_stage",
-	"create_cmd_brief_stage",
-	"update_cmd_brief_stage",
-	"delete_cmd_brief_stage",
-	"move_cmd_brief_stage",
-	"swap_cmd_brief_stages",
-	"list_debriefing_stages",
-	"get_debriefing_stage",
-	"create_debriefing_stage",
-	"update_debriefing_stage",
-	"delete_debriefing_stage",
-	"move_debriefing_stage",
-	"swap_debriefing_stages",
-	"list_messages",
-	"get_message",
-	"create_message",
-	"update_message",
-	"delete_message",
-	"move_message",
-	"swap_messages",
-	"sexp_to_text",
-	"get_sexp_node",
-	"get_sexp_formula_info",
-	"walk_sexp_tree",
-	"find_sexp_text",
-	"text_to_sexp",
-	"detach_sexp_node",
-	"attach_sexp_node",
-	"move_sexp_node",
-	"swap_sexp_nodes",
-	"create_sexp_node",
-	"update_sexp_node",
-	"list_sexp_variables",
-	"get_sexp_variable",
-	"create_sexp_variable",
-	"update_sexp_variable",
-	"delete_sexp_variable",
-	"list_events",
-	"get_event",
-	"create_event",
-	"update_event",
-	"delete_event",
-	"move_event",
-	"swap_events",
-	"list_goals",
-	"get_goal",
-	"create_goal",
-	"update_goal",
-	"delete_goal",
-	"move_goal",
-	"swap_goals",
-	"list_waypoint_lists",
-	"get_waypoint_list",
-	"create_waypoint_list",
-	"update_waypoint_list",
-	"delete_waypoint_list",
-	"move_waypoint_list",
-	"swap_waypoint_lists",
-	"create_waypoint",
-	"update_waypoint",
-	"delete_waypoint",
-	"move_waypoint",
-	"swap_waypoints",
-	"list_jump_nodes",
-	"get_jump_node",
-	"create_jump_node",
-	"update_jump_node",
-	"delete_jump_node",
-	"move_jump_node",
-	"swap_jump_nodes",
-	"list_ships",
-	"get_ship",
-	"create_ship",
-	"update_ship",
-	"delete_ship",
-	"move_ship",
-	"swap_ships",
-	"dock_ships",
-	"undock_ships",
-	"undock_all_ships",
-	"list_docked_group",
-	"set_dock_leader",
-	"list_ship_weapons",
-	"get_ship_weapon_bank",
-	"update_ship_weapon_bank",
-	"get_max_ammo_for_bank",
-	"list_ship_subsystems",
-	"get_ship_subsystem",
-	"update_ship_subsystem",
-	"get_ship_special_explosion",
-	"update_ship_special_explosion",
-	"get_ship_special_hitpoints",
-	"update_ship_special_hitpoints",
-	"list_ship_submodels",
-	"get_ship_submodel",
-	"update_ship_submodel",
-	"list_wings",
-	"get_wing",
-	"form_wing",
-	"update_wing",
-	"arrange_in_formation",
-	"delete_wing",
-	"disband_wing",
-	"move_wing",
-	"swap_wings",
-	"get_mission_music",
-	"update_mission_music",
-	"get_editor_view",
-	"set_editor_view",
-	"list_reinforcements",
-	"get_reinforcement",
-	"set_reinforcement",
-	"get_team_loadout",
-	"update_team_loadout",
-	"set_team_loadout_ship",
-	"set_team_loadout_weapon",
-	nullptr
-};
-
-// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_mission_tools(json_t *tools)
+static void register_get_mission_music(json_t *tools)
 {
-	mcp_register_mission_info_tools(tools);
-	mcp_register_fiction_viewer_tools(tools);
-	mcp_register_cmd_brief_tools(tools);
-	mcp_register_debrief_tools(tools);
-	mcp_register_sexp_tools(tools);
-	mcp_register_event_tools(tools);
-	mcp_register_goal_tools(tools);
-	mcp_register_waypoint_tools(tools);
-	mcp_register_jump_node_tools(tools);
-	mcp_register_ship_tools(tools);
-	mcp_register_submodel_tools(tools);
-	mcp_register_wing_tools(tools);
-	mcp_register_reinforcement_tools(tools);
-	mcp_register_loadout_tools(tools);
-
-	// get_mission_music
 	register_tool(tools, "get_mission_music",
 		"Returns all mission music assignments: event music, briefing music, debriefing music "
 		"(success/average/failure), fiction viewer music, and the substitute event/briefing music "
 		"fields used for FS1 compatibility. Each field is a music name or \"None\" if unset.",
 		nullptr);
+}
 
-	// update_mission_music
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "event_music",
-			"Event music soundtrack name. Use list_soundtracks to see valid names. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "substitute_event_music",
-			"Alternate event music soundtrack used at mission load if available (FS1 compatibility). Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "briefing_music",
-			"Briefing music name. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "substitute_briefing_music",
-			"Alternate briefing music used at mission load if available. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "debriefing_success_music",
-			"Music for the success debriefing outcome. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "debriefing_average_music",
-			"Music for the average debriefing outcome. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "debriefing_failure_music",
-			"Music for the failure debriefing outcome. Pass an empty string or \"None\" to clear.");
-		add_string_prop(props, "fiction_viewer_music",
-			"Music played during the fiction viewer for this mission. Pass an empty string or \"None\" to clear.");
-		register_tool(tools, "update_mission_music",
-			"Update one or more mission music assignments. All parameters are optional; "
-			"only provided fields are changed. Returns the full updated music state.",
-			props);
-	}
+static void register_update_mission_music(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "event_music",
+		"Event music soundtrack name. Use list_soundtracks to see valid names. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "substitute_event_music",
+		"Alternate event music soundtrack used at mission load if available (FS1 compatibility). Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "briefing_music",
+		"Briefing music name. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "substitute_briefing_music",
+		"Alternate briefing music used at mission load if available. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "debriefing_success_music",
+		"Music for the success debriefing outcome. Use list_menu_music to see valid names. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "debriefing_average_music",
+		"Music for the average debriefing outcome. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "debriefing_failure_music",
+		"Music for the failure debriefing outcome. Pass an empty string or \"None\" to clear.");
+	add_string_prop(props, "fiction_viewer_music",
+		"Music played during the fiction viewer for this mission. Pass an empty string or \"None\" to clear.");
+	register_tool(tools, "update_mission_music",
+		"Update one or more mission music assignments. All parameters are optional; "
+		"only provided fields are changed. Returns the full updated music state.",
+		props);
+}
 
-	// get_editor_view
+static void register_get_editor_view(json_t *tools)
+{
 	register_tool(tools, "get_editor_view",
 		"Returns the FRED editor camera's current position and orientation.",
 		nullptr);
-
-	// set_editor_view
-	{
-		json_t *props = json_object();
-		add_vec3d_prop(props, "position",
-			"New camera world position. Omit to leave position unchanged.");
-		add_matrix_prop(props, "orientation",
-			"New camera orientation matrix (rvec/uvec/fvec). Omit to leave orientation unchanged.");
-		register_tool(tools, "set_editor_view",
-			"Update the FRED editor camera's position and/or orientation. "
-			"Both parameters are optional; only provided fields are changed. "
-			"Returns the full updated view state.",
-			props);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Routing (called on mongoose thread — marshals to main thread)
-// ---------------------------------------------------------------------------
-
-json_t *mcp_route_mission_tool(const char *tool_name, json_t *arguments)
+static void register_set_editor_view(json_t *tools)
 {
-	for (const char **p = mission_tool_names; *p; p++) {
-		if (strcmp(tool_name, *p) == 0)
-			return mcp_execute_on_main_thread(McpToolId::MISSION_TOOL, tool_name, arguments);
-	}
-	return nullptr;
+	json_t *props = json_object();
+	add_vec3d_prop(props, "position",
+		"New camera world position. Omit to leave position unchanged.");
+	add_matrix_prop(props, "orientation",
+		"New camera orientation matrix (rvec/uvec/fvec). Omit to leave orientation unchanged.");
+	register_tool(tools, "set_editor_view",
+		"Update the FRED editor camera's position and/or orientation. "
+		"Both parameters are optional; only provided fields are changed. "
+		"Returns the full updated view state.",
+		props);
 }
 
 // ---------------------------------------------------------------------------
-// Main-thread dispatch
+// Tool table (misc mission tools not belonging to an entity area)
 // ---------------------------------------------------------------------------
 
-void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
-{
-	if (mcp_handle_mission_info_tool(tool_name, input_json, req)) {
-		// handled by mission-info unit
-	} else if (mcp_handle_fiction_viewer_tool(tool_name, input_json, req)) {
-		// handled by fiction_viewer unit
-	} else if (mcp_handle_cmd_brief_tool(tool_name, input_json, req)) {
-		// handled by cmd_brief unit
-	} else if (mcp_handle_debrief_tool(tool_name, input_json, req)) {
-		// handled by debrief unit
-	} else if (mcp_handle_sexp_tool(tool_name, input_json, req)) {
-		// handled by SEXP unit
-	} else if (mcp_handle_event_tool(tool_name, input_json, req)) {
-		// handled by events unit
-	} else if (mcp_handle_goal_tool(tool_name, input_json, req)) {
-		// handled by goals unit
-	} else if (mcp_handle_waypoint_tool(tool_name, input_json, req)) {
-		// handled by waypoints unit
-	} else if (mcp_handle_jump_node_tool(tool_name, input_json, req)) {
-		// handled by jump_node unit
-	} else if (mcp_handle_ship_tool(tool_name, input_json, req)) {
-		// handled by ships unit
-	} else if (mcp_handle_submodel_tool(tool_name, input_json, req)) {
-		// handled by submodels unit
-	} else if (mcp_handle_wing_tool(tool_name, input_json, req)) {
-		// handled by wings unit
-	} else if (mcp_handle_reinforcement_tool(tool_name, input_json, req)) {
-		// handled by reinforcements unit
-	} else if (mcp_handle_loadout_tool(tool_name, input_json, req)) {
-		// handled by team loadout unit
-	} else if (strcmp(tool_name, "get_mission_music") == 0) {
-		handle_get_mission_music(input_json, req);
-	} else if (strcmp(tool_name, "update_mission_music") == 0) {
-		handle_update_mission_music(input_json, req);
-	} else if (strcmp(tool_name, "get_editor_view") == 0) {
-		handle_get_editor_view(input_json, req);
-	} else if (strcmp(tool_name, "set_editor_view") == 0) {
-		handle_set_editor_view(input_json, req);
-	} else {
-		McpErrorSink sink(req);
-		sink.set_error("Unknown mission tool: %s", tool_name);
-	}
-}
+const McpToolDef mcp_mission_misc_tool_defs[] = {
+	{ "get_mission_music",    register_get_mission_music,    nullptr, handle_get_mission_music,    false },
+	{ "update_mission_music", register_update_mission_music, nullptr, handle_update_mission_music, false },
+	{ "get_editor_view",      register_get_editor_view,      nullptr, handle_get_editor_view,      false },
+	{ "set_editor_view",      register_set_editor_view,      nullptr, handle_set_editor_view,      false },
+};
+const size_t mcp_mission_misc_tool_def_count = sizeof(mcp_mission_misc_tool_defs) / sizeof(mcp_mission_misc_tool_defs[0]);

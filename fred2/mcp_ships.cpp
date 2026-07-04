@@ -2800,477 +2800,484 @@ static const SCP_vector<const char *> &get_mcp_player_orders_parse_names()
 	return cache;
 }
 
-void mcp_register_ship_tools(json_t *tools)
+static void register_list_ships(json_t *tools)
 {
-	// list_ships
 	register_tool(tools, "list_ships",
 		"List all ships in the mission (including player-start ships), in the same order that "
 		"move_ship/swap_ships indices refer to: a ship's 1-based position in this list is its index. "
 		"Each entry has the ship's name, class, team (IFF), player-start flag, wing membership, and position.",
 		json_object());
+}
 
-	// get_ship
+static void register_get_ship(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship",
 		"Get full details of a ship by name. Returns identity, scoring, position/orientation, arrival/departure settings "
 		"(including SEXP cue node IDs you can edit via the SEXP tools), and wing membership. If the ship is in a wing, "
 		"the wing owns the arrival/departure settings — the ship's own values are returned for reference but are not authoritative.",
 		"name", "Name of the ship to retrieve");
+}
 
-	// create_ship
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Unique name for the ship (must not collide with any other ship, wing, waypoint, or jump node).");
-		add_string_prop(props, "ship_class",
-			"Ship class name (e.g. \"GTF Ulysses\"). Use list_ship_classes to discover valid names.");
-		add_vec3d_prop(props, "position", "World position where the ship is placed.");
-		add_matrix_prop(props, "orientation",
-			"Orientation matrix (rvec/uvec/fvec) for the ship at placement.");
-		add_string_prop(props, "display_name",
-			"Optional display name shown to the player (if different from `name`). Pass \"<none>\" or "
-			"a string matching the ship's `name` to clear; a blank string is a valid display name and "
-			"will be stored as-is.");
-		add_string_prop(props, "team",
-			"IFF team name (e.g. \"Friendly\", \"Hostile\"). Defaults to the ship class's species default IFF.");
-		add_string_prop(props, "ai_class",
-			"AI class name (e.g. \"General\", \"Captain\"). Omit, or pass empty/\"<default>\", "
-			"for the ship class's default AI.");
-		add_string_prop(props, "cargo",
-			"Cargo name. Auto-added to the mission cargo pool if new (subject to MAX_CARGO).");
-		add_integer_prop(props, "hotkey",
-			"Hotkey assignment 0-9, or omit for no hotkey.");
-		add_string_prop(props, "persona",
-			"Persona name. Empty/\"<none>\" for no persona.");
-		add_string_prop(props, "alt_class_name",
-			"Alternate ship class name (display alias). Empty/\"<none>\" clears.");
-		add_string_prop(props, "callsign",
-			"Pilot callsign. Empty/\"<none>\" clears.");
-		add_bool_prop(props, "is_player_start",
-			"If true, mark this ship as a player starting point. Default false.");
-		add_integer_prop(props, "score",
-			"Points awarded to the player for destroying this ship.");
-		add_number_prop(props, "assist_score_fraction",
-			"Fraction (0.0-1.0) of the score awarded for an assist.");
-		add_string_enum_prop(props, "arrival_location",
-			"How the ship arrives. Default \"Hyperspace\".", arrival_location_enum_values);
-		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (e.g. \"<any friendly>\") referenced by the arrival_location. "
-			"Empty/\"<none>\" clears.");
-		add_integer_prop(props, "arrival_distance",
-			"Distance offset (meters) from the arrival target.");
-		add_integer_prop(props, "arrival_delay",
-			"Seconds to wait after the arrival cue evaluates true before the ship actually arrives.");
-		add_integer_prop(props, "arrival_cue",
-			"SEXP node ID of the boolean formula that gates arrival. Defaults to a locked \"true\" cue. "
-			"Use text_to_sexp / create_sexp_node to build cues.");
-		add_string_enum_prop(props, "departure_location",
-			"How the ship departs. Default \"Hyperspace\".", departure_location_enum_values);
-		add_string_prop(props, "departure_target",
-			"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
-			"Empty/\"<none>\" clears.");
-		add_integer_prop(props, "departure_delay",
-			"Seconds to wait after the departure cue evaluates true before the ship actually departs.");
-		add_integer_prop(props, "departure_cue",
-			"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
-		add_bool_map_prop(props, "ship_flags",
-			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
-			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
-			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
-		add_integer_prop(props, "escort_priority",
-			"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
-			"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
-		add_integer_prop(props, "kamikaze_damage",
-			"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
-			"stored unconditionally but only matters at runtime when \"kamikaze\" is set. "
-			"FRED defaults this to min(1000, 200 + hull/4) on ship creation. Non-negative.");
-		add_integer_prop(props, "destroy_before_mission_seconds",
-			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
-			"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
-			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
-		add_integer_prop(props, "initial_hull_percent",
-			"Initial hull strength at mission start, as a percent of class max (0-100). FRED defaults to 100.");
-		add_integer_prop(props, "initial_shield_percent",
-			"Initial shield strength at mission start, as a percent of class max (0-100). FRED defaults to 100. "
-			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
-		add_integer_prop(props, "initial_speed_percent",
-			"Initial speed at mission start, as a percent of class max (0-100). FRED defaults to 33.");
-		add_string_array_prop(props, "player_orders_accepted",
-			"Array of player order parse_names this ship will accept from the player "
-			"(e.g. \"attack ship\", \"form on wing\"). Must be a subset of the ship "
-			"type's valid_player_orders. If omitted, defaults to the ship type's "
-			"full valid_player_orders set. Use list_defined_player_orders to discover "
-			"valid parse_names.",
-			get_mcp_player_orders_parse_names());
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("ship_class"));
-		json_array_append_new(req, json_string("position"));
-		json_array_append_new(req, json_string("orientation"));
-		register_tool(tools, "create_ship",
-			"Create a new ship in the mission. The ship is placed in no wing (use a wing tool to add it to a wing later). "
-			"Arrival/departure cues default to locked-true and locked-false respectively.",
-			props, req);
-	}
+static void register_create_ship(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Unique name for the ship (must not collide with any other ship, wing, waypoint, or jump node).");
+	add_string_prop(props, "ship_class",
+		"Ship class name (e.g. \"GTF Ulysses\"). Use list_ship_classes to discover valid names.");
+	add_vec3d_prop(props, "position", "World position where the ship is placed.");
+	add_matrix_prop(props, "orientation",
+		"Orientation matrix (rvec/uvec/fvec) for the ship at placement.");
+	add_string_prop(props, "display_name",
+		"Optional display name shown to the player (if different from `name`). Pass \"<none>\" or "
+		"a string matching the ship's `name` to clear; a blank string is a valid display name and "
+		"will be stored as-is.");
+	add_string_prop(props, "team",
+		"IFF team name (e.g. \"Friendly\", \"Hostile\"). Defaults to the ship class's species default IFF.");
+	add_string_prop(props, "ai_class",
+		"AI class name (e.g. \"General\", \"Captain\"). Omit, or pass empty/\"<default>\", "
+		"for the ship class's default AI.");
+	add_string_prop(props, "cargo",
+		"Cargo name. Auto-added to the mission cargo pool if new (subject to MAX_CARGO).");
+	add_integer_prop(props, "hotkey",
+		"Hotkey assignment 0-9, or omit for no hotkey.");
+	add_string_prop(props, "persona",
+		"Persona name. Empty/\"<none>\" for no persona.");
+	add_string_prop(props, "alt_class_name",
+		"Alternate ship class name (display alias). Empty/\"<none>\" clears.");
+	add_string_prop(props, "callsign",
+		"Pilot callsign. Empty/\"<none>\" clears.");
+	add_bool_prop(props, "is_player_start",
+		"If true, mark this ship as a player starting point. Default false.");
+	add_integer_prop(props, "score",
+		"Points awarded to the player for destroying this ship.");
+	add_number_prop(props, "assist_score_fraction",
+		"Fraction (0.0-1.0) of the score awarded for an assist.");
+	add_string_enum_prop(props, "arrival_location",
+		"How the ship arrives. Default \"Hyperspace\".", arrival_location_enum_values);
+	add_string_prop(props, "arrival_target",
+		"Ship name or special anchor (e.g. \"<any friendly>\") referenced by the arrival_location. "
+		"Empty/\"<none>\" clears.");
+	add_integer_prop(props, "arrival_distance",
+		"Distance offset (meters) from the arrival target.");
+	add_integer_prop(props, "arrival_delay",
+		"Seconds to wait after the arrival cue evaluates true before the ship actually arrives.");
+	add_integer_prop(props, "arrival_cue",
+		"SEXP node ID of the boolean formula that gates arrival. Defaults to a locked \"true\" cue. "
+		"Use text_to_sexp / create_sexp_node to build cues.");
+	add_string_enum_prop(props, "departure_location",
+		"How the ship departs. Default \"Hyperspace\".", departure_location_enum_values);
+	add_string_prop(props, "departure_target",
+		"Ship name (typically one with a docking bay when departure_location is \"Docking Bay\"). "
+		"Empty/\"<none>\" clears.");
+	add_integer_prop(props, "departure_delay",
+		"Seconds to wait after the departure cue evaluates true before the ship actually departs.");
+	add_integer_prop(props, "departure_cue",
+		"SEXP node ID of the boolean formula that gates departure. Defaults to a locked \"false\" cue.");
+	add_bool_map_prop(props, "ship_flags",
+		"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
+		"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
+		"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
+	add_integer_prop(props, "escort_priority",
+		"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
+		"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
+	add_integer_prop(props, "kamikaze_damage",
+		"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
+		"stored unconditionally but only matters at runtime when \"kamikaze\" is set. "
+		"FRED defaults this to min(1000, 200 + hull/4) on ship creation. Non-negative.");
+	add_integer_prop(props, "destroy_before_mission_seconds",
+		"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
+		"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
+		"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
+	add_integer_prop(props, "initial_hull_percent",
+		"Initial hull strength at mission start, as a percent of class max (0-100). FRED defaults to 100.");
+	add_integer_prop(props, "initial_shield_percent",
+		"Initial shield strength at mission start, as a percent of class max (0-100). FRED defaults to 100. "
+		"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
+	add_integer_prop(props, "initial_speed_percent",
+		"Initial speed at mission start, as a percent of class max (0-100). FRED defaults to 33.");
+	add_string_array_prop(props, "player_orders_accepted",
+		"Array of player order parse_names this ship will accept from the player "
+		"(e.g. \"attack ship\", \"form on wing\"). Must be a subset of the ship "
+		"type's valid_player_orders. If omitted, defaults to the ship type's "
+		"full valid_player_orders set. Use list_defined_player_orders to discover "
+		"valid parse_names.",
+		get_mcp_player_orders_parse_names());
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("ship_class"));
+	json_array_append_new(req, json_string("position"));
+	json_array_append_new(req, json_string("orientation"));
+	register_tool(tools, "create_ship",
+		"Create a new ship in the mission. The ship is placed in no wing (use a wing tool to add it to a wing later). "
+		"Arrival/departure cues default to locked-true and locked-false respectively.",
+		props, req);
+}
 
-	// update_ship
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship to update.");
-		add_string_prop(props, "new_name",
-			"New name for the ship. SEXP references, AI goals, texture replacements, and reinforcement entries "
-			"are updated automatically. Per FRED convention, renaming may reset the display name.");
-		add_string_prop(props, "display_name",
-			"Display name shown to the player. Pass \"<none>\" or a string matching the ship's `name` "
-			"to clear; a blank string is a valid display name and will be stored as-is.");
-		add_string_prop(props, "ship_class",
-			"Change the ship's class. Triggers a model/subsystem swap via change_ship_type.");
-		add_string_prop(props, "team", "IFF team name.");
-		add_string_prop(props, "ai_class", "AI class name. Empty/\"<default>\" resets to the ship class default.");
-		add_string_prop(props, "cargo", "Cargo name (auto-added if new).");
-		add_integer_prop(props, "hotkey", "Hotkey 0-9.");
-		add_string_prop(props, "persona", "Persona name. Empty/\"<none>\" clears.");
-		add_string_prop(props, "alt_class_name", "Alternate ship class name. Empty/\"<none>\" clears.");
-		add_string_prop(props, "callsign", "Pilot callsign. Empty/\"<none>\" clears.");
-		add_bool_prop(props, "is_player_start",
-			"Toggles whether this is a player ship or not. Refused if turning off would leave zero player ships.");
-		add_integer_prop(props, "score", "Score awarded for destroying this ship.");
-		add_number_prop(props, "assist_score_fraction", "Assist score fraction 0.0-1.0.");
-		add_vec3d_prop(props, "position", "New world position.");
-		add_matrix_prop(props, "orientation", "New orientation matrix.");
-		add_string_enum_prop(props, "arrival_location",
-			"Arrival mode (ignored if ship is in a wing).", arrival_location_enum_values);
-		add_string_prop(props, "arrival_target",
-			"Ship name or special anchor (ignored if ship is in a wing). Empty/\"<none>\" clears.");
-		add_integer_prop(props, "arrival_distance", "Arrival distance (ignored if ship is in a wing).");
-		add_integer_prop(props, "arrival_delay", "Arrival delay (ignored if ship is in a wing).");
-		add_integer_prop(props, "arrival_cue",
-			"SEXP node ID for the arrival cue (ignored if ship is in a wing). The previous cue tree is freed.");
-		add_string_enum_prop(props, "departure_location",
-			"Departure mode (ignored if ship is in a wing).", departure_location_enum_values);
-		add_string_prop(props, "departure_target",
-			"Departure target (ignored if ship is in a wing). Empty/\"<none>\" clears.");
-		add_integer_prop(props, "departure_delay", "Departure delay (ignored if ship is in a wing).");
-		add_integer_prop(props, "departure_cue",
-			"SEXP node ID for the departure cue (ignored if ship is in a wing). The previous cue tree is freed.");
-		add_bool_map_prop(props, "ship_flags",
-			"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
-			"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
-			"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
-		add_integer_prop(props, "escort_priority",
-			"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
-			"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
-		add_integer_prop(props, "kamikaze_damage",
-			"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
-			"stored unconditionally but only matters at runtime when \"kamikaze\" is set. Non-negative.");
-		add_integer_prop(props, "destroy_before_mission_seconds",
-			"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
-			"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
-			"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
-		add_integer_prop(props, "initial_hull_percent",
-			"Initial hull strength at mission start, as a percent of class max (0-100).");
-		add_integer_prop(props, "initial_shield_percent",
-			"Initial shield strength at mission start, as a percent of class max (0-100). "
-			"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
-		add_integer_prop(props, "initial_speed_percent",
-			"Initial speed at mission start, as a percent of class max (0-100).");
-		add_string_array_prop(props, "player_orders_accepted",
-			"Array of player order parse_names this ship will accept from the player. "
-			"Must be a subset of the ship type's valid_player_orders (validated against "
-			"the post-update ship_class when both are set in the same call). Use "
-			"list_defined_player_orders to discover valid parse_names.",
-			get_mcp_player_orders_parse_names());
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_ship",
-			"Update properties of an existing ship. Only specified fields are changed. "
-			"If the ship is in a wing, arrival/departure fields are silently ignored and the response lists which were skipped.",
-			props, req);
-	}
+static void register_update_ship(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship to update.");
+	add_string_prop(props, "new_name",
+		"New name for the ship. SEXP references, AI goals, texture replacements, and reinforcement entries "
+		"are updated automatically. Per FRED convention, renaming may reset the display name.");
+	add_string_prop(props, "display_name",
+		"Display name shown to the player. Pass \"<none>\" or a string matching the ship's `name` "
+		"to clear; a blank string is a valid display name and will be stored as-is.");
+	add_string_prop(props, "ship_class",
+		"Change the ship's class. Triggers a model/subsystem swap via change_ship_type.");
+	add_string_prop(props, "team", "IFF team name.");
+	add_string_prop(props, "ai_class", "AI class name. Empty/\"<default>\" resets to the ship class default.");
+	add_string_prop(props, "cargo", "Cargo name (auto-added if new).");
+	add_integer_prop(props, "hotkey", "Hotkey 0-9.");
+	add_string_prop(props, "persona", "Persona name. Empty/\"<none>\" clears.");
+	add_string_prop(props, "alt_class_name", "Alternate ship class name. Empty/\"<none>\" clears.");
+	add_string_prop(props, "callsign", "Pilot callsign. Empty/\"<none>\" clears.");
+	add_bool_prop(props, "is_player_start",
+		"Toggles whether this is a player ship or not. Refused if turning off would leave zero player ships.");
+	add_integer_prop(props, "score", "Score awarded for destroying this ship.");
+	add_number_prop(props, "assist_score_fraction", "Assist score fraction 0.0-1.0.");
+	add_vec3d_prop(props, "position", "New world position.");
+	add_matrix_prop(props, "orientation", "New orientation matrix.");
+	add_string_enum_prop(props, "arrival_location",
+		"Arrival mode (ignored if ship is in a wing).", arrival_location_enum_values);
+	add_string_prop(props, "arrival_target",
+		"Ship name or special anchor (ignored if ship is in a wing). Empty/\"<none>\" clears.");
+	add_integer_prop(props, "arrival_distance", "Arrival distance (ignored if ship is in a wing).");
+	add_integer_prop(props, "arrival_delay", "Arrival delay (ignored if ship is in a wing).");
+	add_integer_prop(props, "arrival_cue",
+		"SEXP node ID for the arrival cue (ignored if ship is in a wing). The previous cue tree is freed.");
+	add_string_enum_prop(props, "departure_location",
+		"Departure mode (ignored if ship is in a wing).", departure_location_enum_values);
+	add_string_prop(props, "departure_target",
+		"Departure target (ignored if ship is in a wing). Empty/\"<none>\" clears.");
+	add_integer_prop(props, "departure_delay", "Departure delay (ignored if ship is in a wing).");
+	add_integer_prop(props, "departure_cue",
+		"SEXP node ID for the departure cue (ignored if ship is in a wing). The previous cue tree is freed.");
+	add_bool_map_prop(props, "ship_flags",
+		"Partial map of {flag_name: bool} for this ship's flags. Names come from list_ship_flags and "
+		"span the engine's object, ship, parse-object, and AI flag enums (same surface as the Lua "
+		"Ship:setFlag API and the alter-ship-flag SEXP). Only listed keys are touched.");
+	add_integer_prop(props, "escort_priority",
+		"Escort priority. Paired with the \"escort\" entry in ship_flags: the priority is stored "
+		"unconditionally but only matters at runtime when \"escort\" is set. Non-negative.");
+	add_integer_prop(props, "kamikaze_damage",
+		"Damage dealt by a kamikaze collision. Paired with the \"kamikaze\" entry in ship_flags: "
+		"stored unconditionally but only matters at runtime when \"kamikaze\" is set. Non-negative.");
+	add_integer_prop(props, "destroy_before_mission_seconds",
+		"Seconds before mission start at which the ship is pre-destroyed (sets Kill_before_mission). "
+		"This scalar IS the flag: a non-negative integer enables the behavior; -1 disables it. "
+		"There is no \"destroy-before-mission\" entry in ship_flags. Omit the field entirely to leave unchanged.");
+	add_integer_prop(props, "initial_hull_percent",
+		"Initial hull strength at mission start, as a percent of class max (0-100).");
+	add_integer_prop(props, "initial_shield_percent",
+		"Initial shield strength at mission start, as a percent of class max (0-100). "
+		"If a ship does not have shields, this field does not appear in a GET response but can still be written.");
+	add_integer_prop(props, "initial_speed_percent",
+		"Initial speed at mission start, as a percent of class max (0-100).");
+	add_string_array_prop(props, "player_orders_accepted",
+		"Array of player order parse_names this ship will accept from the player. "
+		"Must be a subset of the ship type's valid_player_orders (validated against "
+		"the post-update ship_class when both are set in the same call). Use "
+		"list_defined_player_orders to discover valid parse_names.",
+		get_mcp_player_orders_parse_names());
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_ship",
+		"Update properties of an existing ship. Only specified fields are changed. "
+		"If the ship is in a wing, arrival/departure fields are silently ignored and the response lists which were skipped.",
+		props, req);
+}
 
-	// delete_ship
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship to delete.");
-		add_bool_prop(props, "force",
-			"If true, delete even when the ship is referenced in SEXPs or AI goals "
-			"(references are invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_ship",
-			"Delete a ship from the mission. Refuses if the ship is the last player start, "
-			"or if it is referenced in SEXPs unless force=true. Wing membership and docking are cleaned up automatically.",
-			props, req);
-	}
+static void register_delete_ship(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship to delete.");
+	add_bool_prop(props, "force",
+		"If true, delete even when the ship is referenced in SEXPs or AI goals "
+		"(references are invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_ship",
+		"Delete a ship from the mission. Refuses if the ship is the last player start, "
+		"or if it is referenced in SEXPs unless force=true. Wing membership and docking are cleaned up automatically.",
+		props, req);
+}
 
-	// move_ship
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"1-based index of the ship to move");
-		add_integer_prop(props, "to_index",
-			"1-based destination index");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_ship",
-			"Move a ship from one list position to another.  Indices are 1-based.",
-			props, req);
-	}
+static void register_move_ship(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"1-based index of the ship to move");
+	add_integer_prop(props, "to_index",
+		"1-based destination index");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_ship",
+		"Move a ship from one list position to another.  Indices are 1-based.",
+		props, req);
+}
 
-	// swap_ships
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first ship");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second ship");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_ships",
-			"Swap two ships at the given list positions.  Indices are 1-based.",
-			props, req);
-	}
+static void register_swap_ships(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first ship");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second ship");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_ships",
+		"Swap two ships at the given list positions.  Indices are 1-based.",
+		props, req);
+}
 
-	// dock_ships
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "docker", "Name of the docker ship.");
-		add_string_prop(props, "dockee", "Name of the dockee ship (must differ from docker).");
-		add_string_prop(props, "docker_point",
-			"Dockpoint name on the docker's ship class. Use list_ship_class_dockpoints "
-			"for available names, or get_ship_class_model_details.docking_bays for full info.");
-		add_string_prop(props, "dockee_point",
-			"Dockpoint name on the dockee's ship class. Type of dockpoint (cargo/rearm/generic) "
-			"must be compatible with docker_point.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("docker"));
-		json_array_append_new(req, json_string("dockee"));
-		json_array_append_new(req, json_string("docker_point"));
-		json_array_append_new(req, json_string("dockee_point"));
-		register_tool(tools, "dock_ships",
-			"Link two ships at mission start via the named dockpoints (\"+Docked With:\" in the .fs2 file). "
-			"The chain's dock leader is auto-resolved per FRED's rules: the one ship whose arrival cue is "
-			"not locked-false, tie-broken by ship_class_compare. Non-leader arrival cues may be rewritten "
-			"to locked-false to keep only the leader arriving on cue. Note: after running this tool, the "
-			"docker will be moved and reoriented to its docked location on the dockee's dockpoint.",
-			props, req);
-	}
+static void register_dock_ships(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "docker", "Name of the docker ship.");
+	add_string_prop(props, "dockee", "Name of the dockee ship (must differ from docker).");
+	add_string_prop(props, "docker_point",
+		"Dockpoint name on the docker's ship class. Use list_ship_class_dockpoints "
+		"for available names, or get_ship_class_model_details.docking_bays for full info.");
+	add_string_prop(props, "dockee_point",
+		"Dockpoint name on the dockee's ship class. Type of dockpoint (cargo/rearm/generic) "
+		"must be compatible with docker_point.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("docker"));
+	json_array_append_new(req, json_string("dockee"));
+	json_array_append_new(req, json_string("docker_point"));
+	json_array_append_new(req, json_string("dockee_point"));
+	register_tool(tools, "dock_ships",
+		"Link two ships at mission start via the named dockpoints (\"+Docked With:\" in the .fs2 file). "
+		"The chain's dock leader is auto-resolved per FRED's rules: the one ship whose arrival cue is "
+		"not locked-false, tie-broken by ship_class_compare. Non-leader arrival cues may be rewritten "
+		"to locked-false to keep only the leader arriving on cue. Note: after running this tool, the "
+		"docker will be moved and reoriented to its docked location on the dockee's dockpoint.",
+		props, req);
+}
 
-	// undock_ships
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "ship", "Name of the ship.");
-		add_string_prop(props, "other_ship",
-			"Optional partner ship name. If omitted, the ship must be docked to exactly one other; "
-			"otherwise the call errors as ambiguous. The response always echoes the resolved partner.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("ship"));
-		register_tool(tools, "undock_ships",
-			"Separate two directly-docked ships. Ships are not physically moved apart; issue update_ship "
-			"with a new position if you need spatial separation. Arrival cues that were forced to "
-			"locked-false by an earlier dock-leader resolution are restored to locked-true if the ship "
-			"is no longer docked and is not part of a wing. The response includes still_docked_to: an "
-			"array of ship names that 'ship' remains directly docked to after this call (empty when "
-			"'ship' has no further dock attachments).",
-			props, req);
-	}
+static void register_undock_ships(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "ship", "Name of the ship.");
+	add_string_prop(props, "other_ship",
+		"Optional partner ship name. If omitted, the ship must be docked to exactly one other; "
+		"otherwise the call errors as ambiguous. The response always echoes the resolved partner.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("ship"));
+	register_tool(tools, "undock_ships",
+		"Separate two directly-docked ships. Ships are not physically moved apart; issue update_ship "
+		"with a new position if you need spatial separation. Arrival cues that were forced to "
+		"locked-false by an earlier dock-leader resolution are restored to locked-true if the ship "
+		"is no longer docked and is not part of a wing. The response includes still_docked_to: an "
+		"array of ship names that 'ship' remains directly docked to after this call (empty when "
+		"'ship' has no further dock attachments).",
+		props, req);
+}
 
-	// undock_all_ships
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "ship", "Name of the ship to fully undock.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("ship"));
-		register_tool(tools, "undock_all_ships",
-			"Separate the ship from every other ship it is directly docked to, in one call. "
-			"Returns formerly_docked_to listing every ship that was undocked (empty if the ship had no "
-			"dock attachments). Otherwise behaves like undock_ships applied iteratively.",
-			props, req);
-	}
+static void register_undock_all_ships(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "ship", "Name of the ship to fully undock.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("ship"));
+	register_tool(tools, "undock_all_ships",
+		"Separate the ship from every other ship it is directly docked to, in one call. "
+		"Returns formerly_docked_to listing every ship that was undocked (empty if the ship had no "
+		"dock attachments). Otherwise behaves like undock_ships applied iteratively.",
+		props, req);
+}
 
-	// list_docked_group
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "ship", "Name of any ship in the docked group.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("ship"));
-		register_tool(tools, "list_docked_group",
-			"Enumerate every ship transitively docked together with the given ship, including the chain's "
-			"dock leader. Prefer this over recursively walking get_ship.docked_to. Solitary ships are "
-			"reported as a single-element group with dock_leader: null.",
-			props, req);
-	}
+static void register_list_docked_group(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "ship", "Name of any ship in the docked group.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("ship"));
+	register_tool(tools, "list_docked_group",
+		"Enumerate every ship transitively docked together with the given ship, including the chain's "
+		"dock leader. Prefer this over recursively walking get_ship.docked_to. Solitary ships are "
+		"reported as a single-element group with dock_leader: null.",
+		props, req);
+}
 
-	// set_dock_leader
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "ship",
-			"Name of the ship to designate as the dock leader. Must already be in a docked group "
-			"and must not be a wing member.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("ship"));
-		register_tool(tools, "set_dock_leader",
-			"Override the auto-resolved dock leader for the group containing this ship. Swaps the "
-			"previous leader's arrival cue onto the new leader (preserving the chain's effective "
-			"arrival behavior) and parks the previous leader on locked-false. Refuses if either the "
-			"new leader or the current leader is a wing member, since wing-member effective cues "
-			"come from the wing, not the individual ship.",
-			props, req);
-	}
+static void register_set_dock_leader(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "ship",
+		"Name of the ship to designate as the dock leader. Must already be in a docked group "
+		"and must not be a wing member.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("ship"));
+	register_tool(tools, "set_dock_leader",
+		"Override the auto-resolved dock leader for the group containing this ship. Swaps the "
+		"previous leader's arrival cue onto the new leader (preserving the chain's effective "
+		"arrival behavior) and parks the previous leader on locked-false. Refuses if either the "
+		"new leader or the current leader is a wing member, since wing-member effective cues "
+		"come from the wing, not the individual ship.",
+		props, req);
+}
 
-	// list_ship_weapons
+static void register_list_ship_weapons(json_t *tools)
+{
 	register_tool_with_required_string(tools, "list_ship_weapons",
 		"Get every weapon bank assignment on a ship -- the pilot weapon set plus every turret "
 		"subsystem.  Each bank entry is { bank, weapon_class, ammo_count } where bank is 1-based, "
 		"weapon_class \"<none>\" means an empty slot, and ammo_count is an absolute count (0 for "
 		"energy primaries and beams).  Only banks within the ship/turret's num_*_banks are reported.",
 		"name", "Name of the ship");
+}
 
-	// get_ship_weapon_bank
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "subsystem",
-			"Subsystem name.  Default \"Pilot\" (the ship's main weapon set).  Any other value "
-			"must name a turret subsystem on the ship.");
-		add_string_enum_prop(props, "bank_type",
-			"Which set of banks to read.", bank_type_enum_values);
-		add_integer_prop(props, "bank",
-			"1-based bank index within the selected bank_type.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("bank_type"));
-		json_array_append_new(req, json_string("bank"));
-		register_tool(tools, "get_ship_weapon_bank",
-			"Get the weapon class and ammo count for a single weapon bank (pilot or turret).",
-			props, req);
-	}
+static void register_get_ship_weapon_bank(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "subsystem",
+		"Subsystem name.  Default \"Pilot\" (the ship's main weapon set).  Any other value "
+		"must name a turret subsystem on the ship.");
+	add_string_enum_prop(props, "bank_type",
+		"Which set of banks to read.", bank_type_enum_values);
+	add_integer_prop(props, "bank",
+		"1-based bank index within the selected bank_type.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("bank_type"));
+	json_array_append_new(req, json_string("bank"));
+	register_tool(tools, "get_ship_weapon_bank",
+		"Get the weapon class and ammo count for a single weapon bank (pilot or turret).",
+		props, req);
+}
 
-	// update_ship_weapon_bank
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "subsystem",
-			"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
-		add_string_enum_prop(props, "bank_type",
-			"Which set of banks to update.", bank_type_enum_values);
-		add_integer_prop(props, "bank",
-			"1-based bank index within the selected bank_type.");
-		add_string_prop(props, "weapon_class",
-			"Weapon to load.  Pass \"<none>\" to clear the bank.  Must match the bank's type "
-			"(primary slots reject secondary weapons and vice versa).  Omit to leave the weapon "
-			"unchanged.");
-		add_integer_prop(props, "ammo_count",
-			"Absolute ammo count for ballistic primaries and secondaries.  Must be 0 for energy "
-			"primaries, beams, and cleared banks.  Range-checked against the per-bank-and-weapon "
-			"maximum (see get_max_ammo_for_bank).  Omit to leave ammo unchanged -- if the weapon "
-			"is changing, the previous percentage is preserved against the new weapon's max.");
-		add_bool_prop(props, "force",
-			"If true, bypass the editor-selectability check (No_fred / Child) and the ship-class "
-			"allowed-weapons check for pilot banks.  Default false.  Does not bypass structural "
-			"rules (bank range, weapon/bank type match, restricted_to_big_ships match, ammo bounds).");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("bank_type"));
-		json_array_append_new(req, json_string("bank"));
-		register_tool(tools, "update_ship_weapon_bank",
-			"Set the weapon and/or ammo count for a single weapon bank.  Either weapon_class or "
-			"ammo_count may be omitted to leave that field unchanged.",
-			props, req);
-	}
+static void register_update_ship_weapon_bank(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "subsystem",
+		"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
+	add_string_enum_prop(props, "bank_type",
+		"Which set of banks to update.", bank_type_enum_values);
+	add_integer_prop(props, "bank",
+		"1-based bank index within the selected bank_type.");
+	add_string_prop(props, "weapon_class",
+		"Weapon to load.  Pass \"<none>\" to clear the bank.  Must match the bank's type "
+		"(primary slots reject secondary weapons and vice versa).  Omit to leave the weapon "
+		"unchanged.");
+	add_integer_prop(props, "ammo_count",
+		"Absolute ammo count for ballistic primaries and secondaries.  Must be 0 for energy "
+		"primaries, beams, and cleared banks.  Range-checked against the per-bank-and-weapon "
+		"maximum (see get_max_ammo_for_bank).  Omit to leave ammo unchanged -- if the weapon "
+		"is changing, the previous percentage is preserved against the new weapon's max.");
+	add_bool_prop(props, "force",
+		"If true, bypass the editor-selectability check (No_fred / Child) and the ship-class "
+		"allowed-weapons check for pilot banks.  Default false.  Does not bypass structural "
+		"rules (bank range, weapon/bank type match, restricted_to_big_ships match, ammo bounds).");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("bank_type"));
+	json_array_append_new(req, json_string("bank"));
+	register_tool(tools, "update_ship_weapon_bank",
+		"Set the weapon and/or ammo count for a single weapon bank.  Either weapon_class or "
+		"ammo_count may be omitted to leave that field unchanged.",
+		props, req);
+}
 
-	// get_max_ammo_for_bank
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "subsystem",
-			"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
-		add_string_enum_prop(props, "bank_type",
-			"Which set of banks to compute for.", bank_type_enum_values);
-		add_integer_prop(props, "bank",
-			"1-based bank index within the selected bank_type.");
-		add_string_prop(props, "weapon_class",
-			"Weapon to compute the maximum for.  Returns 0 for energy primaries and beams "
-			"(only ballistic weapons have ammo).");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("bank_type"));
-		json_array_append_new(req, json_string("bank"));
-		json_array_append_new(req, json_string("weapon_class"));
-		register_tool(tools, "get_max_ammo_for_bank",
-			"Compute the maximum ammo count for a specific (ship, bank, weapon) combination.  "
-			"Mirrors the engine's per-bank-and-weapon clamp -- use this value as the upper bound "
-			"when passing ammo_count to update_ship_weapon_bank.  "
-			"Note: the engine rounds pilot banks (capacity / cargo_size) with std::lround but "
-			"truncates turret banks; for the same weapon and capacity, the turret value can be "
-			"one less than the pilot value.  This tool mirrors whichever rule applies to the "
-			"requested bank, so the returned max matches what update_ship_weapon_bank will "
-			"accept.",
-			props, req);
-	}
+static void register_get_max_ammo_for_bank(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "subsystem",
+		"Subsystem name.  Default \"Pilot\".  Any other value must name a turret subsystem.");
+	add_string_enum_prop(props, "bank_type",
+		"Which set of banks to compute for.", bank_type_enum_values);
+	add_integer_prop(props, "bank",
+		"1-based bank index within the selected bank_type.");
+	add_string_prop(props, "weapon_class",
+		"Weapon to compute the maximum for.  Returns 0 for energy primaries and beams "
+		"(only ballistic weapons have ammo).");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("bank_type"));
+	json_array_append_new(req, json_string("bank"));
+	json_array_append_new(req, json_string("weapon_class"));
+	register_tool(tools, "get_max_ammo_for_bank",
+		"Compute the maximum ammo count for a specific (ship, bank, weapon) combination.  "
+		"Mirrors the engine's per-bank-and-weapon clamp -- use this value as the upper bound "
+		"when passing ammo_count to update_ship_weapon_bank.  "
+		"Note: the engine rounds pilot banks (capacity / cargo_size) with std::lround but "
+		"truncates turret banks; for the same weapon and capacity, the turret value can be "
+		"one less than the pilot value.  This tool mirrors whichever rule applies to the "
+		"requested bank, so the returned max matches what update_ship_weapon_bank will "
+		"accept.",
+		props, req);
+}
 
-	// list_ship_subsystems
+static void register_list_ship_subsystems(json_t *tools)
+{
 	register_tool_with_required_string(tools, "list_ship_subsystems",
 		"List all subsystems on a ship with their initial-state details: subsystem name, type "
 		"(Engines/Turrets/Radar/etc.), initial_health_percent, cargo (if set), cargo_title "
 		"(if set), and ai_class (turrets only). For a single subsystem, see get_ship_subsystem; "
 		"for updates, see update_ship_subsystem.",
 		"name", "Name of the ship");
+}
 
-	// get_ship_subsystem
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "subsystem",
-			"Subsystem name (matches subobj_name from the model, case-insensitive). Use "
-			"list_ship_subsystems to enumerate available names.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("subsystem"));
-		register_tool(tools, "get_ship_subsystem",
-			"Get one subsystem by name with its initial-state details. For all subsystems on a "
-			"ship in one call, see list_ship_subsystems.",
-			props, req);
-	}
+static void register_get_ship_subsystem(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "subsystem",
+		"Subsystem name (matches subobj_name from the model, case-insensitive). Use "
+		"list_ship_subsystems to enumerate available names.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("subsystem"));
+	register_tool(tools, "get_ship_subsystem",
+		"Get one subsystem by name with its initial-state details. For all subsystems on a "
+		"ship in one call, see list_ship_subsystems.",
+		props, req);
+}
 
-	// update_ship_subsystem
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "subsystem",
-			"Subsystem name (matches subobj_name from the model, case-insensitive).");
-		add_integer_prop(props, "initial_health_percent",
-			"Initial health at mission start, as a percent of class max (0-100). "
-			"100 = full, 0 = destroyed. Mirrors the Initial Status dialog's \"Damage\" field "
-			"(damage = 100 - health).");
-		add_string_prop(props, "cargo",
-			"Per-subsystem cargo name. Auto-added to the mission cargo pool if new (subject to "
-			"MAX_CARGO). Pass \"<none>\" or an empty string to clear. Separate from the ship's "
-			"own cargo field on update_ship.");
-		add_string_prop(props, "cargo_title",
-			"Display label paired with cargo (non-retail; e.g. \"Cargo:\" or \"Passengers:\"). "
-			"Requires cargo to also be set (in this call or already on the subsystem); "
-			"pass \"<none>\" or an empty string to clear.");
-		add_string_prop(props, "ai_class",
-			"AI class name. Turret subsystems only; rejected on any other subsystem type. "
-			"Use list_ai_classes for valid names. Pass empty/\"<default>\" to reset to the "
-			"ship class default.");
-		add_bool_prop(props, "force",
-			"If true, bypass the scannable-subsystems gate on cargo/cargo_title writes. By "
-			"default, those fields are only writable on ships with scannable subsystems "
-			"(is_huge_ship XOR toggle-subsystem-scanning flag). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("subsystem"));
-		register_tool(tools, "update_ship_subsystem",
-			"Update initial-state fields for a single subsystem (health, cargo, cargo_title, "
-			"ai_class). All update fields are optional; omitted fields are left unchanged. "
-			"Returns the post-update subsystem record.",
-			props, req);
-	}
+static void register_update_ship_subsystem(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "subsystem",
+		"Subsystem name (matches subobj_name from the model, case-insensitive).");
+	add_integer_prop(props, "initial_health_percent",
+		"Initial health at mission start, as a percent of class max (0-100). "
+		"100 = full, 0 = destroyed. Mirrors the Initial Status dialog's \"Damage\" field "
+		"(damage = 100 - health).");
+	add_string_prop(props, "cargo",
+		"Per-subsystem cargo name. Auto-added to the mission cargo pool if new (subject to "
+		"MAX_CARGO). Pass \"<none>\" or an empty string to clear. Separate from the ship's "
+		"own cargo field on update_ship.");
+	add_string_prop(props, "cargo_title",
+		"Display label paired with cargo (non-retail; e.g. \"Cargo:\" or \"Passengers:\"). "
+		"Requires cargo to also be set (in this call or already on the subsystem); "
+		"pass \"<none>\" or an empty string to clear.");
+	add_string_prop(props, "ai_class",
+		"AI class name. Turret subsystems only; rejected on any other subsystem type. "
+		"Use list_ai_classes for valid names. Pass empty/\"<default>\" to reset to the "
+		"ship class default.");
+	add_bool_prop(props, "force",
+		"If true, bypass the scannable-subsystems gate on cargo/cargo_title writes. By "
+		"default, those fields are only writable on ships with scannable subsystems "
+		"(is_huge_ship XOR toggle-subsystem-scanning flag). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("subsystem"));
+	register_tool(tools, "update_ship_subsystem",
+		"Update initial-state fields for a single subsystem (health, cargo, cargo_title, "
+		"ai_class). All update fields are optional; omitted fields are left unchanged. "
+		"Returns the post-update subsystem record.",
+		props, req);
+}
 
-	// get_ship_special_explosion
+static void register_get_ship_special_explosion(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship_special_explosion",
 		"Get the per-ship Special Explosion override fields (changes explosion characteristics "
 		"from the ship class defaults).  When the master toggle is off, returns "
@@ -3280,128 +3287,103 @@ void mcp_register_ship_tools(json_t *tools)
 		"non-zero).  If a ship has no special explosion, the ship class default values "
 		"(see get_ship_class) are used.",
 		"name", "Name of the ship");
+}
 
-	// update_ship_special_explosion
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_bool_prop(props, "enable",
-			"Master toggle for the override (use_special_explosion).  When false, all override "
-			"fields are wiped and no other fields may be supplied.  When true, partial updates "
-			"apply; any value not specified uses the previously specified value, or the ship class "
-			"default value (see get_ship_class) if never specified.");
-		add_integer_prop(props, "damage", "Explosion damage. Non-negative.");
-		add_integer_prop(props, "blast_force",
-			"Explosion blast force. Non-negative.");
-		add_integer_prop(props, "inner_radius",
-			"Inner shockwave radius (>= 1, must not exceed outer_radius).");
-		add_integer_prop(props, "outer_radius",
-			"Outer shockwave radius (>= 2).");
-		add_bool_prop(props, "shockwave_enabled",
-			"Whether the explosion should produce a shockwave.");
-		add_integer_prop(props, "shockwave_speed",
-			"Shockwave propagation speed. Must be >= 1 when shockwave_enabled is true; "
-			"wiped to 0 when shockwave_enabled is false.");
-		add_integer_prop(props, "deathroll_time_ms",
-			"How long, in milliseconds, the ship tumbles in its death roll before the final explosion.  0 means inherit the class default; "
-			"otherwise must be at least 2 ms.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("enable"));
-		register_tool(tools, "update_ship_special_explosion",
-			"Update the per-ship Special Explosion override fields.  Set 'enable' to false to "
-			"wipe the override (no other fields permitted in that case).  Set 'enable' to true "
-			"to activate or modify the override; partial updates are allowed (omitted fields "
-			"retain their current value or use the ship class's defaults if never overridden).  "
-			"Validation: inner_radius <= outer_radius; "
-			"deathroll_time_ms is 0 or >= 2; shockwave_speed >= 1 when shockwave_enabled.",
-			props, req);
-	}
+static void register_update_ship_special_explosion(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_bool_prop(props, "enable",
+		"Master toggle for the override (use_special_explosion).  When false, all override "
+		"fields are wiped and no other fields may be supplied.  When true, partial updates "
+		"apply; any value not specified uses the previously specified value, or the ship class "
+		"default value (see get_ship_class) if never specified.");
+	add_integer_prop(props, "damage", "Explosion damage. Non-negative.");
+	add_integer_prop(props, "blast_force",
+		"Explosion blast force. Non-negative.");
+	add_integer_prop(props, "inner_radius",
+		"Inner shockwave radius (>= 1, must not exceed outer_radius).");
+	add_integer_prop(props, "outer_radius",
+		"Outer shockwave radius (>= 2).");
+	add_bool_prop(props, "shockwave_enabled",
+		"Whether the explosion should produce a shockwave.");
+	add_integer_prop(props, "shockwave_speed",
+		"Shockwave propagation speed. Must be >= 1 when shockwave_enabled is true; "
+		"wiped to 0 when shockwave_enabled is false.");
+	add_integer_prop(props, "deathroll_time_ms",
+		"How long, in milliseconds, the ship tumbles in its death roll before the final explosion.  0 means inherit the class default; "
+		"otherwise must be at least 2 ms.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("enable"));
+	register_tool(tools, "update_ship_special_explosion",
+		"Update the per-ship Special Explosion override fields.  Set 'enable' to false to "
+		"wipe the override (no other fields permitted in that case).  Set 'enable' to true "
+		"to activate or modify the override; partial updates are allowed (omitted fields "
+		"retain their current value or use the ship class's defaults if never overridden).  "
+		"Validation: inner_radius <= outer_radius; "
+		"deathroll_time_ms is 0 or >= 2; shockwave_speed >= 1 when shockwave_enabled.",
+		props, req);
+}
 
-	// get_ship_special_hitpoints
+static void register_get_ship_special_hitpoints(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship_special_hitpoints",
 		"Get the per-ship Special Hitpoints overrides (changes hull and shield hitpoints from the "
 		"ship class standard values).  Each field is independent and is omitted from the response "
 		"when not overridden.  Standard values (max_hull_strength, max_shield_strength) are "
 		"exposed via get_ship_class.",
 		"name", "Name of the ship");
-
-	// update_ship_special_hitpoints
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_integer_prop(props, "hull",
-			"Hull strength override.  A value >= 1 enables and sets it; 0 disables the "
-			"override; omitting the field leaves it unchanged.");
-		add_integer_prop(props, "shield",
-			"Shield strength override.  A value >= 0 enables and sets it (0 is a valid "
-			"no-shields config); -1 disables the override; omitting the field leaves it "
-			"unchanged.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_ship_special_hitpoints",
-			"Update the per-ship Special Hitpoints overrides.  Each of 'hull' and 'shield' is "
-			"independently optional: a value in range enables+sets, the below-range sentinel "
-			"(hull: 0, shield: -1) disables, omitting leaves unchanged.  When either field "
-			"changes, kamikaze_damage is also recalculated, but the kamikaze flag is not changed.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_ship_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_update_ship_special_hitpoints(json_t *tools)
 {
-	if (strcmp(tool_name, "list_ships") == 0) {
-		handle_list_ships(input_json, req);
-	} else if (strcmp(tool_name, "get_ship") == 0) {
-		handle_get_ship(input_json, req);
-	} else if (strcmp(tool_name, "create_ship") == 0) {
-		handle_create_ship(input_json, req);
-	} else if (strcmp(tool_name, "update_ship") == 0) {
-		handle_update_ship(input_json, req);
-	} else if (strcmp(tool_name, "delete_ship") == 0) {
-		handle_delete_ship(input_json, req);
-	} else if (strcmp(tool_name, "move_ship") == 0) {
-		handle_move_ship(input_json, req);
-	} else if (strcmp(tool_name, "swap_ships") == 0) {
-		handle_swap_ships(input_json, req);
-	} else if (strcmp(tool_name, "dock_ships") == 0) {
-		handle_dock_ships(input_json, req);
-	} else if (strcmp(tool_name, "undock_ships") == 0) {
-		handle_undock_ships(input_json, req);
-	} else if (strcmp(tool_name, "undock_all_ships") == 0) {
-		handle_undock_all_ships(input_json, req);
-	} else if (strcmp(tool_name, "list_docked_group") == 0) {
-		handle_list_docked_group(input_json, req);
-	} else if (strcmp(tool_name, "set_dock_leader") == 0) {
-		handle_set_dock_leader(input_json, req);
-	} else if (strcmp(tool_name, "list_ship_weapons") == 0) {
-		handle_list_ship_weapons(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_weapon_bank") == 0) {
-		handle_get_ship_weapon_bank(input_json, req);
-	} else if (strcmp(tool_name, "update_ship_weapon_bank") == 0) {
-		handle_update_ship_weapon_bank(input_json, req);
-	} else if (strcmp(tool_name, "get_max_ammo_for_bank") == 0) {
-		handle_get_max_ammo_for_bank(input_json, req);
-	} else if (strcmp(tool_name, "list_ship_subsystems") == 0) {
-		handle_list_ship_subsystems(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_subsystem") == 0) {
-		handle_get_ship_subsystem(input_json, req);
-	} else if (strcmp(tool_name, "update_ship_subsystem") == 0) {
-		handle_update_ship_subsystem(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_special_explosion") == 0) {
-		handle_get_ship_special_explosion(input_json, req);
-	} else if (strcmp(tool_name, "update_ship_special_explosion") == 0) {
-		handle_update_ship_special_explosion(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_special_hitpoints") == 0) {
-		handle_get_ship_special_hitpoints(input_json, req);
-	} else if (strcmp(tool_name, "update_ship_special_hitpoints") == 0) {
-		handle_update_ship_special_hitpoints(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_integer_prop(props, "hull",
+		"Hull strength override.  A value >= 1 enables and sets it; 0 disables the "
+		"override; omitting the field leaves it unchanged.");
+	add_integer_prop(props, "shield",
+		"Shield strength override.  A value >= 0 enables and sets it (0 is a valid "
+		"no-shields config); -1 disables the override; omitting the field leaves it "
+		"unchanged.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_ship_special_hitpoints",
+		"Update the per-ship Special Hitpoints overrides.  Each of 'hull' and 'shield' is "
+		"independently optional: a value in range enables+sets, the below-range sentinel "
+		"(hull: 0, shield: -1) disables, omitting leaves unchanged.  When either field "
+		"changes, kamikaze_damage is also recalculated, but the kamikaze flag is not changed.",
+		props, req);
 }
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_ship_tool_defs[] = {
+	{ "list_ships",                    register_list_ships,                    nullptr, handle_list_ships,                    false },
+	{ "get_ship",                      register_get_ship,                      nullptr, handle_get_ship,                      false },
+	{ "create_ship",                   register_create_ship,                   nullptr, handle_create_ship,                   false },
+	{ "update_ship",                   register_update_ship,                   nullptr, handle_update_ship,                   false },
+	{ "delete_ship",                   register_delete_ship,                   nullptr, handle_delete_ship,                   false },
+	{ "move_ship",                     register_move_ship,                     nullptr, handle_move_ship,                     false },
+	{ "swap_ships",                    register_swap_ships,                    nullptr, handle_swap_ships,                    false },
+	{ "dock_ships",                    register_dock_ships,                    nullptr, handle_dock_ships,                    false },
+	{ "undock_ships",                  register_undock_ships,                  nullptr, handle_undock_ships,                  false },
+	{ "undock_all_ships",              register_undock_all_ships,              nullptr, handle_undock_all_ships,              false },
+	{ "list_docked_group",             register_list_docked_group,             nullptr, handle_list_docked_group,             false },
+	{ "set_dock_leader",               register_set_dock_leader,               nullptr, handle_set_dock_leader,               false },
+	{ "list_ship_weapons",             register_list_ship_weapons,             nullptr, handle_list_ship_weapons,             false },
+	{ "get_ship_weapon_bank",          register_get_ship_weapon_bank,          nullptr, handle_get_ship_weapon_bank,          false },
+	{ "update_ship_weapon_bank",       register_update_ship_weapon_bank,       nullptr, handle_update_ship_weapon_bank,       false },
+	{ "get_max_ammo_for_bank",         register_get_max_ammo_for_bank,         nullptr, handle_get_max_ammo_for_bank,         false },
+	{ "list_ship_subsystems",          register_list_ship_subsystems,          nullptr, handle_list_ship_subsystems,          false },
+	{ "get_ship_subsystem",            register_get_ship_subsystem,            nullptr, handle_get_ship_subsystem,            false },
+	{ "update_ship_subsystem",         register_update_ship_subsystem,         nullptr, handle_update_ship_subsystem,         false },
+	{ "get_ship_special_explosion",    register_get_ship_special_explosion,    nullptr, handle_get_ship_special_explosion,    false },
+	{ "update_ship_special_explosion", register_update_ship_special_explosion, nullptr, handle_update_ship_special_explosion, false },
+	{ "get_ship_special_hitpoints",    register_get_ship_special_hitpoints,    nullptr, handle_get_ship_special_hitpoints,    false },
+	{ "update_ship_special_hitpoints", register_update_ship_special_hitpoints, nullptr, handle_update_ship_special_hitpoints, false },
+};
+const size_t mcp_ship_tool_def_count = sizeof(mcp_ship_tool_defs) / sizeof(mcp_ship_tool_defs[0]);
