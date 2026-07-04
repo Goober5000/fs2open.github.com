@@ -385,7 +385,7 @@ static bool cutscene_lookup(const char *entity_id, entity_specific_tag /*tag*/,
 {
 	int idx = atoi(entity_id);
 	if (idx < 1 || idx > (int)The_mission.cutscenes.size()) {
-		sink.set_error("Cutscene index %d is out of range (1..%d)", idx, (int)The_mission.cutscenes.size());
+		sink.set_error("Cutscene index %d is out of range (1.." SIZE_T_ARG ")", idx, The_mission.cutscenes.size());
 		return false;
 	}
 	info.attached_id = idx;
@@ -410,7 +410,7 @@ static bool fvs_lookup(const char *entity_id, entity_specific_tag /*tag*/,
 {
 	int idx = atoi(entity_id);
 	if (idx < 1 || idx > (int)Fiction_viewer_stages.size()) {
-		sink.set_error("Fiction viewer stage index %d is out of range (1..%d)", idx, (int)Fiction_viewer_stages.size());
+		sink.set_error("Fiction viewer stage index %d is out of range (1.." SIZE_T_ARG ")", idx, Fiction_viewer_stages.size());
 		return false;
 	}
 	info.attached_id = idx;
@@ -2308,7 +2308,7 @@ static void report_composed_error(McpErrorSink &user_sink, json_t *step_err,
 		node_list += std::to_string(orphan_nodes[i]);
 	}
 	user_sink.set_error("%s failed AND rollback failed; "
-		"%zu SEXP subtrees remain free-standing at nodes %s. "
+		SIZE_T_ARG " SEXP subtrees remain free-standing at nodes %s. "
 		"Use sexp_to_text or walk_sexp_tree to inspect them; "
 		"use attach_sexp_node to re-integrate them.",
 		step_label, orphan_nodes.size(), node_list.c_str());

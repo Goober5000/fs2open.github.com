@@ -406,7 +406,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		json_t *elem;
 		json_array_foreach(cs_in, idx, elem) {
 			if (!json_is_object(elem)) {
-				sink.set_error("custom_strings[%zu] must be an object", idx);
+				sink.set_error("custom_strings[" SIZE_T_ARG "] must be an object", idx);
 				return;
 			}
 			auto n = get_required_string(elem, "name", sink, true);
