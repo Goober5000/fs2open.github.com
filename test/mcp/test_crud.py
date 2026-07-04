@@ -496,14 +496,14 @@ def register(suite, client):
             r = client.call_tool("create_briefing_icon", {
                 "stage": 1,
                 "position": {"x": 100, "y": 0, "z": 200},
-                "type": "Fighter",
+                "icon_type": "Fighter",
                 "label": "Alpha wing",
             })
             assert_success(r)
             d = tool_data(r)
             icon_id = d.get("id")
             assert_true(icon_id is not None and icon_id >= 0, "icon id assigned")
-            assert_equal(d.get("type"), "Fighter", "icon type round-trip")
+            assert_equal(d.get("icon_type"), "Fighter", "icon type round-trip")
 
             s1, s2 = stage_icons(1), stage_icons(2)
             assert_equal(len(s1), 1, "stage 1 icon count")
@@ -514,7 +514,7 @@ def register(suite, client):
             r = client.call_tool("create_briefing_icon", {
                 "stage": 1,
                 "position": {"x": -100, "y": 0, "z": 200},
-                "type": "Cargo",
+                "icon_type": "Cargo",
                 "label": "Depot",
                 "propagate": False,
             })
@@ -526,7 +526,7 @@ def register(suite, client):
             r = client.call_tool("create_briefing_icon", {
                 "stage": 1,
                 "position": {"x": 0, "y": 0, "z": 0},
-                "type": "Fighter",
+                "icon_type": "Fighter",
                 "id": icon_id,
             })
             assert_error(r)
