@@ -577,7 +577,6 @@ void mcp_register_mission_tools(json_t *tools)
 	mcp_register_fiction_viewer_tools(tools);
 	mcp_register_cmd_brief_tools(tools);
 	mcp_register_debrief_tools(tools);
-	mcp_register_message_tools(tools);
 	mcp_register_sexp_tools(tools);
 	mcp_register_event_tools(tools);
 	mcp_register_goal_tools(tools);
@@ -668,8 +667,6 @@ void mcp_handle_mission_tool(const char *tool_name, json_t *input_json, McpToolR
 		// handled by cmd_brief unit
 	} else if (mcp_handle_debrief_tool(tool_name, input_json, req)) {
 		// handled by debrief unit
-	} else if (mcp_handle_message_tool(tool_name, input_json, req)) {
-		// handled by messages unit
 	} else if (mcp_handle_sexp_tool(tool_name, input_json, req)) {
 		// handled by SEXP unit
 	} else if (mcp_handle_event_tool(tool_name, input_json, req)) {

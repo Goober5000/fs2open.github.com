@@ -407,145 +407,133 @@ static void handle_swap_messages(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_message_tools(json_t *tools)
+static void register_list_messages(json_t *tools)
 {
-	// list_messages
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "source",
-			"Which messages to list: \"mission\" (default) for mission-specific messages, "
-			"or \"builtin\" for built-in engine messages from messages.tbl",
-			message_enum_values);
-		register_tool(tools, "list_messages",
-			"List messages. By default lists mission-specific messages. "
-			"Use source=\"builtin\" to list built-in engine messages instead. "
-			"Returns each message's name, text, and persona.",
-			props);
-	}
+	json_t *props = json_object();
+	add_string_enum_prop(props, "source",
+		"Which messages to list: \"mission\" (default) for mission-specific messages, "
+		"or \"builtin\" for built-in engine messages from messages.tbl",
+		message_enum_values);
+	register_tool(tools, "list_messages",
+		"List messages. By default lists mission-specific messages. "
+		"Use source=\"builtin\" to list built-in engine messages instead. "
+		"Returns each message's name, text, and persona.",
+		props);
+}
 
-	// get_message
+static void register_get_message(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_message",
 		"Get full details of a message by name, including text, persona, "
 		"talking head animation, voice file, and team assignment.",
 		"name", "Name of the message to retrieve");
-
-	// create_message
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Unique name for the message");
-		add_string_prop(props, "message", "The message text displayed in-game");
-		add_string_prop(props, "persona",
-			"Name of the persona who delivers this message (e.g. \"Wingman 1\"). "
-			"Empty string or \"<none>\" for no persona.");
-		add_string_prop(props, "talking_head", "Filename for the talking head animation");
-		add_string_prop(props, "voice_filename", "Filename for the voice audio");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (\"none\" for all teams)",
-			team_enum_values);
-		add_integer_prop(props, "index",
-			"Position to insert the message among mission messages (1 = first). "
-			"If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("message"));
-		register_tool(tools, "create_message",
-			"Create a new mission message. Messages are used by send-message SEXPs to "
-			"display in-game dialogue with optional voice and talking head animation.",
-			props, req);
-	}
-
-	// update_message
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the existing message to update");
-		add_string_prop(props, "new_name", "New name for the message");
-		add_string_prop(props, "message", "New message text");
-		add_string_prop(props, "persona",
-			"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string or \"<none>\" to clear)");
-		add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string or \"<none>\" to clear)");
-		add_string_prop(props, "voice_filename", "Filename for the voice audio (empty string or \"<none>\" to clear)");
-		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (\"none\" for all teams)",
-			team_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_message",
-			"Update properties of an existing mission message. Only specified fields are "
-			"changed; omitted fields are left unchanged. Renaming automatically updates "
-			"all SEXP references to the message.",
-			props, req);
-	}
-
-	// delete_message
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the message to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the message is referenced in SEXPs (references "
-			"will be invalidated). Default: false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_message",
-			"Delete a mission message. SEXP references to the deleted message are "
-			"invalidated (wrapped in angle brackets).",
-			props, req);
-	}
-
-	// move_message
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the message among mission messages");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the message to");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_message",
-			"Move a mission message from one position to another. "
-			"Indices are 1-based within mission messages.",
-			props, req);
-	}
-
-	// swap_messages
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first message among mission messages");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second message among mission messages");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_messages",
-			"Swap two mission messages at the given positions. "
-			"Indices are 1-based within mission messages.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_message_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_message(json_t *tools)
 {
-	if (strcmp(tool_name, "list_messages") == 0) {
-		handle_list_messages(input_json, req);
-	} else if (strcmp(tool_name, "get_message") == 0) {
-		handle_get_message(input_json, req);
-	} else if (strcmp(tool_name, "create_message") == 0) {
-		handle_create_message(input_json, req);
-	} else if (strcmp(tool_name, "update_message") == 0) {
-		handle_update_message(input_json, req);
-	} else if (strcmp(tool_name, "delete_message") == 0) {
-		handle_delete_message(input_json, req);
-	} else if (strcmp(tool_name, "move_message") == 0) {
-		handle_move_message(input_json, req);
-	} else if (strcmp(tool_name, "swap_messages") == 0) {
-		handle_swap_messages(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Unique name for the message");
+	add_string_prop(props, "message", "The message text displayed in-game");
+	add_string_prop(props, "persona",
+		"Name of the persona who delivers this message (e.g. \"Wingman 1\"). "
+		"Empty string or \"<none>\" for no persona.");
+	add_string_prop(props, "talking_head", "Filename for the talking head animation");
+	add_string_prop(props, "voice_filename", "Filename for the voice audio");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment (\"none\" for all teams)",
+		team_enum_values);
+	add_integer_prop(props, "index",
+		"Position to insert the message among mission messages (1 = first). "
+		"If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("message"));
+	register_tool(tools, "create_message",
+		"Create a new mission message. Messages are used by send-message SEXPs to "
+		"display in-game dialogue with optional voice and talking head animation.",
+		props, req);
 }
+
+static void register_update_message(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the existing message to update");
+	add_string_prop(props, "new_name", "New name for the message");
+	add_string_prop(props, "message", "New message text");
+	add_string_prop(props, "persona",
+		"Name of the persona who delivers this message (e.g. \"Wingman 1\") (empty string or \"<none>\" to clear)");
+	add_string_prop(props, "talking_head", "Filename for the talking head animation (empty string or \"<none>\" to clear)");
+	add_string_prop(props, "voice_filename", "Filename for the voice audio (empty string or \"<none>\" to clear)");
+	add_string_enum_prop(props, "team",
+		"Multiplayer team assignment (\"none\" for all teams)",
+		team_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_message",
+		"Update properties of an existing mission message. Only specified fields are "
+		"changed; omitted fields are left unchanged. Renaming automatically updates "
+		"all SEXP references to the message.",
+		props, req);
+}
+
+static void register_delete_message(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the message to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the message is referenced in SEXPs (references "
+		"will be invalidated). Default: false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_message",
+		"Delete a mission message. SEXP references to the deleted message are "
+		"invalidated (wrapped in angle brackets).",
+		props, req);
+}
+
+static void register_move_message(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the message among mission messages");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the message to");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_message",
+		"Move a mission message from one position to another. "
+		"Indices are 1-based within mission messages.",
+		props, req);
+}
+
+static void register_swap_messages(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first message among mission messages");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second message among mission messages");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_messages",
+		"Swap two mission messages at the given positions. "
+		"Indices are 1-based within mission messages.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_message_tool_defs[] = {
+	{ "list_messages",  register_list_messages,  nullptr, handle_list_messages,  false },
+	{ "get_message",    register_get_message,    nullptr, handle_get_message,    false },
+	{ "create_message", register_create_message, nullptr, handle_create_message, false },
+	{ "update_message", register_update_message, nullptr, handle_update_message, false },
+	{ "delete_message", register_delete_message, nullptr, handle_delete_message, false },
+	{ "move_message",   register_move_message,   nullptr, handle_move_message,   false },
+	{ "swap_messages",  register_swap_messages,  nullptr, handle_swap_messages,  false },
+};
+const size_t mcp_message_tool_def_count = sizeof(mcp_message_tool_defs) / sizeof(mcp_message_tool_defs[0]);

@@ -12,9 +12,10 @@
 enum class McpToolId {
 	REBUILD_SEXP_FOREST,
 	GET_SEXP_LISTING,
-	APP_TOOL,
-	MISSION_TOOL,
-	REFERENCE_TOOL
+	APP_TOOL,			// legacy marshal id; being replaced by REGISTRY_TOOL
+	MISSION_TOOL,		// legacy marshal id; being replaced by REGISTRY_TOOL
+	REFERENCE_TOOL,
+	REGISTRY_TOOL		// any registry tool with a main_handler (see mcp_tool_registry.h)
 };
 
 struct McpToolRequest {
