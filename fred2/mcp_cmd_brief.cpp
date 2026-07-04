@@ -252,143 +252,125 @@ static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_cmd_brief_tools(json_t *tools)
+static const char *cmd_brief_team_desc =
+	"Which team's command briefing to operate on (\"Team 1\" or \"Team 2\"). "
+	"Defaults to \"Team 1\". \"none\" is not valid for command briefings.";
+
+static void register_list_cmd_brief_stages(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// Command briefing stage tools
-	// -----------------------------------------------------------------------
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	register_tool(tools, "list_cmd_brief_stages",
+		"List all command briefing stages. Returns each stage's index, text, "
+		"animation filename, and wave filename.",
+		props);
+}
 
-	static const char *cmd_brief_team_desc =
-		"Which team's command briefing to operate on (\"Team 1\" or \"Team 2\"). "
-		"Defaults to \"Team 1\". \"none\" is not valid for command briefings.";
+static void register_get_cmd_brief_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index", "1-based index of the stage to retrieve");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "get_cmd_brief_stage",
+		"Get full details of a command briefing stage by index.",
+		props, req);
+}
 
-	// list_cmd_brief_stages
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		register_tool(tools, "list_cmd_brief_stages",
-			"List all command briefing stages. Returns each stage's index, text, "
-			"animation filename, and wave filename.",
-			props);
-	}
+static void register_create_cmd_brief_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "text", "The text displayed during this stage");
+	add_string_prop(props, "animation_filename",
+		"Animation filename (ani/eff/png). Defaults to \"<default>\".");
+	add_string_prop(props, "voice_filename",
+		"Voice audio filename (wav/ogg). Defaults to \"none\".");
+	add_integer_prop(props, "index",
+		"Position to insert the stage (1 = first). If omitted, appends to the end.");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("text"));
+	register_tool(tools, "create_cmd_brief_stage",
+		"Create a new command briefing stage. Command briefings are narrated "
+		"slideshows shown before the main briefing, with text, animation, and "
+		"optional voice per stage. Maximum " SCP_TOKEN_TO_STR(CMD_BRIEF_STAGES_MAX) " stages.",
+		props, req);
+}
 
-	// get_cmd_brief_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index", "1-based index of the stage to retrieve");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "get_cmd_brief_stage",
-			"Get full details of a command briefing stage by index.",
-			props, req);
-	}
+static void register_update_cmd_brief_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index", "1-based index of the stage to update");
+	add_string_prop(props, "text", "New text for this stage");
+	add_string_prop(props, "animation_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
+	add_string_prop(props, "voice_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "update_cmd_brief_stage",
+		"Update properties of an existing command briefing stage. Only specified "
+		"fields are changed; omitted fields are left unchanged.",
+		props, req);
+}
 
-	// create_cmd_brief_stage
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "text", "The text displayed during this stage");
-		add_string_prop(props, "animation_filename",
-			"Animation filename (ani/eff/png). Defaults to \"<default>\".");
-		add_string_prop(props, "voice_filename",
-			"Voice audio filename (wav/ogg). Defaults to \"none\".");
-		add_integer_prop(props, "index",
-			"Position to insert the stage (1 = first). If omitted, appends to the end.");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("text"));
-		register_tool(tools, "create_cmd_brief_stage",
-			"Create a new command briefing stage. Command briefings are narrated "
-			"slideshows shown before the main briefing, with text, animation, and "
-			"optional voice per stage. Maximum " SCP_TOKEN_TO_STR(CMD_BRIEF_STAGES_MAX) " stages.",
-			props, req);
-	}
+static void register_delete_cmd_brief_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index", "1-based index of the stage to delete");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "delete_cmd_brief_stage",
+		"Delete a command briefing stage. Remaining stages are shifted down.",
+		props, req);
+}
 
-	// update_cmd_brief_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index", "1-based index of the stage to update");
-		add_string_prop(props, "text", "New text for this stage");
-		add_string_prop(props, "animation_filename", "New animation filename (ani/eff/png) (empty string to reset to default)");
-		add_string_prop(props, "voice_filename", "New voice audio filename (wav/ogg) (empty string to clear)");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "update_cmd_brief_stage",
-			"Update properties of an existing command briefing stage. Only specified "
-			"fields are changed; omitted fields are left unchanged.",
-			props, req);
-	}
+static void register_move_cmd_brief_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the stage");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the stage to");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_cmd_brief_stage",
+		"Move a command briefing stage from one position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
 
-	// delete_cmd_brief_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index", "1-based index of the stage to delete");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "delete_cmd_brief_stage",
-			"Delete a command briefing stage. Remaining stages are shifted down.",
-			props, req);
-	}
-
-	// move_cmd_brief_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the stage");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the stage to");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_cmd_brief_stage",
-			"Move a command briefing stage from one position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_cmd_brief_stages
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first stage");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second stage");
-		add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_cmd_brief_stages",
-			"Swap two command briefing stages at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
+static void register_swap_cmd_brief_stages(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first stage");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second stage");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_cmd_brief_stages",
+		"Swap two command briefing stages at the given positions. "
+		"Indices are 1-based.",
+		props, req);
 }
 
 // ---------------------------------------------------------------------------
-// Main-thread dispatch
+// Tool table
 // ---------------------------------------------------------------------------
 
-bool mcp_handle_cmd_brief_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
-{
-	if (strcmp(tool_name, "list_cmd_brief_stages") == 0) {
-		handle_list_cmd_brief_stages(input_json, req);
-	} else if (strcmp(tool_name, "get_cmd_brief_stage") == 0) {
-		handle_get_cmd_brief_stage(input_json, req);
-	} else if (strcmp(tool_name, "create_cmd_brief_stage") == 0) {
-		handle_create_cmd_brief_stage(input_json, req);
-	} else if (strcmp(tool_name, "update_cmd_brief_stage") == 0) {
-		handle_update_cmd_brief_stage(input_json, req);
-	} else if (strcmp(tool_name, "delete_cmd_brief_stage") == 0) {
-		handle_delete_cmd_brief_stage(input_json, req);
-	} else if (strcmp(tool_name, "move_cmd_brief_stage") == 0) {
-		handle_move_cmd_brief_stage(input_json, req);
-	} else if (strcmp(tool_name, "swap_cmd_brief_stages") == 0) {
-		handle_swap_cmd_brief_stages(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
-}
+const McpToolDef mcp_cmd_brief_tool_defs[] = {
+	{ "list_cmd_brief_stages",  register_list_cmd_brief_stages,  nullptr, handle_list_cmd_brief_stages,  false },
+	{ "get_cmd_brief_stage",    register_get_cmd_brief_stage,    nullptr, handle_get_cmd_brief_stage,    false },
+	{ "create_cmd_brief_stage", register_create_cmd_brief_stage, nullptr, handle_create_cmd_brief_stage, false },
+	{ "update_cmd_brief_stage", register_update_cmd_brief_stage, nullptr, handle_update_cmd_brief_stage, false },
+	{ "delete_cmd_brief_stage", register_delete_cmd_brief_stage, nullptr, handle_delete_cmd_brief_stage, false },
+	{ "move_cmd_brief_stage",   register_move_cmd_brief_stage,   nullptr, handle_move_cmd_brief_stage,   false },
+	{ "swap_cmd_brief_stages",  register_swap_cmd_brief_stages,  nullptr, handle_swap_cmd_brief_stages,  false },
+};
+const size_t mcp_cmd_brief_tool_def_count = sizeof(mcp_cmd_brief_tool_defs) / sizeof(mcp_cmd_brief_tool_defs[0]);

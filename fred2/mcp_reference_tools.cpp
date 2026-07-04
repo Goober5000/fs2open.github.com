@@ -134,98 +134,117 @@ static const SCP_vector<const char*> subtype_enum_values = { "primary", "seconda
 
 static json_t *get_reference_notes();
 
-void mcp_register_reference_tools(json_t *tools)
+static void register_list_ship_types(json_t *tools)
 {
-	// list_ship_types
 	register_tool(tools, "list_ship_types",
 		"List all ship types (e.g. fighter, bomber, cruiser, capital). "
 		"Ship types are abstract categories; individual ship classes belong to a type.",
 		json_object());
+}
 
-	// get_ship_type
+static void register_get_ship_type(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship_type",
 		"Get detailed information about a ship type, including AI behavior flags.",
 		"name", "Name of the ship type (e.g. \"fighter\")");
+}
 
-	// list_ship_classes
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "species", "Filter by species name (e.g. \"Terran\")");
-		add_string_prop(props, "ship_type", "Filter by ship type name (e.g. \"fighter\")");
-		register_tool(tools, "list_ship_classes",
-			"List all ship classes with summary info. Optionally filter by species and/or ship type.",
-			props);
-	}
+static void register_list_ship_classes(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "species", "Filter by species name (e.g. \"Terran\")");
+	add_string_prop(props, "ship_type", "Filter by ship type name (e.g. \"fighter\")");
+	register_tool(tools, "list_ship_classes",
+		"List all ship classes with summary info. Optionally filter by species and/or ship type.",
+		props);
+}
 
-	// get_ship_class
+static void register_get_ship_class(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship_class",
 		"Get detailed stats for a specific ship class, including hull, shields, "
 		"speed, weapons, and per-bank weapon restrictions. See also get_ship_class_model_details "
 		"for ship class information that depends on the 3D model.",
 		"name", "Name of the ship class (e.g. \"GTF Ulysses\")");
+}
 
-	// list_weapon_classes
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "subtype",
-			"Filter by subtype: \"primary\", \"secondary\", or \"beam\"",
-			subtype_enum_values);
-		register_tool(tools, "list_weapon_classes",
-			"List all weapon classes with summary info. Optionally filter by subtype.",
-			props);
-	}
+static void register_list_weapon_classes(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "subtype",
+		"Filter by subtype: \"primary\", \"secondary\", or \"beam\"",
+		subtype_enum_values);
+	register_tool(tools, "list_weapon_classes",
+		"List all weapon classes with summary info. Optionally filter by subtype.",
+		props);
+}
 
-	// get_weapon_class
+static void register_get_weapon_class(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_weapon_class",
 		"Get detailed stats for a specific weapon, including damage and damage-per-second (dps) against hulls, shields, and subsystems.",
 		"name", "Name of the weapon (e.g. \"Subach HL-7\")");
+}
 
-	// list_species
+static void register_list_species(json_t *tools)
+{
 	register_tool(tools, "list_species",
 		"List all species defined in the game (e.g. Terran, Vasudan, Shivan).",
 		json_object());
+}
 
-	// list_iffs
+static void register_list_iffs(json_t *tools)
+{
 	register_tool(tools, "list_iffs",
 		"List all IFF (Identify Friend or Foe) definitions. IFFs define faction allegiances and determine who attacks whom.",
 		json_object());
+}
 
-	// get_iff
+static void register_get_iff(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_iff",
 		"Get details for a specific IFF, including color, attack relationships, and flags.",
 		"name", "Name of the IFF (e.g. \"Friendly\")");
+}
 
-	// list_intel_entries
+static void register_list_intel_entries(json_t *tools)
+{
 	register_tool(tools, "list_intel_entries",
 		"List all intel/tech database entries. These contain universe lore and descriptions.",
 		json_object());
+}
 
-	// get_intel_entry
+static void register_get_intel_entry(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_intel_entry",
 		"Get the full text of an intel/tech database entry, including its description and custom data.",
 		"name", "Name of the intel entry");
+}
 
-	// list_sexp_categories
+static void register_list_sexp_categories(json_t *tools)
+{
 	register_tool(tools, "list_sexp_categories",
 		"List all SEXP operator categories and their subcategories, with operator "
 		"counts per category. Use this to discover the category hierarchy before "
 		"listing operators.",
 		json_object());
+}
 
-	// list_sexp_operators
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\"). Use list_sexp_categories to see valid names.");
-		add_string_prop(props, "subcategory", "Filter by subcategory name (requires category to also be specified)");
-		add_string_prop(props, "search", "Fuzzy search against operator names. Results are sorted by match quality.");
-		register_tool(tools, "list_sexp_operators",
-			"List SEXP (S-expression) operators used in mission event logic. "
-			"Optionally filter by category, subcategory, and/or fuzzy name search. "
-			"max_args is -1 for variadic (unlimited argument) operators.",
-			props);
-	}
+static void register_list_sexp_operators(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "category", "Filter by category name (e.g. \"Objectives\", \"Change\", \"Status\", \"Conditional\"). Use list_sexp_categories to see valid names.");
+	add_string_prop(props, "subcategory", "Filter by subcategory name (requires category to also be specified)");
+	add_string_prop(props, "search", "Fuzzy search against operator names. Results are sorted by match quality.");
+	register_tool(tools, "list_sexp_operators",
+		"List SEXP (S-expression) operators used in mission event logic. "
+		"Optionally filter by category, subcategory, and/or fuzzy name search. "
+		"max_args is -1 for variadic (unlimited argument) operators.",
+		props);
+}
 
-	// get_sexp_operator
+static void register_get_sexp_operator(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_sexp_operator",
 		"Get full details of a SEXP operator, including help text, argument types, "
 		"return type, category, and whether it is a dynamic (mod-provided) SEXP. "
@@ -233,109 +252,115 @@ void mcp_register_reference_tools(json_t *tools)
 		"only the fixed argument group and variadic_argument_types contains the "
 		"repeating argument group.",
 		"name", "Name of the SEXP operator (e.g. \"is-destroyed-delay\")");
+}
 
-	// get_mod_info
+static void register_get_mod_info(json_t *tools)
+{
 	register_tool(tools, "get_mod_info",
 		"Get information about the current mod, including its setting, factions, "
 		"lore, and mission design conventions. Returns Markdown. Call this early "
 		"in a session to understand the context you are working in.",
 		json_object());
+}
 
-	// list_reference_notes
-	{
-		json_t *props = json_object();
+static void register_list_reference_notes(json_t *tools)
+{
+	json_t *props = json_object();
 
-		// Build category enum dynamically from the reference notes file
-		SCP_vector<const char *> category_values;
-		json_t *notes_for_categories = get_reference_notes();
-		if (notes_for_categories && json_is_array(notes_for_categories)) {
-			size_t idx;
-			json_t *entry;
-			json_array_foreach(notes_for_categories, idx, entry) {
-				const char *cat = json_string_value(json_object_get(entry, "category"));
-				if (cat) {
-					bool already_listed = false;
-					for (const char *existing : category_values) {
-						if (stricmp(existing, cat) == 0) {
-							already_listed = true;
-							break;
-						}
+	// Build category enum dynamically from the reference notes file
+	SCP_vector<const char *> category_values;
+	json_t *notes_for_categories = get_reference_notes();
+	if (notes_for_categories && json_is_array(notes_for_categories)) {
+		size_t idx;
+		json_t *entry;
+		json_array_foreach(notes_for_categories, idx, entry) {
+			const char *cat = json_string_value(json_object_get(entry, "category"));
+			if (cat) {
+				bool already_listed = false;
+				for (const char *existing : category_values) {
+					if (stricmp(existing, cat) == 0) {
+						already_listed = true;
+						break;
 					}
-					if (!already_listed)
-						category_values.push_back(cat);
 				}
+				if (!already_listed)
+					category_values.push_back(cat);
 			}
 		}
-
-		if (!category_values.empty())
-			add_string_enum_prop(props, "category",
-				"Filter by category. Omit to list all.",
-				category_values);
-
-		add_string_prop(props, "search",
-			"Fuzzy search against topic names. Results are sorted by match quality.");
-		register_tool(tools, "list_reference_notes",
-			"List reference notes about FreeSpace game concepts and domain knowledge. "
-			"Returns topic names with categories and descriptions. "
-			"Use get_reference_note to read the full text of a specific topic.",
-			props);
 	}
 
-	// get_reference_note
+	if (!category_values.empty())
+		add_string_enum_prop(props, "category",
+			"Filter by category. Omit to list all.",
+			category_values);
+
+	add_string_prop(props, "search",
+		"Fuzzy search against topic names. Results are sorted by match quality.");
+	register_tool(tools, "list_reference_notes",
+		"List reference notes about FreeSpace game concepts and domain knowledge. "
+		"Returns topic names with categories and descriptions. "
+		"Use get_reference_note to read the full text of a specific topic.",
+		props);
+}
+
+static void register_get_reference_note(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_reference_note",
 		"Get the full text of a specific reference note. "
 		"Use list_reference_notes to discover available topics.",
 		"topic", "Topic name to look up.");
+}
 
-	// get_sexp_argument_type
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Argument type name as returned by get_sexp_operator (e.g. \"ship\", \"ship_or_wing\"). "
-			"Omit to list all known argument types.");
-		register_tool(tools, "get_sexp_argument_type",
-			"Get details about a SEXP argument type, including what values it accepts. "
-			"Call without arguments to list all known argument types.",
-			props);
-	}
+static void register_get_sexp_argument_type(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Argument type name as returned by get_sexp_operator (e.g. \"ship\", \"ship_or_wing\"). "
+		"Omit to list all known argument types.");
+	register_tool(tools, "get_sexp_argument_type",
+		"Get details about a SEXP argument type, including what values it accepts. "
+		"Call without arguments to list all known argument types.",
+		props);
+}
 
-	// get_sexp_return_type
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Return type name as returned by get_sexp_operator (e.g. \"boolean\", \"number\"). "
-			"Omit to list all known return types.");
-		register_tool(tools, "get_sexp_return_type",
-			"Get details about a SEXP return type, including what argument types it is compatible with. "
-			"Call without arguments to list all known return types.",
-			props);
-	}
+static void register_get_sexp_return_type(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Return type name as returned by get_sexp_operator (e.g. \"boolean\", \"number\"). "
+		"Omit to list all known return types.");
+	register_tool(tools, "get_sexp_return_type",
+		"Get details about a SEXP return type, including what argument types it is compatible with. "
+		"Call without arguments to list all known return types.",
+		props);
+}
 
-	// list_sexp_argument_values
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Argument type name as returned by get_sexp_operator or get_sexp_argument_type "
-			"(e.g. \"iff\", \"ship_flag\", \"skill_level\")");
-		add_integer_prop(props, "node",
-			"Sexp_nodes[] index for context-filtered results "
-			"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results.");
-		add_integer_prop(props, "arg_index",
-			"Argument position within the operator at 'node' (1-based). "
-			"Used together with 'node' for context filtering.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "list_sexp_argument_values",
-			"List the valid values for a SEXP argument type. "
-			"Without the optional 'node' parameter, returns all possible values. "
-			"With 'node', returns context-filtered values (e.g. only subsystems belonging "
-			"to the ship specified in an earlier argument of the same SEXP operator). "
-			"Some types depend on the current mission (e.g. 'ship' returns ships in the "
-			"loaded mission).",
-			props, req);
-	}
+static void register_list_sexp_argument_values(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Argument type name as returned by get_sexp_operator or get_sexp_argument_type "
+		"(e.g. \"iff\", \"ship_flag\", \"skill_level\")");
+	add_integer_prop(props, "node",
+		"Sexp_nodes[] index for context-filtered results "
+		"(e.g. to get only subsystems of a specific ship). Omit for unfiltered results.");
+	add_integer_prop(props, "arg_index",
+		"Argument position within the operator at 'node' (1-based). "
+		"Used together with 'node' for context filtering.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "list_sexp_argument_values",
+		"List the valid values for a SEXP argument type. "
+		"Without the optional 'node' parameter, returns all possible values. "
+		"With 'node', returns context-filtered values (e.g. only subsystems belonging "
+		"to the ship specified in an earlier argument of the same SEXP operator). "
+		"Some types depend on the current mission (e.g. 'ship' returns ships in the "
+		"loaded mission).",
+		props, req);
+}
 
-	// get_ship_class_model_details
+static void register_get_ship_class_model_details(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_ship_class_model_details",
 		"Get 3D model details for a ship class, including subsystems, bounding box "
 		"dimensions, docking bays, and navigation paths (for subsystem attack, docking, and "
@@ -344,8 +369,10 @@ void mcp_register_reference_tools(json_t *tools)
 		"current mission, this tool may take several seconds to respond while the model is "
 		"temporarily loaded into memory.",
 		"ship_class", "Name of the ship class (e.g. \"GTD Orion\")");
+}
 
-	// list_ship_class_dockpoints
+static void register_list_ship_class_dockpoints(json_t *tools)
+{
 	register_tool_with_required_string(tools, "list_ship_class_dockpoints",
 		"List the dockpoints on a ship class as { name, dock_types, position, normal }, "
 		"all in the model's local reference frame. dock_types is a subset of "
@@ -354,133 +381,145 @@ void mcp_register_reference_tools(json_t *tools)
 		"take several seconds to respond if there is no ship with this ship class in the "
 		"current mission.",
 		"ship_class", "Name of the ship class.");
+}
 
-	// subsystem_names_compare
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name1", "First subsystem name");
-		add_string_prop(props, "name2", "Second subsystem name");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name1"));
-		json_array_append_new(req, json_string("name2"));
-		register_tool(tools, "subsystem_names_compare",
-			"Compare the ordering of two subsystem names using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
-			"Returns an integer: negative if name1 < name2, 0 if equal, positive if name1 > name2 (like strcmp). "
-			"Use this for sorting; use subsystem_names_equal for simple equality checks. Always use one of these tools "
-			"instead of common string comparison for subsystem names.",
-			props, req);
-	}
+static void register_subsystem_names_compare(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name1", "First subsystem name");
+	add_string_prop(props, "name2", "Second subsystem name");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name1"));
+	json_array_append_new(req, json_string("name2"));
+	register_tool(tools, "subsystem_names_compare",
+		"Compare the ordering of two subsystem names using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
+		"Returns an integer: negative if name1 < name2, 0 if equal, positive if name1 > name2 (like strcmp). "
+		"Use this for sorting; use subsystem_names_equal for simple equality checks. Always use one of these tools "
+		"instead of common string comparison for subsystem names.",
+		props, req);
+}
 
-	// subsystem_names_equal
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name1", "First subsystem name");
-		add_string_prop(props, "name2", "Second subsystem name");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name1"));
-		json_array_append_new(req, json_string("name2"));
-		register_tool(tools, "subsystem_names_equal",
-			"Check whether two subsystem names are considered equal using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
-			"Returns a boolean. "
-			"Use this for simple equality checks; use subsystem_names_compare for sorting. Always use one of these tools "
-			"instead of common string comparison for subsystem names.",
-			props, req);
-	}
+static void register_subsystem_names_equal(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name1", "First subsystem name");
+	add_string_prop(props, "name2", "Second subsystem name");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name1"));
+	json_array_append_new(req, json_string("name2"));
+	register_tool(tools, "subsystem_names_equal",
+		"Check whether two subsystem names are considered equal using the engine's special comparison that handles minor allowable variations (e.g. trailing 's'). "
+		"Returns a boolean. "
+		"Use this for simple equality checks; use subsystem_names_compare for sorting. Always use one of these tools "
+		"instead of common string comparison for subsystem names.",
+		props, req);
+}
 
-	// coordinate_transform
-	{
-		json_t *props = json_object();
-		static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
-		add_string_enum_prop(props, "mode",
-			"Transform direction: \"local_to_world\" or \"world_to_local\"",
-			mode_values);
-		add_matrix_prop(props, "reference_frame_orientation",
-			"Reference frame orientation matrix (e.g. a ship's orientation)");
-		add_vec3d_prop(props, "reference_frame_position",
-			"Reference frame world position. Defaults to origin. Only affects position transforms.");
-		add_vec3d_prop(props, "position",
-			"A position to transform (applies rotation + translation)");
-		add_vec3d_prop(props, "normal",
-			"A direction/normal vector to transform (rotation only, no translation)");
-		add_matrix_prop(props, "orientation",
-			"An orientation matrix to compose with the reference frame orientation");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("mode"));
-		json_array_append_new(req, json_string("reference_frame_orientation"));
-		register_tool(tools, "coordinate_transform",
-			"Transform a position, direction/normal vector, and/or orientation matrix between "
-			"a local reference frame and world coordinates. Provide the reference frame via "
-			"'reference_frame_orientation' (and optionally 'reference_frame_position'), then "
-			"supply at least one of 'position', 'normal', or 'orientation' to transform "
-			"(at least one is required; rejected otherwise). "
-			"All coordinate data uses the engine's left-handed coordinate system "
-			"(+X right, +Y up, +Z forward).",
-			props, req);
-	}
+static void register_coordinate_transform(json_t *tools)
+{
+	json_t *props = json_object();
+	static const SCP_vector<const char*> mode_values = { "local_to_world", "world_to_local" };
+	add_string_enum_prop(props, "mode",
+		"Transform direction: \"local_to_world\" or \"world_to_local\"",
+		mode_values);
+	add_matrix_prop(props, "reference_frame_orientation",
+		"Reference frame orientation matrix (e.g. a ship's orientation)");
+	add_vec3d_prop(props, "reference_frame_position",
+		"Reference frame world position. Defaults to origin. Only affects position transforms.");
+	add_vec3d_prop(props, "position",
+		"A position to transform (applies rotation + translation)");
+	add_vec3d_prop(props, "normal",
+		"A direction/normal vector to transform (rotation only, no translation)");
+	add_matrix_prop(props, "orientation",
+		"An orientation matrix to compose with the reference frame orientation");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("mode"));
+	json_array_append_new(req, json_string("reference_frame_orientation"));
+	register_tool(tools, "coordinate_transform",
+		"Transform a position, direction/normal vector, and/or orientation matrix between "
+		"a local reference frame and world coordinates. Provide the reference frame via "
+		"'reference_frame_orientation' (and optionally 'reference_frame_position'), then "
+		"supply at least one of 'position', 'normal', or 'orientation' to transform "
+		"(at least one is required; rejected otherwise). "
+		"All coordinate data uses the engine's left-handed coordinate system "
+		"(+X right, +Y up, +Z forward).",
+		props, req);
+}
 
-	// list_persona_types
-	{
-		register_tool(tools, "list_persona_types",
-			"List all persona type strings (e.g. \"wingman\", \"support\", \"large\", \"command\").",
-			json_object());
-	}
+static void register_list_persona_types(json_t *tools)
+{
+	register_tool(tools, "list_persona_types",
+		"List all persona type strings (e.g. \"wingman\", \"support\", \"large\", \"command\").",
+		json_object());
+}
 
-	// list_personas
-	{
-		register_tool(tools, "list_personas",
-			"List all available personas. Personas define who delivers a message "
-			"(e.g. a wingman, support ship, or command). Returns each persona's name, "
-			"type, and compatible species. Use persona names with create_message and "
-			"update_message.",
-			json_object());
-	}
+static void register_list_personas(json_t *tools)
+{
+	register_tool(tools, "list_personas",
+		"List all available personas. Personas define who delivers a message "
+		"(e.g. a wingman, support ship, or command). Returns each persona's name, "
+		"type, and compatible species. Use persona names with create_message and "
+		"update_message.",
+		json_object());
+}
 
-	// list_talking_heads
-	{
-		register_tool(tools, "list_talking_heads",
-			"List all available talking head animations. Includes heads referenced by "
-			"existing messages, hardcoded heads (unless disabled by mod), and custom "
-			"heads defined in the mod table. Message talking heads are almost always "
-			"assigned from this list, but on rare occasions can be unique.",
-			json_object());
-	}
+static void register_list_talking_heads(json_t *tools)
+{
+	register_tool(tools, "list_talking_heads",
+		"List all available talking head animations. Includes heads referenced by "
+		"existing messages, hardcoded heads (unless disabled by mod), and custom "
+		"heads defined in the mod table. Message talking heads are almost always "
+		"assigned from this list, but on rare occasions can be unique.",
+		json_object());
+}
 
-	// list_missions
+static void register_list_missions(json_t *tools)
+{
 	register_tool(tools, "list_missions",
 		"List all mission files (.fs2) available in the data/missions directory. "
 		"Returns the directory path and an array of missions with filename and "
 		"last-modified timestamp. Combine the directory and filename to get the "
 		"absolute path for load_mission.",
 		json_object());
+}
 
-	// list_fonts
+static void register_list_fonts(json_t *tools)
+{
 	register_tool(tools, "list_fonts",
 		"List all fonts loaded from fonts.tbl and modular font tables (*-fnt.tbm). "
 		"Returns each font's name, filename, and type (volition_font or truetype). "
 		"Font names are used in fiction viewer stages and other UI references.",
 		json_object());
+}
 
-	// list_ai_classes
+static void register_list_ai_classes(json_t *tools)
+{
 	register_tool(tools, "list_ai_classes",
 		"List all AI classes defined in ai.tbl. "
 		"AI classes control per-ship AI behavior (accuracy, evasion, courage, etc.).",
 		json_object());
+}
 
-	// list_subsystem_types
+static void register_list_subsystem_types(json_t *tools)
+{
 	register_tool(tools, "list_subsystem_types",
 		"List the engine-defined subsystem types. These are the values that appear "
 		"in the subsystem_type field for certain tools which return subsystem information.",
 		json_object());
+}
 
-	// list_defined_ai_goals
+static void register_list_defined_ai_goals(json_t *tools)
+{
 	register_tool(tools, "list_defined_ai_goals",
 		"List all of the AI goals that can be assigned to AI-controlled ships "
 		"(in mission files, ai-* SEXPs, and the per-ship-type +Valid goals: list "
 		"in objecttypes.tbl). The goals a particular ship type accepts are a "
 		"subset of these; this tool just enumerates the universe of goals.",
 		json_object());
+}
 
-	// list_defined_player_orders
+static void register_list_defined_player_orders(json_t *tools)
+{
 	register_tool(tools, "list_defined_player_orders",
 		"List all of the player orders defined for this mod (e.g. \"Destroy my "
 		"target\", \"Form on my wing\"). Each entry has a parse_name (used in "
@@ -488,54 +527,70 @@ void mcp_register_reference_tools(json_t *tools)
 		"shown to the player). The set of orders a particular ship will accept "
 		"is governed by its ship type and can be customized per ship.",
 		json_object());
+}
 
-	// list_ai_profiles
+static void register_list_ai_profiles(json_t *tools)
+{
 	register_tool(tools, "list_ai_profiles",
 		"List all AI profiles defined in ai_profiles.tbl. "
 		"AI profiles control AI behavior parameters for the mission. "
 		"Returns each profile's name and whether it is the default.",
 		json_object());
+}
 
-	// list_sound_environment_presets
+static void register_list_sound_environment_presets(json_t *tools)
+{
 	register_tool(tools, "list_sound_environment_presets",
 		"List all sound environment presets available for mission audio. "
 		"These are EAX/EFX reverb environments (e.g. Generic, Hangar, Underwater). "
 		"Returns each environment's name.",
 		json_object());
+}
 
-	// list_soundtracks
+static void register_list_soundtracks(json_t *tools)
+{
 	register_tool(tools, "list_soundtracks",
 		"List all event music soundtracks defined in music.tbl. "
 		"Soundtracks control the in-mission music (battle, arrival, victory cues, etc.). "
 		"Returns each soundtrack's name.",
 		json_object());
+}
 
-	// list_menu_music
+static void register_list_menu_music(json_t *tools)
+{
 	register_tool(tools, "list_menu_music",
 		"List all menu/briefing music tracks defined in music.tbl. "
 		"These are spooled music entries used for briefing, debriefing, and fiction viewer screens. "
 		"Returns each track's name.",
 		json_object());
+}
 
-	// list_mission_flags
+static void register_list_mission_flags(json_t *tools)
+{
 	register_tool(tools, "list_mission_flags",
 		"List all mission flags that can be set in Mission Specs. "
 		"Returns each flag's name (as used in the mission file) and description.",
 		json_object());
+}
 
-	// list_ship_flags
+static void register_list_ship_flags(json_t *tools)
+{
 	register_tool(tools, "list_ship_flags",
 		"List all ship flags that can be set in the mission file. "
 		"Returns each flag's name (as used in the mission file) and description.",
 		json_object());
+}
 
-	// list_wing_flags
+static void register_list_wing_flags(json_t *tools)
+{
 	register_tool(tools, "list_wing_flags",
 		"List all wing flags that can be set in the mission file. "
 		"Returns each flag's name (as used in the mission file) and description.",
 		json_object());
+}
 
-	// list_wing_formations
+static void register_list_wing_formations(json_t *tools)
+{
 	register_tool(tools, "list_wing_formations",
 		"List all wing formations that can be set in the mission file. "
 		"A wing formation describes the relative positions of wingmen around the wing "
@@ -543,98 +598,102 @@ void mcp_register_reference_tools(json_t *tools)
 		"formation position refers to the second ship, the second formation position "
 		"refers to the third ship, etc).",
 		json_object());
+}
 
-	// list_scripting_elements
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "element_type",
-			"Filter by element type. Omit to list both.",
-			{ "library", "class" });
-		add_string_prop(props, "search",
-			"Fuzzy search against element names. Results are sorted by match quality.");
-		register_tool(tools, "list_scripting_elements",
-			"List all scripting API libraries and classes with summary info (name, shortName, "
-			"type, description, child count). Use this to discover available namespaces and "
-			"types before drilling into specifics with get_scripting_element. "
-			"Use get_reference_note with topic 'scripts' for an overview of the scripting system. "
-			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
-			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props);
-	}
+static void register_list_scripting_elements(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "element_type",
+		"Filter by element type. Omit to list both.",
+		{ "library", "class" });
+	add_string_prop(props, "search",
+		"Fuzzy search against element names. Results are sorted by match quality.");
+	register_tool(tools, "list_scripting_elements",
+		"List all scripting API libraries and classes with summary info (name, shortName, "
+		"type, description, child count). Use this to discover available namespaces and "
+		"types before drilling into specifics with get_scripting_element. "
+		"Use get_reference_note with topic 'scripts' for an overview of the scripting system. "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
+		props);
+}
 
-	// get_scripting_element
+static void register_get_scripting_element(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_scripting_element",
 		"Get full details of a scripting library or class, including all its children "
 		"(functions, properties, operators). Matches by name or shortName, case-insensitive. "
 		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
 		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
 		"name", "Name or shortName of the element (e.g. \"Mission\", \"mn\", \"ship\")");
+}
 
-	// search_scripting_children
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "search",
-			"Fuzzy search against child names. Results are sorted by match quality.");
-		add_string_enum_prop(props, "child_type",
-			"Filter by child type.",
-			{ "function", "property", "operator" });
-		register_tool(tools, "search_scripting_children",
-			"Search for functions, properties, or operators across all scripting libraries "
-			"and classes. Returns matches with parent context. At least one of `search` or "
-			"`child_type` must be supplied (rejected otherwise). "
-			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
-			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props);
-	}
+static void register_search_scripting_children(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "search",
+		"Fuzzy search against child names. Results are sorted by match quality.");
+	add_string_enum_prop(props, "child_type",
+		"Filter by child type.",
+		{ "function", "property", "operator" });
+	register_tool(tools, "search_scripting_children",
+		"Search for functions, properties, or operators across all scripting libraries "
+		"and classes. Returns matches with parent context. At least one of `search` or "
+		"`child_type` must be supplied (rejected otherwise). "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
+		props);
+}
 
-	// list_scripting_hooks
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Get a specific hook by exact name (case-insensitive). Returns full details "
-			"including hookVars and conditions. Omit to list all hooks as summaries.");
-		add_string_prop(props, "search",
-			"Fuzzy search against hook names. Results are sorted by match quality.");
-		add_bool_prop(props, "overridable",
-			"Filter to only overridable (true) or non-overridable (false) hooks.");
-		register_tool(tools, "list_scripting_hooks",
-			"List scripting hooks (actions) that fire at engine events. Without 'name', "
-			"returns summaries. With 'name', returns full hook details including typed "
-			"hookVars and conditions. "
-			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
-			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props);
-	}
+static void register_list_scripting_hooks(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Get a specific hook by exact name (case-insensitive). Returns full details "
+		"including hookVars and conditions. Omit to list all hooks as summaries.");
+	add_string_prop(props, "search",
+		"Fuzzy search against hook names. Results are sorted by match quality.");
+	add_bool_prop(props, "overridable",
+		"Filter to only overridable (true) or non-overridable (false) hooks.");
+	register_tool(tools, "list_scripting_hooks",
+		"List scripting hooks (actions) that fire at engine events. Without 'name', "
+		"returns summaries. With 'name', returns full hook details including typed "
+		"hookVars and conditions. "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
+		props);
+}
 
-	// list_scripting_enums
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "search",
-			"Fuzzy search against enum names. Results are sorted by match quality.");
-		register_tool(tools, "list_scripting_enums",
-			"List all scripting enumeration constants with their integer values. "
-			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
-			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props);
-	}
+static void register_list_scripting_enums(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "search",
+		"Fuzzy search against enum names. Results are sorted by match quality.");
+	register_tool(tools, "list_scripting_enums",
+		"List all scripting enumeration constants with their integer values. "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
+		props);
+}
 
-	// get_scripting_misc
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "section",
-			"Which section to return.",
-			scripting_misc_sections);
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("section"));
-		register_tool(tools, "get_scripting_misc",
-			"Get miscellaneous scripting API sections: 'conditions' (hook condition types), "
-			"'options' (engine options), or 'globalVars' (global hook variables). "
-			"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
-			"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
-			props, req);
-	}
+static void register_get_scripting_misc(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "section",
+		"Which section to return.",
+		scripting_misc_sections);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("section"));
+	register_tool(tools, "get_scripting_misc",
+		"Get miscellaneous scripting API sections: 'conditions' (hook condition types), "
+		"'options' (engine options), or 'globalVars' (global hook variables). "
+		"NOTE: Although the scripting documentation cache is proactively built as soon as the MCP server is initialized, "
+		"the first call to any scripting-related tool may need to wait up to 60 seconds for it to complete.",
+		props, req);
+}
 
-	// get_root_paths
+static void register_get_root_paths(json_t *tools)
+{
 	register_tool(tools, "get_root_paths",
 		"Returns an array of all root directory paths known to the game engine, "
 		"including the game root, user root, and any mod directories. Each entry "
@@ -687,7 +746,7 @@ static json_t *build_ship_type_json(const ship_type_info &st, bool include_detai
 	return obj;
 }
 
-static json_t *handle_list_ship_types()
+static json_t *handle_list_ship_types(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (const auto &st : Ship_types)
@@ -1083,7 +1142,7 @@ static json_t *handle_get_weapon_class(json_t *arguments)
 	return make_json_tool_result(build_weapon_class_json(idx, true));
 }
 
-static json_t *handle_list_species()
+static json_t *handle_list_species(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 
@@ -1105,7 +1164,7 @@ static json_t *handle_list_species()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_iffs()
+static json_t *handle_list_iffs(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 
@@ -1158,7 +1217,7 @@ static json_t *handle_get_iff(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
-static json_t *handle_list_intel_entries()
+static json_t *handle_list_intel_entries(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 
@@ -1201,7 +1260,7 @@ static json_t *handle_get_intel_entry(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
-static json_t *handle_list_sexp_categories()
+static json_t *handle_list_sexp_categories(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 
@@ -1558,7 +1617,7 @@ static SCP_string load_config_file(const char *filename, bool try_defaults)
 // Loaded eagerly by mcp_reference_tools_init(); immutable afterwards.
 static SCP_string mod_info_content;
 
-static json_t *handle_get_mod_info()
+static json_t *handle_get_mod_info(json_t * /*arguments*/)
 {
 	if (mod_info_content.empty())
 		return make_tool_result(
@@ -2336,7 +2395,7 @@ static json_t *handle_coordinate_transform(json_t *arguments)
 // Persona and talking head reference tools
 // ---------------------------------------------------------------------------
 
-static json_t *handle_list_persona_types()
+static json_t *handle_list_persona_types(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (int i = 0; i < MAX_PERSONA_TYPES; i++)
@@ -2345,7 +2404,7 @@ static json_t *handle_list_persona_types()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_personas()
+static json_t *handle_list_personas(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 
@@ -2416,7 +2475,7 @@ static void snapshot_talking_heads()
 	}
 }
 
-static json_t *handle_list_talking_heads()
+static json_t *handle_list_talking_heads(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (const auto &h : talking_heads_snapshot)
@@ -2429,7 +2488,7 @@ static json_t *handle_list_talking_heads()
 // Fonts
 // ---------------------------------------------------------------------------
 
-static json_t *handle_list_fonts()
+static json_t *handle_list_fonts(json_t * /*arguments*/)
 {
 	int n = font::FontManager::numberOfFonts();
 	json_t *arr = json_array();
@@ -2457,7 +2516,7 @@ static json_t *handle_list_fonts()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_ai_classes()
+static json_t *handle_list_ai_classes(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (int i = 0; i < Num_ai_classes; i++) {
@@ -2471,7 +2530,7 @@ static json_t *handle_list_ai_classes()
 // Enumerates the engine's SUBSYSTEM_* values (skipping NONE/MAX sentinels).
 // Same mapping subsystem_type_str uses for the subsystem_type field in
 // get_ship_class_model_details.subsystems[].
-static json_t *handle_list_subsystem_types()
+static json_t *handle_list_subsystem_types(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (int t = SUBSYSTEM_ENGINE; t <= SUBSYSTEM_UNKNOWN; t++) {
@@ -2482,7 +2541,7 @@ static json_t *handle_list_subsystem_types()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_defined_ai_goals()
+static json_t *handle_list_defined_ai_goals(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (int i = 0; i < Num_ai_goals; i++) {
@@ -2493,7 +2552,7 @@ static json_t *handle_list_defined_ai_goals()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_defined_player_orders()
+static json_t *handle_list_defined_player_orders(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (const auto &o : Player_orders) {
@@ -2512,7 +2571,7 @@ static json_t *handle_list_defined_player_orders()
 
 extern void get_wing_delta(vec3d *delta, int wing_index);
 
-static json_t *handle_list_wing_formations()
+static json_t *handle_list_wing_formations(json_t * /*arguments*/)
 {
 	auto build_entry = [](const char *name, const vec3d *positions, size_t n) {
 		json_t *item = json_object();
@@ -2539,7 +2598,7 @@ static json_t *handle_list_wing_formations()
 	return make_json_tool_result(arr);
 }
 
-static json_t *handle_list_ai_profiles()
+static json_t *handle_list_ai_profiles(json_t * /*arguments*/)
 {
 	json_t *arr = json_array();
 	for (int i = 0; i < Num_ai_profiles; i++) {
@@ -3087,7 +3146,7 @@ static json_t *main_thread_build_list_missions()
 }
 
 // Worker-side handler: marshal to the main thread (cfile access).
-static json_t *handle_list_missions()
+static json_t *handle_list_missions(json_t * /*arguments*/)
 {
 	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "list_missions");
 }
@@ -3128,13 +3187,13 @@ static json_t *main_thread_build_root_paths()
 }
 
 // Worker-side handler: marshal to the main thread (cfile access).
-static json_t *handle_get_root_paths()
+static json_t *handle_get_root_paths(json_t * /*arguments*/)
 {
 	return mcp_execute_on_main_thread(McpToolId::REFERENCE_TOOL, "get_root_paths");
 }
 
 // ---------------------------------------------------------------------------
-// Dispatch
+// Handlers defined after the helpers they depend on
 // ---------------------------------------------------------------------------
 
 static json_t *handle_list_sexp_argument_values(json_t *arguments)
@@ -3187,115 +3246,36 @@ static json_t *handle_list_sexp_argument_values(json_t *arguments)
 	return make_json_tool_result(obj);
 }
 
-json_t *mcp_handle_reference_tool(const char *tool_name, json_t *arguments)
+static json_t *handle_list_sound_environment_presets(json_t * /*arguments*/)
 {
-	if (!tool_name)
-		return nullptr;
+	return handle_list_names(EFX_presets, [](const auto &e) { return e.name.c_str(); });
+}
 
-	if (strcmp(tool_name, "list_ship_types") == 0)
-		return handle_list_ship_types();
-	if (strcmp(tool_name, "get_ship_type") == 0)
-		return handle_get_ship_type(arguments);
-	if (strcmp(tool_name, "list_ship_classes") == 0)
-		return handle_list_ship_classes(arguments);
-	if (strcmp(tool_name, "get_ship_class") == 0)
-		return handle_get_ship_class(arguments);
-	if (strcmp(tool_name, "list_weapon_classes") == 0)
-		return handle_list_weapon_classes(arguments);
-	if (strcmp(tool_name, "get_weapon_class") == 0)
-		return handle_get_weapon_class(arguments);
-	if (strcmp(tool_name, "list_species") == 0)
-		return handle_list_species();
-	if (strcmp(tool_name, "list_iffs") == 0)
-		return handle_list_iffs();
-	if (strcmp(tool_name, "get_iff") == 0)
-		return handle_get_iff(arguments);
-	if (strcmp(tool_name, "list_intel_entries") == 0)
-		return handle_list_intel_entries();
-	if (strcmp(tool_name, "get_intel_entry") == 0)
-		return handle_get_intel_entry(arguments);
-	if (strcmp(tool_name, "list_sexp_categories") == 0)
-		return handle_list_sexp_categories();
-	if (strcmp(tool_name, "list_sexp_operators") == 0)
-		return handle_list_sexp_operators(arguments);
-	if (strcmp(tool_name, "get_sexp_operator") == 0)
-		return handle_get_sexp_operator(arguments);
-	if (strcmp(tool_name, "get_mod_info") == 0)
-		return handle_get_mod_info();
-	if (strcmp(tool_name, "list_reference_notes") == 0)
-		return handle_list_reference_notes(arguments);
-	if (strcmp(tool_name, "get_reference_note") == 0)
-		return handle_get_reference_note(arguments);
-	if (strcmp(tool_name, "get_sexp_argument_type") == 0)
-		return handle_get_sexp_argument_type(arguments);
-	if (strcmp(tool_name, "get_sexp_return_type") == 0)
-		return handle_get_sexp_return_type(arguments);
-	if (strcmp(tool_name, "list_sexp_argument_values") == 0)
-		return handle_list_sexp_argument_values(arguments);
-	if (strcmp(tool_name, "get_ship_class_model_details") == 0)
-		return handle_get_ship_class_model_details(arguments);
-	if (strcmp(tool_name, "list_ship_class_dockpoints") == 0)
-		return handle_list_ship_class_dockpoints(arguments);
-	if (strcmp(tool_name, "subsystem_names_compare") == 0)
-		return handle_subsystem_names_compare(arguments);
-	if (strcmp(tool_name, "subsystem_names_equal") == 0)
-		return handle_subsystem_names_equal(arguments);
-	if (strcmp(tool_name, "coordinate_transform") == 0)
-		return handle_coordinate_transform(arguments);
-	if (strcmp(tool_name, "list_persona_types") == 0)
-		return handle_list_persona_types();
-	if (strcmp(tool_name, "list_personas") == 0)
-		return handle_list_personas();
-	if (strcmp(tool_name, "list_talking_heads") == 0)
-		return handle_list_talking_heads();
-	if (strcmp(tool_name, "list_fonts") == 0)
-		return handle_list_fonts();
-	if (strcmp(tool_name, "list_ai_classes") == 0)
-		return handle_list_ai_classes();
-	if (strcmp(tool_name, "list_subsystem_types") == 0)
-		return handle_list_subsystem_types();
-	if (strcmp(tool_name, "list_defined_ai_goals") == 0)
-		return handle_list_defined_ai_goals();
-	if (strcmp(tool_name, "list_defined_player_orders") == 0)
-		return handle_list_defined_player_orders();
-	if (strcmp(tool_name, "list_ai_profiles") == 0)
-		return handle_list_ai_profiles();
-	if (strcmp(tool_name, "list_sound_environment_presets") == 0)
-		return handle_list_names(EFX_presets, [](const auto &e) { return e.name.c_str(); });
-	if (strcmp(tool_name, "list_soundtracks") == 0)
-		return handle_list_names(Soundtracks, [](const auto &e) -> const char* { return e.name; });
-	if (strcmp(tool_name, "list_menu_music") == 0)
-		return handle_list_names(Spooled_music, [](const auto &e) -> const char* { return e.name; });
-	if (strcmp(tool_name, "list_mission_flags") == 0)
-		return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
-	if (strcmp(tool_name, "list_ship_flags") == 0) {
-		const auto &v = get_mcp_visible_ship_flags();
-		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
-	}
-	if (strcmp(tool_name, "list_wing_formations") == 0)
-		return handle_list_wing_formations();
-	if (strcmp(tool_name, "list_wing_flags") == 0) {
-		const auto &v = get_mcp_visible_wing_flags();
-		return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
-	}
-	if (strcmp(tool_name, "list_scripting_elements") == 0)
-		return handle_list_scripting_elements(arguments);
-	if (strcmp(tool_name, "get_scripting_element") == 0)
-		return handle_get_scripting_element(arguments);
-	if (strcmp(tool_name, "search_scripting_children") == 0)
-		return handle_search_scripting_children(arguments);
-	if (strcmp(tool_name, "list_scripting_hooks") == 0)
-		return handle_list_scripting_hooks(arguments);
-	if (strcmp(tool_name, "list_scripting_enums") == 0)
-		return handle_list_scripting_enums(arguments);
-	if (strcmp(tool_name, "get_scripting_misc") == 0)
-		return handle_get_scripting_misc(arguments);
-	if (strcmp(tool_name, "list_missions") == 0)
-		return handle_list_missions();
-	if (strcmp(tool_name, "get_root_paths") == 0)
-		return handle_get_root_paths();
+static json_t *handle_list_soundtracks(json_t * /*arguments*/)
+{
+	return handle_list_names(Soundtracks, [](const auto &e) -> const char* { return e.name; });
+}
 
-	return nullptr;  // not one of our tools
+static json_t *handle_list_menu_music(json_t * /*arguments*/)
+{
+	return handle_list_names(Spooled_music, [](const auto &e) -> const char* { return e.name; });
+}
+
+static json_t *handle_list_mission_flags(json_t * /*arguments*/)
+{
+	return handle_list_flags(Parse_mission_flags, Parse_mission_flag_descriptions, Num_parse_mission_flags);
+}
+
+static json_t *handle_list_ship_flags(json_t * /*arguments*/)
+{
+	const auto &v = get_mcp_visible_ship_flags();
+	return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
+}
+
+static json_t *handle_list_wing_flags(json_t * /*arguments*/)
+{
+	const auto &v = get_mcp_visible_wing_flags();
+	return handle_list_flags(v.flags.data(), v.descs.data(), v.flags.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -3375,3 +3355,60 @@ void mcp_reference_tools_cleanup()
 
 	mcp_sexp_forest_cleanup();
 }
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_reference_tool_defs[] = {
+	{ "list_ship_types", register_list_ship_types, handle_list_ship_types, nullptr, false },
+	{ "get_ship_type", register_get_ship_type, handle_get_ship_type, nullptr, false },
+	{ "list_ship_classes", register_list_ship_classes, handle_list_ship_classes, nullptr, false },
+	{ "get_ship_class", register_get_ship_class, handle_get_ship_class, nullptr, false },
+	{ "list_weapon_classes", register_list_weapon_classes, handle_list_weapon_classes, nullptr, false },
+	{ "get_weapon_class", register_get_weapon_class, handle_get_weapon_class, nullptr, false },
+	{ "list_species", register_list_species, handle_list_species, nullptr, false },
+	{ "list_iffs", register_list_iffs, handle_list_iffs, nullptr, false },
+	{ "get_iff", register_get_iff, handle_get_iff, nullptr, false },
+	{ "list_intel_entries", register_list_intel_entries, handle_list_intel_entries, nullptr, false },
+	{ "get_intel_entry", register_get_intel_entry, handle_get_intel_entry, nullptr, false },
+	{ "list_sexp_categories", register_list_sexp_categories, handle_list_sexp_categories, nullptr, false },
+	{ "list_sexp_operators", register_list_sexp_operators, handle_list_sexp_operators, nullptr, false },
+	{ "get_sexp_operator", register_get_sexp_operator, handle_get_sexp_operator, nullptr, false },
+	{ "get_mod_info", register_get_mod_info, handle_get_mod_info, nullptr, false },
+	{ "list_reference_notes", register_list_reference_notes, handle_list_reference_notes, nullptr, false },
+	{ "get_reference_note", register_get_reference_note, handle_get_reference_note, nullptr, false },
+	{ "get_sexp_argument_type", register_get_sexp_argument_type, handle_get_sexp_argument_type, nullptr, false },
+	{ "get_sexp_return_type", register_get_sexp_return_type, handle_get_sexp_return_type, nullptr, false },
+	{ "list_sexp_argument_values", register_list_sexp_argument_values, handle_list_sexp_argument_values, nullptr, false },
+	{ "get_ship_class_model_details", register_get_ship_class_model_details, handle_get_ship_class_model_details, nullptr, false },
+	{ "list_ship_class_dockpoints", register_list_ship_class_dockpoints, handle_list_ship_class_dockpoints, nullptr, false },
+	{ "subsystem_names_compare", register_subsystem_names_compare, handle_subsystem_names_compare, nullptr, false },
+	{ "subsystem_names_equal", register_subsystem_names_equal, handle_subsystem_names_equal, nullptr, false },
+	{ "coordinate_transform", register_coordinate_transform, handle_coordinate_transform, nullptr, false },
+	{ "list_persona_types", register_list_persona_types, handle_list_persona_types, nullptr, false },
+	{ "list_personas", register_list_personas, handle_list_personas, nullptr, false },
+	{ "list_talking_heads", register_list_talking_heads, handle_list_talking_heads, nullptr, false },
+	{ "list_missions", register_list_missions, handle_list_missions, nullptr, false },
+	{ "list_fonts", register_list_fonts, handle_list_fonts, nullptr, false },
+	{ "list_ai_classes", register_list_ai_classes, handle_list_ai_classes, nullptr, false },
+	{ "list_subsystem_types", register_list_subsystem_types, handle_list_subsystem_types, nullptr, false },
+	{ "list_defined_ai_goals", register_list_defined_ai_goals, handle_list_defined_ai_goals, nullptr, false },
+	{ "list_defined_player_orders", register_list_defined_player_orders, handle_list_defined_player_orders, nullptr, false },
+	{ "list_ai_profiles", register_list_ai_profiles, handle_list_ai_profiles, nullptr, false },
+	{ "list_sound_environment_presets", register_list_sound_environment_presets, handle_list_sound_environment_presets, nullptr, false },
+	{ "list_soundtracks", register_list_soundtracks, handle_list_soundtracks, nullptr, false },
+	{ "list_menu_music", register_list_menu_music, handle_list_menu_music, nullptr, false },
+	{ "list_mission_flags", register_list_mission_flags, handle_list_mission_flags, nullptr, false },
+	{ "list_ship_flags", register_list_ship_flags, handle_list_ship_flags, nullptr, false },
+	{ "list_wing_flags", register_list_wing_flags, handle_list_wing_flags, nullptr, false },
+	{ "list_wing_formations", register_list_wing_formations, handle_list_wing_formations, nullptr, false },
+	{ "list_scripting_elements", register_list_scripting_elements, handle_list_scripting_elements, nullptr, false },
+	{ "get_scripting_element", register_get_scripting_element, handle_get_scripting_element, nullptr, false },
+	{ "search_scripting_children", register_search_scripting_children, handle_search_scripting_children, nullptr, false },
+	{ "list_scripting_hooks", register_list_scripting_hooks, handle_list_scripting_hooks, nullptr, false },
+	{ "list_scripting_enums", register_list_scripting_enums, handle_list_scripting_enums, nullptr, false },
+	{ "get_scripting_misc", register_get_scripting_misc, handle_get_scripting_misc, nullptr, false },
+	{ "get_root_paths", register_get_root_paths, handle_get_root_paths, nullptr, false },
+};
+const size_t mcp_reference_tool_def_count = sizeof(mcp_reference_tool_defs) / sizeof(mcp_reference_tool_defs[0]);

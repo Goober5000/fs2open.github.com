@@ -10,12 +10,10 @@
 #define WM_MCP_TOOL_CALL (WM_USER + 100)
 
 enum class McpToolId {
-	REBUILD_SEXP_FOREST,
-	GET_SEXP_LISTING,
-	APP_TOOL,			// legacy marshal id; being replaced by REGISTRY_TOOL
-	MISSION_TOOL,		// legacy marshal id; being replaced by REGISTRY_TOOL
-	REFERENCE_TOOL,
-	REGISTRY_TOOL		// any registry tool with a main_handler (see mcp_tool_registry.h)
+	REBUILD_SEXP_FOREST,	// internal: rebuild the SEXP forest on the main thread
+	GET_SEXP_LISTING,		// internal: list_sexp_argument_values' inner marshal
+	REFERENCE_TOOL,			// internal: inner marshal for reference tools that read polymodels/cfile
+	REGISTRY_TOOL			// any registry tool with a main_handler (see mcp_tool_registry.h)
 };
 
 struct McpToolRequest {

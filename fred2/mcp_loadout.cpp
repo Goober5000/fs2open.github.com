@@ -839,14 +839,13 @@ int mcp_clear_loadout_variable_refs(const char *var_name)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_loadout_tools(json_t *tools)
-{
-	static const char *loadout_team_desc =
-		"Which team's loadout to operate on (\"Team 1\" or \"Team 2\"). "
-		"Defaults to \"Team 1\". \"none\" is not valid for loadouts. "
-		"Team 2 is only meaningful in team-versus-team missions but may be edited at any time.";
+static const char *loadout_team_desc =
+	"Which team's loadout to operate on (\"Team 1\" or \"Team 2\"). "
+	"Defaults to \"Team 1\". \"none\" is not valid for loadouts. "
+	"Team 2 is only meaningful in team-versus-team missions but may be edited at any time.";
 
-	// get_team_loadout
+static void register_get_team_loadout(json_t *tools)
+{
 	register_tool(tools, "get_team_loadout",
 		"Returns the Team Loadout data for all teams: for each team, the ship pool and weapon pool "
 		"(entries have either a literal class or a string-variable class, and either a literal count "
@@ -856,139 +855,131 @@ void mcp_register_loadout_tools(json_t *tools)
 		"variable-based counts are absolute. Any wing-carried classes missing from the pool are "
 		"reported under wing_ships_not_in_pool / wing_weapons_not_in_pool.",
 		json_object());
-
-	// update_team_loadout
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
-		add_bool_prop(props, "do_not_validate",
-			"If true, the loadout is saved exactly as entered: FRED will not pad the weapon pool "
-			"with weapons carried by the starting wings.");
-
-		// ships
-		{
-			json_t *item_props = json_object();
-			add_string_prop(item_props, "ship_class",
-				"Ship class name (must be flagged as a player ship). Mutually exclusive with class_variable.");
-			add_string_prop(item_props, "class_variable",
-				"Name of a string SEXP variable whose value is a ship class name. "
-				"Mutually exclusive with ship_class. Use list_sexp_variables to see variables.");
-			add_integer_prop(item_props, "count",
-				"Number of ships of this class available beyond those used by starting wings (0-9999). "
-				"Mutually exclusive with count_variable.");
-			add_string_prop(item_props, "count_variable",
-				"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
-			add_object_array_prop(props, "ships",
-				"Ship pool entries. REPLACES the team's entire ship pool (including variable-based "
-				"entries); use get_team_loadout first and include any entries you want to keep. "
-				"Pass [] to clear the pool.",
-				item_props);
-		}
-
-		// weapons
-		{
-			json_t *item_props = json_object();
-			add_string_prop(item_props, "weapon_class",
-				"Weapon class name (must be flagged as player-allowed). Mutually exclusive with class_variable.");
-			add_string_prop(item_props, "class_variable",
-				"Name of a string SEXP variable whose value is a weapon class name. "
-				"Mutually exclusive with weapon_class. Use list_sexp_variables to see variables.");
-			add_integer_prop(item_props, "count",
-				"Number of weapons of this class available beyond those carried by starting wings (0-9999). "
-				"Mutually exclusive with count_variable.");
-			add_string_prop(item_props, "count_variable",
-				"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
-			add_bool_prop(item_props, "required",
-				"If true, the player must take at least one of this weapon into the mission. "
-				"Only valid for a static weapon_class with a count of at least 1.");
-			add_object_array_prop(props, "weapons",
-				"Weapon pool entries. REPLACES the team's entire weapon pool (including variable-based "
-				"entries) and its required-weapon flags; use get_team_loadout first and include any "
-				"entries you want to keep. Pass [] to clear the pool.",
-				item_props);
-		}
-
-		register_tool(tools, "update_team_loadout",
-			"Update a team's loadout (Team Loadout editor). All parameters are optional; the ships "
-			"and weapons arrays each REPLACE that entire pool when provided, while omitted parameters "
-			"are left unchanged. Returns the team's full updated loadout.",
-			props);
-	}
-
-	// set_team_loadout_ship
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
-		add_string_prop(props, "ship_class",
-			"Ship class of the entry to create, update, or remove (must be flagged as a player ship). "
-			"Mutually exclusive with class_variable.");
-		add_string_prop(props, "class_variable",
-			"Name of a string SEXP variable identifying the entry (its value must be a ship class name). "
-			"Mutually exclusive with ship_class.");
-		add_integer_prop(props, "count",
-			"Number of ships of this class available beyond those used by starting wings (0-9999). "
-			"Required when creating a new entry (unless count_variable is given); optional on update. "
-			"Mutually exclusive with count_variable.");
-		add_string_prop(props, "count_variable",
-			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
-		add_bool_prop(props, "enable",
-			"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
-		register_tool(tools, "set_team_loadout_ship",
-			"Create, update, or remove a single ship pool entry in a team's loadout, keyed by "
-			"ship_class or class_variable. Existing entries are partially updated (only provided "
-			"fields change); enable=false removes the entry. Use update_team_loadout to replace "
-			"the whole pool at once. Returns the team's full updated loadout.",
-			props);
-	}
-
-	// set_team_loadout_weapon
-	{
-		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
-		add_string_prop(props, "weapon_class",
-			"Weapon class of the entry to create, update, or remove (must be flagged as player-allowed). "
-			"Mutually exclusive with class_variable.");
-		add_string_prop(props, "class_variable",
-			"Name of a string SEXP variable identifying the entry (its value must be a weapon class name). "
-			"Mutually exclusive with weapon_class.");
-		add_integer_prop(props, "count",
-			"Number of weapons of this class available beyond those carried by starting wings (0-9999). "
-			"Required when creating a new entry (unless count_variable is given); optional on update. "
-			"Mutually exclusive with count_variable.");
-		add_string_prop(props, "count_variable",
-			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
-		add_bool_prop(props, "required",
-			"If true, the player must take at least one of this weapon into the mission. "
-			"Only valid for a static weapon_class with a count of at least 1. "
-			"Removing the entry clears the flag.");
-		add_bool_prop(props, "enable",
-			"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
-		register_tool(tools, "set_team_loadout_weapon",
-			"Create, update, or remove a single weapon pool entry in a team's loadout, keyed by "
-			"weapon_class or class_variable. Existing entries are partially updated (only provided "
-			"fields change); enable=false removes the entry and clears its required flag. Use "
-			"update_team_loadout to replace the whole pool at once. Returns the team's full "
-			"updated loadout.",
-			props);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_loadout_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_update_team_loadout(json_t *tools)
 {
-	if (strcmp(tool_name, "get_team_loadout") == 0) {
-		handle_get_team_loadout(input_json, req);
-	} else if (strcmp(tool_name, "update_team_loadout") == 0) {
-		handle_update_team_loadout(input_json, req);
-	} else if (strcmp(tool_name, "set_team_loadout_ship") == 0) {
-		handle_set_team_loadout_ship(input_json, req);
-	} else if (strcmp(tool_name, "set_team_loadout_weapon") == 0) {
-		handle_set_team_loadout_weapon(input_json, req);
-	} else {
-		return false;
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
+	add_bool_prop(props, "do_not_validate",
+		"If true, the loadout is saved exactly as entered: FRED will not pad the weapon pool "
+		"with weapons carried by the starting wings.");
+
+	// ships
+	{
+		json_t *item_props = json_object();
+		add_string_prop(item_props, "ship_class",
+			"Ship class name (must be flagged as a player ship). Mutually exclusive with class_variable.");
+		add_string_prop(item_props, "class_variable",
+			"Name of a string SEXP variable whose value is a ship class name. "
+			"Mutually exclusive with ship_class. Use list_sexp_variables to see variables.");
+		add_integer_prop(item_props, "count",
+			"Number of ships of this class available beyond those used by starting wings (0-9999). "
+			"Mutually exclusive with count_variable.");
+		add_string_prop(item_props, "count_variable",
+			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+		add_object_array_prop(props, "ships",
+			"Ship pool entries. REPLACES the team's entire ship pool (including variable-based "
+			"entries); use get_team_loadout first and include any entries you want to keep. "
+			"Pass [] to clear the pool.",
+			item_props);
 	}
-	return true;
+
+	// weapons
+	{
+		json_t *item_props = json_object();
+		add_string_prop(item_props, "weapon_class",
+			"Weapon class name (must be flagged as player-allowed). Mutually exclusive with class_variable.");
+		add_string_prop(item_props, "class_variable",
+			"Name of a string SEXP variable whose value is a weapon class name. "
+			"Mutually exclusive with weapon_class. Use list_sexp_variables to see variables.");
+		add_integer_prop(item_props, "count",
+			"Number of weapons of this class available beyond those carried by starting wings (0-9999). "
+			"Mutually exclusive with count_variable.");
+		add_string_prop(item_props, "count_variable",
+			"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+		add_bool_prop(item_props, "required",
+			"If true, the player must take at least one of this weapon into the mission. "
+			"Only valid for a static weapon_class with a count of at least 1.");
+		add_object_array_prop(props, "weapons",
+			"Weapon pool entries. REPLACES the team's entire weapon pool (including variable-based "
+			"entries) and its required-weapon flags; use get_team_loadout first and include any "
+			"entries you want to keep. Pass [] to clear the pool.",
+			item_props);
+	}
+
+	register_tool(tools, "update_team_loadout",
+		"Update a team's loadout (Team Loadout editor). All parameters are optional; the ships "
+		"and weapons arrays each REPLACE that entire pool when provided, while omitted parameters "
+		"are left unchanged. Returns the team's full updated loadout.",
+		props);
 }
+
+static void register_set_team_loadout_ship(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
+	add_string_prop(props, "ship_class",
+		"Ship class of the entry to create, update, or remove (must be flagged as a player ship). "
+		"Mutually exclusive with class_variable.");
+	add_string_prop(props, "class_variable",
+		"Name of a string SEXP variable identifying the entry (its value must be a ship class name). "
+		"Mutually exclusive with ship_class.");
+	add_integer_prop(props, "count",
+		"Number of ships of this class available beyond those used by starting wings (0-9999). "
+		"Required when creating a new entry (unless count_variable is given); optional on update. "
+		"Mutually exclusive with count_variable.");
+	add_string_prop(props, "count_variable",
+		"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+	add_bool_prop(props, "enable",
+		"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
+	register_tool(tools, "set_team_loadout_ship",
+		"Create, update, or remove a single ship pool entry in a team's loadout, keyed by "
+		"ship_class or class_variable. Existing entries are partially updated (only provided "
+		"fields change); enable=false removes the entry. Use update_team_loadout to replace "
+		"the whole pool at once. Returns the team's full updated loadout.",
+		props);
+}
+
+static void register_set_team_loadout_weapon(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
+	add_string_prop(props, "weapon_class",
+		"Weapon class of the entry to create, update, or remove (must be flagged as player-allowed). "
+		"Mutually exclusive with class_variable.");
+	add_string_prop(props, "class_variable",
+		"Name of a string SEXP variable identifying the entry (its value must be a weapon class name). "
+		"Mutually exclusive with weapon_class.");
+	add_integer_prop(props, "count",
+		"Number of weapons of this class available beyond those carried by starting wings (0-9999). "
+		"Required when creating a new entry (unless count_variable is given); optional on update. "
+		"Mutually exclusive with count_variable.");
+	add_string_prop(props, "count_variable",
+		"Name of a number SEXP variable providing the count. Mutually exclusive with count.");
+	add_bool_prop(props, "required",
+		"If true, the player must take at least one of this weapon into the mission. "
+		"Only valid for a static weapon_class with a count of at least 1. "
+		"Removing the entry clears the flag.");
+	add_bool_prop(props, "enable",
+		"Pass false to remove the entry from the pool (other parameters are ignored). Defaults to true.");
+	register_tool(tools, "set_team_loadout_weapon",
+		"Create, update, or remove a single weapon pool entry in a team's loadout, keyed by "
+		"weapon_class or class_variable. Existing entries are partially updated (only provided "
+		"fields change); enable=false removes the entry and clears its required flag. Use "
+		"update_team_loadout to replace the whole pool at once. Returns the team's full "
+		"updated loadout.",
+		props);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_loadout_tool_defs[] = {
+	{ "get_team_loadout",        register_get_team_loadout,        nullptr, handle_get_team_loadout,        false },
+	{ "update_team_loadout",     register_update_team_loadout,     nullptr, handle_update_team_loadout,     false },
+	{ "set_team_loadout_ship",   register_set_team_loadout_ship,   nullptr, handle_set_team_loadout_ship,   false },
+	{ "set_team_loadout_weapon", register_set_team_loadout_weapon, nullptr, handle_set_team_loadout_weapon, false },
+};
+const size_t mcp_loadout_tool_def_count = sizeof(mcp_loadout_tool_defs) / sizeof(mcp_loadout_tool_defs[0]);

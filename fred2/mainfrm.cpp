@@ -785,10 +785,6 @@ LRESULT CMainFrame::OnMcpToolCall(WPARAM /*wParam*/, LPARAM lParam)
 		}
 		break;
 
-	case McpToolId::MISSION_TOOL:
-		mcp_handle_mission_tool(req->filepath, req->input_json, req);
-		break;
-
 	case McpToolId::REFERENCE_TOOL:
 		mcp_handle_reference_tool_on_main_thread(req->filepath, req->input_json, req);
 		break;

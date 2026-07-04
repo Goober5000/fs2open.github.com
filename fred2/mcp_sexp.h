@@ -2,21 +2,17 @@
 #define _MCP_SEXP_H
 
 #include <jansson.h>
+#include "mcp_tool_registry.h"
 #include "parse/sexp.h"   // for sexp_opr_t used by check_sexp_formula
 
 class McpErrorSink;
 struct McpToolRequest;
 
-// Append SEXP tool schemas (sexp_to_text, text_to_sexp, get_sexp_node,
-// walk_sexp_tree, detach/create/update_sexp_node, get_sexp_formula_info,
-// and the five sexp_variable tools) to the tools array.  Called from
-// mcp_register_mission_tools in mcp_mission_tools.cpp.
-void mcp_register_sexp_tools(json_t *tools);
-
-// Try to dispatch a SEXP tool call on the main thread.  Returns true if the
-// tool name matched and was handled; false to let the caller fall through.
-// Called from mcp_handle_mission_tool.
-bool mcp_handle_sexp_tool(const char *tool_name, json_t *input_json, McpToolRequest *req);
+// SEXP tools (sexp_to_text, text_to_sexp, get_sexp_node, walk_sexp_tree,
+// find_sexp_text, detach/attach/move/swap/create/update_sexp_node,
+// get_sexp_formula_info, and the five sexp_variable tools).
+extern const McpToolDef mcp_sexp_tool_defs[];
+extern const size_t mcp_sexp_tool_def_count;
 
 // Validate that `node` is a well-formed SEXP formula root of the expected
 // return type.  Shared with non-SEXP handlers (create/update_event,

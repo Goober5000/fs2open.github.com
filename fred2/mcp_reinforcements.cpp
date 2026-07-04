@@ -210,65 +210,59 @@ static void handle_set_reinforcement(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_reinforcement_tools(json_t *tools)
+static void register_list_reinforcements(json_t *tools)
 {
-	// list_reinforcements
 	register_tool(tools, "list_reinforcements",
 		"List all reinforcement entries in the mission. Each entry names a ship "
 		"(not in a wing) or a whole wing that can be summoned via the squad-message "
 		"menu. Returns each entry's name, uses, and arrival_delay.",
 		json_object());
+}
 
-	// get_reinforcement
+static void register_get_reinforcement(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_reinforcement",
 		"Get the reinforcement entry for a named ship or wing. "
 		"Returns name, uses, and arrival_delay.",
 		"name", "Name of the ship or wing whose reinforcement entry to retrieve");
-
-	// set_reinforcement
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name",
-			"Ship or wing name. A ship may only be a reinforcement if it is not "
-			"part of a wing (if it is, designate the wing instead). A wing may "
-			"only be a reinforcement if all its member ships share a team.");
-		add_bool_prop(props, "enable",
-			"Whether the named entity should be a reinforcement. Omit or set to "
-			"true to create or keep the entry (also applies optional uses / "
-			"arrival_delay). Set to false to remove the entry; uses and "
-			"arrival_delay are then ignored.");
-		add_integer_prop(props, "uses",
-			"Number of times this reinforcement can be summoned (1-99). "
-			"For wing reinforcements this becomes the wing's num_waves at mission "
-			"load. For ship reinforcements the field is stored but functionally "
-			"inert (a ship always arrives once). Omit to leave unchanged.");
-		add_integer_prop(props, "arrival_delay",
-			"Seconds between summoning and arrival (0-1000). Omit to leave unchanged.");
-		json_t *required = json_array();
-		json_array_append_new(required, json_string("name"));
-		register_tool(tools, "set_reinforcement",
-			"Create, update, or remove a reinforcement entry for a ship or wing. "
-			"Adding an entry also sets the ship/wing's reinforcement flag; "
-			"removing one clears it. Use this in preference to toggling the "
-			"reinforcement flag through update_ship / update_wing.",
-			props, required);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_reinforcement_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_set_reinforcement(json_t *tools)
 {
-	if (strcmp(tool_name, "list_reinforcements") == 0) {
-		handle_list_reinforcements(input_json, req);
-	} else if (strcmp(tool_name, "get_reinforcement") == 0) {
-		handle_get_reinforcement(input_json, req);
-	} else if (strcmp(tool_name, "set_reinforcement") == 0) {
-		handle_set_reinforcement(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name",
+		"Ship or wing name. A ship may only be a reinforcement if it is not "
+		"part of a wing (if it is, designate the wing instead). A wing may "
+		"only be a reinforcement if all its member ships share a team.");
+	add_bool_prop(props, "enable",
+		"Whether the named entity should be a reinforcement. Omit or set to "
+		"true to create or keep the entry (also applies optional uses / "
+		"arrival_delay). Set to false to remove the entry; uses and "
+		"arrival_delay are then ignored.");
+	add_integer_prop(props, "uses",
+		"Number of times this reinforcement can be summoned (1-99). "
+		"For wing reinforcements this becomes the wing's num_waves at mission "
+		"load. For ship reinforcements the field is stored but functionally "
+		"inert (a ship always arrives once). Omit to leave unchanged.");
+	add_integer_prop(props, "arrival_delay",
+		"Seconds between summoning and arrival (0-1000). Omit to leave unchanged.");
+	json_t *required = json_array();
+	json_array_append_new(required, json_string("name"));
+	register_tool(tools, "set_reinforcement",
+		"Create, update, or remove a reinforcement entry for a ship or wing. "
+		"Adding an entry also sets the ship/wing's reinforcement flag; "
+		"removing one clears it. Use this in preference to toggling the "
+		"reinforcement flag through update_ship / update_wing.",
+		props, required);
 }
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_reinforcement_tool_defs[] = {
+	{ "list_reinforcements", register_list_reinforcements, nullptr, handle_list_reinforcements, false },
+	{ "get_reinforcement",   register_get_reinforcement,   nullptr, handle_get_reinforcement,   false },
+	{ "set_reinforcement",   register_set_reinforcement,   nullptr, handle_set_reinforcement,   false },
+};
+const size_t mcp_reinforcement_tool_def_count = sizeof(mcp_reinforcement_tool_defs) / sizeof(mcp_reinforcement_tool_defs[0]);

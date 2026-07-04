@@ -736,223 +736,200 @@ static void handle_swap_waypoints(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_waypoint_tools(json_t *tools)
+static void register_list_waypoint_lists(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// Waypoint list tools
-	// -----------------------------------------------------------------------
-
-	// list_waypoint_lists
 	register_tool(tools, "list_waypoint_lists",
 		"List all waypoint lists in the mission. Returns each list's name, "
 		"index, and waypoint count.",
 		json_object());
+}
 
-	// get_waypoint_list
+static void register_get_waypoint_list(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_waypoint_list",
 		"Get full details of a waypoint list by name, including all "
 		"waypoint positions.",
 		"name", "Name of the waypoint list to retrieve");
-
-	// create_waypoint_list
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Unique name for the waypoint list");
-		add_vec3d_array_prop(props, "points",
-			"Array of 3D positions ({x, y, z} objects) for the waypoints in this list. "
-			"At least one point is required.");
-		add_integer_prop(props, "index",
-			"Position to insert the waypoint list (1 = first). If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("points"));
-		register_tool(tools, "create_waypoint_list",
-			"Create a new waypoint list with the given positions. Waypoint lists define "
-			"flight paths that ships can follow via ai-waypoints SEXPs.",
-			props, req);
-	}
-
-	// update_waypoint_list
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the waypoint list to update");
-		add_string_prop(props, "new_name", "New name for the waypoint list");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_waypoint_list",
-			"Rename a waypoint list. SEXP and AI goal references are updated "
-			"automatically, including individual waypoint names (e.g. Path:1 becomes NewPath:1).",
-			props, req);
-	}
-
-	// delete_waypoint_list
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the waypoint list to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the waypoint list or its waypoints are referenced in SEXPs "
-			"(references will be invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_waypoint_list",
-			"Delete a waypoint list and all its waypoints from the mission. Fails if the list "
-			"or any of its waypoints are referenced in SEXPs unless force=true.",
-			props, req);
-	}
-
-	// move_waypoint_list
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"1-based index of the waypoint list to move");
-		add_integer_prop(props, "to_index",
-			"1-based target index");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_waypoint_list",
-			"Move a waypoint list from one position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_waypoint_lists
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first waypoint list");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second waypoint list");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_waypoint_lists",
-			"Swap two waypoint lists at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// -----------------------------------------------------------------------
-	// Individual waypoint tools
-	// -----------------------------------------------------------------------
-
-	// create_waypoint
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "list", "Name of the waypoint list to add to");
-		add_vec3d_prop(props, "position", "World position of the new waypoint");
-		add_integer_prop(props, "index",
-			"1-based position to insert within the list. If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("list"));
-		json_array_append_new(req, json_string("position"));
-		register_tool(tools, "create_waypoint",
-			"Add a new waypoint to an existing waypoint list at a given position.",
-			props, req);
-	}
-
-	// update_waypoint
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "list", "Name of the waypoint list");
-		add_integer_prop(props, "index", "1-based index of the waypoint to update");
-		add_vec3d_prop(props, "position", "New world position for the waypoint");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("list"));
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "update_waypoint",
-			"Update the position of an individual waypoint. Only specified fields "
-			"are changed; omitted fields are left unchanged.",
-			props, req);
-	}
-
-	// delete_waypoint
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "list", "Name of the waypoint list");
-		add_integer_prop(props, "index", "1-based index of the waypoint to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the waypoint is referenced in SEXPs "
-			"(references will be invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("list"));
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "delete_waypoint",
-			"Delete a waypoint from a list. If this is the last waypoint, the entire "
-			"list is removed. Fails if the waypoint is referenced in SEXPs unless force=true. "
-			"SEXP references for subsequent waypoints are automatically renumbered.",
-			props, req);
-	}
-
-	// move_waypoint
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "list", "Name of the waypoint list");
-		add_integer_prop(props, "from_index",
-			"1-based index of the waypoint to move");
-		add_integer_prop(props, "to_index",
-			"1-based target index");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("list"));
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_waypoint",
-			"Move a waypoint from one position to another within the same list. "
-			"SEXP references are updated to follow the waypoints. Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_waypoints
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "list", "Name of the waypoint list");
-		add_integer_prop(props, "index_a",
-			"1-based index of the first waypoint");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second waypoint");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("list"));
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_waypoints",
-			"Swap two waypoints within the same list. "
-			"SEXP references are updated to follow the waypoints. Indices are 1-based.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_waypoint_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_waypoint_list(json_t *tools)
 {
-	if (strcmp(tool_name, "list_waypoint_lists") == 0) {
-		handle_list_waypoint_lists(input_json, req);
-	} else if (strcmp(tool_name, "get_waypoint_list") == 0) {
-		handle_get_waypoint_list(input_json, req);
-	} else if (strcmp(tool_name, "create_waypoint_list") == 0) {
-		handle_create_waypoint_list(input_json, req);
-	} else if (strcmp(tool_name, "update_waypoint_list") == 0) {
-		handle_update_waypoint_list(input_json, req);
-	} else if (strcmp(tool_name, "delete_waypoint_list") == 0) {
-		handle_delete_waypoint_list(input_json, req);
-	} else if (strcmp(tool_name, "move_waypoint_list") == 0) {
-		handle_move_waypoint_list(input_json, req);
-	} else if (strcmp(tool_name, "swap_waypoint_lists") == 0) {
-		handle_swap_waypoint_lists(input_json, req);
-	} else if (strcmp(tool_name, "create_waypoint") == 0) {
-		handle_create_waypoint(input_json, req);
-	} else if (strcmp(tool_name, "update_waypoint") == 0) {
-		handle_update_waypoint(input_json, req);
-	} else if (strcmp(tool_name, "delete_waypoint") == 0) {
-		handle_delete_waypoint(input_json, req);
-	} else if (strcmp(tool_name, "move_waypoint") == 0) {
-		handle_move_waypoint(input_json, req);
-	} else if (strcmp(tool_name, "swap_waypoints") == 0) {
-		handle_swap_waypoints(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Unique name for the waypoint list");
+	add_vec3d_array_prop(props, "points",
+		"Array of 3D positions ({x, y, z} objects) for the waypoints in this list. "
+		"At least one point is required.");
+	add_integer_prop(props, "index",
+		"Position to insert the waypoint list (1 = first). If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("points"));
+	register_tool(tools, "create_waypoint_list",
+		"Create a new waypoint list with the given positions. Waypoint lists define "
+		"flight paths that ships can follow via ai-waypoints SEXPs.",
+		props, req);
 }
+
+static void register_update_waypoint_list(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the waypoint list to update");
+	add_string_prop(props, "new_name", "New name for the waypoint list");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_waypoint_list",
+		"Rename a waypoint list. SEXP and AI goal references are updated "
+		"automatically, including individual waypoint names (e.g. Path:1 becomes NewPath:1).",
+		props, req);
+}
+
+static void register_delete_waypoint_list(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the waypoint list to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the waypoint list or its waypoints are referenced in SEXPs "
+		"(references will be invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_waypoint_list",
+		"Delete a waypoint list and all its waypoints from the mission. Fails if the list "
+		"or any of its waypoints are referenced in SEXPs unless force=true.",
+		props, req);
+}
+
+static void register_move_waypoint_list(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"1-based index of the waypoint list to move");
+	add_integer_prop(props, "to_index",
+		"1-based target index");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_waypoint_list",
+		"Move a waypoint list from one position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_waypoint_lists(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first waypoint list");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second waypoint list");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_waypoint_lists",
+		"Swap two waypoint lists at the given positions. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+static void register_create_waypoint(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "list", "Name of the waypoint list to add to");
+	add_vec3d_prop(props, "position", "World position of the new waypoint");
+	add_integer_prop(props, "index",
+		"1-based position to insert within the list. If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("list"));
+	json_array_append_new(req, json_string("position"));
+	register_tool(tools, "create_waypoint",
+		"Add a new waypoint to an existing waypoint list at a given position.",
+		props, req);
+}
+
+static void register_update_waypoint(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "list", "Name of the waypoint list");
+	add_integer_prop(props, "index", "1-based index of the waypoint to update");
+	add_vec3d_prop(props, "position", "New world position for the waypoint");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("list"));
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "update_waypoint",
+		"Update the position of an individual waypoint. Only specified fields "
+		"are changed; omitted fields are left unchanged.",
+		props, req);
+}
+
+static void register_delete_waypoint(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "list", "Name of the waypoint list");
+	add_integer_prop(props, "index", "1-based index of the waypoint to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the waypoint is referenced in SEXPs "
+		"(references will be invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("list"));
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "delete_waypoint",
+		"Delete a waypoint from a list. If this is the last waypoint, the entire "
+		"list is removed. Fails if the waypoint is referenced in SEXPs unless force=true. "
+		"SEXP references for subsequent waypoints are automatically renumbered.",
+		props, req);
+}
+
+static void register_move_waypoint(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "list", "Name of the waypoint list");
+	add_integer_prop(props, "from_index",
+		"1-based index of the waypoint to move");
+	add_integer_prop(props, "to_index",
+		"1-based target index");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("list"));
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_waypoint",
+		"Move a waypoint from one position to another within the same list. "
+		"SEXP references are updated to follow the waypoints. Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_waypoints(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "list", "Name of the waypoint list");
+	add_integer_prop(props, "index_a",
+		"1-based index of the first waypoint");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second waypoint");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("list"));
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_waypoints",
+		"Swap two waypoints within the same list. "
+		"SEXP references are updated to follow the waypoints. Indices are 1-based.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_waypoint_tool_defs[] = {
+	{ "list_waypoint_lists",  register_list_waypoint_lists,  nullptr, handle_list_waypoint_lists,  false },
+	{ "get_waypoint_list",    register_get_waypoint_list,    nullptr, handle_get_waypoint_list,    false },
+	{ "create_waypoint_list", register_create_waypoint_list, nullptr, handle_create_waypoint_list, false },
+	{ "update_waypoint_list", register_update_waypoint_list, nullptr, handle_update_waypoint_list, false },
+	{ "delete_waypoint_list", register_delete_waypoint_list, nullptr, handle_delete_waypoint_list, false },
+	{ "move_waypoint_list",   register_move_waypoint_list,   nullptr, handle_move_waypoint_list,   false },
+	{ "swap_waypoint_lists",  register_swap_waypoint_lists,  nullptr, handle_swap_waypoint_lists,  false },
+	{ "create_waypoint",      register_create_waypoint,      nullptr, handle_create_waypoint,      false },
+	{ "update_waypoint",      register_update_waypoint,      nullptr, handle_update_waypoint,      false },
+	{ "delete_waypoint",      register_delete_waypoint,      nullptr, handle_delete_waypoint,      false },
+	{ "move_waypoint",        register_move_waypoint,        nullptr, handle_move_waypoint,        false },
+	{ "swap_waypoints",       register_swap_waypoints,       nullptr, handle_swap_waypoints,       false },
+};
+const size_t mcp_waypoint_tool_def_count = sizeof(mcp_waypoint_tool_defs) / sizeof(mcp_waypoint_tool_defs[0]);

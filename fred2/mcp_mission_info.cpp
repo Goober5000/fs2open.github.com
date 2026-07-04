@@ -714,174 +714,162 @@ static void handle_update_custom_wing_names(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
-// Registration
+// Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_mission_info_tools(json_t *tools)
+static void register_get_mission_info(json_t *tools)
 {
-	// get_mission_info
 	register_tool(tools, "get_mission_info",
 		"Returns metadata about the currently loaded mission (filename, title, author, notes, "
 		"game_type, mission flags, support ship settings, command persona, sound environment, "
 		"custom data/strings, AI profile, and other Mission Specs fields).",
 		nullptr);
+}
 
-	// update_mission_info
+static void register_update_mission_info(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "title", "Mission title");
+	add_string_prop(props, "author", "Mission author/designer");
+	add_string_prop(props, "notes", "Mission design notes (internal; not shown to player)");
+	add_string_prop(props, "mission_desc", "Mission description shown to the player");
+	add_string_enum_prop(props, "game_type",
+		"Mission game type",
+		{ "single-player", "single-player training",
+		  "multiplayer co-op", "multiplayer team-versus-team", "multiplayer dogfight" });
+	add_integer_prop(props, "respawns", "Number of respawns allowed (multiplayer, 0-99)");
+	add_integer_prop(props, "max_respawn_delay", "Max respawn delay in seconds (-1 to 999; -1 = no limit)");
+	add_integer_prop(props, "player_entry_delay",
+		"Seconds the mission runs before the player enters it (0-30). Shown in FRED's team loadout editor.");
+	add_integer_prop(props, "contrail_threshold",
+		"Speed threshold at which ships produce contrails (0-1000); -1 to restore the default (45)");
+	add_bool_prop(props, "all_teams_at_war", "All teams target each other");
+	add_string_prop(props, "command_sender", "Name shown as the sender of #Command messages");
+	add_string_prop(props, "command_persona",
+		"Persona name used for built-in command messages (empty string clears). Use list_personas to see available names.");
+	add_string_prop(props, "squadron_name", "Reassigned squadron name (empty string clears)");
+	add_string_prop(props, "squadron_logo_filename", "Reassigned squadron logo filename (empty string clears)");
+	add_string_prop(props, "loading_screen_640", "Loading screen filename for 640x480");
+	add_string_prop(props, "loading_screen_1024", "Loading screen filename for 1024x768 and higher");
+	add_string_prop(props, "ai_profile",
+		"AI profile name. Use list_ai_profiles to see available names.");
+
+	add_bool_map_prop(props, "mission_flags",
+		"Partial update of mission flags. Keys are flag names from list_mission_flags; "
+		"values are booleans. Only provided flags are modified.");
+
+	// support_ships: nested object with known shape
 	{
-		json_t *props = json_object();
-		add_string_prop(props, "title", "Mission title");
-		add_string_prop(props, "author", "Mission author/designer");
-		add_string_prop(props, "notes", "Mission design notes (internal; not shown to player)");
-		add_string_prop(props, "mission_desc", "Mission description shown to the player");
-		add_string_enum_prop(props, "game_type",
-			"Mission game type",
-			{ "single-player", "single-player training",
-			  "multiplayer co-op", "multiplayer team-versus-team", "multiplayer dogfight" });
-		add_integer_prop(props, "respawns", "Number of respawns allowed (multiplayer, 0-99)");
-		add_integer_prop(props, "max_respawn_delay", "Max respawn delay in seconds (-1 to 999; -1 = no limit)");
-		add_integer_prop(props, "player_entry_delay",
-			"Seconds the mission runs before the player enters it (0-30). Shown in FRED's team loadout editor.");
-		add_integer_prop(props, "contrail_threshold",
-			"Speed threshold at which ships produce contrails (0-1000); -1 to restore the default (45)");
-		add_bool_prop(props, "all_teams_at_war", "All teams target each other");
-		add_string_prop(props, "command_sender", "Name shown as the sender of #Command messages");
-		add_string_prop(props, "command_persona",
-			"Persona name used for built-in command messages (empty string clears). Use list_personas to see available names.");
-		add_string_prop(props, "squadron_name", "Reassigned squadron name (empty string clears)");
-		add_string_prop(props, "squadron_logo_filename", "Reassigned squadron logo filename (empty string clears)");
-		add_string_prop(props, "loading_screen_640", "Loading screen filename for 640x480");
-		add_string_prop(props, "loading_screen_1024", "Loading screen filename for 1024x768 and higher");
-		add_string_prop(props, "ai_profile",
-			"AI profile name. Use list_ai_profiles to see available names.");
-
-		add_bool_map_prop(props, "mission_flags",
-			"Partial update of mission flags. Keys are flag names from list_mission_flags; "
-			"values are booleans. Only provided flags are modified.");
-
-		// support_ships: nested object with known shape
-		{
-			json_t *support_props = json_object();
-			add_bool_prop(support_props, "disallowed", "If true, support ships are disallowed");
-			add_number_prop(support_props, "max_hull_repair", "Maximum hull repair percentage (0-100)");
-			add_number_prop(support_props, "max_subsys_repair", "Maximum subsystem repair percentage (0-100)");
-			add_object_prop(props, "support_ships", "Support ship settings (partial update).", support_props);
-		}
-
-		// sound_environment: object or null
-		{
-			json_t *env_props = json_object();
-			add_string_prop(env_props, "preset",
-				"Preset name from list_sound_environment_presets (empty string disables)");
-			add_number_prop(env_props, "volume", "Environment volume");
-			add_number_prop(env_props, "damping", "Environment damping");
-			add_number_prop(env_props, "decay", "Environment decay");
-			json_t *env_schema = json_object();
-			json_t *type_arr = json_array();
-			json_array_append_new(type_arr, json_string("object"));
-			json_array_append_new(type_arr, json_string("null"));
-			json_object_set_new(env_schema, "type", type_arr);
-			json_object_set_new(env_schema, "description",
-				json_string("Sound environment (partial update). Pass null to disable."));
-			json_object_set_new(env_schema, "properties", env_props);
-			json_object_set_new(props, "sound_environment", env_schema);
-		}
-
-		// custom_data: free-form object of string → string (replacement)
-		{
-			json_t *cd_schema = json_object();
-			json_object_set_new(cd_schema, "type", json_string("object"));
-			json_object_set_new(cd_schema, "description",
-				json_string("Mission custom_data as a key-value map. REPLACES the existing map; pass {} to clear."));
-			json_t *ap = json_object();
-			json_object_set_new(ap, "type", json_string("string"));
-			json_object_set_new(cd_schema, "additionalProperties", ap);
-			json_object_set_new(props, "custom_data", cd_schema);
-		}
-
-		// custom_strings: array of {name, value, text} (replacement)
-		{
-			json_t *elem_props = json_object();
-			add_string_prop(elem_props, "name", "Custom string name");
-			add_string_prop(elem_props, "value", "Custom string value");
-			add_string_prop(elem_props, "text", "Custom string text");
-			json_t *elem_req = json_array();
-			json_array_append_new(elem_req, json_string("name"));
-			json_array_append_new(elem_req, json_string("value"));
-			json_array_append_new(elem_req, json_string("text"));
-			add_object_array_prop(props, "custom_strings",
-				"Mission custom_strings. REPLACES the existing vector; pass [] to clear.",
-				elem_props, elem_req);
-		}
-
-		register_tool(tools, "update_mission_info",
-			"Update fields on the currently loaded mission (Mission Specs). All parameters "
-			"are optional; only provided fields are changed. Returns the full updated mission info. "
-			"Music fields are NOT included here -- they will belong to a separate tool.",
-			props);
+		json_t *support_props = json_object();
+		add_bool_prop(support_props, "disallowed", "If true, support ships are disallowed");
+		add_number_prop(support_props, "max_hull_repair", "Maximum hull repair percentage (0-100)");
+		add_number_prop(support_props, "max_subsys_repair", "Maximum subsystem repair percentage (0-100)");
+		add_object_prop(props, "support_ships", "Support ship settings (partial update).", support_props);
 	}
 
-	// get_custom_wing_names
+	// sound_environment: object or null
+	{
+		json_t *env_props = json_object();
+		add_string_prop(env_props, "preset",
+			"Preset name from list_sound_environment_presets (empty string disables)");
+		add_number_prop(env_props, "volume", "Environment volume");
+		add_number_prop(env_props, "damping", "Environment damping");
+		add_number_prop(env_props, "decay", "Environment decay");
+		json_t *env_schema = json_object();
+		json_t *type_arr = json_array();
+		json_array_append_new(type_arr, json_string("object"));
+		json_array_append_new(type_arr, json_string("null"));
+		json_object_set_new(env_schema, "type", type_arr);
+		json_object_set_new(env_schema, "description",
+			json_string("Sound environment (partial update). Pass null to disable."));
+		json_object_set_new(env_schema, "properties", env_props);
+		json_object_set_new(props, "sound_environment", env_schema);
+	}
+
+	// custom_data: free-form object of string → string (replacement)
+	{
+		json_t *cd_schema = json_object();
+		json_object_set_new(cd_schema, "type", json_string("object"));
+		json_object_set_new(cd_schema, "description",
+			json_string("Mission custom_data as a key-value map. REPLACES the existing map; pass {} to clear."));
+		json_t *ap = json_object();
+		json_object_set_new(ap, "type", json_string("string"));
+		json_object_set_new(cd_schema, "additionalProperties", ap);
+		json_object_set_new(props, "custom_data", cd_schema);
+	}
+
+	// custom_strings: array of {name, value, text} (replacement)
+	{
+		json_t *elem_props = json_object();
+		add_string_prop(elem_props, "name", "Custom string name");
+		add_string_prop(elem_props, "value", "Custom string value");
+		add_string_prop(elem_props, "text", "Custom string text");
+		json_t *elem_req = json_array();
+		json_array_append_new(elem_req, json_string("name"));
+		json_array_append_new(elem_req, json_string("value"));
+		json_array_append_new(elem_req, json_string("text"));
+		add_object_array_prop(props, "custom_strings",
+			"Mission custom_strings. REPLACES the existing vector; pass [] to clear.",
+			elem_props, elem_req);
+	}
+
+	register_tool(tools, "update_mission_info",
+		"Update fields on the currently loaded mission (Mission Specs). All parameters "
+		"are optional; only provided fields are changed. Returns the full updated mission info. "
+		"Music fields are NOT included here -- they will belong to a separate tool.",
+		props);
+}
+
+static void register_get_custom_wing_names(json_t *tools)
+{
 	register_tool(tools, "get_custom_wing_names",
 		"Returns the mission's custom wing-name tables: starting_wings (" SCP_TOKEN_TO_STR(MAX_STARTING_WINGS) "), "
 		"squadron_wings (" SCP_TOKEN_TO_STR(MAX_SQUADRON_WINGS) "), tvt_wings (" SCP_TOKEN_TO_STR(MAX_TVT_WINGS) "). "
 		"These name the wings that play special engine roles (wings accessible in the starting loadout, wings shown on "
 		"the squadron HUD gauge, and team-vs-team starting wings).",
 		nullptr);
-
-	// update_custom_wing_names
-	{
-		json_t *props = json_object();
-
-		auto add_fixed_string_array = [&](const char *name, int len, const char *desc) {
-			json_t *items = json_object();
-			json_object_set_new(items, "type", json_string("string"));
-			json_t *schema = json_object();
-			json_object_set_new(schema, "type", json_string("array"));
-			json_object_set_new(schema, "description", json_string(desc));
-			json_object_set_new(schema, "items", items);
-			json_object_set_new(schema, "minItems", json_integer(len));
-			json_object_set_new(schema, "maxItems", json_integer(len));
-			json_object_set(props, name, schema);
-			json_decref(schema);
-		};
-
-		add_fixed_string_array("starting_wings", MAX_STARTING_WINGS,
-			"Player-starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_STARTING_WINGS) " strings). REPLACES the current array.");
-		add_fixed_string_array("squadron_wings", MAX_SQUADRON_WINGS,
-			"Squadron-message HUD wing names (exactly " SCP_TOKEN_TO_STR(MAX_SQUADRON_WINGS) " strings). REPLACES the current array.");
-		add_fixed_string_array("tvt_wings", MAX_TVT_WINGS,
-			"Team-versus-team starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_TVT_WINGS) " strings). REPLACES the current array.");
-
-		register_tool(tools, "update_custom_wing_names",
-			"Replace one or more of the mission's custom wing-name tables. All parameters "
-			"are optional; only provided tables are changed. Constraints: first starting wing "
-			"must equal first team-versus-team wing; no case-insensitive duplicates within a table; each "
-			"name is at most " SCP_TOKEN_TO_STR(NAME_LENGTH_1) " characters. Returns the full updated tables.",
-			props);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_mission_info_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_update_custom_wing_names(json_t *tools)
 {
-	if (strcmp(tool_name, "get_mission_info") == 0) {
-		handle_get_mission_info(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "update_mission_info") == 0) {
-		handle_update_mission_info(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "get_custom_wing_names") == 0) {
-		handle_get_custom_wing_names(input_json, req);
-		return true;
-	}
-	if (strcmp(tool_name, "update_custom_wing_names") == 0) {
-		handle_update_custom_wing_names(input_json, req);
-		return true;
-	}
-	return false;
+	json_t *props = json_object();
+
+	auto add_fixed_string_array = [&](const char *name, int len, const char *desc) {
+		json_t *items = json_object();
+		json_object_set_new(items, "type", json_string("string"));
+		json_t *schema = json_object();
+		json_object_set_new(schema, "type", json_string("array"));
+		json_object_set_new(schema, "description", json_string(desc));
+		json_object_set_new(schema, "items", items);
+		json_object_set_new(schema, "minItems", json_integer(len));
+		json_object_set_new(schema, "maxItems", json_integer(len));
+		json_object_set(props, name, schema);
+		json_decref(schema);
+	};
+
+	add_fixed_string_array("starting_wings", MAX_STARTING_WINGS,
+		"Player-starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_STARTING_WINGS) " strings). REPLACES the current array.");
+	add_fixed_string_array("squadron_wings", MAX_SQUADRON_WINGS,
+		"Squadron-message HUD wing names (exactly " SCP_TOKEN_TO_STR(MAX_SQUADRON_WINGS) " strings). REPLACES the current array.");
+	add_fixed_string_array("tvt_wings", MAX_TVT_WINGS,
+		"Team-versus-team starting wing names (exactly " SCP_TOKEN_TO_STR(MAX_TVT_WINGS) " strings). REPLACES the current array.");
+
+	register_tool(tools, "update_custom_wing_names",
+		"Replace one or more of the mission's custom wing-name tables. All parameters "
+		"are optional; only provided tables are changed. Constraints: first starting wing "
+		"must equal first team-versus-team wing; no case-insensitive duplicates within a table; each "
+		"name is at most " SCP_TOKEN_TO_STR(NAME_LENGTH_1) " characters. Returns the full updated tables.",
+		props);
 }
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_mission_info_tool_defs[] = {
+	{ "get_mission_info",         register_get_mission_info,         nullptr, handle_get_mission_info,         false },
+	{ "update_mission_info",      register_update_mission_info,      nullptr, handle_update_mission_info,      false },
+	{ "get_custom_wing_names",    register_get_custom_wing_names,    nullptr, handle_get_custom_wing_names,    false },
+	{ "update_custom_wing_names", register_update_custom_wing_names, nullptr, handle_update_custom_wing_names, false },
+};
+const size_t mcp_mission_info_tool_def_count = sizeof(mcp_mission_info_tool_defs) / sizeof(mcp_mission_info_tool_defs[0]);

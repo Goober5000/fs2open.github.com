@@ -327,146 +327,132 @@ static void handle_swap_jump_nodes(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_jump_node_tools(json_t *tools)
+static void register_list_jump_nodes(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// Jump node tools
-	// -----------------------------------------------------------------------
-
-	// list_jump_nodes
 	register_tool(tools, "list_jump_nodes",
 		"List all jump nodes in the mission. Returns each node's name, "
 		"index, and position.",
 		json_object());
+}
 
-	// get_jump_node
+static void register_get_jump_node(json_t *tools)
+{
 	register_tool_with_required_string(tools, "get_jump_node",
 		"Get full details of a jump node by name, including position, "
 		"display name, color, model file, hidden state, and radius.",
 		"name", "Name of the jump node to retrieve");
-
-	// create_jump_node
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Unique name for the jump node");
-		add_vec3d_prop(props, "position", "World position of the jump node");
-		add_string_prop(props, "display_name",
-			"Display name shown to the player (if different from name)");
-		add_color_prop(props, "color",
-			"Custom RGBA display color. If omitted, defaults to green (0,255,0,255).");
-		add_string_prop(props, "model_filename",
-			"Model filename (POF). Defaults to \"" JN_DEFAULT_MODEL "\".");
-		add_bool_prop(props, "show_polys",
-			"If true, render as solid model instead of wireframe. Default false.");
-		add_bool_prop(props, "hidden",
-			"If true, the jump node is hidden from rendering. Default false.");
-		add_integer_prop(props, "index",
-			"Position to insert the jump node (1 = first). If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("position"));
-		register_tool(tools, "create_jump_node",
-			"Create a new jump node at a given position. Jump nodes are subspace "
-			"navigation points that ships can depart through.",
-			props, req);
-	}
-
-	// update_jump_node
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the jump node to update");
-		add_string_prop(props, "new_name", "New name for the jump node");
-		add_vec3d_prop(props, "position", "New world position");
-		add_string_prop(props, "display_name",
-			"New display name. Pass \"<none>\" or a string matching the jump node's "
-			"regular name to clear; a blank string is a valid display name and will "
-			"be stored as-is.");
-		add_color_prop(props, "color", "New RGBA display color");
-		add_string_prop(props, "model_filename",
-			"New model filename (POF)");
-		add_bool_prop(props, "show_polys",
-			"If true, render as solid model instead of wireframe");
-		add_bool_prop(props, "hidden",
-			"If true, the jump node is hidden from rendering");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "update_jump_node",
-			"Update properties of an existing jump node. Only specified fields "
-			"are changed; omitted fields are left unchanged. Renaming updates "
-			"SEXP references automatically.",
-			props, req);
-	}
-
-	// delete_jump_node
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the jump node to delete");
-		add_bool_prop(props, "force",
-			"If true, delete even if the jump node is referenced in SEXPs "
-			"(references will be invalidated). Default false.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		register_tool(tools, "delete_jump_node",
-			"Delete a jump node from the mission. Fails if the node is "
-			"referenced in SEXPs unless force=true.",
-			props, req);
-	}
-
-	// move_jump_node
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"1-based index of the jump node to move");
-		add_integer_prop(props, "to_index",
-			"1-based target index");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_jump_node",
-			"Move a jump node from one list position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_jump_nodes
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first jump node");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second jump node");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_jump_nodes",
-			"Swap two jump nodes at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_jump_node_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_create_jump_node(json_t *tools)
 {
-	if (strcmp(tool_name, "list_jump_nodes") == 0) {
-		handle_list_jump_nodes(input_json, req);
-	} else if (strcmp(tool_name, "get_jump_node") == 0) {
-		handle_get_jump_node(input_json, req);
-	} else if (strcmp(tool_name, "create_jump_node") == 0) {
-		handle_create_jump_node(input_json, req);
-	} else if (strcmp(tool_name, "update_jump_node") == 0) {
-		handle_update_jump_node(input_json, req);
-	} else if (strcmp(tool_name, "delete_jump_node") == 0) {
-		handle_delete_jump_node(input_json, req);
-	} else if (strcmp(tool_name, "move_jump_node") == 0) {
-		handle_move_jump_node(input_json, req);
-	} else if (strcmp(tool_name, "swap_jump_nodes") == 0) {
-		handle_swap_jump_nodes(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Unique name for the jump node");
+	add_vec3d_prop(props, "position", "World position of the jump node");
+	add_string_prop(props, "display_name",
+		"Display name shown to the player (if different from name)");
+	add_color_prop(props, "color",
+		"Custom RGBA display color. If omitted, defaults to green (0,255,0,255).");
+	add_string_prop(props, "model_filename",
+		"Model filename (POF). Defaults to \"" JN_DEFAULT_MODEL "\".");
+	add_bool_prop(props, "show_polys",
+		"If true, render as solid model instead of wireframe. Default false.");
+	add_bool_prop(props, "hidden",
+		"If true, the jump node is hidden from rendering. Default false.");
+	add_integer_prop(props, "index",
+		"Position to insert the jump node (1 = first). If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("position"));
+	register_tool(tools, "create_jump_node",
+		"Create a new jump node at a given position. Jump nodes are subspace "
+		"navigation points that ships can depart through.",
+		props, req);
 }
+
+static void register_update_jump_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the jump node to update");
+	add_string_prop(props, "new_name", "New name for the jump node");
+	add_vec3d_prop(props, "position", "New world position");
+	add_string_prop(props, "display_name",
+		"New display name. Pass \"<none>\" or a string matching the jump node's "
+		"regular name to clear; a blank string is a valid display name and will "
+		"be stored as-is.");
+	add_color_prop(props, "color", "New RGBA display color");
+	add_string_prop(props, "model_filename",
+		"New model filename (POF)");
+	add_bool_prop(props, "show_polys",
+		"If true, render as solid model instead of wireframe");
+	add_bool_prop(props, "hidden",
+		"If true, the jump node is hidden from rendering");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "update_jump_node",
+		"Update properties of an existing jump node. Only specified fields "
+		"are changed; omitted fields are left unchanged. Renaming updates "
+		"SEXP references automatically.",
+		props, req);
+}
+
+static void register_delete_jump_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the jump node to delete");
+	add_bool_prop(props, "force",
+		"If true, delete even if the jump node is referenced in SEXPs "
+		"(references will be invalidated). Default false.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	register_tool(tools, "delete_jump_node",
+		"Delete a jump node from the mission. Fails if the node is "
+		"referenced in SEXPs unless force=true.",
+		props, req);
+}
+
+static void register_move_jump_node(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"1-based index of the jump node to move");
+	add_integer_prop(props, "to_index",
+		"1-based target index");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_jump_node",
+		"Move a jump node from one list position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_jump_nodes(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first jump node");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second jump node");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_jump_nodes",
+		"Swap two jump nodes at the given positions. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_jump_node_tool_defs[] = {
+	{ "list_jump_nodes",  register_list_jump_nodes,  nullptr, handle_list_jump_nodes,  false },
+	{ "get_jump_node",    register_get_jump_node,    nullptr, handle_get_jump_node,    false },
+	{ "create_jump_node", register_create_jump_node, nullptr, handle_create_jump_node, false },
+	{ "update_jump_node", register_update_jump_node, nullptr, handle_update_jump_node, false },
+	{ "delete_jump_node", register_delete_jump_node, nullptr, handle_delete_jump_node, false },
+	{ "move_jump_node",   register_move_jump_node,   nullptr, handle_move_jump_node,   false },
+	{ "swap_jump_nodes",  register_swap_jump_nodes,  nullptr, handle_swap_jump_nodes,  false },
+};
+const size_t mcp_jump_node_tool_def_count = sizeof(mcp_jump_node_tool_defs) / sizeof(mcp_jump_node_tool_defs[0]);
