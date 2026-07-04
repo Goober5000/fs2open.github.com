@@ -576,7 +576,8 @@ void mcp_register_event_tools(json_t *tools)
 		add_integer_prop(props, "chain_delay",
 			"Delay before evaluating this chained event (-1 = not chained)");
 		add_string_enum_prop(props, "team",
-			"Multiplayer team assignment (\"none\" for all teams)",
+			"Multiplayer team assignment (\"none\" for all teams; default: \"none\". "
+			"Note that create_goal defaults to \"Team 1\" -- each mirrors its engine default.)",
 			team_enum_values);
 		add_string_prop(props, "objective_text", "Directive text displayed in the HUD");
 		add_string_prop(props, "objective_key_text", "Localization key for the objective text");

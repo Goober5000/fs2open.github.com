@@ -374,6 +374,8 @@ static void handle_list_wings(json_t * /*input*/, McpToolRequest *req)
 	if (!validate(validate_dialog_for_wings, sink)) return;
 
 	json_t *arr = json_array();
+	// Same slot walk as wing_slot_at_public_index, so a wing's 1-based
+	// position in this list is its move_wing/swap_wings index
 	for (int i = 0; i < MAX_WINGS; ++i) {
 		if (Wings[i].wave_count == 0)
 			continue;
@@ -989,7 +991,9 @@ void mcp_register_wing_tools(json_t *tools)
 {
 	// list_wings
 	register_tool(tools, "list_wings",
-		"List all wings in the mission.  Each entry has the wing's name, "
+		"List all wings in the mission, in the same order that move_wing/swap_wings "
+		"indices refer to: a wing's 1-based position in this list is its index. "
+		"Each entry has the wing's name, "
 		"wave_count (current ship count), num_waves, "
 		"and the names of its member ships in slot order.",
 		json_object());

@@ -39,7 +39,7 @@ static debriefing *get_debriefing_for_team(json_t *input, McpErrorSink &sink)
 	int team_index = 0;  // default to Team 1
 
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", sink))
+		if (!check_string_enum(team_str, team_selector_enum_values, "team", sink))
 			return nullptr;
 		if (reject_team_none(team_str, "debriefing", sink)) return nullptr;
 		team_index = team_index_from_name(team_str);
@@ -278,7 +278,7 @@ void mcp_register_debrief_tools(json_t *tools)
 	// list_debriefing_stages
 	{
 		json_t *props = json_object();
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		register_tool(tools, "list_debriefing_stages",
 			"List all debriefing stages for a team. Returns each stage's index, "
 			"text, voice, recommendation text, and SEXP formula root node.",
@@ -290,7 +290,7 @@ void mcp_register_debrief_tools(json_t *tools)
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
 			"1-based index of the stage to retrieve");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "get_debriefing_stage",
@@ -310,7 +310,7 @@ void mcp_register_debrief_tools(json_t *tools)
 			"Defaults to true (stage always shown).");
 		add_integer_prop(props, "index",
 			"Position to insert the stage (1 = first). If omitted, appends to the end.");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("text"));
 		register_tool(tools, "create_debriefing_stage",
@@ -331,7 +331,7 @@ void mcp_register_debrief_tools(json_t *tools)
 		add_string_prop(props, "recommendation_text",
 			"New recommendation text. Empty string clears the recommendation.");
 		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "update_debriefing_stage",
@@ -345,7 +345,7 @@ void mcp_register_debrief_tools(json_t *tools)
 		json_t *props = json_object();
 		add_integer_prop(props, "index",
 			"1-based index of the stage to delete");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index"));
 		register_tool(tools, "delete_debriefing_stage",
@@ -361,7 +361,7 @@ void mcp_register_debrief_tools(json_t *tools)
 			"Current 1-based index of the stage");
 		add_integer_prop(props, "to_index",
 			"Target 1-based index to move the stage to");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("from_index"));
 		json_array_append_new(req, json_string("to_index"));
@@ -378,7 +378,7 @@ void mcp_register_debrief_tools(json_t *tools)
 			"1-based index of the first stage");
 		add_integer_prop(props, "index_b",
 			"1-based index of the second stage");
-		add_string_enum_prop(props, "team", debrief_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", debrief_team_desc, team_selector_enum_values);
 		json_t *req = json_array();
 		json_array_append_new(req, json_string("index_a"));
 		json_array_append_new(req, json_string("index_b"));
