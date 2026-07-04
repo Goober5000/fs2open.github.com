@@ -568,7 +568,7 @@ def register(suite, client):
             r = client.call_tool("update_ship", {
                 "name": "MCP Paired Scalars",
                 "ship_flags": {"escort": False, "kamikaze": False},
-                "destroy_before_mission_seconds": None,
+                "destroy_before_mission_seconds": -1,
             })
             assert_success(r)
             d = tool_data(r)
@@ -580,7 +580,7 @@ def register(suite, client):
             assert_true("kamikaze_damage" not in d,
                 "kamikaze_damage must not surface when kamikaze is off")
             assert_true("destroy_before_mission_seconds" not in d,
-                "destroy_before_mission_seconds must not surface after null-clear")
+                "destroy_before_mission_seconds must not surface after -1 disable")
         finally:
             _delete_all_test_ships(client, created)
 
@@ -606,8 +606,9 @@ def register(suite, client):
                 "name": "MCP Paired Errs", "kamikaze_damage": -5,
             })
             assert_error(r)
+            # -1 is the disable sentinel, so the first out-of-range value is -2.
             r = client.call_tool("update_ship", {
-                "name": "MCP Paired Errs", "destroy_before_mission_seconds": -1,
+                "name": "MCP Paired Errs", "destroy_before_mission_seconds": -2,
             })
             assert_error(r)
 
@@ -2441,19 +2442,19 @@ def register(suite, client):
         finally:
             _delete_all_test_ships(client, [name])
 
-    def test_ship_special_hitpoints_disable_via_null():
-        name = "MCP SpecHP Null"
+    def test_ship_special_hitpoints_disable_via_sentinel():
+        name = "MCP SpecHP Sentinel"
         try:
             _create_basic_ship(name)
             r = client.call_tool("update_ship_special_hitpoints",
                 {"name": name, "hull": 5000, "shield": 200})
             assert_success(r)
             r = client.call_tool("update_ship_special_hitpoints",
-                {"name": name, "hull": None})
+                {"name": name, "hull": 0})
             assert_success(r)
             d = tool_data(r)
-            assert_true("hull" not in d, "hull absent after null-disable")
-            assert_equal(d.get("shield"), 200, "shield unchanged by hull-null update")
+            assert_true("hull" not in d, "hull absent after sentinel-disable")
+            assert_equal(d.get("shield"), 200, "shield unchanged by hull-disable update")
         finally:
             _delete_all_test_ships(client, [name])
 
@@ -2478,11 +2479,13 @@ def register(suite, client):
         name = "MCP SpecHP Range"
         try:
             _create_basic_ship(name)
+            # 0 (hull) and -1 (shield) are the disable sentinels, so the first
+            # out-of-range values are -1 and -2 respectively.
             r = client.call_tool("update_ship_special_hitpoints",
-                {"name": name, "hull": 0})
+                {"name": name, "hull": -1})
             assert_error(r)
             r = client.call_tool("update_ship_special_hitpoints",
-                {"name": name, "shield": -5})
+                {"name": name, "shield": -2})
             assert_error(r)
         finally:
             _delete_all_test_ships(client, [name])
@@ -2501,7 +2504,7 @@ def register(suite, client):
                 {"name": name, "hull": 8000})
             assert_success(r)
             r = client.call_tool("update_ship_special_hitpoints",
-                {"name": name, "hull": None})
+                {"name": name, "hull": 0})
             assert_success(r)
             r = client.call_tool("get_ship", {"name": name})
             assert_success(r)
@@ -2604,8 +2607,8 @@ def register(suite, client):
         test_ship_special_hitpoints_hull_only_and_kamikaze_recalc)
     suite.add("ship_special_hitpoints_shield_zero_valid",
         test_ship_special_hitpoints_shield_zero_valid)
-    suite.add("ship_special_hitpoints_disable_via_null",
-        test_ship_special_hitpoints_disable_via_null)
+    suite.add("ship_special_hitpoints_disable_via_sentinel",
+        test_ship_special_hitpoints_disable_via_sentinel)
     suite.add("ship_special_hitpoints_omit_leaves_unchanged",
         test_ship_special_hitpoints_omit_leaves_unchanged)
     suite.add("ship_special_hitpoints_range_validation",
