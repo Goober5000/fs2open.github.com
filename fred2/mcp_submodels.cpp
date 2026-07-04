@@ -344,9 +344,8 @@ static void handle_update_ship_submodel(json_t *input, McpToolRequest *req)
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_submodel_tools(json_t *tools)
+static void register_list_ship_submodels(json_t *tools)
 {
-	// list_ship_submodels
 	register_tool_with_required_string(tools, "list_ship_submodels",
 		"List a ship's submodels (subobjects) and their current instance pose. Only submodels that "
 		"the editor actually draws are listed: lower-LOD duplicates and submodels outside the "
@@ -358,86 +357,79 @@ void mcp_register_submodel_tools(json_t *tools)
 		"offset vector) forms. NOTE: submodel pose is transient editor state for viewing "
 		"configurations; it is not saved to the mission file.",
 		"name", "Name of the ship");
-
-	// get_ship_submodel
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "submodel",
-			"Submodel (subobject) name, case-insensitive. Use list_ship_submodels to enumerate names.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("submodel"));
-		register_tool(tools, "get_ship_submodel",
-			"Get one submodel's current instance pose: rotation/translation axis metadata, "
-			"blown_off state, and the pose in both 'basic' (angle_degrees/offset_meters; omitted "
-			"when the submodel has no corresponding movement axis) and 'advanced' (orientation "
-			"matrix + offset vector) forms.",
-			props, req);
-	}
-
-	// update_ship_submodel
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "name", "Name of the ship.");
-		add_string_prop(props, "submodel",
-			"Submodel (subobject) name, case-insensitive.");
-
-		json_t *basic_props = json_object();
-		add_number_prop(basic_props, "angle_degrees",
-			"Rotation angle in degrees about the submodel's defined rotation axis. Normalized to "
-			"[0, 360). Rejected if the submodel has no rotation axis (use advanced.orientation).");
-		add_number_prop(basic_props, "offset_meters",
-			"Linear displacement in meters along the submodel's defined translation axis. Rejected "
-			"if the submodel has no translation axis (use advanced.offset).");
-		add_object_prop(props, "basic",
-			"Simple axis-constrained pose. Provide angle_degrees and/or offset_meters (each "
-			"optional). Mutually exclusive with 'advanced'.", basic_props);
-
-		json_t *adv_props = json_object();
-		add_matrix_prop(adv_props, "orientation",
-			"Full submodel orientation matrix (rvec/uvec/fvec), relative to the submodel's default "
-			"(unrotated) orientation; the identity matrix means unrotated. Allows arbitrary posing of "
-			"any submodel, including those without a defined rotation axis.");
-		add_vec3d_prop(adv_props, "offset",
-			"Full submodel translation offset vector, relative to the submodel's default offset from "
-			"its parent; the zero vector means unmoved.");
-		add_object_prop(props, "advanced",
-			"Arbitrary pose. Provide orientation and/or offset (each optional). Mutually exclusive "
-			"with 'basic'.", adv_props);
-
-		add_bool_prop(props, "blown_off",
-			"Whether this submodel is in its blown-off (destroyed) state and hidden from rendering. "
-			"Optional; independent of basic/advanced. CAVEAT: this is a no-op for the detail-root "
-			"hull submodel, which the engine always draws regardless.");
-
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("name"));
-		json_array_append_new(req, json_string("submodel"));
-		register_tool(tools, "update_ship_submodel",
-			"Set a ship submodel's instance pose for viewing configurations in the editor. Provide "
-			"either a 'basic' (angle_degrees/offset_meters) or an 'advanced' (orientation/offset) "
-			"object, not both; all pose fields are optional and applied as a partial update. May "
-			"also toggle blown_off. The change is propagated to all LODs and the viewport is "
-			"refreshed. NOTE: this is transient editor state and is NOT saved to the mission file.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_submodel_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_get_ship_submodel(json_t *tools)
 {
-	if (strcmp(tool_name, "list_ship_submodels") == 0) {
-		handle_list_ship_submodels(input_json, req);
-	} else if (strcmp(tool_name, "get_ship_submodel") == 0) {
-		handle_get_ship_submodel(input_json, req);
-	} else if (strcmp(tool_name, "update_ship_submodel") == 0) {
-		handle_update_ship_submodel(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "submodel",
+		"Submodel (subobject) name, case-insensitive. Use list_ship_submodels to enumerate names.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("submodel"));
+	register_tool(tools, "get_ship_submodel",
+		"Get one submodel's current instance pose: rotation/translation axis metadata, "
+		"blown_off state, and the pose in both 'basic' (angle_degrees/offset_meters; omitted "
+		"when the submodel has no corresponding movement axis) and 'advanced' (orientation "
+		"matrix + offset vector) forms.",
+		props, req);
 }
+
+static void register_update_ship_submodel(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "name", "Name of the ship.");
+	add_string_prop(props, "submodel",
+		"Submodel (subobject) name, case-insensitive.");
+
+	json_t *basic_props = json_object();
+	add_number_prop(basic_props, "angle_degrees",
+		"Rotation angle in degrees about the submodel's defined rotation axis. Normalized to "
+		"[0, 360). Rejected if the submodel has no rotation axis (use advanced.orientation).");
+	add_number_prop(basic_props, "offset_meters",
+		"Linear displacement in meters along the submodel's defined translation axis. Rejected "
+		"if the submodel has no translation axis (use advanced.offset).");
+	add_object_prop(props, "basic",
+		"Simple axis-constrained pose. Provide angle_degrees and/or offset_meters (each "
+		"optional). Mutually exclusive with 'advanced'.", basic_props);
+
+	json_t *adv_props = json_object();
+	add_matrix_prop(adv_props, "orientation",
+		"Full submodel orientation matrix (rvec/uvec/fvec), relative to the submodel's default "
+		"(unrotated) orientation; the identity matrix means unrotated. Allows arbitrary posing of "
+		"any submodel, including those without a defined rotation axis.");
+	add_vec3d_prop(adv_props, "offset",
+		"Full submodel translation offset vector, relative to the submodel's default offset from "
+		"its parent; the zero vector means unmoved.");
+	add_object_prop(props, "advanced",
+		"Arbitrary pose. Provide orientation and/or offset (each optional). Mutually exclusive "
+		"with 'basic'.", adv_props);
+
+	add_bool_prop(props, "blown_off",
+		"Whether this submodel is in its blown-off (destroyed) state and hidden from rendering. "
+		"Optional; independent of basic/advanced. CAVEAT: this is a no-op for the detail-root "
+		"hull submodel, which the engine always draws regardless.");
+
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("name"));
+	json_array_append_new(req, json_string("submodel"));
+	register_tool(tools, "update_ship_submodel",
+		"Set a ship submodel's instance pose for viewing configurations in the editor. Provide "
+		"either a 'basic' (angle_degrees/offset_meters) or an 'advanced' (orientation/offset) "
+		"object, not both; all pose fields are optional and applied as a partial update. May "
+		"also toggle blown_off. The change is propagated to all LODs and the viewport is "
+		"refreshed. NOTE: this is transient editor state and is NOT saved to the mission file.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_submodel_tool_defs[] = {
+	{ "list_ship_submodels",  register_list_ship_submodels,  nullptr, handle_list_ship_submodels,  false },
+	{ "get_ship_submodel",    register_get_ship_submodel,    nullptr, handle_get_ship_submodel,    false },
+	{ "update_ship_submodel", register_update_ship_submodel, nullptr, handle_update_ship_submodel, false },
+};
+const size_t mcp_submodel_tool_def_count = sizeof(mcp_submodel_tool_defs) / sizeof(mcp_submodel_tool_defs[0]);

@@ -259,155 +259,139 @@ static void handle_swap_fiction_viewer_stages(json_t *input, McpToolRequest *req
 // Tool registration
 // ---------------------------------------------------------------------------
 
-void mcp_register_fiction_viewer_tools(json_t *tools)
+static void register_list_fiction_viewer_stages(json_t *tools)
 {
-	// -----------------------------------------------------------------------
-	// Fiction Viewer tools
-	// -----------------------------------------------------------------------
-
-	// list_fiction_viewer_stages
 	register_tool(tools, "list_fiction_viewer_stages",
 		"List all fiction viewer stages. Returns each stage's index, story filename, "
 		"font, voice, UI name, backgrounds, and SEXP formula root node.",
 		json_object());
-
-	// get_fiction_viewer_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to retrieve");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "get_fiction_viewer_stage",
-			"Get full details of a fiction viewer stage by index.",
-			props, req);
-	}
-
-	// create_fiction_viewer_stage
-	{
-		json_t *props = json_object();
-		add_string_prop(props, "story_filename",
-			"Text filename for the fiction stage (e.g. \"fiction.txt\"). Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
-		add_string_prop(props, "font_filename",
-			"Font name from list_fonts. Defaults to empty (uses default font).");
-		add_string_prop(props, "voice_filename",
-			"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
-		add_string_enum_prop(props, "ui_name",
-			"UI layout name. Defaults to \"<default>\" (the mod's default UI).",
-			fiction_ui_name_values);
-		add_string_prop(props, "background_640",
-			"Background image for 640x480 resolution. Defaults to empty (standard background).");
-		add_string_prop(props, "background_1024",
-			"Background image for 1024x768 resolution. Defaults to empty (standard background).");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
-			"Defaults to true.");
-		add_integer_prop(props, "index",
-			"Position to insert the stage (1 = first). If omitted, appends to the end.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("story_filename"));
-		register_tool(tools, "create_fiction_viewer_stage",
-			"Create a new fiction viewer stage. Fiction viewer stages display story "
-			"text between missions, with optional font, voice, background, and "
-			"SEXP-controlled activation. Multiple stages can exist; only the first "
-			"whose formula evaluates to true is shown at runtime.",
-			props, req);
-	}
-
-	// update_fiction_viewer_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to update");
-		add_string_prop(props, "story_filename",
-			"New text filename for the fiction stage. Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
-		add_string_prop(props, "font_filename",
-			"New font name from list_fonts. Empty string clears the font.");
-		add_string_prop(props, "voice_filename",
-			"New voice audio filename. Empty string clears the voice.");
-		add_string_enum_prop(props, "ui_name",
-			"New UI layout name. Use \"<default>\" to clear to the mod's default UI.",
-			fiction_ui_name_values);
-		add_string_prop(props, "background_640",
-			"New background image for 640x480 resolution. Empty string clears.");
-		add_string_prop(props, "background_1024",
-			"New background image for 1024x768 resolution. Empty string clears.");
-		add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "update_fiction_viewer_stage",
-			"Update properties of an existing fiction viewer stage. Only specified "
-			"fields are changed; omitted fields are left unchanged.",
-			props, req);
-	}
-
-	// delete_fiction_viewer_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index",
-			"1-based index of the stage to delete");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index"));
-		register_tool(tools, "delete_fiction_viewer_stage",
-			"Delete a fiction viewer stage. Frees its SEXP formula. "
-			"Remaining stages are shifted down.",
-			props, req);
-	}
-
-	// move_fiction_viewer_stage
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "from_index",
-			"Current 1-based index of the stage");
-		add_integer_prop(props, "to_index",
-			"Target 1-based index to move the stage to");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("from_index"));
-		json_array_append_new(req, json_string("to_index"));
-		register_tool(tools, "move_fiction_viewer_stage",
-			"Move a fiction viewer stage from one position to another. "
-			"Indices are 1-based.",
-			props, req);
-	}
-
-	// swap_fiction_viewer_stages
-	{
-		json_t *props = json_object();
-		add_integer_prop(props, "index_a",
-			"1-based index of the first stage");
-		add_integer_prop(props, "index_b",
-			"1-based index of the second stage");
-		json_t *req = json_array();
-		json_array_append_new(req, json_string("index_a"));
-		json_array_append_new(req, json_string("index_b"));
-		register_tool(tools, "swap_fiction_viewer_stages",
-			"Swap two fiction viewer stages at the given positions. "
-			"Indices are 1-based.",
-			props, req);
-	}
 }
 
-// ---------------------------------------------------------------------------
-// Main-thread dispatch
-// ---------------------------------------------------------------------------
-
-bool mcp_handle_fiction_viewer_tool(const char *tool_name, json_t *input_json, McpToolRequest *req)
+static void register_get_fiction_viewer_stage(json_t *tools)
 {
-	if (strcmp(tool_name, "list_fiction_viewer_stages") == 0) {
-		handle_list_fiction_viewer_stages(input_json, req);
-	} else if (strcmp(tool_name, "get_fiction_viewer_stage") == 0) {
-		handle_get_fiction_viewer_stage(input_json, req);
-	} else if (strcmp(tool_name, "create_fiction_viewer_stage") == 0) {
-		handle_create_fiction_viewer_stage(input_json, req);
-	} else if (strcmp(tool_name, "update_fiction_viewer_stage") == 0) {
-		handle_update_fiction_viewer_stage(input_json, req);
-	} else if (strcmp(tool_name, "delete_fiction_viewer_stage") == 0) {
-		handle_delete_fiction_viewer_stage(input_json, req);
-	} else if (strcmp(tool_name, "move_fiction_viewer_stage") == 0) {
-		handle_move_fiction_viewer_stage(input_json, req);
-	} else if (strcmp(tool_name, "swap_fiction_viewer_stages") == 0) {
-		handle_swap_fiction_viewer_stages(input_json, req);
-	} else {
-		return false;
-	}
-	return true;
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to retrieve");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "get_fiction_viewer_stage",
+		"Get full details of a fiction viewer stage by index.",
+		props, req);
 }
+
+static void register_create_fiction_viewer_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "story_filename",
+		"Text filename for the fiction stage (e.g. \"fiction.txt\"). Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
+	add_string_prop(props, "font_filename",
+		"Font name from list_fonts. Defaults to empty (uses default font).");
+	add_string_prop(props, "voice_filename",
+		"Voice audio filename (wav/ogg). Defaults to empty (no voice).");
+	add_string_enum_prop(props, "ui_name",
+		"UI layout name. Defaults to \"<default>\" (the mod's default UI).",
+		fiction_ui_name_values);
+	add_string_prop(props, "background_640",
+		"Background image for 640x480 resolution. Defaults to empty (standard background).");
+	add_string_prop(props, "background_1024",
+		"Background image for 1024x768 resolution. Defaults to empty (standard background).");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage. "
+		"Defaults to true.");
+	add_integer_prop(props, "index",
+		"Position to insert the stage (1 = first). If omitted, appends to the end.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("story_filename"));
+	register_tool(tools, "create_fiction_viewer_stage",
+		"Create a new fiction viewer stage. Fiction viewer stages display story "
+		"text between missions, with optional font, voice, background, and "
+		"SEXP-controlled activation. Multiple stages can exist; only the first "
+		"whose formula evaluates to true is shown at runtime.",
+		props, req);
+}
+
+static void register_update_fiction_viewer_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to update");
+	add_string_prop(props, "story_filename",
+		"New text filename for the fiction stage. Max " SCP_TOKEN_TO_STR(MAX_FILENAME_LEN_1) " characters.");
+	add_string_prop(props, "font_filename",
+		"New font name from list_fonts. Empty string clears the font.");
+	add_string_prop(props, "voice_filename",
+		"New voice audio filename. Empty string clears the voice.");
+	add_string_enum_prop(props, "ui_name",
+		"New UI layout name. Use \"<default>\" to clear to the mod's default UI.",
+		fiction_ui_name_values);
+	add_string_prop(props, "background_640",
+		"New background image for 640x480 resolution. Empty string clears.");
+	add_string_prop(props, "background_1024",
+		"New background image for 1024x768 resolution. Empty string clears.");
+	add_integer_prop(props, "formula", "Root node of the SEXP formula used for this stage.");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "update_fiction_viewer_stage",
+		"Update properties of an existing fiction viewer stage. Only specified "
+		"fields are changed; omitted fields are left unchanged.",
+		props, req);
+}
+
+static void register_delete_fiction_viewer_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index",
+		"1-based index of the stage to delete");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index"));
+	register_tool(tools, "delete_fiction_viewer_stage",
+		"Delete a fiction viewer stage. Frees its SEXP formula. "
+		"Remaining stages are shifted down.",
+		props, req);
+}
+
+static void register_move_fiction_viewer_stage(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "from_index",
+		"Current 1-based index of the stage");
+	add_integer_prop(props, "to_index",
+		"Target 1-based index to move the stage to");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("from_index"));
+	json_array_append_new(req, json_string("to_index"));
+	register_tool(tools, "move_fiction_viewer_stage",
+		"Move a fiction viewer stage from one position to another. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+static void register_swap_fiction_viewer_stages(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "index_a",
+		"1-based index of the first stage");
+	add_integer_prop(props, "index_b",
+		"1-based index of the second stage");
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("index_a"));
+	json_array_append_new(req, json_string("index_b"));
+	register_tool(tools, "swap_fiction_viewer_stages",
+		"Swap two fiction viewer stages at the given positions. "
+		"Indices are 1-based.",
+		props, req);
+}
+
+// ---------------------------------------------------------------------------
+// Tool table
+// ---------------------------------------------------------------------------
+
+const McpToolDef mcp_fiction_viewer_tool_defs[] = {
+	{ "list_fiction_viewer_stages",  register_list_fiction_viewer_stages,  nullptr, handle_list_fiction_viewer_stages,  false },
+	{ "get_fiction_viewer_stage",    register_get_fiction_viewer_stage,    nullptr, handle_get_fiction_viewer_stage,    false },
+	{ "create_fiction_viewer_stage", register_create_fiction_viewer_stage, nullptr, handle_create_fiction_viewer_stage, false },
+	{ "update_fiction_viewer_stage", register_update_fiction_viewer_stage, nullptr, handle_update_fiction_viewer_stage, false },
+	{ "delete_fiction_viewer_stage", register_delete_fiction_viewer_stage, nullptr, handle_delete_fiction_viewer_stage, false },
+	{ "move_fiction_viewer_stage",   register_move_fiction_viewer_stage,   nullptr, handle_move_fiction_viewer_stage,   false },
+	{ "swap_fiction_viewer_stages",  register_swap_fiction_viewer_stages,  nullptr, handle_swap_fiction_viewer_stages,  false },
+};
+const size_t mcp_fiction_viewer_tool_def_count = sizeof(mcp_fiction_viewer_tool_defs) / sizeof(mcp_fiction_viewer_tool_defs[0]);
