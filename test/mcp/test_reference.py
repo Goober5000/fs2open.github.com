@@ -97,7 +97,7 @@ def register(suite, client):
         name = ctx.get("ship_class_name")
         if not name:
             raise SkipTest("No ship classes available")
-        r = client.call_tool("get_ship_class_model_details", {"name": name}, timeout=120)
+        r = client.call_tool("get_ship_class_model_details", {"ship_class": name}, timeout=120)
         assert_success(r)
         d = tool_data(r)
         assert_has_key(d, "name")

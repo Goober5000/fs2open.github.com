@@ -59,7 +59,7 @@ static int resolve_loadout_team(json_t *input, McpErrorSink &sink)
 	if (sink.has_error()) return -1;
 
 	if (team_str) {
-		if (!check_string_enum(team_str, team_enum_values, "team", sink))
+		if (!check_string_enum(team_str, team_selector_enum_values, "team", sink))
 			return -1;
 		if (reject_team_none(team_str, "team loadout", sink)) return -1;
 		return team_index_from_name(team_str);
@@ -860,7 +860,7 @@ void mcp_register_loadout_tools(json_t *tools)
 	// update_team_loadout
 	{
 		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
 		add_bool_prop(props, "do_not_validate",
 			"If true, the loadout is saved exactly as entered: FRED will not pad the weapon pool "
 			"with weapons carried by the starting wings.");
@@ -918,7 +918,7 @@ void mcp_register_loadout_tools(json_t *tools)
 	// set_team_loadout_ship
 	{
 		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
 		add_string_prop(props, "ship_class",
 			"Ship class of the entry to create, update, or remove (must be flagged as a player ship). "
 			"Mutually exclusive with class_variable.");
@@ -944,7 +944,7 @@ void mcp_register_loadout_tools(json_t *tools)
 	// set_team_loadout_weapon
 	{
 		json_t *props = json_object();
-		add_string_enum_prop(props, "team", loadout_team_desc, team_enum_values);
+		add_string_enum_prop(props, "team", loadout_team_desc, team_selector_enum_values);
 		add_string_prop(props, "weapon_class",
 			"Weapon class of the entry to create, update, or remove (must be flagged as player-allowed). "
 			"Mutually exclusive with class_variable.");

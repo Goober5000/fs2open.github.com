@@ -45,6 +45,11 @@ int lookup_wing(const char *name, McpErrorSink &sink);
 
 extern const SCP_vector<const char *> team_enum_values;
 
+// For tools where `team` SELECTS which team's data to address (command
+// briefings, debriefings, loadouts) rather than optionally restricting an
+// entity to a team: "none" is never valid there, so it is not in the enum.
+extern const SCP_vector<const char *> team_selector_enum_values;
+
 const char *team_name_from_index(int multi_team);
 int team_index_from_name(const char *name);
 
