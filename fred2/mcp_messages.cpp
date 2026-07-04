@@ -213,7 +213,12 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		set_not_found_error(sink,"Message", name);
+		// get_message returns builtins, so distinguish "builtin" from "no such
+		// message" rather than confusing the caller with a bare not-found
+		if (find_item_with_string(Messages, &MMessage::name, name, 0, (size_t)Num_builtin_messages) >= 0)
+			sink.set_error("'%s' is a built-in message and cannot be modified.", name);
+		else
+			set_not_found_error(sink, "Message", name);
 		return;
 	}
 
@@ -331,7 +336,10 @@ static void handle_delete_message(json_t *input, McpToolRequest *req)
 	// Find the message (mission-specific only)
 	int idx = find_item_with_string(Messages, &MMessage::name, name, Num_builtin_messages);
 	if (idx < 0) {
-		set_not_found_error(sink,"Message", name);
+		if (find_item_with_string(Messages, &MMessage::name, name, 0, (size_t)Num_builtin_messages) >= 0)
+			sink.set_error("'%s' is a built-in message and cannot be deleted.", name);
+		else
+			set_not_found_error(sink, "Message", name);
 		return;
 	}
 
