@@ -249,6 +249,59 @@ static void handle_swap_cmd_brief_stages(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Command briefing background tools
+// ---------------------------------------------------------------------------
+
+static json_t *build_cmd_brief_background_json(const cmd_brief &cb)
+{
+	json_t *obj = json_object();
+	set_optional_filename(obj, "background_640", cb.background[GR_640]);
+	set_optional_filename(obj, "background_1024", cb.background[GR_1024]);
+	return obj;
+}
+
+static void handle_get_cmd_brief_background(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, sink);
+	if (!cb) return;
+
+	req->result_json = make_json_tool_result(build_cmd_brief_background_json(*cb));
+	req->success = true;
+}
+
+static void handle_update_cmd_brief_background(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_cmd_brief, sink)) return;
+
+	auto *cb = get_cmd_brief_for_team(input, sink);
+	if (!cb) return;
+
+	auto bg640  = get_optional_filename(input, "background_640", sink, false);
+	auto bg1024 = get_optional_filename(input, "background_1024", sink, false);
+	if (sink.has_error()) return;
+
+	bool changed = false;
+	if (bg640 && strcmp(cb->background[GR_640], bg640) != 0) {
+		strcpy_s(cb->background[GR_640], bg640);
+		changed = true;
+	}
+	if (bg1024 && strcmp(cb->background[GR_1024], bg1024) != 0) {
+		strcpy_s(cb->background[GR_1024], bg1024);
+		changed = true;
+	}
+
+	if (changed)
+		mark_modified("MCP: update command briefing background");
+
+	req->result_json = make_json_tool_result(build_cmd_brief_background_json(*cb));
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -360,6 +413,33 @@ static void register_swap_cmd_brief_stages(json_t *tools)
 		props, req);
 }
 
+static void register_get_cmd_brief_background(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	register_tool(tools, "get_cmd_brief_background",
+		"Get the custom background images for a team's command briefing screen. "
+		"The 640 variant is used at resolutions below 1024x768; the 1024 variant "
+		"otherwise. Fields are omitted when no custom background is set (the "
+		"standard background is used).",
+		props);
+}
+
+static void register_update_cmd_brief_background(json_t *tools)
+{
+	json_t *props = json_object();
+	add_string_prop(props, "background_640",
+		"Command briefing screen background, 640x480 variant");
+	add_string_prop(props, "background_1024",
+		"Command briefing screen background, 1024x768 variant");
+	add_string_enum_prop(props, "team", cmd_brief_team_desc, team_selector_enum_values);
+	register_tool(tools, "update_cmd_brief_background",
+		"Update the custom background images for a team's command briefing "
+		"screen. Only specified fields are changed; pass an empty string to "
+		"clear a field back to the standard background.",
+		props);
+}
+
 // ---------------------------------------------------------------------------
 // Tool table
 // ---------------------------------------------------------------------------
@@ -372,5 +452,7 @@ const McpToolDef mcp_cmd_brief_tool_defs[] = {
 	{ "delete_cmd_brief_stage", register_delete_cmd_brief_stage, nullptr, handle_delete_cmd_brief_stage, false },
 	{ "move_cmd_brief_stage",   register_move_cmd_brief_stage,   nullptr, handle_move_cmd_brief_stage,   false },
 	{ "swap_cmd_brief_stages",  register_swap_cmd_brief_stages,  nullptr, handle_swap_cmd_brief_stages,  false },
+	{ "get_cmd_brief_background",    register_get_cmd_brief_background,    nullptr, handle_get_cmd_brief_background,    false },
+	{ "update_cmd_brief_background", register_update_cmd_brief_background, nullptr, handle_update_cmd_brief_background, false },
 };
 const size_t mcp_cmd_brief_tool_def_count = sizeof(mcp_cmd_brief_tool_defs) / sizeof(mcp_cmd_brief_tool_defs[0]);

@@ -719,6 +719,64 @@ def register(suite, client):
                 except Exception:
                     break
 
+    # ----- Custom Backgrounds (briefing / cmd brief / debriefing) -----
+
+    def test_custom_backgrounds_crud():
+        # (get_tool, update_tool, field names)
+        areas = [
+            ("get_briefing_backgrounds", "update_briefing_backgrounds",
+                ["background_640", "background_1024",
+                 "ship_select_background_640", "ship_select_background_1024",
+                 "weapon_select_background_640", "weapon_select_background_1024"]),
+            ("get_cmd_brief_background", "update_cmd_brief_background",
+                ["background_640", "background_1024"]),
+            ("get_debriefing_background", "update_debriefing_background",
+                ["background_640", "background_1024"]),
+        ]
+
+        try:
+            for get_tool, update_tool, fields in areas:
+                # Round-trip: set every field, read back (filenames are
+                # capped at 31 chars, so keep the test names short)
+                values = {f: f"test_bg_{i}.png" for i, f in enumerate(fields)}
+                r = client.call_tool(update_tool, values)
+                assert_success(r)
+                r = client.call_tool(get_tool)
+                assert_success(r)
+                d = tool_data(r)
+                for f in fields:
+                    assert_equal(d.get(f), values[f], f"{get_tool}: {f} round-trip")
+
+                # Partial update preserves unspecified fields
+                r = client.call_tool(update_tool, {fields[0]: "test_changed.png"})
+                assert_success(r)
+                r = client.call_tool(get_tool)
+                assert_success(r)
+                d = tool_data(r)
+                assert_equal(d.get(fields[0]), "test_changed.png",
+                    f"{get_tool}: {fields[0]} updated")
+                for f in fields[1:]:
+                    assert_equal(d.get(f), values[f],
+                        f"{get_tool}: {f} preserved across partial update")
+
+                # Empty string clears; a cleared field is omitted from the get
+                r = client.call_tool(update_tool, {fields[0]: ""})
+                assert_success(r)
+                r = client.call_tool(get_tool)
+                assert_success(r)
+                d = tool_data(r)
+                assert_true(d.get(fields[0]) is None,
+                    f"{get_tool}: cleared {fields[0]} is omitted")
+
+        finally:
+            # Backgrounds live in globals; clear everything so nothing leaks
+            # into later tests or missions.
+            for _, update_tool, fields in areas:
+                try:
+                    client.call_tool(update_tool, {f: "" for f in fields})
+                except Exception:
+                    pass
+
     # ----- Debriefing Stages -----
 
     def test_debriefing_stages_crud():
@@ -1236,6 +1294,7 @@ def register(suite, client):
     suite.add("crud_briefing_stages", test_briefing_stages_crud)
     suite.add("crud_briefing_icons", test_briefing_icons_crud)
     suite.add("crud_briefing_lines", test_briefing_lines_crud)
+    suite.add("crud_custom_backgrounds", test_custom_backgrounds_crud)
     suite.add("crud_debriefing_stages", test_debriefing_stages_crud)
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
