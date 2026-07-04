@@ -78,7 +78,7 @@ static json_t *build_brief_icon_json(const brief_icon &icon, int index)
 	json_object_set_new(obj, "index", json_integer(index + 1));
 	json_object_set_new(obj, "id", json_integer(icon.id));
 	if (icon.type >= 0 && icon.type < MIN_BRIEF_ICONS)
-		json_object_set_new(obj, "type", json_string(Icon_names[icon.type]));
+		json_object_set_new(obj, "icon_type", json_string(Icon_names[icon.type]));
 	if (icon.team >= 0 && icon.team < (int)Iff_info.size())
 		json_object_set_new(obj, "iff", json_safe_string(Iff_info[icon.team].iff_name));
 	if (icon.ship_class >= 0 && icon.ship_class < ship_info_size())
@@ -569,7 +569,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 
 	auto source         = get_optional_string(input, "source", sink);
 	auto position       = get_optional_vec3d(input, "position", sink);
-	auto type_str       = get_optional_string(input, "type", sink);
+	auto type_str       = get_optional_string(input, "icon_type", sink);
 	auto iff_str        = get_optional_string(input, "iff", sink);
 	auto class_str      = get_optional_string(input, "ship_class", sink);
 	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
@@ -586,7 +586,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	// Resolve enums up-front so we fail before mutation
 	int type_idx = -1;
 	if (type_str) {
-		type_idx = check_lookup(type_str, icon_type_enum_values(), "type", sink);
+		type_idx = check_lookup(type_str, icon_type_enum_values(), "icon_type", sink);
 		if (type_idx < 0) return;
 	}
 	int iff_idx = -1;
@@ -612,7 +612,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 			return;
 		}
 		if (!type_str) {
-			sink.set_error("The type parameter is required when source is not given");
+			sink.set_error("The icon_type parameter is required when source is not given");
 			return;
 		}
 	}
@@ -702,7 +702,7 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 	if (!check_int_range(*index, 1, s.num_icons, "index", sink)) return;
 
 	auto position       = get_optional_vec3d(input, "position", sink);
-	auto type_str       = get_optional_string(input, "type", sink);
+	auto type_str       = get_optional_string(input, "icon_type", sink);
 	auto iff_str        = get_optional_string(input, "iff", sink);
 	auto class_str      = get_optional_string(input, "ship_class", sink);
 	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
@@ -718,7 +718,7 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 
 	int type_idx = -1;
 	if (type_str) {
-		type_idx = check_lookup(type_str, icon_type_enum_values(), "type", sink);
+		type_idx = check_lookup(type_str, icon_type_enum_values(), "icon_type", sink);
 		if (type_idx < 0) return;
 	}
 	int iff_idx = -1;
@@ -1063,7 +1063,7 @@ static void register_create_briefing_icon(json_t *tools)
 		"first point). Explicit parameters override derived values.");
 	add_vec3d_prop(props, "position",
 		"Position of the icon on the briefing map. Required if source is not given.");
-	add_string_enum_prop(props, "type",
+	add_string_enum_prop(props, "icon_type",
 		"Icon type, which determines the symbol drawn on the briefing map. "
 		"Required if source is not given.",
 		icon_type_enum_values());
@@ -1110,7 +1110,7 @@ static void register_update_briefing_icon(json_t *tools)
 		"1-based index of the icon within the stage");
 	add_vec3d_prop(props, "position",
 		"New position of the icon on the briefing map");
-	add_string_enum_prop(props, "type",
+	add_string_enum_prop(props, "icon_type",
 		"New icon type", icon_type_enum_values());
 	add_string_prop(props, "iff", icon_iff_desc);
 	add_string_prop(props, "ship_class", "New ship class of the icon");
