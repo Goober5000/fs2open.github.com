@@ -343,7 +343,7 @@ void mcp_register_reference_tools(json_t *tools)
 		"local reference frame. Note: if there is no ship with this ship class in the "
 		"current mission, this tool may take several seconds to respond while the model is "
 		"temporarily loaded into memory.",
-		"name", "Name of the ship class (e.g. \"GTD Orion\")");
+		"ship_class", "Name of the ship class (e.g. \"GTD Orion\")");
 
 	// list_ship_class_dockpoints
 	register_tool_with_required_string(tools, "list_ship_class_dockpoints",
@@ -2055,7 +2055,7 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 static void main_thread_get_model_details(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
-	auto name = get_required_string(input, "name", sink, true);
+	auto name = get_required_string(input, "ship_class", sink, true);
 	if (!name) return;
 
 	int sip_idx = ship_info_lookup(name);
@@ -2106,7 +2106,7 @@ static json_t *handle_get_ship_class_model_details(json_t *arguments)
 {
 	json_t *err = nullptr;
 	McpErrorSink sink(&err);
-	auto name = get_required_string(arguments, "name", sink, true);
+	auto name = get_required_string(arguments, "ship_class", sink, true);
 	if (!name) return err;
 
 	int sip_idx = ship_info_lookup(name);

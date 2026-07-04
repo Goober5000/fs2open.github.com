@@ -91,6 +91,10 @@ int lookup_wing(const char *name, McpErrorSink &sink)
 
 const SCP_vector<const char *> team_enum_values = { "none", "Team 1", "Team 2" };
 
+// Selector contexts (cmd brief, debrief, loadout) reject "none" at runtime,
+// so advertising it in the schema enum would invite invalid calls.
+const SCP_vector<const char *> team_selector_enum_values = { "Team 1", "Team 2" };
+
 // ---------------------------------------------------------------------------
 // Team helpers
 // ---------------------------------------------------------------------------
