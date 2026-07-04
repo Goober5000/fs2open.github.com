@@ -651,11 +651,11 @@ std::optional<SCP_vector<vec3d>> get_required_vec3d_array(json_t *input, const c
 		bool failed_finite_check = false;
 		auto v = parse_vec3d_json(item, failed_finite_check);
 		if (failed_finite_check) {
-			sink.set_error("Parameter '%s[%d]' has components that are not finite numbers", param_name, (int)index);
+			sink.set_error("Parameter '%s[" SIZE_T_ARG "]' has components that are not finite numbers", param_name, index);
 			return std::nullopt;
 		}
 		if (!v.has_value()) {
-			sink.set_error("Parameter '%s[%d]' is not a valid {x, y, z} object", param_name, (int)index);
+			sink.set_error("Parameter '%s[" SIZE_T_ARG "]' is not a valid {x, y, z} object", param_name, index);
 			return std::nullopt;
 		}
 		out.push_back(*v);
