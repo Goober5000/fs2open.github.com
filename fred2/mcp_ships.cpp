@@ -62,6 +62,23 @@ static bool validate_dialog_for_ships(SCP_string &error_msg)
 // Ship JSON serialization
 // ---------------------------------------------------------------------------
 
+// Reverse of ship_slot_at_public_index (below): returns the 1-based public
+// index of an occupied Ships[] slot -- its position among occupied slots in
+// slot order, i.e. the index move_ship/swap_ships refer to.  Returns -1 for
+// an empty or out-of-range slot.
+static int ship_public_index_of_slot(int slot)
+{
+	if (slot < 0 || slot >= MAX_SHIPS || Ships[slot].objnum < 0)
+		return -1;
+
+	int count = 0;
+	for (int i = 0; i <= slot; ++i) {
+		if (Ships[i].objnum >= 0)
+			count++;
+	}
+	return count;
+}
+
 static json_t *build_ship_flags_array(int ship_idx);
 
 static json_t *build_ship_json(int ship_idx, bool include_details)
@@ -71,6 +88,7 @@ static json_t *build_ship_json(int ship_idx, bool include_details)
 
 	json_t *obj = json_object();
 	json_object_set_new(obj, "name", json_safe_string(shipp.ship_name));
+	json_object_set_new(obj, "index", json_integer(ship_public_index_of_slot(ship_idx)));
 	json_object_set_new(obj, "ship_class",
 		json_safe_string(Ship_info[shipp.ship_info_index].name));
 	json_object_set_new(obj, "team",
@@ -2804,8 +2822,9 @@ static void register_list_ships(json_t *tools)
 {
 	register_tool(tools, "list_ships",
 		"List all ships in the mission (including player-start ships), in the same order that "
-		"move_ship/swap_ships indices refer to: a ship's 1-based position in this list is its index. "
-		"Each entry has the ship's name, class, team (IFF), player-start flag, wing membership, and position.",
+		"move_ship/swap_ships indices refer to: each entry's \"index\" field is that index, "
+		"and equals the entry's 1-based position in this list. "
+		"Each entry has the ship's name, index, class, team (IFF), player-start flag, wing membership, and position.",
 		json_object());
 }
 
