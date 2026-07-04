@@ -94,6 +94,16 @@ static json_t *build_brief_icon_json(const brief_icon &icon, int index)
 	return obj;
 }
 
+// Line endpoints are 1-based icon indices, matching the icons array.
+static json_t *build_brief_line_json(const brief_line &line, int index)
+{
+	json_t *obj = json_object();
+	json_object_set_new(obj, "index", json_integer(index + 1));
+	json_object_set_new(obj, "start_icon", json_integer(line.start_icon + 1));
+	json_object_set_new(obj, "end_icon", json_integer(line.end_icon + 1));
+	return obj;
+}
+
 static json_t *build_brief_stage_json(const brief_stage &stage, int index)
 {
 	json_t *obj = json_object();
@@ -114,15 +124,9 @@ static json_t *build_brief_stage_json(const brief_stage &stage, int index)
 		json_array_append_new(icons, build_brief_icon_json(stage.icons[i], i));
 	json_object_set_new(obj, "icons", icons);
 
-	// Lines are read-only until the line tools exist; icon indices are 1-based
-	// to match the icons array above.
 	json_t *lines = json_array();
-	for (int i = 0; i < stage.num_lines; i++) {
-		json_t *line = json_object();
-		json_object_set_new(line, "start_icon", json_integer(stage.lines[i].start_icon + 1));
-		json_object_set_new(line, "end_icon", json_integer(stage.lines[i].end_icon + 1));
-		json_array_append_new(lines, line);
-	}
+	for (int i = 0; i < stage.num_lines; i++)
+		json_array_append_new(lines, build_brief_line_json(stage.lines[i], i));
 	json_object_set_new(obj, "lines", lines);
 
 	return obj;
@@ -890,6 +894,115 @@ static void handle_delete_briefing_icon(json_t *input, McpToolRequest *req)
 }
 
 // ---------------------------------------------------------------------------
+// Briefing line tools
+// ---------------------------------------------------------------------------
+
+// Find the line with the given 0-based endpoints (order-insensitive), or -1.
+static int find_line_in_stage(const brief_stage &s, int icon_a, int icon_b)
+{
+	for (int i = 0; i < s.num_lines; i++) {
+		if ((s.lines[i].start_icon == icon_a && s.lines[i].end_icon == icon_b) ||
+			(s.lines[i].start_icon == icon_b && s.lines[i].end_icon == icon_a))
+			return i;
+	}
+	return -1;
+}
+
+static void handle_create_briefing_line(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	int stage_idx = get_stage_param(input, br, sink);
+	if (stage_idx < 0) return;
+	brief_stage &s = br->stages[stage_idx];
+
+	auto start_icon = get_required_integer(input, "start_icon", sink);
+	if (!start_icon.has_value()) return;
+	auto end_icon = get_required_integer(input, "end_icon", sink);
+	if (!end_icon.has_value()) return;
+	if (!check_int_range(*start_icon, 1, s.num_icons, "start_icon", sink)) return;
+	if (!check_int_range(*end_icon, 1, s.num_icons, "end_icon", sink)) return;
+
+	if (*start_icon == *end_icon) {
+		sink.set_error("A line cannot connect an icon to itself");
+		return;
+	}
+	if (s.num_lines >= MAX_BRIEF_STAGE_LINES) {
+		sink.set_error("Cannot add more than %d lines to a briefing stage", MAX_BRIEF_STAGE_LINES);
+		return;
+	}
+	if (find_line_in_stage(s, *start_icon - 1, *end_icon - 1) >= 0) {
+		sink.set_error("A line between icons %d and %d already exists in stage %d",
+			*start_icon, *end_icon, stage_idx + 1);
+		return;
+	}
+
+	brief_line &line = s.lines[s.num_lines++];
+	line.start_icon = *start_icon - 1;
+	line.end_icon = *end_icon - 1;
+
+	mark_modified("MCP: create briefing line in stage %d", stage_idx + 1);
+
+	req->result_json = make_json_tool_result(build_brief_line_json(line, s.num_lines - 1));
+	req->success = true;
+}
+
+static void handle_delete_briefing_line(json_t *input, McpToolRequest *req)
+{
+	McpErrorSink sink(req);
+	if (!validate(validate_dialog_for_briefing, sink)) return;
+
+	auto *br = get_briefing_for_team(input, sink);
+	if (!br) return;
+
+	int stage_idx = get_stage_param(input, br, sink);
+	if (stage_idx < 0) return;
+	brief_stage &s = br->stages[stage_idx];
+
+	auto index      = get_optional_integer(input, "index", sink);
+	auto start_icon = get_optional_integer(input, "start_icon", sink);
+	auto end_icon   = get_optional_integer(input, "end_icon", sink);
+	if (sink.has_error()) return;
+
+	// Exactly one addressing form: a line index, or a complete endpoint pair
+	bool have_pair = start_icon.has_value() || end_icon.has_value();
+	if (index.has_value() == have_pair) {
+		sink.set_error("Specify either index or the start_icon/end_icon pair, but not both");
+		return;
+	}
+
+	int target;
+	if (index.has_value()) {
+		if (!check_int_range(*index, 1, s.num_lines, "index", sink)) return;
+		target = *index - 1;
+	} else {
+		if (!start_icon.has_value() || !end_icon.has_value()) {
+			sink.set_error("Both start_icon and end_icon are required when deleting by endpoints");
+			return;
+		}
+		if (!check_int_range(*start_icon, 1, s.num_icons, "start_icon", sink)) return;
+		if (!check_int_range(*end_icon, 1, s.num_icons, "end_icon", sink)) return;
+		target = find_line_in_stage(s, *start_icon - 1, *end_icon - 1);
+		if (target < 0) {
+			sink.set_error("No line between icons %d and %d in stage %d",
+				*start_icon, *end_icon, stage_idx + 1);
+			return;
+		}
+	}
+
+	array_remove_slot(s.lines, s.num_lines, target);
+
+	mark_modified("MCP: delete briefing line %d in stage %d", target + 1, stage_idx + 1);
+	sprintf(req->result_message,
+		"Deleted briefing line %d from stage %d", target + 1, stage_idx + 1);
+	req->success = true;
+}
+
+// ---------------------------------------------------------------------------
 // Tool registration
 // ---------------------------------------------------------------------------
 
@@ -1158,6 +1271,50 @@ static void register_delete_briefing_icon(json_t *tools)
 		props, req);
 }
 
+static void register_create_briefing_line(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "stage",
+		"1-based index of the stage to add the line to");
+	add_integer_prop(props, "start_icon",
+		"1-based index of the icon where the line starts");
+	add_integer_prop(props, "end_icon",
+		"1-based index of the icon where the line ends");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("stage"));
+	json_array_append_new(req, json_string("start_icon"));
+	json_array_append_new(req, json_string("end_icon"));
+	register_tool(tools, "create_briefing_line",
+		"Draw a line between two icons on the briefing map. Lines are unordered: "
+		"at most one line can exist between any two icons, and endpoint order "
+		"does not matter. Lines are local to the stage. "
+		"Maximum " SCP_TOKEN_TO_STR(MAX_BRIEF_STAGE_LINES) " lines per stage.",
+		props, req);
+}
+
+static void register_delete_briefing_line(json_t *tools)
+{
+	json_t *props = json_object();
+	add_integer_prop(props, "stage",
+		"1-based index of the stage containing the line");
+	add_integer_prop(props, "index",
+		"1-based index of the line to delete. Specify either this or the "
+		"start_icon/end_icon pair, but not both.");
+	add_integer_prop(props, "start_icon",
+		"1-based icon index of one line endpoint (order does not matter)");
+	add_integer_prop(props, "end_icon",
+		"1-based icon index of the other line endpoint (order does not matter)");
+	add_string_enum_prop(props, "team", brief_team_desc, team_selector_enum_values);
+	json_t *req = json_array();
+	json_array_append_new(req, json_string("stage"));
+	register_tool(tools, "delete_briefing_line",
+		"Delete a line between two icons, addressed either by its 1-based line "
+		"index or by its endpoint pair (in either order). Remaining lines are "
+		"shifted down.",
+		props, req);
+}
+
 // ---------------------------------------------------------------------------
 // Tool table
 // ---------------------------------------------------------------------------
@@ -1173,5 +1330,7 @@ const McpToolDef mcp_brief_tool_defs[] = {
 	{ "create_briefing_icon",  register_create_briefing_icon,  nullptr, handle_create_briefing_icon,  false },
 	{ "update_briefing_icon",  register_update_briefing_icon,  nullptr, handle_update_briefing_icon,  false },
 	{ "delete_briefing_icon",  register_delete_briefing_icon,  nullptr, handle_delete_briefing_icon,  false },
+	{ "create_briefing_line",  register_create_briefing_line,  nullptr, handle_create_briefing_line,  false },
+	{ "delete_briefing_line",  register_delete_briefing_line,  nullptr, handle_delete_briefing_line,  false },
 };
 const size_t mcp_brief_tool_def_count = sizeof(mcp_brief_tool_defs) / sizeof(mcp_brief_tool_defs[0]);
