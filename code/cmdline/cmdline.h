@@ -132,6 +132,8 @@ extern bool Cmdline_alternate_registry_path;
 
 // Developer/Testing related
 extern char *Cmdline_start_mission;
+extern bool Cmdline_start_mcp;
+extern int Cmdline_mcp_port;
 extern int Cmdline_dis_collisions;
 extern int Cmdline_dis_weapons;
 extern bool Cmdline_output_sexp_info;
