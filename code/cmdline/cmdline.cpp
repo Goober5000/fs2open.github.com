@@ -498,6 +498,7 @@ bool Cmdline_reuse_rng_seed = false;
 
 // Developer/Testing related
 cmdline_parm start_mission_arg("-start_mission", "Skip mainhall and run this mission", AT_STRING);	// Cmdline_start_mission
+cmdline_parm start_mcp_arg("-start_mcp", "Automatically start the MCP server in FRED, with optional port override", AT_INT);	// Cmdline_start_mcp, Cmdline_mcp_port
 cmdline_parm dis_collisions("-dis_collisions", NULL, AT_NONE);	// Cmdline_dis_collisions
 cmdline_parm dis_weapons("-dis_weapons", NULL, AT_NONE);		// Cmdline_dis_weapons
 cmdline_parm noparseerrors_arg("-noparseerrors", NULL, AT_NONE);	// Cmdline_noparseerrors  -- turns off parsing errors -C
@@ -537,6 +538,8 @@ cmdline_parm vulkan("-vulkan", nullptr, AT_NONE);
 cmdline_parm multithreading("-threads", nullptr, AT_INT);
 
 char *Cmdline_start_mission = NULL;
+bool Cmdline_start_mcp = false;
+int Cmdline_mcp_port = 0;
 int Cmdline_dis_collisions = 0;
 int Cmdline_dis_weapons = 0;
 bool Cmdline_output_sexp_info = false;
@@ -2071,6 +2074,17 @@ bool SetCmdlineParams()
 
 	if ( start_mission_arg.found() ) {
 		Cmdline_start_mission = start_mission_arg.str();
+	}
+
+	if ( start_mcp_arg.found() ) {
+		Cmdline_start_mcp = true;
+		if (start_mcp_arg.has_param()) {
+			Cmdline_mcp_port = start_mcp_arg.get_int();
+			if (Cmdline_mcp_port < 1024 || Cmdline_mcp_port > 65535) {
+				Warning(LOCATION, "-start_mcp port must be between 1024 and 65535, got %d. Ignoring.", Cmdline_mcp_port);
+				Cmdline_mcp_port = 0;
+			}
+		}
 	}
 
 	if ( output_scripting_arg.found() )

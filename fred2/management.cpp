@@ -310,6 +310,10 @@ bool fred_init(std::unique_ptr<os::GraphicsOperations>&& graphicsOps)
 	// Load game_settings.tbl
 	mod_table_init();
 
+	// a port specified with -start_mcp overrides the game_settings.tbl port
+	if (Cmdline_mcp_port > 0)
+		Mcp_server_port = Cmdline_mcp_port;
+
 	// initialize localization module. Make sure this is done AFTER initializing OS.
 	// NOTE: Fred should ALWAYS run without localization. Otherwise it might swap in another language
 	// when saving - which would cause inconsistencies when externalizing to tstrings.tbl via Exstr
