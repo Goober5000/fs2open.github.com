@@ -23,6 +23,7 @@
 #include "CampaignTreeView.h"
 #include "CampaignTreeWnd.h"
 
+#include "cmdline/cmdline.h"
 #include "globalincs/mspdb_callstack.h"
 #include "graphics/2d.h"
 #include "io/key.h"
@@ -414,6 +415,11 @@ BOOL CFREDApp::OnIdle(LONG lCount) {
 			Wing_editor_dialog.show_hide_sexp_help();
 		if (Hide_wing_cues)
 			Wing_editor_dialog.show_hide_cues();
+
+		// start the MCP server if -start_mcp was specified on the command line; post the
+		// menu command so it is handled after the interface has finished coming up
+		if (Cmdline_start_mcp)
+			Fred_main_wnd->PostMessage(WM_COMMAND, ID_TOOLS_MCP_SERVER, 0);
 	}
 
 	CWinApp::OnIdle(lCount);
