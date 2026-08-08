@@ -1928,12 +1928,17 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 	// Helper: build a JSON array of firing point objects with standardized
 	// { "position": ..., "normal": ... } format.  For hull-mounted banks,
 	// each point has its own normal; for turrets, a shared normal is used.
-	auto build_firing_points = [](const vec3d *points, const vec3d *normals,
-	                              const vec3d *shared_normal, int count) -> json_t * {
+	// Points stored relative to a submodel (turret firing points) are
+	// accumulated up the parent chain to the model frame; pass -1 for points
+	// that are already model-frame (hull banks).
+	auto build_firing_points = [pm](const vec3d *points, const vec3d *normals,
+	                              const vec3d *shared_normal, int count, int submodel_num) -> json_t * {
 		json_t *arr = json_array();
 		for (int i = 0; i < count; i++) {
+			vec3d pos;
+			model_local_to_global_point(&pos, &points[i], pm, submodel_num);
 			json_t *fp = json_object();
-			json_object_set_new(fp, "position", build_vec3d_json(points[i]));
+			json_object_set_new(fp, "position", build_vec3d_json(pos));
 			json_object_set_new(fp, "normal",
 				build_vec3d_json(normals ? normals[i] : *shared_normal));
 			json_array_append_new(arr, fp);
@@ -1948,7 +1953,7 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 			const auto &bank = pm->gun_banks[g];
 			json_t *bank_obj = json_object();
 			json_object_set_new(bank_obj, "firing_points",
-				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots));
+				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots, -1));
 			json_array_append_new(banks, bank_obj);
 		}
 		json_object_set_new(obj, "primary_weapon_banks", banks);
@@ -1961,7 +1966,7 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 			const auto &bank = pm->missile_banks[m];
 			json_t *bank_obj = json_object();
 			json_object_set_new(bank_obj, "firing_points",
-				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots));
+				build_firing_points(bank.pnt, bank.norm, nullptr, bank.num_slots, -1));
 			json_array_append_new(banks, bank_obj);
 		}
 		json_object_set_new(obj, "secondary_weapon_banks", banks);
@@ -2064,7 +2069,15 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 			if (ss.type != SUBSYSTEM_NONE)
 				json_object_set_new(ss_obj, "subsystem_type", json_string(subsystem_type_str(ss.type)));
 			json_object_set_new(ss_obj, "max_hitpoints", json_real(ss.max_subsys_strength));
-			json_object_set_new(ss_obj, "position", build_vec3d_json(ss.pnt));
+
+			// ss.pnt for a submodel-linked subsystem is the submodel's offset
+			// relative to its parent, not the model frame; accumulate up the
+			// chain.  Special-point subsystems (subobj_num < 0) store a
+			// model-frame point already.
+			vec3d ss_pos = ss.pnt;
+			if (ss.subobj_num >= 0)
+				model_find_submodel_offset(&ss_pos, pm, ss.subobj_num);
+			json_object_set_new(ss_obj, "position", build_vec3d_json(ss_pos));
 			json_object_set_new(ss_obj, "radius", json_real(ss.radius));
 
 			if (ss.path_num >= 0 && ss.path_num < pm->n_paths)
@@ -2076,9 +2089,13 @@ static json_t *build_model_details_json(int sip_idx, polymodel *pm)
 				(ss.turret_turning_rate > 0.0f);
 
 			if (has_turret_data) {
+				// Turret firing points are stored relative to the turret's gun
+				// submodel (see model.h turret_firing_point), so accumulate
+				// through that chain.  turret_norm is a direction, which offset
+				// accumulation does not affect.
 				json_object_set_new(ss_obj, "turret_firing_points",
 					build_firing_points(ss.turret_firing_point, nullptr,
-						&ss.turret_norm, ss.turret_num_firing_points));
+						&ss.turret_norm, ss.turret_num_firing_points, ss.turret_gun_sobj));
 
 				if (ss.turret_turning_rate > 0.0f)
 					json_object_set_new(ss_obj, "turret_turning_rate", json_real(ss.turret_turning_rate));
