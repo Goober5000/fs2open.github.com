@@ -591,6 +591,20 @@ static void handle_get_ship(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+// Editor-selectability check matching the selectable_in_editor field on
+// list_ship_classes: FRED skips No_fred classes in the new-ship dropdown
+// and the ship editor's class dropdown.  Overridable with force=true.
+static bool ship_class_selectable_in_editor(int class_idx, McpErrorSink &sink)
+{
+	const ship_info &sip = Ship_info[class_idx];
+	if (!sip.flags[Ship::Info_Flags::No_fred])
+		return true;
+
+	sink.set_error("Ship class '%s' is not selectable in the editor (No_fred flag set). "
+		"Pass force=true to override.", sip.name);
+	return false;
+}
+
 static void handle_create_ship(json_t *input, McpToolRequest *req)
 {
 	McpErrorSink sink(req);
@@ -621,6 +635,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	auto is_player         = get_optional_bool(input, "is_player_start", sink);
 	auto score             = get_optional_integer(input, "score", sink);
 	auto assist_pct        = get_optional_float(input, "assist_score_fraction", sink);
+	auto force_arg         = get_optional_bool(input, "force", sink);
 
 	auto arrival_loc_str   = get_optional_string(input, "arrival_location", sink);
 	auto arrival_tgt_str   = get_optional_string(input, "arrival_target", sink);
@@ -665,6 +680,8 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	// Resolve ship class
 	int class_idx = check_lookup(class_name, ship_info_lookup, "ship_class", sink);
 	if (class_idx < 0) return;
+	if (!force_arg.value_or(false) && !ship_class_selectable_in_editor(class_idx, sink))
+		return;
 
 	// Validate player_orders_accepted against the new ship class's type defaults
 	std::optional<SCP_set<size_t>> resolved_player_orders;
@@ -883,6 +900,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	auto assist_pct        = get_optional_float(input, "assist_score_fraction", sink);
 	auto new_pos           = get_optional_vec3d(input, "position", sink);
 	auto new_orient        = get_optional_matrix(input, "orientation", sink);
+	auto force_arg         = get_optional_bool(input, "force", sink);
 
 	auto arrival_loc_str   = get_optional_string(input, "arrival_location", sink);
 	auto arrival_tgt_str   = get_optional_string(input, "arrival_target", sink);
@@ -948,6 +966,8 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		int new_class = check_lookup(class_name, ship_info_lookup, "ship_class", sink);
 		if (new_class < 0) return;
 		if (new_class != shipp.ship_info_index) {
+			if (!force_arg.value_or(false) && !ship_class_selectable_in_editor(new_class, sink))
+				return;
 			change_ship_type(ship_idx, new_class, 0);
 			changed = true;
 		}
@@ -2843,7 +2863,8 @@ static void register_create_ship(json_t *tools)
 	add_string_prop(props, "name",
 		"Unique name for the ship (must not collide with any other ship, wing, waypoint, or jump node).");
 	add_string_prop(props, "ship_class",
-		"Ship class name (e.g. \"GTF Ulysses\"). Use list_ship_classes to discover valid names.");
+		"Ship class name (e.g. \"GTF Ulysses\"). Use list_ship_classes to discover valid names. "
+		"Classes with the No_fred flag are refused unless force is true.");
 	add_vec3d_prop(props, "position", "World position where the ship is placed.");
 	add_matrix_prop(props, "orientation",
 		"Orientation matrix (rvec/uvec/fvec) for the ship at placement.");
@@ -2922,6 +2943,9 @@ static void register_create_ship(json_t *tools)
 		"full valid_player_orders set. Use list_defined_player_orders to discover "
 		"valid parse_names.",
 		get_mcp_player_orders_parse_names());
+	add_bool_prop(props, "force",
+		"If true, bypass the editor-selectability check (No_fred) on the ship class. "
+		"Default false.");
 	json_t *req = json_array();
 	json_array_append_new(req, json_string("name"));
 	json_array_append_new(req, json_string("ship_class"));
@@ -2944,7 +2968,8 @@ static void register_update_ship(json_t *tools)
 		"Display name shown to the player. Pass \"<none>\" or a string matching the ship's `name` "
 		"to clear; a blank string is a valid display name and will be stored as-is.");
 	add_string_prop(props, "ship_class",
-		"Change the ship's class. Triggers a model/subsystem swap via change_ship_type.");
+		"Change the ship's class. Triggers a model/subsystem swap via change_ship_type. "
+		"Classes with the No_fred flag are refused unless force is true.");
 	add_string_prop(props, "team", "IFF team name.");
 	add_string_prop(props, "ai_class", "AI class name. Empty/\"<default>\" resets to the ship class default.");
 	add_string_prop(props, "cargo", "Cargo name (auto-added if new).");
@@ -3000,6 +3025,9 @@ static void register_update_ship(json_t *tools)
 		"the post-update ship_class when both are set in the same call). Use "
 		"list_defined_player_orders to discover valid parse_names.",
 		get_mcp_player_orders_parse_names());
+	add_bool_prop(props, "force",
+		"If true, bypass the editor-selectability check (No_fred) when changing ship_class. "
+		"Default false.");
 	json_t *req = json_array();
 	json_array_append_new(req, json_string("name"));
 	register_tool(tools, "update_ship",
