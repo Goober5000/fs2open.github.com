@@ -425,7 +425,7 @@ struct SexpContextMenuState {
 
 class SexpTreeModel {
 public:
-	SexpTreeModel();
+	explicit SexpTreeModel(bool indexed_load = false);
 	~SexpTreeModel();
 
 	// Non-copyable and non-movable: _opf holds a back-reference to this model,
@@ -435,6 +435,12 @@ public:
 	SexpTreeModel& operator=(const SexpTreeModel&) = delete;
 	SexpTreeModel(SexpTreeModel&&) = delete;
 	SexpTreeModel& operator=(SexpTreeModel&&) = delete;
+
+	// Indexed-load mode: load_branch keeps tree_nodes[i] 1:1 with Sexp_nodes[i],
+	// so callers can address tree nodes by global sexp index and reload branches
+	// in place (stale entries are left behind as harmless orphans).  Used by
+	// FRED2's MCP sexp forest.
+	const bool indexed_load;
 
 	// Tree node storage
 	SCP_vector<sexp_tree_item> tree_nodes;
@@ -477,6 +483,9 @@ public:
 	int allocate_node();
 	// Allocate a node as a child of 'parent', inserted after 'after' (-1 = append to end)
 	int allocate_node(int parent, int after = -1);
+	// Indexed-load only: allocate (or overwrite) the node at tree_nodes[sexp_index],
+	// preserving the 1:1 tree_nodes/Sexp_nodes index mapping
+	int allocate_node_at(int sexp_index, int parent);
 	// Set the type and text of an already-allocated node
 	void set_node(int node, int type, const char* text);
 	// Free a node and its children; if cascade!=0 also free all subsequent siblings

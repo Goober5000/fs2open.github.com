@@ -8,7 +8,6 @@
 #include "mcp_loadout.h"
 #include "mcp_reference_tools.h"
 #include "mcp_utils.h"
-#include "sexp_tree.h"
 
 #include <jansson.h>
 #include <algorithm>
@@ -39,13 +38,13 @@
 // ---------------------------------------------------------------------------
 // Event-annotation maintenance for the sexp mutators
 //
-// Event annotations (code/mission/missiongoals.h) locate their node by a
+// Event annotations (code/missioneditor/sexp_annotation_model.h) locate their node by a
 // positional path { event_index, 0, child_idx, child_idx, ... } through the event
 // editor's tree.  The second element is always 0: the event's tree item holds the
 // formula's root operator as its single child (create_tree -> add_sub_tree), so the
 // operator sits at child index 0 under the event item.  After that, each child index
 // is the node's position among its operator's arguments, exactly as
-// sexp_tree::load_branch builds the tree: list-wrapper nodes are transparent, so a
+// SexpTreeModel::load_branch builds the tree: list-wrapper nodes are transparent, so a
 // (wrapped) sub-operator counts as one position just like a literal argument.  These
 // helpers convert between a path and a Sexp_node so the mutators can keep annotations
 // attached to their node; see AnnotationRemapScope.
