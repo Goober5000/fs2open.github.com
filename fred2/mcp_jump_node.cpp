@@ -4,7 +4,6 @@
 #include "mcp_app.h"
 #include "mcp_json.h"
 #include "mcpserver.h"
-#include "mcp_array_utils.h"
 #include "mcp_sexp_forest.h"
 
 #include <jansson.h>
@@ -13,6 +12,7 @@
 #include "globalincs/utility.h"
 
 #include "jumpnode/jumpnode.h"
+#include "missioneditor/slot_operations.h"
 #include "object/object.h"
 #include "model/model.h"
 #include "parse/sexp.h"
@@ -284,22 +284,37 @@ static void handle_delete_jump_node(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
+// The attached Jump_nodes[] indices, in display order (same filter as
+// qtFRED's reorder dialog).  Jump_nodes is kept compact, so normally this is
+// just 0..N-1.
+static SCP_vector<int> attached_jump_node_slots()
+{
+	SCP_vector<int> slots;
+	for (int i = 0; i < (int)Jump_nodes.size(); i++)
+		if (Jump_nodes[i].GetSCPObjectNumber() >= 0)
+			slots.push_back(i);
+	return slots;
+}
+
 // Move/swap config for jump nodes
 static MoveSwapConfig make_jump_node_move_swap_config()
 {
 	MoveSwapConfig cfg;
 	cfg.entity_name = "jump node";
-	cfg.count = (int)Jump_nodes.size();
+	cfg.count = (int)attached_jump_node_slots().size();
 	cfg.one_based = true;
 	cfg.validate_dialog = validate_dialog_for_jump_nodes;
 	cfg.get_name = [](int i) {
-		return Jump_nodes[i - 1].GetName();
+		return Jump_nodes[attached_jump_node_slots()[i - 1]].GetName();
 	};
 	cfg.do_move = [](int from, int to) {
-		array_move_element(Jump_nodes, from - 1, to - 1);
+		FredJumpNodeSlotConfig jcfg;
+		rotate_jump_node_slots(attached_jump_node_slots(), from - 1, to - 1, jcfg);
 	};
 	cfg.do_swap = [](int a, int b) {
-		std::swap(Jump_nodes[a - 1], Jump_nodes[b - 1]);
+		FredJumpNodeSlotConfig jcfg;
+		auto slots = attached_jump_node_slots();
+		swap_jump_node_slots(slots[a - 1], slots[b - 1], jcfg);
 	};
 	return cfg;
 }

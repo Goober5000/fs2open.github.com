@@ -50,6 +50,20 @@ SCP_vector<std::pair<size_t, size_t>> fuzzy_search_and_sort(
 }
 
 // ---------------------------------------------------------------------------
+// Table lookup
+// ---------------------------------------------------------------------------
+
+// Linear search in a sentinel-terminated (t->name == nullptr) named-info table.
+template<typename T>
+const T *find_named_info(const T *table, const char *name)
+{
+	for (const T *t = table; t->name; t++)
+		if (stricmp(name, t->name) == 0)
+			return t;
+	return nullptr;
+}
+
+// ---------------------------------------------------------------------------
 // SEXPs
 // ---------------------------------------------------------------------------
 
