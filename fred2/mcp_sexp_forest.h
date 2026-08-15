@@ -4,7 +4,7 @@
 #include "globalincs/pstypes.h"
 
 // ---------------------------------------------------------------------------
-// Cached headless sexp_tree representing every live SEXP tree in the mission.
+// Cached UI-free SexpTreeModel representing every live SEXP tree in the mission.
 //
 // The forest is rebuilt the first time it is needed, and again whenever
 // SEXP-editing state becomes dirty.
