@@ -22,6 +22,7 @@
 #include "mission/missionmessage.h"   // Personas
 #include "mission/missionparse.h"
 #include "missioneditor/common.h"     // target_to_anchor, anchor_to_target, stuff_special_arrival_anchor_name
+#include "missioneditor/slot_operations.h"  // FredShipSlotConfig, swap_ship_slots, rotate_ship_slots
 #include "object/object.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
@@ -1376,16 +1377,14 @@ static MoveSwapConfig make_ship_move_swap_config()
 		return SCP_string(Ships[ship_slot_at_public_index(i)].ship_name);
 	};
 	cfg.do_move = [](int from, int to) {
-		// Walk the moving element via adjacent swaps.  After each swap the
-		// sparse positions of *other* occupied slots are unchanged, so
-		// ship_slot_at_public_index remains correct for the next step.
-		auto scfg = make_ship_slot_config();
-		int step = (from < to) ? 1 : -1;
-		for (int pos = from; pos != to; pos += step) {
-			int a = ship_slot_at_public_index(pos);
-			int b = ship_slot_at_public_index(pos + step);
-			swap_ship_slots(a, b, scfg);
-		}
+		// Build the occupied-slots list (in public order: ascending Ships[]
+		// slots) and move in a single rotation -- K+2 reassignments for a move
+		// of K positions instead of 3K for a walk of adjacent swaps.
+		SCP_vector<int> slots;
+		for (int i = 0; i < MAX_SHIPS; i++)
+			if (Ships[i].objnum >= 0)
+				slots.push_back(i);
+		rotate_ship_slots(slots, from - 1, to - 1, make_ship_slot_config());
 	};
 	cfg.do_swap = [](int a, int b) {
 		int sa = ship_slot_at_public_index(a);

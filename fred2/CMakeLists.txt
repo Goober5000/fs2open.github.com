@@ -164,7 +164,6 @@ set(FRED2_SOURCES
 	mcpserver.h
 	mcp_tool_registry.cpp
 	mcp_tool_registry.h
-	mcp_array_utils.h
 	mcp_utils.cpp
 	mcp_utils.h
 	mcp_app.cpp

@@ -14,7 +14,8 @@
 #include "ai/ai.h"                    // get_absolute_wing_pos
 #include "globalincs/utility.h"       // find_item_with_string
 #include "mission/missionparse.h"
-#include "missioneditor/common.h"     // FredWingSlotConfig, reassign_wing_slot, swap_wing_slots, update_custom_wing_indexes
+#include "missioneditor/common.h"     // update_custom_wing_indexes, ai_update_goal_references
+#include "missioneditor/slot_operations.h"  // FredWingSlotConfig, reassign_wing_slot, swap_wing_slots
 #include "object/object.h"
 #include "parse/sexp.h"
 #include "parse/parselo.h"
@@ -970,16 +971,14 @@ static MoveSwapConfig make_wing_move_swap_config()
 		return SCP_string(Wings[wing_slot_at_public_index(i)].name);
 	};
 	cfg.do_move = [](int from, int to) {
-		// Walk the moving element via adjacent swaps.  After each swap the
-		// sparse positions of *other* occupied slots are unchanged, so
-		// wing_slot_at_public_index remains correct for the next step.
-		auto wcfg = make_wing_slot_config();
-		int step = (from < to) ? 1 : -1;
-		for (int pos = from; pos != to; pos += step) {
-			int a = wing_slot_at_public_index(pos);
-			int b = wing_slot_at_public_index(pos + step);
-			swap_wing_slots(a, b, wcfg);
-		}
+		// Build the occupied-slots list (in public order: ascending Wings[]
+		// slots) and move in a single rotation -- K+2 reassignments for a move
+		// of K positions instead of 3K for a walk of adjacent swaps.
+		SCP_vector<int> slots;
+		for (int i = 0; i < MAX_WINGS; i++)
+			if (Wings[i].wave_count > 0)
+				slots.push_back(i);
+		rotate_wing_slots(slots, from - 1, to - 1, make_wing_slot_config());
 	};
 	cfg.do_swap = [](int a, int b) {
 		int sa = wing_slot_at_public_index(a);
