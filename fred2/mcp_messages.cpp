@@ -5,7 +5,7 @@
 #include "mcp_json.h"
 #include "mcp_sexp_forest.h"
 #include "mcpserver.h"
-#include "mcp_array_utils.h"
+#include "utils/array_utils.h"
 
 #include <jansson.h>
 #include <cstring>
