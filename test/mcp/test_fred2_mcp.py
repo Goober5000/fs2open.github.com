@@ -37,6 +37,7 @@ import test_wings
 import test_reinforcements
 import test_team_loadout
 import test_sexp_roundtrip
+import test_sexp_listing
 import test_sexp_detach
 import test_sexp_attach
 import test_sexp_move_swap
@@ -61,6 +62,7 @@ AREAS = [
     test_reinforcements,
     test_team_loadout,
     test_sexp_roundtrip,
+    test_sexp_listing,
     test_sexp_detach,
     test_sexp_attach,
     test_sexp_move_swap,
