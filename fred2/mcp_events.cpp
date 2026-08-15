@@ -15,6 +15,7 @@
 #include "globalincs/utility.h"
 
 #include "mission/missiongoals.h"
+#include "missioneditor/sexp_annotation_model.h"
 #include "parse/parselo.h"
 #include "parse/sexp.h"
 

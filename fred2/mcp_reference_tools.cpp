@@ -7,7 +7,6 @@
 #include "mcp_ships.h"      // mcp_ship_flag_excluded
 #include "mcp_utils.h"
 #include "mcp_wings.h"      // mcp_wing_flag_excluded
-#include "sexp_tree.h"
 
 #include <jansson.h>
 #include <climits>

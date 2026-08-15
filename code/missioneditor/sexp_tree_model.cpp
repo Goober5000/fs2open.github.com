@@ -240,8 +240,9 @@ bool SexpTreeEditorInterface::requireCampaignOperators() const
 
 // Initialize model with all state cleared. The UI layer must set _interface and
 // modified before using the tree.
-SexpTreeModel::SexpTreeModel()
-	: total_nodes(0), item_index(-1),
+SexpTreeModel::SexpTreeModel(bool indexed_load_mode)
+	: indexed_load(indexed_load_mode),
+	  total_nodes(0), item_index(-1),
 	  root_item(-1), select_sexp_node(-1), flag(0),
 	  _interface(nullptr), modified(nullptr),
 	  _opf(*this)
@@ -257,6 +258,8 @@ SexpTreeModel::~SexpTreeModel() = default;
 // Scan for the first unused slot in the tree_nodes array. Returns -1 if none available.
 int SexpTreeModel::find_free_node() const
 {
+	Assertion(!indexed_load, "find_free_node must not be used in indexed-load mode; tree_nodes is addressed by Sexp_nodes index directly");
+
 	for (int i = 0; i < static_cast<int>(tree_nodes.size()); i++) {
 		if (tree_nodes[i].type == SEXPT_UNUSED)
 			return i;
@@ -329,6 +332,38 @@ int SexpTreeModel::allocate_node(int parent, int after)
 
 	tree_nodes[index].parent = parent;
 	return index;
+}
+
+// indexed-load only: allocate (or overwrite) the tree node at tree_nodes[sexp_index].
+// Because tree_nodes and Sexp_nodes share a 1:1 index mapping in indexed-load mode,
+// the caller passes the Sexp_nodes[] index being processed and we write directly there.
+int SexpTreeModel::allocate_node_at(int sexp_index, int parent)
+{
+	Assertion(indexed_load, "allocate_node_at requires indexed-load mode");
+
+	if (sexp_index >= static_cast<int>(tree_nodes.size()))
+		tree_nodes.resize(sexp_index + 1);
+
+	tree_nodes[sexp_index].type   = SEXPT_UNINIT;
+	tree_nodes[sexp_index].parent = parent;
+	tree_nodes[sexp_index].child  = -1;
+	tree_nodes[sexp_index].next   = -1;
+	tree_nodes[sexp_index].flags  = 0;
+	strcpy_s(tree_nodes[sexp_index].text, "<uninitialized tree node>");
+	tree_nodes[sexp_index].handle = nullptr;
+
+	if (parent != -1) {
+		int i = tree_nodes[parent].child;
+		if (i == -1) {
+			tree_nodes[parent].child = sexp_index;
+		} else {
+			while (tree_nodes[i].next != -1)
+				i = tree_nodes[i].next;
+			tree_nodes[i].next = sexp_index;
+		}
+	}
+
+	return sexp_index;
 }
 
 // initialize the data for a node.  Should be called right after a new node is allocated.
@@ -501,7 +536,7 @@ int SexpTreeModel::load_branch(int index, int parent)
 			load_branch(Sexp_nodes[index].first, parent);
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_OPERATOR) {
-			cur = allocate_node(parent);
+			cur = indexed_load ? allocate_node_at(index, parent) : allocate_node(parent);
 			if ((index == select_sexp_node) && !flag) {
 				select_sexp_node = cur;
 				flag = 1;
@@ -512,7 +547,7 @@ int SexpTreeModel::load_branch(int index, int parent)
 			return cur;
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_NUMBER) {
-			cur = allocate_node(parent);
+			cur = indexed_load ? allocate_node_at(index, parent) : allocate_node(parent);
 			if (Sexp_nodes[index].type & SEXP_FLAG_VARIABLE) {
 				get_combined_variable_name(combined_var_name, Sexp_nodes[index].text);
 				set_node(cur, (SEXPT_VARIABLE | SEXPT_NUMBER | additional_flags), combined_var_name);
@@ -521,7 +556,7 @@ int SexpTreeModel::load_branch(int index, int parent)
 			}
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_STRING) {
-			cur = allocate_node(parent);
+			cur = indexed_load ? allocate_node_at(index, parent) : allocate_node(parent);
 			if (Sexp_nodes[index].type & SEXP_FLAG_VARIABLE) {
 				get_combined_variable_name(combined_var_name, Sexp_nodes[index].text);
 				set_node(cur, (SEXPT_VARIABLE | SEXPT_STRING | additional_flags), combined_var_name);
@@ -536,11 +571,11 @@ int SexpTreeModel::load_branch(int index, int parent)
 			Assertion(get_sexp_container(Sexp_nodes[index].text) != nullptr,
 				"Attempt to load unknown container data %s into SEXP tree. Please report!",
 				Sexp_nodes[index].text);
-			cur = allocate_node(parent);
+			cur = indexed_load ? allocate_node_at(index, parent) : allocate_node(parent);
 			set_node(cur, (SEXPT_CONTAINER_NAME | SEXPT_STRING | additional_flags), Sexp_nodes[index].text);
 
 		} else if (Sexp_nodes[index].subtype == SEXP_ATOM_CONTAINER_DATA) {
-			cur = allocate_node(parent);
+			cur = indexed_load ? allocate_node_at(index, parent) : allocate_node(parent);
 			Assertion(get_sexp_container(Sexp_nodes[index].text) != nullptr,
 				"Attempt to load unknown container data %s into SEXP tree. Please report!",
 				Sexp_nodes[index].text);

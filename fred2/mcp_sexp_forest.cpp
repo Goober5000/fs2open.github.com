@@ -1,7 +1,7 @@
 #include "stdafx.h"
 #include "mcp_json.h"
 #include "mcp_sexp_forest.h"
-#include "sexp_tree.h"
+#include "missioneditor/sexp_tree_model.h"
 #include "parse/sexp.h"
 
 #include <jansson.h>
@@ -18,17 +18,28 @@
 // unprotected Sexp_nodes[] array and main-thread-owned globals (Ships[],
 // Wings[], Messages[], Mission_events[], etc.).
 
-// The single cached headless sexp_tree that holds every live SEXP in the
-// mission.
-// NOTE: The reason we need to keep a sexp_tree here is so that we can use it
-// query for argument values.  Once get_opf_* functions are separated from
-// sexp_tree, this whole cache setup may no longer be needed.
-// Constructed on first use (Meyers singleton) rather than at static-init time:
-// sexp_tree derives from CTreeCtrl and its constructor logs via mprintf, both
-// of which are only safe once MFC and FRED's logging are up.
-static sexp_tree &get_sexp_forest()
+// The single cached UI-free SexpTreeModel that holds every live SEXP in the
+// mission.  The model exists so that SexpTreeOPF can answer context-sensitive
+// argument-value queries: get_listing_opf() reads sibling arguments out of a
+// populated tree_nodes[] (e.g. which ship an OPF_SUBSYSTEM argument refers to).
+// Indexed-load mode keeps tree_nodes[i] 1:1 with Sexp_nodes[i], so tool
+// handlers can pass raw Sexp_nodes indices as parent_node and partial rebuilds
+// can reload dirty roots in place.
+// Constructed on first use (Meyers singleton); the model has no UI or MFC
+// dependencies, so lazy construction is a convenience rather than a necessity.
+static SexpTreeModel &get_sexp_forest()
 {
-	static sexp_tree forest(true /* headless */);
+	// Default editor-interface fallback, same pattern as sexp_tree_view: base-class
+	// behavior matches the old no-context defaults.  The modified dummy satisfies
+	// model mutators that write *modified; the forest itself tracks dirtiness
+	// through g_sexp_forest_dirty / g_dirty_roots below.
+	static SexpTreeEditorInterface forest_interface;
+	static int forest_modified_dummy = 0;
+	static SexpTreeModel forest(true /* indexed_load */);
+	if (forest._interface == nullptr) {
+		forest._interface = &forest_interface;
+		forest.modified = &forest_modified_dummy;
+	}
 	return forest;
 }
 
@@ -113,7 +124,7 @@ void mcp_sexp_forest_rebuild()
 				referenced.insert(Sexp_nodes[i].rest);
 		}
 
-		get_sexp_forest().clear_tree();
+		get_sexp_forest().clear_tree_data();
 
 		// Pass 2: load each root subtree into the forest
 		for (int i = 0; i < Num_sexp_nodes; i++) {
@@ -133,7 +144,7 @@ void mcp_sexp_forest_rebuild()
 		SCP_vector<int> roots(g_dirty_roots.begin(), g_dirty_roots.end());
 		g_dirty_roots.clear();
 
-		// load_branch in headless mode writes directly to tree_nodes[r] by Sexp_nodes index,
+		// load_branch in indexed-load mode writes directly to tree_nodes[r] by Sexp_nodes index,
 		// overwriting any prior content.  No need to remove previous stale branches.
 		for (int r : roots) {
 			if (Sexp_nodes[r].type != SEXP_NOT_USED)
@@ -146,7 +157,7 @@ void mcp_sexp_forest_cleanup()
 {
 	forest_assert_main_thread("mcp_sexp_forest_cleanup");
 
-	get_sexp_forest().clear_tree();
+	get_sexp_forest().clear_tree_data();
 }
 
 // ---------------------------------------------------------------------------
@@ -162,7 +173,7 @@ json_t *mcp_sexp_forest_get_listing_on_main_thread(int opf, int parent_node, int
 	// Rebuild if needed — this is a no-op when the forest is already clean.
 	mcp_sexp_forest_rebuild();
 
-	sexp_list_item *list = get_sexp_forest().get_listing_opf(opf, parent_node, arg_index);
+	sexp_list_item *list = get_sexp_forest()._opf.get_listing_opf(opf, parent_node, arg_index);
 
 	json_t *values = json_array();
 	for (sexp_list_item *item = list; item != nullptr; item = item->next)
