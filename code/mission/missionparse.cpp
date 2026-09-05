@@ -7401,6 +7401,21 @@ void support_ship_info::reset()
 	}
 }
 
+// Releases the references to the replacement textures that were loaded for the parse objects (see post_process_ships_wings()
+// and the SEXPs which add replacements); ships created from those objects take their own references.
+static void mission_release_replacement_textures()
+{
+	for (auto &p_obj : Parse_objects)
+	{
+		for (auto &tr : p_obj.replacement_textures)
+		{
+			if (tr.new_texture_id >= 0)
+				bm_release(tr.new_texture_id);
+			tr.new_texture_id = -1;
+		}
+	}
+}
+
 /**
  * Initialize the mission and related data structures.
  */
@@ -7461,6 +7476,7 @@ void mission_init(mission *pm, bool quick_init)
 	}
 	Total_initially_docked = 0;
 
+	mission_release_replacement_textures();
 	Parse_objects.clear();
 	list_init(&Ship_arrival_list);	// init list for arrival ships
 
@@ -7579,6 +7595,7 @@ void mission_parse_close()
 	}
 
 	// the destructor for each p_object will clear its dock list
+	mission_release_replacement_textures();
 	Parse_objects.clear();
 }
 

@@ -1105,9 +1105,9 @@ void brief_render_closeup(int ship_class, float frametime)
 			gr_set_clip(Closeup_region[gr_screen.res][0], Closeup_region[gr_screen.res][1], w, h, GR_RESIZE_MENU);
 		}
 
-		auto sip = &Ship_info[ship_class];
-		if (!sip->replacement_textures.empty())
-			render_info.set_replacement_textures(Closeup_icon->modelnum, sip->replacement_textures);
+		// the instance carries the ship class's replacement textures, if any
+		if (Closeup_icon->model_instance_num >= 0)
+			render_info.set_replacement_textures(model_get_instance(Closeup_icon->model_instance_num)->texture_replace);
 
 		render_info.set_flags(MR_AUTOCENTER);
 	}
@@ -1279,6 +1279,9 @@ int brief_setup_closeup(brief_icon *bi, bool api_access)
 
 	Closeup_icon = bi;
 	Closeup_icon->modelnum = -1;
+
+	if (Closeup_icon->model_instance_num >= 0)
+		model_delete_instance(Closeup_icon->model_instance_num);
 	Closeup_icon->model_instance_num = -1;
 
 	Closeup_one_revolution_time = ONE_REV_TIME;
@@ -1941,6 +1944,17 @@ void brief_close(bool api_access)
 
 		// unload the bitmaps
 		brief_unload_bitmaps();
+
+		// delete the model instances of every icon that was set up for a closeup, not just the current one
+		for (int i = 0; i < Briefing->num_stages; i++) {
+			brief_stage *bs = &Briefing->stages[i];
+			for (int j = 0; j < bs->num_icons; j++) {
+				if (bs->icons[j].model_instance_num >= 0) {
+					model_delete_instance(bs->icons[j].model_instance_num);
+					bs->icons[j].model_instance_num = -1;
+				}
+			}
+		}
 
 		brief_common_close();
 	}
