@@ -40,6 +40,11 @@ static cmd_brief *get_cmd_brief_for_team(json_t *input, McpErrorSink &sink)
 			return nullptr;
 		if (reject_team_none(team_str, "command briefing", sink)) return nullptr;
 		team_index = team_index_from_name(team_str);
+		// FRED's command briefing editor has no team selector at all (it edits
+		// team 0 only), but the mission format stores one command briefing per
+		// team and qtFRED does offer a selector, so gate on Num_teams as the
+		// other team-scoped tools do rather than on FRED's missing control.
+		if (reject_team_not_in_mission(team_index, "command briefing", sink)) return nullptr;
 	}
 
 	return &Cmd_briefs[team_index];
@@ -307,7 +312,10 @@ static void handle_update_cmd_brief_background(json_t *input, McpToolRequest *re
 
 static const char *cmd_brief_team_desc =
 	"Which team's command briefing to operate on (\"Team 1\" or \"Team 2\"). "
-	"Defaults to \"Team 1\". \"none\" is not valid for command briefings.";
+	"Defaults to \"Team 1\". \"none\" is not valid for command briefings. "
+	"\"Team 2\" exists only in team-versus-team missions; in any other mission type it is "
+	"rejected, because the mission format has no place to store it. (FRED's command briefing "
+	"editor only ever edits Team 1, but the format and qtFRED both support one per team.)";
 
 static void register_list_cmd_brief_stages(json_t *tools)
 {

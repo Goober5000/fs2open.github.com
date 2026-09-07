@@ -43,7 +43,7 @@ static bool validate_dialog_for_briefing(SCP_string &error_msg)
 // ---------------------------------------------------------------------------
 
 // Resolve optional "team" parameter to a briefing pointer.
-// Defaults to Team 1. Rejects "none".
+// Defaults to Team 1. Rejects "none" and teams the mission doesn't have.
 static briefing *get_briefing_for_team(json_t *input, McpErrorSink &sink)
 {
 	auto team_str = get_optional_string(input, "team", sink);
@@ -55,6 +55,7 @@ static briefing *get_briefing_for_team(json_t *input, McpErrorSink &sink)
 			return nullptr;
 		if (reject_team_none(team_str, "briefing", sink)) return nullptr;
 		team_index = team_index_from_name(team_str);
+		if (reject_team_not_in_mission(team_index, "briefing", sink)) return nullptr;
 	}
 
 	return &Briefings[team_index];
@@ -1075,7 +1076,9 @@ static void handle_update_briefing_backgrounds(json_t *input, McpToolRequest *re
 
 static const char *brief_team_desc =
 	"Which team's briefing to operate on (\"Team 1\" or \"Team 2\"). "
-	"Defaults to \"Team 1\". \"none\" is not valid for briefings.";
+	"Defaults to \"Team 1\". \"none\" is not valid for briefings. "
+	"\"Team 2\" exists only in team-versus-team missions, matching FRED; in any other mission "
+	"type it is rejected, because the mission format has no place to store it.";
 
 static void register_list_briefing_stages(json_t *tools)
 {

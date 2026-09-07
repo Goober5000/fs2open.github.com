@@ -139,10 +139,13 @@ void TeamLoadoutDialogModel::reject()
 void TeamLoadoutDialogModel::initializeData()
 {
 	
-	// first, build the team list same as other dialogs
+	// build the team list, but only for the teams this mission actually has;
+	// _teams below is sized to Num_teams, and setCurrentTeam rejects anything
+	// outside it, so offering Team 2 elsewhere would just snap back to Team 1
 	_teamList.clear();
 	for (auto& team : Mission_event_teams_tvt) {
-		_teamList.emplace_back(team.first, team.second);
+		if (team.second < Num_teams)
+			_teamList.emplace_back(team.first, team.second);
 	}
 
 	// need to build list for count variables.

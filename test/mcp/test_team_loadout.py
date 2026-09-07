@@ -11,7 +11,6 @@ variable-based class/count entries, delete/rename/type-change guards on
 referenced variables, and the player_entry_delay field on mission info.
 """
 
-import contextlib
 import os
 import re
 
@@ -25,6 +24,7 @@ from mcp_test_lib import (
     assert_true,
     run_module_standalone,
     SkipTest,
+    tvt_mission,
     tool_data,
     tool_text,
 )
@@ -77,26 +77,6 @@ def _safe_delete_var(client, name):
         client.call_tool("delete_sexp_variable", {"name": name, "force": True})
     except Exception:
         pass
-
-
-@contextlib.contextmanager
-def _tvt_mission(client):
-    """Temporarily switch the mission to team-versus-team, so that Team 2
-    exists.  Team 2 is only addressable there -- see _tvt guard test."""
-    r = client.call_tool("get_mission_info")
-    assert_success(r)
-    original = tool_data(r).get("game_type")
-    r = client.call_tool("update_mission_info",
-        {"game_type": "multiplayer team-versus-team"})
-    assert_success(r)
-    try:
-        yield
-    finally:
-        if original:
-            try:
-                client.call_tool("update_mission_info", {"game_type": original})
-            except Exception:
-                pass
 
 
 def _find_player_weapon_class(client, limit=80):
@@ -250,7 +230,7 @@ def register(suite, client):
             _restore_team(client, snap)
 
     def test_loadout_team2_independent():
-        with _tvt_mission(client):
+        with tvt_mission(client):
             snap1 = _snapshot_team(client, "Team 1")
             snap2 = _snapshot_team(client, "Team 2")
             try:

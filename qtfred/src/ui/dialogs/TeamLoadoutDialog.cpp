@@ -86,7 +86,9 @@ void TeamLoadoutDialog::initializeUi()
 	}
 
 	// quickly enable or disable the team spin box (must not get to multiple teams if in SP!)
-	if (The_mission.game_type & MISSION_TYPE_MULTI) {
+	// Gate on Num_teams, not MISSION_TYPE_MULTI: multiplayer co-op and dogfight missions are
+	// multi but still have only one team, and the model rejects any team outside Num_teams.
+	if (Num_teams > 1) {
 		ui->currentTeamComboBox->setEnabled(true); // TODO make an enable/disable function for all the controls
 		ui->copyLoadoutToOtherTeamsButton->setEnabled(true);
 	} else {

@@ -21,6 +21,7 @@ from mcp_test_lib import (
     tool_text,
     tree_signature,
     tree_values,
+    tvt_mission,
 )
 
 
@@ -391,24 +392,29 @@ def register(suite, client):
         client.call_tool("delete_debriefing_stage", {"index": 1})
 
     def test_entity_debriefing_stage_team_2():
-        # Create a debriefing stage on team 2.
-        r = client.call_tool("create_debriefing_stage", {"text": "attach debrief t2", "team": "Team 2"})
-        assert_success(r)
-        # Build a (not (true)) formula — avoids the Locked_sexp_true singleton.
-        r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
-        assert_success(r)
-        src = tool_data(r)["node"]
-        # Attach via target_entity_tag="team_2".
-        r = client.call_tool("attach_sexp_node", {
-            "source_node": src,
-            "target_entity_type": "debriefing_stage",
-            "target_entity_id": "1",
-            "target_entity_tag": "team_2",
-        })
-        assert_success(r)
-        assert_equal(tool_data(r).get("position"), "entity_formula", "position")
-        # Clean up.
-        client.call_tool("delete_debriefing_stage", {"index": 1, "team": "Team 2"})
+        # Team 2 debriefings only exist in team-versus-team missions -- the
+        # parser and saver both stop at Num_teams -- so the debriefing tools
+        # refuse Team 2 anywhere else.  Switch the mission so the stage this
+        # test attaches to is one the mission can actually hold.
+        with tvt_mission(client):
+            # Create a debriefing stage on team 2.
+            r = client.call_tool("create_debriefing_stage", {"text": "attach debrief t2", "team": "Team 2"})
+            assert_success(r)
+            # Build a (not (true)) formula — avoids the Locked_sexp_true singleton.
+            r = client.call_tool("text_to_sexp", {"text": "( not ( true ) )"})
+            assert_success(r)
+            src = tool_data(r)["node"]
+            # Attach via target_entity_tag="team_2".
+            r = client.call_tool("attach_sexp_node", {
+                "source_node": src,
+                "target_entity_type": "debriefing_stage",
+                "target_entity_id": "1",
+                "target_entity_tag": "team_2",
+            })
+            assert_success(r)
+            assert_equal(tool_data(r).get("position"), "entity_formula", "position")
+            # Clean up.
+            client.call_tool("delete_debriefing_stage", {"index": 1, "team": "Team 2"})
 
     def test_entity_fiction_viewer_stage():
         # Create a fiction viewer stage.
