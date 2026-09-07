@@ -6,10 +6,10 @@
 #include "mcpserver.h"
 
 #include <jansson.h>
-#include <cstring>
+#include <algorithm>
 #include <cstdlib>
 
-#include "management.h"          // generate_ship_usage_list / generate_weaponry_usage_list
+#include "missioneditor/common.h" // generate_ship_usage_list_team / generate_weaponry_usage_list_team
 
 #include "mission/missionparse.h"
 #include "parse/sexp.h"
@@ -19,16 +19,26 @@
 // ---------------------------------------------------------------------------
 // Team loadout tools
 //
-// Expose the Team Loadout editor's data (Team_data[MAX_TVT_TEAMS]) over MCP.
-// Each team owns two pools of entries -- ships and weapons -- where an entry's
-// class is either a literal class name or the name of a string SEXP variable,
-// and its count is either a literal or the name of a number SEXP variable.
+// Expose the Team Loadout editor's data (Team_data) over MCP.  Each team owns
+// two pools of entries -- ships and weapons -- where an entry's class is either
+// a literal class name or the name of a string SEXP variable, and its count is
+// either a literal or the name of a number SEXP variable.
+//
+// Only the teams the mission actually has are addressable, matching FRED: the
+// loadout dialog greys Team 2 out when Num_teams is 1, the parser fills only
+// Num_teams pools, and the saver writes only Num_teams pools -- so edits to
+// Team 2 in a non-TVT mission would be silently discarded.
 //
 // Count semantics (mirrors FRED's in-memory convention): for entries with a
 // literal class and literal count, the weapon count means "extras beyond what
 // the starting wings already carry" -- FREDDoc subtracts wing-carried weapons
 // after load and mission save adds them back (unless do_not_validate is set).
 // Variable-based entries are never padded; their counts are absolute.
+//
+// team_data::default_ship is deliberately left alone.  FRED never writes it
+// (neither does qtFRED), and the mission saver never emits "+Default_ship:" at
+// all, so the field is reconstituted as ship_choices.front() every time a
+// FRED-saved mission is reloaded.  Maintaining it here would persist nothing.
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
@@ -52,7 +62,8 @@ static constexpr int LOADOUT_COUNT_MAX = 9999;
 // ---------------------------------------------------------------------------
 
 // Resolve optional "team" parameter to a team index.
-// Defaults to Team 1. Rejects "none". Returns -1 with sink error on failure.
+// Defaults to Team 1. Rejects "none" and teams the mission doesn't have.
+// Returns -1 with sink error on failure.
 static int resolve_loadout_team(json_t *input, McpErrorSink &sink)
 {
 	auto team_str = get_optional_string(input, "team", sink);
@@ -62,7 +73,9 @@ static int resolve_loadout_team(json_t *input, McpErrorSink &sink)
 		if (!check_string_enum(team_str, team_selector_enum_values, "team", sink))
 			return -1;
 		if (reject_team_none(team_str, "team loadout", sink)) return -1;
-		return team_index_from_name(team_str);
+		int team = team_index_from_name(team_str);
+		if (reject_team_not_in_mission(team, "team loadout", sink)) return -1;
+		return team;
 	}
 
 	return 0;	// default to Team 1
@@ -74,24 +87,42 @@ static int resolve_loadout_team(json_t *input, McpErrorSink &sink)
 
 // Per-team ship/weapon usage from the starting wings, matching how the Team
 // Loadout editor computes its "used in wings" readouts: TVT missions count
-// each team's TVT wings; other missions count the starting wings for Team 1
-// only (Team 2 has no starting wings outside TVT).
-static void compute_team_usage(int team, SCP_vector<int> &ship_usage, SCP_vector<int> &weapon_usage)
+// each team's TVT wings; other missions count the starting wings.  Since only
+// teams the mission has are addressable, the shared helpers can be used as-is.
+static void compute_team_usage(int team, SCP_map<int, int> &ship_usage, SCP_map<int, int> &weapon_usage)
 {
-	ship_usage.assign(MAX_SHIP_CLASSES, 0);
-	weapon_usage.assign(MAX_WEAPON_TYPES, 0);
+	generate_ship_usage_list_team(team, ship_usage);
+	generate_weaponry_usage_list_team(team, weapon_usage);
+}
 
-	if (The_mission.game_type & MISSION_TYPE_MULTI_TEAMS) {
-		for (int j = 0; j < MAX_TVT_WINGS_PER_TEAM; j++) {
-			generate_ship_usage_list(ship_usage.data(), TVT_wings[(team * MAX_TVT_WINGS_PER_TEAM) + j]);
-			generate_weaponry_usage_list(weapon_usage.data(), TVT_wings[(team * MAX_TVT_WINGS_PER_TEAM) + j]);
-		}
-	} else if (team == 0) {
-		for (int j = 0; j < MAX_STARTING_WINGS; j++) {
-			generate_ship_usage_list(ship_usage.data(), Starting_wings[j]);
-			generate_weaponry_usage_list(weapon_usage.data(), Starting_wings[j]);
-		}
+// Is this class present in the pool as a literal-class entry?  Entries whose
+// class comes from a SEXP variable are not matched: their class is only known
+// at mission runtime, so they cannot answer for a specific class here.
+static bool pool_has_literal_class(const SCP_vector<loadout_entry> &pool, int class_index)
+{
+	for (const auto &entry : pool) {
+		if (entry.class_variable.empty() && entry.class_index == class_index)
+			return true;
 	}
+	return false;
+}
+
+// Canonical pool order, matching what the Team Loadout dialog's OnOK produces:
+// entries whose class comes from a SEXP variable first, ordered by the
+// variable's index in Sexp_variables, then literal-class entries ordered by
+// class index.  Keeping MCP writes in this order means a pool built here does
+// not silently reshuffle the first time a designer opens and OKs the dialog.
+static void normalize_pool(SCP_vector<loadout_entry> &pool)
+{
+	auto sort_key = [](const loadout_entry &e) {
+		return e.class_variable.empty()
+			? std::make_pair(1, e.class_index)
+			: std::make_pair(0, get_index_sexp_variable_name(e.class_variable.c_str()));
+	};
+
+	std::stable_sort(pool.begin(), pool.end(), [&sort_key](const loadout_entry &a, const loadout_entry &b) {
+		return sort_key(a) < sort_key(b);
+	});
 }
 
 // ---------------------------------------------------------------------------
@@ -102,7 +133,7 @@ static json_t *build_team_loadout_json(int team)
 {
 	const team_data &td = Team_data[team];
 
-	SCP_vector<int> ship_usage, weapon_usage;
+	SCP_map<int, int> ship_usage, weapon_usage;
 	compute_team_usage(team, ship_usage, weapon_usage);
 
 	json_t *obj = json_object();
@@ -111,37 +142,37 @@ static json_t *build_team_loadout_json(int team)
 
 	// ship pool
 	json_t *ships = json_array();
-	for (int i = 0; i < td.num_ship_choices; i++) {
+	for (const auto &entry : td.ship_choices) {
 		json_t *e = json_object();
-		if (strlen(td.ship_list_variables[i]) > 0) {
-			json_object_set_new(e, "class_variable", json_safe_string(td.ship_list_variables[i]));
-		} else if (td.ship_list[i] >= 0 && td.ship_list[i] < ship_info_size()) {
-			json_object_set_new(e, "ship_class", json_safe_string(Ship_info[td.ship_list[i]].name));
-			json_object_set_new(e, "used_in_wings", json_integer(ship_usage[td.ship_list[i]]));
+		if (!entry.class_variable.empty()) {
+			json_object_set_new(e, "class_variable", json_safe_string(entry.class_variable.c_str()));
+		} else if (entry.class_index >= 0 && entry.class_index < ship_info_size()) {
+			json_object_set_new(e, "ship_class", json_safe_string(Ship_info[entry.class_index].name));
+			json_object_set_new(e, "used_in_wings", json_integer(ship_usage.value_or(entry.class_index, 0)));
 		}
-		if (strlen(td.ship_count_variables[i]) > 0)
-			json_object_set_new(e, "count_variable", json_safe_string(td.ship_count_variables[i]));
+		if (!entry.count_variable.empty())
+			json_object_set_new(e, "count_variable", json_safe_string(entry.count_variable.c_str()));
 		else
-			json_object_set_new(e, "count", json_integer(td.ship_count[i]));
+			json_object_set_new(e, "count", json_integer(entry.count));
 		json_array_append_new(ships, e);
 	}
 	json_object_set_new(obj, "ships", ships);
 
 	// weapon pool
 	json_t *weapons = json_array();
-	for (int i = 0; i < td.num_weapon_choices; i++) {
+	for (const auto &entry : td.weapon_choices) {
 		json_t *e = json_object();
-		if (strlen(td.weaponry_pool_variable[i]) > 0) {
-			json_object_set_new(e, "class_variable", json_safe_string(td.weaponry_pool_variable[i]));
-		} else if (td.weaponry_pool[i] >= 0 && td.weaponry_pool[i] < weapon_info_size()) {
-			json_object_set_new(e, "weapon_class", json_safe_string(Weapon_info[td.weaponry_pool[i]].name));
-			json_object_set_new(e, "used_in_wings", json_integer(weapon_usage[td.weaponry_pool[i]]));
-			json_object_set_new(e, "required", json_boolean(td.weapon_required[td.weaponry_pool[i]]));
+		if (!entry.class_variable.empty()) {
+			json_object_set_new(e, "class_variable", json_safe_string(entry.class_variable.c_str()));
+		} else if (entry.class_index >= 0 && entry.class_index < weapon_info_size()) {
+			json_object_set_new(e, "weapon_class", json_safe_string(Weapon_info[entry.class_index].name));
+			json_object_set_new(e, "used_in_wings", json_integer(weapon_usage.value_or(entry.class_index, 0)));
+			json_object_set_new(e, "required", json_boolean(td.required_weapons.contains(entry.class_index)));
 		}
-		if (strlen(td.weaponry_amount_variable[i]) > 0)
-			json_object_set_new(e, "count_variable", json_safe_string(td.weaponry_amount_variable[i]));
+		if (!entry.count_variable.empty())
+			json_object_set_new(e, "count_variable", json_safe_string(entry.count_variable.c_str()));
 		else
-			json_object_set_new(e, "count", json_integer(td.weaponry_count[i]));
+			json_object_set_new(e, "count", json_integer(entry.count));
 		json_array_append_new(weapons, e);
 	}
 	json_object_set_new(obj, "weapons", weapons);
@@ -150,20 +181,13 @@ static json_t *build_team_loadout_json(int team)
 	// from the static pool.  Missing weapons are auto-added at save time unless
 	// do_not_validate is set; missing ships trip the mission error checker.
 	json_t *missing_ships = json_array();
-	for (int j = 0; j < ship_info_size(); j++) {
-		if (ship_usage[j] <= 0)
+	for (const auto &[ship_class, used] : ship_usage) {
+		if (used <= 0 || ship_class < 0 || ship_class >= ship_info_size())
 			continue;
-		bool in_pool = false;
-		for (int i = 0; i < td.num_ship_choices; i++) {
-			if (strlen(td.ship_list_variables[i]) == 0 && td.ship_list[i] == j) {
-				in_pool = true;
-				break;
-			}
-		}
-		if (!in_pool) {
+		if (!pool_has_literal_class(td.ship_choices, ship_class)) {
 			json_t *e = json_object();
-			json_object_set_new(e, "ship_class", json_safe_string(Ship_info[j].name));
-			json_object_set_new(e, "used_in_wings", json_integer(ship_usage[j]));
+			json_object_set_new(e, "ship_class", json_safe_string(Ship_info[ship_class].name));
+			json_object_set_new(e, "used_in_wings", json_integer(used));
 			json_array_append_new(missing_ships, e);
 		}
 	}
@@ -173,20 +197,13 @@ static json_t *build_team_loadout_json(int team)
 		json_decref(missing_ships);
 
 	json_t *missing_weapons = json_array();
-	for (int j = 0; j < weapon_info_size(); j++) {
-		if (weapon_usage[j] <= 0)
+	for (const auto &[weapon_class, used] : weapon_usage) {
+		if (used <= 0 || weapon_class < 0 || weapon_class >= weapon_info_size())
 			continue;
-		bool in_pool = false;
-		for (int i = 0; i < td.num_weapon_choices; i++) {
-			if (strlen(td.weaponry_pool_variable[i]) == 0 && td.weaponry_pool[i] == j) {
-				in_pool = true;
-				break;
-			}
-		}
-		if (!in_pool) {
+		if (!pool_has_literal_class(td.weapon_choices, weapon_class)) {
 			json_t *e = json_object();
-			json_object_set_new(e, "weapon_class", json_safe_string(Weapon_info[j].name));
-			json_object_set_new(e, "used_in_wings", json_integer(weapon_usage[j]));
+			json_object_set_new(e, "weapon_class", json_safe_string(Weapon_info[weapon_class].name));
+			json_object_set_new(e, "used_in_wings", json_integer(used));
 			json_array_append_new(missing_weapons, e);
 		}
 	}
@@ -194,6 +211,24 @@ static json_t *build_team_loadout_json(int team)
 		json_object_set_new(obj, "wing_weapons_not_in_pool", missing_weapons);
 	else
 		json_decref(missing_weapons);
+
+	// Informational: required_weapons is stored independently of the pool, so a
+	// mission can require a weapon that no pool entry offers.  The parser accepts
+	// that and the saver writes it back out, but the Team Loadout dialog drops it
+	// (with a warning) the first time it is OK'd.  It cannot be expressed by the
+	// per-entry "required" flag, so report it separately; update_team_loadout
+	// preserves these rather than silently discarding them.
+	json_t *required_not_in_pool = json_array();
+	for (int weapon_class : td.required_weapons) {
+		if (weapon_class < 0 || weapon_class >= weapon_info_size())
+			continue;
+		if (!pool_has_literal_class(td.weapon_choices, weapon_class))
+			json_array_append_new(required_not_in_pool, json_safe_string(Weapon_info[weapon_class].name));
+	}
+	if (json_array_size(required_not_in_pool) > 0)
+		json_object_set_new(obj, "required_weapons_not_in_pool", required_not_in_pool);
+	else
+		json_decref(required_not_in_pool);
 
 	return obj;
 }
@@ -214,11 +249,9 @@ struct PendingLoadoutEntry {
 struct LoadoutEntrySpec {
 	const char *class_param;			// "ship_class" / "weapon_class"
 	const char *class_label;			// for error messages
-	const char *pool_label;				// "ship pool" / "weapon pool", for error messages
 	const char *flag_requirement;		// for error messages
 	int (*lookup)(const char *);		// class name -> index, or -1
 	bool (*player_flagged)(int);		// eligibility flag check
-	int max_entries;					// size of the Team_data arrays
 };
 
 static bool ship_player_flagged(int idx)
@@ -232,13 +265,13 @@ static bool weapon_player_flagged(int idx)
 }
 
 static const LoadoutEntrySpec Ship_entry_spec = {
-	"ship_class", "ship class", "ship pool", "flagged as a player ship",
-	ship_info_lookup, ship_player_flagged, MAX_SHIP_CLASSES
+	"ship_class", "ship class", "flagged as a player ship",
+	ship_info_lookup, ship_player_flagged
 };
 
 static const LoadoutEntrySpec Weapon_entry_spec = {
-	"weapon_class", "weapon class", "weapon pool", "flagged as player-allowed",
-	weapon_info_lookup, weapon_player_flagged, MAX_WEAPON_TYPES
+	"weapon_class", "weapon class", "flagged as player-allowed",
+	weapon_info_lookup, weapon_player_flagged
 };
 
 // SEXP variables are referenced by name in loadout entries; accept the @name
@@ -272,10 +305,6 @@ static bool parse_loadout_entries(json_t *arr, const LoadoutEntrySpec &spec, con
 {
 	if (!json_is_array(arr)) {
 		sink.set_error("Parameter '%s' must be an array", param_name);
-		return false;
-	}
-	if ((int)json_array_size(arr) > spec.max_entries) {
-		sink.set_error("Parameter '%s' must have at most %d entries", param_name, spec.max_entries);
 		return false;
 	}
 
@@ -397,65 +426,68 @@ static bool parse_loadout_entries(json_t *arr, const LoadoutEntrySpec &spec, con
 
 static void apply_ship_entries(team_data &td, const SCP_vector<PendingLoadoutEntry> &entries)
 {
-	for (int i = 0; i < (int)entries.size(); i++) {
-		const auto &e = entries[i];
-		if (!e.class_var.empty()) {
-			strcpy_s(td.ship_list_variables[i], e.class_var.c_str());
-			td.ship_list[i] = -1;
-		} else {
-			td.ship_list[i] = e.class_idx;
-			td.ship_list_variables[i][0] = '\0';
-		}
-		td.ship_count[i] = e.count;
-		strcpy_s(td.ship_count_variables[i], e.count_var.c_str());
+	td.ship_choices.clear();
+
+	for (const auto &e : entries) {
+		auto &entry = td.ship_choices.emplace_back();
+		entry.class_index = e.class_var.empty() ? e.class_idx : -1;
+		entry.class_variable = e.class_var;
+		entry.count = e.count;
+		entry.count_variable = e.count_var;
 	}
-	td.num_ship_choices = (int)entries.size();
+
+	normalize_pool(td.ship_choices);
 }
 
 static void apply_weapon_entries(team_data &td, const SCP_vector<PendingLoadoutEntry> &entries)
 {
-	for (int j = 0; j < MAX_WEAPON_TYPES; j++)
-		td.weapon_required[j] = false;
-
-	for (int i = 0; i < (int)entries.size(); i++) {
-		const auto &e = entries[i];
-		if (!e.class_var.empty()) {
-			strcpy_s(td.weaponry_pool_variable[i], e.class_var.c_str());
-			td.weaponry_pool[i] = -1;
-		} else {
-			td.weaponry_pool[i] = e.class_idx;
-			td.weaponry_pool_variable[i][0] = '\0';
-			if (e.required)
-				td.weapon_required[e.class_idx] = true;
-		}
-		td.weaponry_count[i] = e.count;
-		strcpy_s(td.weaponry_amount_variable[i], e.count_var.c_str());
+	// Required weapons that no pool entry offers cannot be expressed by the
+	// caller's per-entry "required" flags, so carry them over rather than
+	// dropping them -- but only while they stay outside the new pool.  Once a
+	// class is in the pool the caller's flags are authoritative for it, the
+	// same as for any other pooled class.
+	SCP_set<int> orphaned_required;
+	for (int weapon_class : td.required_weapons) {
+		if (!pool_has_literal_class(td.weapon_choices, weapon_class))
+			orphaned_required.insert(weapon_class);
 	}
-	td.num_weapon_choices = (int)entries.size();
+
+	td.weapon_choices.clear();
+	td.required_weapons.clear();
+
+	for (const auto &e : entries) {
+		auto &entry = td.weapon_choices.emplace_back();
+		entry.class_index = e.class_var.empty() ? e.class_idx : -1;
+		entry.class_variable = e.class_var;
+		entry.count = e.count;
+		entry.count_variable = e.count_var;
+
+		if (e.required && e.class_var.empty())
+			td.required_weapons.insert(e.class_idx);
+	}
+
+	for (int weapon_class : orphaned_required) {
+		if (!pool_has_literal_class(td.weapon_choices, weapon_class))
+			td.required_weapons.insert(weapon_class);
+	}
+
+	normalize_pool(td.weapon_choices);
 }
 
-// Remove one entry from a team's ship pool, shifting later entries down.
+// Remove one entry from a team's ship pool.
 static void remove_ship_entry(team_data &td, int idx)
 {
-	for (int j = idx; j < td.num_ship_choices - 1; j++) {
-		td.ship_list[j] = td.ship_list[j + 1];
-		strcpy_s(td.ship_list_variables[j], td.ship_list_variables[j + 1]);
-		td.ship_count[j] = td.ship_count[j + 1];
-		strcpy_s(td.ship_count_variables[j], td.ship_count_variables[j + 1]);
-	}
-	td.num_ship_choices--;
+	td.ship_choices.erase(td.ship_choices.begin() + idx);
 }
 
-// Remove one entry from a team's weapon pool, shifting later entries down.
+// Remove one entry from a team's weapon pool, clearing its required flag too.
 static void remove_weapon_entry(team_data &td, int idx)
 {
-	for (int j = idx; j < td.num_weapon_choices - 1; j++) {
-		td.weaponry_pool[j] = td.weaponry_pool[j + 1];
-		strcpy_s(td.weaponry_pool_variable[j], td.weaponry_pool_variable[j + 1]);
-		td.weaponry_count[j] = td.weaponry_count[j + 1];
-		strcpy_s(td.weaponry_amount_variable[j], td.weaponry_amount_variable[j + 1]);
-	}
-	td.num_weapon_choices--;
+	const auto &entry = td.weapon_choices[idx];
+	if (entry.class_variable.empty() && entry.class_index >= 0)
+		td.required_weapons.erase(entry.class_index);
+
+	td.weapon_choices.erase(td.weapon_choices.begin() + idx);
 }
 
 // ---------------------------------------------------------------------------
@@ -470,7 +502,7 @@ static void handle_get_team_loadout(json_t * /*input*/, McpToolRequest *req)
 	json_t *obj = json_object();
 	json_object_set_new(obj, "num_teams", json_integer(Num_teams));
 	json_t *teams = json_array();
-	for (int i = 0; i < MAX_TVT_TEAMS; i++)
+	for (int i = 0; i < Num_teams; i++)
 		json_array_append_new(teams, build_team_loadout_json(i));
 	json_object_set_new(obj, "teams", teams);
 
@@ -523,26 +555,6 @@ static void handle_update_team_loadout(json_t *input, McpToolRequest *req)
 	req->success = true;
 }
 
-// A uniform view over the ship or weapon parallel arrays in team_data, so the
-// upsert handler can be written once for both pools.
-struct LoadoutPoolView {
-	int *class_arr;
-	char (*class_var_arr)[TOKEN_LENGTH];
-	int *count_arr;
-	char (*count_var_arr)[TOKEN_LENGTH];
-	int *num_choices;
-};
-
-static LoadoutPoolView ship_pool_view(team_data &td)
-{
-	return { td.ship_list, td.ship_list_variables, td.ship_count, td.ship_count_variables, &td.num_ship_choices };
-}
-
-static LoadoutPoolView weapon_pool_view(team_data &td)
-{
-	return { td.weaponry_pool, td.weaponry_pool_variable, td.weaponry_count, td.weaponry_amount_variable, &td.num_weapon_choices };
-}
-
 // set_team_loadout_ship / set_team_loadout_weapon: upsert or remove a single
 // pool entry, keyed by its static class or class-variable name.  Follows the
 // set_reinforcement pattern: enable=false removes; otherwise the entry is
@@ -557,7 +569,7 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 	if (team < 0) return;
 
 	team_data &td = Team_data[team];
-	LoadoutPoolView pool = is_weapon ? weapon_pool_view(td) : ship_pool_view(td);
+	SCP_vector<loadout_entry> &pool = is_weapon ? td.weapon_choices : td.ship_choices;
 
 	// --- Phase 1: parse and validate everything (no mutations yet) ---
 
@@ -610,13 +622,13 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 
 	// find the existing entry for this key
 	int found = -1;
-	for (int i = 0; i < *pool.num_choices; i++) {
+	for (int i = 0; i < (int)pool.size(); i++) {
 		if (class_var_name) {
-			if (!strcmp(pool.class_var_arr[i], class_var_name)) {
+			if (pool[i].class_variable == class_var_name) {
 				found = i;
 				break;
 			}
-		} else if (pool.class_var_arr[i][0] == '\0' && pool.class_arr[i] == class_idx) {
+		} else if (pool[i].class_variable.empty() && pool[i].class_index == class_idx) {
 			found = i;
 			break;
 		}
@@ -627,8 +639,6 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 			set_not_found_error(sink, "Loadout entry", class_str ? class_str : class_var_name);
 			return;
 		}
-		if (is_weapon && pool.class_var_arr[found][0] == '\0' && pool.class_arr[found] >= 0)
-			td.weapon_required[pool.class_arr[found]] = false;
 		if (is_weapon)
 			remove_weapon_entry(td, found);
 		else
@@ -667,15 +677,9 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 		count_touched = true;
 	}
 
-	if (found < 0) {
-		if (!count_touched) {
-			sink.set_error("Creating a new loadout entry requires 'count' or 'count_variable'");
-			return;
-		}
-		if (*pool.num_choices >= spec.max_entries) {
-			sink.set_error("Cannot add more than %d %s entries", spec.max_entries, spec.pool_label);
-			return;
-		}
+	if (found < 0 && !count_touched) {
+		sink.set_error("Creating a new loadout entry requires 'count' or 'count_variable'");
+		return;
 	}
 
 	// required (weapons only): same constraints as update_team_loadout
@@ -689,7 +693,7 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 					"(this entry's class comes from a variable)");
 				return;
 			}
-			int effective_count = count_touched ? new_count : pool.count_arr[found];
+			int effective_count = count_touched ? new_count : pool[found].count;
 			if (effective_count < 1) {
 				sink.set_error("A required weapon must have a count of at least 1");
 				return;
@@ -700,27 +704,28 @@ static void handle_set_team_loadout_entry(json_t *input, McpToolRequest *req,
 	// --- Phase 2: apply ---
 	bool changed = false;
 	if (found < 0) {
-		int slot = (*pool.num_choices)++;
-		if (class_var_name) {
-			strcpy_s(pool.class_var_arr[slot], class_var_name);
-			pool.class_arr[slot] = -1;
-		} else {
-			pool.class_arr[slot] = class_idx;
-			pool.class_var_arr[slot][0] = '\0';
-		}
-		pool.count_arr[slot] = new_count;
-		strcpy_s(pool.count_var_arr[slot], new_count_var);
+		auto &entry = pool.emplace_back();
+		if (class_var_name)
+			entry.class_variable = class_var_name;
+		else
+			entry.class_index = class_idx;
+		entry.count = new_count;
+		entry.count_variable = new_count_var;
+		normalize_pool(pool);
 		changed = true;
 	} else if (count_touched &&
-		(strcmp(pool.count_var_arr[found], new_count_var) != 0 || pool.count_arr[found] != new_count)) {
-		pool.count_arr[found] = new_count;
-		strcpy_s(pool.count_var_arr[found], new_count_var);
+		(pool[found].count_variable != new_count_var || pool[found].count != new_count)) {
+		pool[found].count = new_count;
+		pool[found].count_variable = new_count_var;
 		changed = true;
 	}
 
 	if (is_weapon && required_opt.has_value() && class_idx >= 0
-		&& td.weapon_required[class_idx] != *required_opt) {
-		td.weapon_required[class_idx] = *required_opt;
+		&& td.required_weapons.contains(class_idx) != *required_opt) {
+		if (*required_opt)
+			td.required_weapons.insert(class_idx);
+		else
+			td.required_weapons.erase(class_idx);
 		changed = true;
 	}
 
@@ -753,17 +758,13 @@ int mcp_count_loadout_variable_refs(const char *var_name)
 	int count = 0;
 	for (int i = 0; i < MAX_TVT_TEAMS; i++) {
 		const team_data &td = Team_data[i];
-		for (int idx = 0; idx < td.num_ship_choices; idx++) {
-			if (!strcmp(td.ship_list_variables[idx], var_name))
-				count++;
-			if (!strcmp(td.ship_count_variables[idx], var_name))
-				count++;
-		}
-		for (int idx = 0; idx < td.num_weapon_choices; idx++) {
-			if (!strcmp(td.weaponry_pool_variable[idx], var_name))
-				count++;
-			if (!strcmp(td.weaponry_amount_variable[idx], var_name))
-				count++;
+		for (const auto *pool : { &td.ship_choices, &td.weapon_choices }) {
+			for (const auto &entry : *pool) {
+				if (entry.class_variable == var_name)
+					count++;
+				if (entry.count_variable == var_name)
+					count++;
+			}
 		}
 	}
 	return count;
@@ -777,24 +778,16 @@ int mcp_rename_loadout_variable_refs(const char *old_name, const char *new_name)
 	int count = 0;
 	for (int i = 0; i < MAX_TVT_TEAMS; i++) {
 		team_data &td = Team_data[i];
-		for (int idx = 0; idx < td.num_ship_choices; idx++) {
-			if (!strcmp(td.ship_list_variables[idx], old_name)) {
-				strcpy_s(td.ship_list_variables[idx], new_name);
-				count++;
-			}
-			if (!strcmp(td.ship_count_variables[idx], old_name)) {
-				strcpy_s(td.ship_count_variables[idx], new_name);
-				count++;
-			}
-		}
-		for (int idx = 0; idx < td.num_weapon_choices; idx++) {
-			if (!strcmp(td.weaponry_pool_variable[idx], old_name)) {
-				strcpy_s(td.weaponry_pool_variable[idx], new_name);
-				count++;
-			}
-			if (!strcmp(td.weaponry_amount_variable[idx], old_name)) {
-				strcpy_s(td.weaponry_amount_variable[idx], new_name);
-				count++;
+		for (auto *pool : { &td.ship_choices, &td.weapon_choices }) {
+			for (auto &entry : *pool) {
+				if (entry.class_variable == old_name) {
+					entry.class_variable = new_name;
+					count++;
+				}
+				if (entry.count_variable == old_name) {
+					entry.count_variable = new_name;
+					count++;
+				}
 			}
 		}
 	}
@@ -809,25 +802,27 @@ int mcp_clear_loadout_variable_refs(const char *var_name)
 	int count = 0;
 	for (int i = 0; i < MAX_TVT_TEAMS; i++) {
 		team_data &td = Team_data[i];
-		for (int idx = td.num_ship_choices - 1; idx >= 0; idx--) {
-			if (!strcmp(td.ship_list_variables[idx], var_name)) {
+		for (int idx = (int)td.ship_choices.size() - 1; idx >= 0; idx--) {
+			auto &entry = td.ship_choices[idx];
+			if (entry.class_variable == var_name) {
 				count++;
-				if (!strcmp(td.ship_count_variables[idx], var_name))
+				if (entry.count_variable == var_name)
 					count++;	// both references die with the entry
 				remove_ship_entry(td, idx);
-			} else if (!strcmp(td.ship_count_variables[idx], var_name)) {
-				td.ship_count_variables[idx][0] = '\0';	// falls back to the cached literal count
+			} else if (entry.count_variable == var_name) {
+				entry.count_variable.clear();	// falls back to the cached literal count
 				count++;
 			}
 		}
-		for (int idx = td.num_weapon_choices - 1; idx >= 0; idx--) {
-			if (!strcmp(td.weaponry_pool_variable[idx], var_name)) {
+		for (int idx = (int)td.weapon_choices.size() - 1; idx >= 0; idx--) {
+			auto &entry = td.weapon_choices[idx];
+			if (entry.class_variable == var_name) {
 				count++;
-				if (!strcmp(td.weaponry_amount_variable[idx], var_name))
+				if (entry.count_variable == var_name)
 					count++;
 				remove_weapon_entry(td, idx);
-			} else if (!strcmp(td.weaponry_amount_variable[idx], var_name)) {
-				td.weaponry_amount_variable[idx][0] = '\0';
+			} else if (entry.count_variable == var_name) {
+				entry.count_variable.clear();
 				count++;
 			}
 		}
@@ -842,18 +837,22 @@ int mcp_clear_loadout_variable_refs(const char *var_name)
 static const char *loadout_team_desc =
 	"Which team's loadout to operate on (\"Team 1\" or \"Team 2\"). "
 	"Defaults to \"Team 1\". \"none\" is not valid for loadouts. "
-	"Team 2 is only meaningful in team-versus-team missions but may be edited at any time.";
+	"\"Team 2\" exists only in team-versus-team missions, matching FRED; in any other mission "
+	"type it is rejected, because the mission format has no place to store it.";
 
 static void register_get_team_loadout(json_t *tools)
 {
 	register_tool(tools, "get_team_loadout",
-		"Returns the Team Loadout data for all teams: for each team, the ship pool and weapon pool "
+		"Returns the Team Loadout data for every team the mission has (num_teams -- two only in "
+		"team-versus-team missions, otherwise one): for each team, the ship pool and weapon pool "
 		"(entries have either a literal class or a string-variable class, and either a literal count "
 		"or a number-variable count), required weapons, the do_not_validate flag, and how many of "
 		"each pooled class the team's starting wings already use. For entries with a literal class "
 		"and count, the count means extras available beyond what the starting wings carry; "
 		"variable-based counts are absolute. Any wing-carried classes missing from the pool are "
-		"reported under wing_ships_not_in_pool / wing_weapons_not_in_pool.",
+		"reported under wing_ships_not_in_pool / wing_weapons_not_in_pool. A mission may also "
+		"require a weapon that no pool entry offers; those are reported under "
+		"required_weapons_not_in_pool, since no entry's 'required' flag can describe them.",
 		json_object());
 }
 
@@ -904,7 +903,9 @@ static void register_update_team_loadout(json_t *tools)
 		add_object_array_prop(props, "weapons",
 			"Weapon pool entries. REPLACES the team's entire weapon pool (including variable-based "
 			"entries) and its required-weapon flags; use get_team_loadout first and include any "
-			"entries you want to keep. Pass [] to clear the pool.",
+			"entries you want to keep. Pass [] to clear the pool. Weapons listed in "
+			"required_weapons_not_in_pool are preserved unless the new pool contains that class, "
+			"in which case its entry's 'required' flag decides.",
 			item_props);
 	}
 

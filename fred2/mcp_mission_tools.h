@@ -51,6 +51,14 @@ int team_index_from_name(const char *name);
 // for entities that don't allow it (e.g. command briefings, debriefings).
 bool reject_team_none(const char *team_str, const char *entity_name, McpErrorSink &sink);
 
+// Returns true (and sets sink error) if the team doesn't exist in this mission,
+// i.e. Team 2 outside a team-versus-team mission.  FRED greys Team 2 out of the
+// loadout, briefing, and debriefing editors when Num_teams is 1, and neither the
+// parser nor the mission saver touches Team_data[1] / the second briefing there,
+// so edits to it would be silently discarded.  Currently used by the loadout
+// tools; the briefing/debriefing selectors should adopt it too.
+bool reject_team_not_in_mission(int team_index, const char *entity_name, McpErrorSink &sink);
+
 // ---------------------------------------------------------------------------
 // Arrival/departure location enums (shared by ships and wings)
 //

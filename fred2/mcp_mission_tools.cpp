@@ -124,6 +124,17 @@ bool reject_team_none(const char *team_str, const char *entity_name, McpErrorSin
 	return false;
 }
 
+bool reject_team_not_in_mission(int team_index, const char *entity_name, McpErrorSink &sink)
+{
+	if (team_index >= Num_teams) {
+		sink.set_error("\"%s\" is not available for a %s in this mission: only \"Team 1\" exists outside "
+			"team-versus-team missions. Use update_mission_info to set game_type to "
+			"\"multiplayer team-versus-team\".", team_name_from_index(team_index), entity_name);
+		return true;
+	}
+	return false;
+}
+
 // ---------------------------------------------------------------------------
 // Arrival/departure location enums (shared by ships and wings)
 // ---------------------------------------------------------------------------

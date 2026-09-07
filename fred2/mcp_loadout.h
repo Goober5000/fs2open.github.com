@@ -13,13 +13,17 @@ extern const size_t mcp_loadout_tool_def_count;
 // ---------------------------------------------------------------------------
 // Loadout variable-reference helpers (used by the SEXP variable tools)
 //
-// Team_data stores SEXP variable *names* (ship_list_variables, weaponry_pool_
-// variable, and the two count-variable arrays), so variable renames must be
-// propagated and deletions guarded, mirroring how FRED's variable dialog
-// consults sexp_tree::get_loadout_variable_count before allowing changes.
-// All three scan every MAX_TVT_TEAMS team (loadout data exists for both teams
-// regardless of Num_teams).  Comparisons are exact (strcmp), matching the
-// engine's loadout bookkeeping.
+// Team_data stores SEXP variable *names* (loadout_entry::class_variable and
+// ::count_variable, in both the ship and weapon pools), so variable renames
+// must be propagated and deletions guarded, mirroring how FRED's variable
+// dialog consults sexp_tree::get_loadout_variable_count before allowing
+// changes.  Comparisons are exact, matching the engine's loadout bookkeeping.
+//
+// All three scan every MAX_TVT_TEAMS team, deliberately unlike the loadout
+// tools, which only address the teams the mission has.  Team_data[1] keeps its
+// entries after a team-versus-team mission is switched to another type, so
+// ignoring them here would let a variable deletion leave dangling references
+// that resurface if the designer switches back.
 // ---------------------------------------------------------------------------
 
 // Count how many loadout locations reference the variable.
