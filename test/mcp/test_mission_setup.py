@@ -12,6 +12,7 @@ import os
 from mcp_test_lib import (
     assert_is_dict,
     assert_success,
+    assert_true,
     run_module_standalone,
     SkipTest,
     tool_data,
@@ -65,6 +66,39 @@ def register(suite, client):
             except Exception:
                 pass
 
+    def test_save_load_bare_filename():
+        # A bare filename should land in the primary mod's missions folder, and
+        # loading it back should resolve the same way without a path.
+        name = "_mcp_bare_save.fs2"
+        r = client.call_tool("save_mission", {"filepath": name})
+        assert_success(r)
+
+        saved_path = None
+        try:
+            lm = client.call_tool("list_missions")
+            assert_success(lm)
+            for entry in tool_data(lm):
+                if entry.get("packed"):
+                    continue
+                if any(m["filename"].lower() == name for m in entry["missions"]):
+                    saved_path = os.path.join(entry["path"], name)
+                    break
+            assert_true(saved_path is not None,
+                        "mission saved by bare filename should appear in list_missions")
+
+            r = client.call_tool("load_mission", {"filepath": name})
+            assert_success(r)
+        finally:
+            if saved_path:
+                try:
+                    os.remove(saved_path)
+                except OSError:
+                    pass
+            try:
+                client.call_tool("new_mission")
+            except Exception:
+                pass
+
     def test_get_mission_info_new():
         r = client.call_tool("get_mission_info")
         assert_success(r)
@@ -74,6 +108,7 @@ def register(suite, client):
     suite.add("mission_setup_new_mission", test_new_mission, critical=True)
     suite.add("mission_setup_save_mission", test_save_mission)
     suite.add("mission_setup_load_mission", test_load_mission)
+    suite.add("mission_setup_save_load_bare_filename", test_save_load_bare_filename)
     suite.add("mission_setup_get_mission_info", test_get_mission_info_new)
 
 

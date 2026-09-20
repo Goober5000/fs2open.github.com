@@ -36,6 +36,11 @@ def register(suite, client):
         r = client.call_tool("get_message", {"name": "DOES_NOT_EXIST_XYZ"})
         assert_error(r)
 
+    def test_load_mission_bare_name_nonexistent():
+        r = client.call_tool("load_mission", {"filepath": "does_not_exist_xyz.fs2"})
+        assert_error(r)
+        assert_in("not found", tool_text(r).lower())
+
     def test_set_timeout_too_low():
         r = client.call_tool("set_timeout", {"seconds": 0})
         assert_error(r)
@@ -324,6 +329,7 @@ def register(suite, client):
         ("negative_create_event_chain_delay_invalid", test_create_event_chain_delay_invalid),
         ("negative_create_message_talking_head_too_long", test_create_message_talking_head_too_long),
         ("negative_update_message_voice_filename_too_long", test_update_message_voice_filename_too_long),
+        ("negative_load_mission_bare_name_nonexistent", test_load_mission_bare_name_nonexistent),
         ("negative_rejects_bogus_host_header", test_rejects_bogus_host_header),
         ("negative_accepts_localhost_host_header", test_accepts_localhost_host_header),
     ]
