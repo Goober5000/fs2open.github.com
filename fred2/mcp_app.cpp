@@ -13,6 +13,8 @@
 #include "fredrender.h"
 #include "missioneditor/missionsave.h"
 
+#include "cfile/cfile.h"
+#include "cfile/cfilesystem.h"
 #include "mission/missionparse.h"
 #include "mod_table/mod_table.h"
 
@@ -95,8 +97,65 @@ static const char *set_mission_filename_from_path(const char *pathname)
 	return (ext_ch != nullptr) ? ext_ch : "";
 }
 
+// Whether the caller gave us a bare filename for cfile to resolve, rather than a path.
+// (Separators have already been normalized by extract_mission_filepath.)
+static bool mission_filename_is_bare(const char *name)
+{
+	return (strchr(name, DIR_SEPARATOR_CHAR) == nullptr);
+}
+
+// Finds a bare mission filename among the roots, in search order.  This scans rather than
+// going through cf_find_file_location() because that only checks one directory on disk and
+// otherwise relies on the file list built during cfile init, which cannot know about a
+// mission saved earlier in this session.  'resolved' is what to hand the loader: the full
+// path for a mission in a directory, or the name itself for one inside a packfile, which
+// only cfile can read.  'source' is where it was found, for reporting.
+static bool resolve_mission_for_load(const char *name, SCP_string &resolved, SCP_string &source)
+{
+	SCP_string filename = name;
+
+	if (filename.find('.') == SCP_string::npos)
+		filename += ".fs2";
+
+	for (auto &root : cf_get_file_list_by_root(CF_TYPE_MISSIONS, "*.fs2")) {
+		for (auto &file : root.files) {
+			if (!lcase_equal(file.name_ext, filename))
+				continue;
+
+			if (root.packfile) {
+				resolved = filename;
+				source = root.path;
+			} else {
+				resolved = root.path + file.name_ext;
+				source = resolved;
+			}
+
+			return true;
+		}
+	}
+
+	return false;
+}
+
 static void handle_load_mission(McpToolRequest *req)
 {
+	SCP_string source;
+
+	if (mission_filename_is_bare(req->filepath)) {
+		SCP_string resolved;
+
+		if (!resolve_mission_for_load(req->filepath, resolved, source)) {
+			req->success = false;
+			sprintf(req->result_message,
+				"Mission not found in any known root: %s  (call list_missions to see what is available, "
+				"or pass a full path for a mission stored elsewhere)", req->filepath);
+			return;
+		}
+
+		strncpy(req->filepath, resolved.c_str(), sizeof(req->filepath) - 1);
+		req->filepath[sizeof(req->filepath) - 1] = '\0';
+	}
+
 	clean_up_selections();
 	auto ext = set_mission_filename_from_path(req->filepath);
 
@@ -110,8 +169,13 @@ static void handle_load_mission(McpToolRequest *req)
 		if (Fred_view_wnd)
 			Fred_view_wnd->Invalidate();
 		req->success = true;
-		sprintf(req->result_message,
-			"Mission loaded successfully: %s", Mission_filename);
+		if (!source.empty()) {
+			sprintf(req->result_message,
+				"Mission loaded successfully: %s (from %s)", Mission_filename, source.c_str());
+		} else {
+			sprintf(req->result_message,
+				"Mission loaded successfully: %s", Mission_filename);
+		}
 	} else {
 		Mission_filename[0] = '\0';
 		req->success = false;
@@ -120,8 +184,44 @@ static void handle_load_mission(McpToolRequest *req)
 	}
 }
 
+// Point a bare filename at the primary mod's missions folder.  Saving needs a real path:
+// save_mission_file() derives its temp file from the directory part, so a bare name would
+// write to Fred's working directory.  Returns false with the error already set in req.
+static bool resolve_mission_save_path(McpToolRequest *req)
+{
+	const uint32_t flags = CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_PRIMARY_MOD;
+
+	if (!mission_filename_is_bare(req->filepath))
+		return true;
+
+	SCP_string name = req->filepath;
+	if (name.find('.') == SCP_string::npos)
+		name += ".fs2";
+
+	// a mod which has never had a mission saved to it won't have the folder yet
+	cf_create_directory(CF_TYPE_MISSIONS, flags);
+
+	SCP_string path;
+	cf_create_default_path_string(path, CF_TYPE_MISSIONS, name.c_str(), flags);
+
+	// with no root to put it in, cfile hands the bare name back
+	if (path.empty() || mission_filename_is_bare(path.c_str())) {
+		req->success = false;
+		sprintf(req->result_message,
+			"Could not find a mod directory to save %s into; pass a full path instead", req->filepath);
+		return false;
+	}
+
+	strncpy(req->filepath, path.c_str(), sizeof(req->filepath) - 1);
+	req->filepath[sizeof(req->filepath) - 1] = '\0';
+	return true;
+}
+
 static void handle_save_mission(McpToolRequest *req, MissionFormat format)
 {
+	if (!resolve_mission_save_path(req))
+		return;
+
 	auto ext = set_mission_filename_from_path(req->filepath);
 
 	Fred_mission_save save;
@@ -311,15 +411,19 @@ static void register_new_mission(json_t *tools)
 static void register_load_mission(json_t *tools)
 {
 	register_tool_with_required_string(tools, "load_mission",
-		"Load a mission file into FRED2",
-		"filepath", "Absolute path to the mission file (.fs2 extension)");
+		"Load a mission file into FRED2.  A mission inside a packfile can be loaded, but saving "
+		"it puts it in the primary mod instead, since packfiles cannot be written to.",
+		"filepath", "Bare filename of a mission listed by list_missions, which is resolved in the "
+		"usual search order, or an absolute path to a mission stored elsewhere");
 }
 
 static void register_save_mission(json_t *tools)
 {
 	register_tool_with_required_string(tools, "save_mission",
-		"Save the current mission in standard (.fs2) format",
-		"filepath", "Absolute path to save the mission file to");
+		"Save the current mission in standard (.fs2) format.  Missions cannot be saved into a packfile.",
+		"filepath", "Bare filename, which is saved into the primary mod's missions folder, or the game "
+		"root's when no mod is active (with a .fs2 extension added if absent), or an absolute path to "
+		"save anywhere else");
 }
 
 static void register_get_ui_status(json_t *tools)

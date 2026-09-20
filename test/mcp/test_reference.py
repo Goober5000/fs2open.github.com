@@ -411,7 +411,20 @@ def register(suite, client):
         r = client.call_tool("list_missions")
         assert_success(r)
         d = tool_data(r)
-        assert_has_key(d, "directory")
+        assert_is_list(d, "missions should be grouped into a list of roots")
+        assert_true(len(d) > 0, "at least one root should contain missions")
+        for entry in d:
+            for key in ("label", "path", "packed", "missions"):
+                assert_has_key(entry, key, "each root entry should have '%s'" % key)
+            assert_is_list(entry["missions"], "'missions' should be a list")
+            for mission in entry["missions"]:
+                assert_has_key(mission, "filename", "each mission should have 'filename'")
+        assert_true(any(not e["packed"] for e in d),
+                    "at least one root should be a directory rather than a packfile")
+        # retail missions live in the VPs, and are reachable only as packed entries
+        packed_names = [m["filename"].lower()
+                        for e in d if e["packed"] for m in e["missions"]]
+        assert_true(len(packed_names) > 0, "packfiles should contribute missions")
 
     def test_get_root_paths():
         r = client.call_tool("get_root_paths")

@@ -476,10 +476,13 @@ static void register_list_talking_heads(json_t *tools)
 static void register_list_missions(json_t *tools)
 {
 	register_tool(tools, "list_missions",
-		"List all mission files (.fs2) available in the data/missions directory. "
-		"Returns the directory path and an array of missions with filename and "
-		"last-modified timestamp. Combine the directory and filename to get the "
-		"absolute path for load_mission.",
+		"List all mission files (.fs2) the game can see, grouped by the root they come from. "
+		"Each entry has a 'label' (as in get_root_paths), the 'path' of that root's missions "
+		"directory or of the packfile, a 'packed' flag, and the 'missions' found there, with "
+		"filename and last-modified timestamp. Entries are in search order, so if the same "
+		"filename appears in more than one entry, the earliest entry is the one that loads. "
+		"Pass a bare filename to load_mission rather than building a path; missions in a "
+		"packed entry can be loaded but not saved to.",
 		json_object());
 }
 
@@ -706,8 +709,9 @@ static void register_get_root_paths(json_t *tools)
 {
 	register_tool(tools, "get_root_paths",
 		"Returns an array of all root directory paths known to the game engine, "
-		"including the game root, user root, and any mod directories. Each entry "
-		"has a 'label' (e.g., 'game_root', 'user_primary_mod') and an absolute 'path'.",
+		"including the game root, user root, and any mod directories, in search order. Each entry "
+		"has a 'label' (e.g., 'game_root', 'user_primary_mod') and an absolute 'path'. When no mod "
+		"is active the roots themselves serve as the primary mod, and are labelled that way.",
 		json_object());
 }
 
@@ -3148,42 +3152,63 @@ static json_t *handle_get_scripting_misc(json_t *arguments)
 // at init like the other cfile reads.
 // ---------------------------------------------------------------------------
 
+// Names a root the way get_root_paths does, from its location flags.  Labels are not
+// unique: a directory and the packfiles beneath it all carry the same flags.
+static const char *mcp_root_label(uint32_t location_flags)
+{
+	bool user = (location_flags & CF_LOCATION_ROOT_USER) != 0;
+
+	if (location_flags & CF_LOCATION_TYPE_PRIMARY_MOD)
+		return user ? "user_primary_mod" : "game_primary_mod";
+	if (location_flags & CF_LOCATION_TYPE_SECONDARY_MODS)
+		return user ? "user_secondary_mod" : "game_secondary_mod";
+	if (location_flags & CF_LOCATION_ROOT_MEMORY)
+		return "memory";
+
+	return user ? "user_root" : "game_root";
+}
+
 // Main thread only.
 static json_t *main_thread_build_list_missions()
 {
-	SCP_vector<SCP_string> names;
-	SCP_vector<file_list_info> info;
-	SCP_string directory;
-
-	cf_get_file_list(names, CF_TYPE_MISSIONS, "*.fs2", CF_SORT_NAME, &info);
-	cf_create_default_path_string(directory, CF_TYPE_MISSIONS);
+	auto roots = cf_get_file_list_by_root(CF_TYPE_MISSIONS, "*.fs2");
 
 	json_t *arr = json_array();
-	for (size_t i = 0; i < names.size(); i++) {
-		json_t *entry = json_object();
-		json_object_set_new(entry, "filename", json_safe_string((names[i] + ".fs2").c_str()));
 
-		// Format write_time as ISO 8601
-		char timebuf[32];
-		struct tm tm_buf;
-		bool time_ok;
+	for (auto &root : roots) {
+		json_t *missions = json_array();
+
+		for (auto &file : root.files) {
+			json_t *entry = json_object();
+			json_object_set_new(entry, "filename", json_safe_string(file.name_ext.c_str()));
+
+			// Format write_time as ISO 8601
+			char timebuf[32];
+			struct tm tm_buf;
+			bool time_ok;
 #ifdef _WIN32
-		time_ok = (localtime_s(&tm_buf, &info[i].write_time) == 0);
+			time_ok = (localtime_s(&tm_buf, &file.write_time) == 0);
 #else
-		time_ok = (localtime_r(&info[i].write_time, &tm_buf) != nullptr);
+			time_ok = (localtime_r(&file.write_time, &tm_buf) != nullptr);
 #endif
-		if (time_ok) {
-			strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm_buf);
-			json_object_set_new(entry, "modified", json_string(timebuf));
+			if (time_ok) {
+				strftime(timebuf, sizeof(timebuf), "%Y-%m-%dT%H:%M:%S", &tm_buf);
+				json_object_set_new(entry, "modified", json_string(timebuf));
+			}
+
+			json_array_append_new(missions, entry);
 		}
 
-		json_array_append_new(arr, entry);
+		json_t *obj = json_object();
+		json_object_set_new(obj, "label", json_string(mcp_root_label(root.location_flags)));
+		json_object_set_new(obj, "path", json_safe_string(root.path.c_str()));
+		json_object_set_new(obj, "packed", json_boolean(root.packfile));
+		json_object_set_new(obj, "missions", missions);
+
+		json_array_append_new(arr, obj);
 	}
 
-	json_t *obj = json_object();
-	json_object_set_new(obj, "directory", json_safe_string(directory.c_str()));
-	json_object_set_new(obj, "missions", arr);
-	return make_json_tool_result(obj);
+	return make_json_tool_result(arr);
 }
 
 // Worker-side handler: marshal to the main thread (cfile access).
@@ -3195,33 +3220,18 @@ static json_t *handle_list_missions(json_t * /*arguments*/)
 // Main thread only.
 static json_t *main_thread_build_root_paths()
 {
-	// Build an array of all known root paths with their labels.
-	// We query cf_create_default_path_string with specific location flag
-	// combinations to discover each distinct root directory.
-	struct root_query {
-		uint32_t flags;
-		const char *label;
-	};
-	root_query queries[] = {
-		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_PRIMARY_MOD,    "user_primary_mod" },
-		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_SECONDARY_MODS, "user_secondary_mod" },
-		{ CF_LOCATION_ROOT_USER | CF_LOCATION_TYPE_ROOT,           "user_root" },
-		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_PRIMARY_MOD,    "game_primary_mod" },
-		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_SECONDARY_MODS, "game_secondary_mod" },
-		{ CF_LOCATION_ROOT_GAME | CF_LOCATION_TYPE_ROOT,           "game_root" },
-	};
-
+	// Packfiles are roots too, but they aren't directories, so leave them out.  The
+	// in-memory root has no path at all.
 	json_t *arr = json_array();
-	SCP_string buf;
 
-	for (auto &q : queries) {
-		buf.clear();
-		if (cf_create_default_path_string(buf, CF_TYPE_ROOT, nullptr, q.flags) && !buf.empty()) {
-			json_t *entry = json_object();
-			json_object_set_new(entry, "label", json_string(q.label));
-			json_object_set_new(entry, "path", json_safe_string(buf.c_str()));
-			json_array_append_new(arr, entry);
-		}
+	for (auto &root : cf_get_roots()) {
+		if (root.packfile || root.path.empty())
+			continue;
+
+		json_t *entry = json_object();
+		json_object_set_new(entry, "label", json_string(mcp_root_label(root.location_flags)));
+		json_object_set_new(entry, "path", json_safe_string(root.path.c_str()));
+		json_array_append_new(arr, entry);
 	}
 
 	return make_json_tool_result(arr);

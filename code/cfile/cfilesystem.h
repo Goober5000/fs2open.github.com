@@ -46,4 +46,32 @@ int cf_create_default_path_string(char* path, uint path_max, int pathtype, const
 int cf_create_default_path_string(SCP_string& path, int pathtype, const char* filename = nullptr,
                                   uint32_t location_flags = CF_LOCATION_ALL);
 
+// A root that cfile searches.  For a packfile root, the path is the packfile itself.
+struct cf_root_info {
+	SCP_string path;
+	uint32_t location_flags = 0;
+	bool packfile = false;
+};
+
+// One file found in one root.
+struct cf_root_file {
+	SCP_string name_ext;
+	time_t write_time = 0;
+};
+
+struct cf_root_file_list {
+	SCP_string path;			// the pathtype directory within this root, or the packfile
+	uint32_t location_flags = 0;
+	bool packfile = false;
+	SCP_vector<cf_root_file> files;
+};
+
+// Returns all roots, in search order.
+SCP_vector<cf_root_info> cf_get_roots();
+
+// Returns the files matching the filter for the given pathtype, grouped by the root they
+// belong to, in search order.  Roots with no matching files are omitted.  Unlike
+// cf_get_file_list(), files which appear in more than one root are listed for each of them.
+SCP_vector<cf_root_file_list> cf_get_file_list_by_root(int pathtype, const char* filter);
+
 #endif	//_CFILESYSTEM_H

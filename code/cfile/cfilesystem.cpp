@@ -1965,6 +1965,104 @@ int cf_get_file_list(SCP_vector<SCP_string>& list, int pathtype, const char* _fi
 	return (int)list.size();
 }
 
+SCP_vector<cf_root_info> cf_get_roots()
+{
+	SCP_vector<cf_root_info> roots;
+
+	for (int i = 0; i < Num_roots; i++) {
+		auto root = cf_get_root(i);
+
+		if (root == nullptr)
+			continue;
+
+		cf_root_info info;
+		info.path = root->path;
+		info.location_flags = root->location_flags;
+		info.packfile = (root->roottype == CF_ROOTTYPE_PACK);
+
+		roots.push_back(info);
+	}
+
+	return roots;
+}
+
+SCP_vector<cf_root_file_list> cf_get_file_list_by_root(int pathtype, const char* filter)
+{
+	Assert( CF_TYPE_SPECIFIED(pathtype) );
+
+	SCP_vector<cf_root_file_list> lists;
+
+	for (int i = 0; i < Num_roots; i++) {
+		auto root = cf_get_root(i);
+
+		if (root == nullptr)
+			continue;
+
+		cf_root_file_list list;
+		list.location_flags = root->location_flags;
+		list.packfile = (root->roottype == CF_ROOTTYPE_PACK);
+		list.path = root->path;
+
+		if (root->roottype == CF_ROOTTYPE_PATH) {
+			if (strlen(Pathtypes[pathtype].path)) {
+				if (list.path.back() != DIR_SEPARATOR_CHAR) {
+					list.path += DIR_SEPARATOR_CHAR;
+				}
+
+				list.path += cf_get_root_pathtype(root, pathtype);
+			}
+
+			if (list.path.back() != DIR_SEPARATOR_CHAR) {
+				list.path += DIR_SEPARATOR_CHAR;
+			}
+
+			// scan the directory rather than consulting the file list, which is only
+			// built during cfile init and so cannot know about files written since
+			SCP_vector<_file_list_t> files;
+
+			cf_get_list_of_files(list.path, files, filter);
+
+			for (auto &file : files) {
+				cf_root_file entry;
+				entry.name_ext = file.name;
+				entry.write_time = file.m_time;
+
+				list.files.push_back(entry);
+			}
+		} else if (root->roottype == CF_ROOTTYPE_PACK) {
+			for (uint j = 0; j < Num_files; j++) {
+				auto f = cf_get_file(static_cast<int>(j));
+
+				if ( (f->root_index != i) || (f->pathtype_index != pathtype) )
+					continue;
+
+				if ( !cf_matches_spec(filter, f->name_ext.c_str()) )
+					continue;
+
+				cf_root_file entry;
+				entry.name_ext = f->name_ext;
+				entry.write_time = f->write_time;
+
+				list.files.push_back(entry);
+			}
+		} else {
+			// in-memory roots have no location to report
+			continue;
+		}
+
+		if (list.files.empty())
+			continue;
+
+		std::sort(list.files.begin(), list.files.end(), [](const cf_root_file &a, const cf_root_file &b) {
+			return stricmp(a.name_ext.c_str(), b.name_ext.c_str()) < 0;
+		});
+
+		lists.push_back(list);
+	}
+
+	return lists;
+}
+
 int cf_file_already_in_list( int num_files, char **list, const char *filename )
 {
 	int i;
