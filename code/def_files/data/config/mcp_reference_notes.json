@@ -151,7 +151,7 @@
     "topic": "sexp_variables",
     "description": "Mission variables for storing numbers and strings in SEXPs",
     "see_also": ["mission_text_tokens", "sexp_overview"],
-    "text": "SEXP variables allow missions to store and manipulate values (numbers and text strings) during gameplay. Each variable has a name and a default value. Variable names cannot contain spaces.\n\n**Using variables**: The `modify-variable` SEXP operator changes a variable's value during the mission. Variables can be used as arguments in many SEXP operators. In mission text (briefings, messages, etc.), a variable's current value can be inserted by prefixing its name with `$` (e.g., `$DockCount`). See the mission_text_tokens note for details."
+    "text": "SEXP variables allow missions to store and manipulate values (numbers and strings) during gameplay. Each variable has a name and a default value. Variable names cannot contain spaces.\n\n**Using variables**: The `modify-variable` SEXP operator changes a variable's value during the mission. Variables can be used as arguments in many SEXP operators. In mission text (briefings, messages, etc.), a variable's current value can be inserted by prefixing its name with `$` (e.g., `$DockCount`). See the mission_text_tokens note for details."
   },
   {
     "category": "lua_scripting",

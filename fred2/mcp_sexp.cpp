@@ -3726,7 +3726,9 @@ static void register_text_to_sexp(json_t *tools)
 		"operators deeper in the tree are wrapped in list nodes. The caller is "
 		"responsible for attaching the tree to a mission entity's formula, attaching the tree to "
 		"another tree, or deleting the tree. Also returns the round-tripped "
-		"text, any parsing errors encountered, and the first (if any) syntax error.",
+		"text, any parsing errors encountered, and the first (if any) syntax error. Note: when a "
+		"SEXP variable appears in SEXP text, string variables must be enclosed in double quotes "
+		"while numeric variables must be unquoted.",
 		props, req);
 }
 
