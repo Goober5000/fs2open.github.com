@@ -2674,6 +2674,12 @@ static bool is_arg_type_compatible(int opf, const char *arg_type, bool is_variab
 	return false;
 }
 
+// The argument_type ("number" or "string") a SEXP variable reference must use.
+static const char *variable_argument_type(int var_idx)
+{
+	return (Sexp_variables[var_idx].type & SEXP_VARIABLE_NUMBER) ? "number" : "string";
+}
+
 // Parse and allocate a single argument node.  Returns the allocated node index,
 // or -1 on error (with an error message via sink).  `next` is the rest pointer
 // for the new node (building the chain right-to-left).
@@ -2685,6 +2691,12 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 		int var_idx = get_index_sexp_variable_name(var_name);
 		if (var_idx < 0) {
 			sink.set_error("Unknown SEXP variable '%s' in argument %d", var_name, arg_index);
+			return -1;
+		}
+		const char *var_type_str = variable_argument_type(var_idx);
+		if (stricmp(type_str, var_type_str) != 0) {
+			sink.set_error("SEXP variable '%s' in argument %d is a %s variable; use argument_type \"%s\"",
+				var_name, arg_index, var_type_str, var_type_str);
 			return -1;
 		}
 		int subtype = !stricmp(type_str, "number") ? SEXP_ATOM_NUMBER : SEXP_ATOM_STRING;
@@ -3002,6 +3014,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 	int saved_type = Sexp_nodes[n].type;
 	int saved_subtype = Sexp_nodes[n].subtype;
 	int saved_first = Sexp_nodes[n].first;
+	int saved_flags = Sexp_nodes[n].flags;
 	strcpy_s(saved_text, Sexp_nodes[n].text);
 
 	if (!stricmp(role, "operator")) {
@@ -3055,6 +3068,12 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 					sink.set_error("Unknown SEXP variable '%s'", var_name);
 					return;
 				}
+				const char *var_type_str = variable_argument_type(var_idx);
+				if (stricmp(type_str, var_type_str) != 0) {
+					sink.set_error("SEXP variable '%s' is a %s variable; use argument_type \"%s\"",
+						var_name, var_type_str, var_type_str);
+					return;
+				}
 				Sexp_nodes[n].type = SEXP_ATOM | SEXP_FLAG_VARIABLE;
 				Sexp_nodes[n].subtype = new_subtype;
 				strcpy_s(Sexp_nodes[n].text, Sexp_variables[var_idx].variable_name);
@@ -3067,6 +3086,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 				Sexp_nodes[n].subtype = new_subtype;
 				strcpy_s(Sexp_nodes[n].text, value_str);
 			}
+			// the node no longer holds the reference that was parsed with the wrong quoting
+			Sexp_nodes[n].flags &= ~SNF_VARIABLE_TYPE_MISMATCH;
 		}
 	}
 
@@ -3077,7 +3098,8 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 	bool node_changed = strcmp(saved_text, Sexp_nodes[n].text) != 0
 		|| saved_type != Sexp_nodes[n].type
 		|| saved_subtype != Sexp_nodes[n].subtype
-		|| saved_first != Sexp_nodes[n].first;
+		|| saved_first != Sexp_nodes[n].first
+		|| saved_flags != Sexp_nodes[n].flags;
 
 	// Syntax check for mission-attached formulas
 	auto info = find_formula_root_and_type(n);
@@ -3090,6 +3112,7 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 			Sexp_nodes[n].type = saved_type;
 			Sexp_nodes[n].subtype = saved_subtype;
 			Sexp_nodes[n].first = saved_first;
+			Sexp_nodes[n].flags = saved_flags;
 
 			sink.set_error("Update would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
 				info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
@@ -3204,6 +3227,21 @@ static void update_sexp_node_variable_references(const char *old_name, const cha
 			strcpy_s(Sexp_nodes[i].text, new_name);
 		}
 	}
+}
+
+// Mirrors SexpTreeActions::modify_sexp_tree_variable, but for every tree rather than just the open one
+static int retype_sexp_node_variable_references(const char *var_name, bool is_number)
+{
+	int count = 0;
+
+	for (int i = 0; i < Num_sexp_nodes; i++) {
+		if ((Sexp_nodes[i].type != SEXP_NOT_USED) && (Sexp_nodes[i].type & SEXP_FLAG_VARIABLE) && !strcmp(Sexp_nodes[i].text, var_name)) {
+			Sexp_nodes[i].subtype = is_number ? SEXP_ATOM_NUMBER : SEXP_ATOM_STRING;
+			Sexp_nodes[i].flags &= ~SNF_VARIABLE_TYPE_MISMATCH;
+			count++;
+		}
+	}
+	return count;
 }
 
 static int reset_sexp_node_variable_references(const char *var_name)
@@ -3441,6 +3479,12 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 
+	// References must follow a number<->string change
+	bool retyped = false;
+	if (type_bits != (old_type & (SEXP_VARIABLE_NUMBER | SEXP_VARIABLE_STRING))) {
+		retyped = retype_sexp_node_variable_references(final_name, (type_bits & SEXP_VARIABLE_NUMBER) != 0) > 0;
+	}
+
 	// Check if anything actually changed
 	if (!changed) {
 		if (default_value && strcmp(Sexp_variables[idx].text, default_value) != 0)
@@ -3456,8 +3500,8 @@ static void handle_update_sexp_variable(json_t *input, McpToolRequest *req)
 		sexp_variable_sort();
 
 	if (changed) {
-		// Only the rename path modifies Sexp_nodes; value/type/flag changes don't
-		if (renamed)
+		// Only renames and type changes modify Sexp_nodes; value/flag changes don't
+		if (renamed || retyped)
 			mcp_sexp_forest_mark_dirty();
 		mark_modified("MCP: update SEXP variable %s", final_name);
 	}
@@ -3941,7 +3985,7 @@ static void register_create_sexp_node(json_t *tools)
 		sexp_arg_type_values);
 	add_string_prop(arg_props, "argument_value",
 		"Argument value. For number/string: literal value (prefix with @ "
-		"for SEXP variable). For boolean: \"true\" or \"false\". "
+		"for SEXP variable; argument_type must match the variable's type). For boolean: \"true\" or \"false\". "
 		"For node: a node index, or \"-1\" as a placeholder. "
 		"A node value of -1 or a string value of " PLACEHOLDER_STRING
 		" bypasses type checking, serves as a placeholder, and can be "
@@ -3961,7 +4005,8 @@ static void register_create_sexp_node(json_t *tools)
 		sexp_mutable_arg_type_values);
 	add_string_prop(props, "argument_value",
 		"Argument value for standalone argument creation. "
-		"For number/string: literal value (prefix with @ for SEXP variable). "
+		"For number/string: literal value (prefix with @ for SEXP variable; "
+		"argument_type must match the variable's type). "
 		"For boolean: \"true\" or \"false\". "
 		"Required when role is 'argument'.");
 
@@ -3992,7 +4037,7 @@ static void register_update_sexp_node(json_t *tools)
 		sexp_mutable_arg_type_values);
 	add_string_prop(props, "argument_value",
 		"New argument value. For number/string: literal value (prefix with @ "
-		"for SEXP variable). For boolean: \"true\" or \"false\". "
+		"for SEXP variable; argument_type must match the variable's type). For boolean: \"true\" or \"false\". "
 		"Required when updating an argument node.");
 
 	json_t *req = json_array();
