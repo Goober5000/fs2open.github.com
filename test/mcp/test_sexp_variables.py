@@ -11,6 +11,9 @@ is covered in test_crud.py; this file focuses specifically on:
   * delete_sexp_variable refusing to drop a referenced variable unless
     force=true, and resetting references to <placeholder> when forced
   * update_sexp_variable rename propagating to every referencing node
+  * variable references typed by the variable's declared type: quoting
+    that contradicts it is flagged as a syntax error, and node tools
+    reject an argument_type that contradicts it
 
 Each scenario owns its setup and uses a try/finally cleanup list, so a
 failure in one scenario does not leak state into the next.
@@ -50,6 +53,28 @@ def _safe_delete_var(client, name):
         client.call_tool("delete_sexp_variable", {"name": name, "force": True})
     except Exception:
         pass
+
+
+def _safe_delete_event(client, name):
+    try:
+        client.call_tool("delete_event", {"name": name})
+    except Exception:
+        pass
+
+
+VARIABLE_TYPE_MISMATCH_TEXT = "does not match the variable's type"
+
+
+def _create_typed_vars(client, vars_):
+    """Create one string and one number variable for the type-mismatch scenarios."""
+    for name, value, var_type in (("tsv_str", "unset", "string"), ("tsv_num", "0", "number")):
+        r = client.call_tool("create_sexp_variable", {
+            "name": name,
+            "default_value": value,
+            "variable_type": var_type
+        })
+        assert_success(r)
+        vars_.append(name)
 
 
 def _list_var_names(client):
@@ -441,6 +466,220 @@ def register(suite, client):
             for v in vars_:
                 _safe_delete_var(client, v)
 
+    # ----- Scenario 12: unquoted string variable in text_to_sexp -------------
+
+    def test_text_to_sexp_unquoted_string_variable():
+        trees, vars_ = [], []
+        try:
+            _create_typed_vars(client, vars_)
+
+            r = client.call_tool("text_to_sexp", {
+                "text": '( when ( true ) ( modify-variable @tsv_str "saved" ) )'
+            })
+            assert_success(r)
+            d = tool_data(r)
+            trees.append(d["node"])
+
+            nodes = _walk_nodes(client, d["node"])
+            ref = find_node_by_value(nodes, "tsv_str", role="argument")
+            assert_equal(ref.get("value_type"), "string_variable",
+                         "node type should come from the declared type, not the quoting")
+
+            err = d.get("syntax_error")
+            assert_true(err is not None, "contradicting quoting should be a syntax error")
+            assert_in(VARIABLE_TYPE_MISMATCH_TEXT, err.get("error_message", ""))
+            assert_equal(err.get("bad_node_text"), "tsv_str")
+
+            assert_in('"@tsv_str[', d.get("parsed_text", ""),
+                      "round-tripped text should quote the string variable")
+        finally:
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 13: quoted number variable in text_to_sexp ---------------
+
+    def test_text_to_sexp_quoted_number_variable():
+        trees, vars_ = [], []
+        try:
+            _create_typed_vars(client, vars_)
+
+            r = client.call_tool("text_to_sexp", {
+                "text": '( when ( true ) ( modify-variable "@tsv_num" 5 ) )'
+            })
+            assert_success(r)
+            d = tool_data(r)
+            trees.append(d["node"])
+
+            nodes = _walk_nodes(client, d["node"])
+            ref = find_node_by_value(nodes, "tsv_num", role="argument")
+            assert_equal(ref.get("value_type"), "numeric_variable",
+                         "node type should come from the declared type, not the quoting")
+
+            err = d.get("syntax_error")
+            assert_true(err is not None, "contradicting quoting should be a syntax error")
+            assert_in(VARIABLE_TYPE_MISMATCH_TEXT, err.get("error_message", ""))
+            assert_equal(err.get("bad_node_text"), "tsv_num")
+
+            parsed = d.get("parsed_text", "")
+            assert_in("@tsv_num[", parsed)
+            assert_true('"@tsv_num[' not in parsed,
+                        "round-tripped text should not quote the number variable")
+
+            # The mismatch keeps the formula from being attached
+            r = client.call_tool("create_event", {"name": "tsv_mismatch_evt", "formula": d["node"]})
+            assert_error(r)
+            assert_in("syntax error", tool_text(r))
+        finally:
+            _safe_delete_event(client, "tsv_mismatch_evt")
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 14: correct quoting parses cleanly -----------------------
+
+    def test_text_to_sexp_correct_variable_quoting():
+        trees, vars_ = [], []
+        try:
+            _create_typed_vars(client, vars_)
+
+            for text in ('( when ( true ) ( modify-variable "@tsv_str" "saved" ) )',
+                         '( when ( true ) ( modify-variable @tsv_num 5 ) )'):
+                r = client.call_tool("text_to_sexp", {"text": text})
+                assert_success(r)
+                d = tool_data(r)
+                trees.append(d["node"])
+                assert_true(d.get("syntax_error") is None,
+                            f"correctly quoted variable should not be a syntax error: {d.get('syntax_error')}")
+        finally:
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 15: update_sexp_node clears a parsed mismatch ------------
+
+    def test_update_node_fixes_parsed_mismatch():
+        trees, vars_, events = [], [], []
+        try:
+            _create_typed_vars(client, vars_)
+
+            r = client.call_tool("text_to_sexp", {
+                "text": '( when ( true ) ( modify-variable "@tsv_num" 5 ) )'
+            })
+            assert_success(r)
+            root = tool_data(r)["node"]
+            trees.append(root)
+
+            # Rewriting the reference with the matching argument_type clears the mismatch
+            ref = find_node_by_value(_walk_nodes(client, root), "tsv_num", role="argument")
+            r = client.call_tool("update_sexp_node", {
+                "node": ref["node"],
+                "argument_type": "number",
+                "argument_value": "@tsv_num",
+            })
+            assert_success(r)
+
+            r = client.call_tool("create_event", {"name": "tsv_fixed_evt", "formula": root})
+            assert_success(r)
+            events.append("tsv_fixed_evt")
+            trees.remove(root)  # owned by the event now
+        finally:
+            for e in events:
+                _safe_delete_event(client, e)
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 16: node tools reject a contradicting argument_type ------
+
+    def test_node_tools_reject_contradicting_argument_type():
+        trees, vars_ = [], []
+        try:
+            _create_typed_vars(client, vars_)
+
+            r = client.call_tool("create_sexp_node", {
+                "role": "operator",
+                "operator_name": "string-equals",
+                "operator_arguments": [
+                    {"argument_type": "number", "argument_value": "@tsv_str"},
+                    {"argument_type": "string", "argument_value": "saved"},
+                ],
+            })
+            assert_error(r)
+            assert_in("is a string variable", tool_text(r))
+
+            r = client.call_tool("create_sexp_node", {
+                "role": "operator",
+                "operator_name": "+",
+                "operator_arguments": [
+                    {"argument_type": "number", "argument_value": "@tsv_num"},
+                    {"argument_type": "number", "argument_value": "1"},
+                ],
+            })
+            assert_success(r)
+            root = tool_data(r)["node"]
+            trees.append(root)
+
+            ref = find_node_by_value(_walk_nodes(client, root), "tsv_num", role="argument")
+            r = client.call_tool("update_sexp_node", {
+                "node": ref["node"],
+                "argument_type": "string",
+                "argument_value": "@tsv_num",
+            })
+            assert_error(r)
+            assert_in("is a number variable", tool_text(r))
+
+            ref = find_node_by_value(_walk_nodes(client, root), "tsv_num", role="argument")
+            assert_equal(ref.get("value_type"), "numeric_variable",
+                         "a rejected update should leave the node unchanged")
+        finally:
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    # ----- Scenario 17: changing a variable's type retypes references --------
+
+    def test_type_change_retypes_references():
+        trees, vars_ = [], []
+        try:
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tsv_retype",
+                "default_value": "0",
+                "variable_type": "number"
+            })
+            assert_success(r)
+            vars_.append("tsv_retype")
+
+            r = client.call_tool("text_to_sexp", {"text": "( modify-variable @tsv_retype 5 )"})
+            assert_success(r)
+            root = tool_data(r)["node"]
+            trees.append(root)
+
+            r = client.call_tool("update_sexp_variable", {
+                "name": "tsv_retype",
+                "variable_type": "string",
+            })
+            assert_success(r)
+
+            ref = find_node_by_value(_walk_nodes(client, root), "tsv_retype", role="argument")
+            assert_equal(ref.get("value_type"), "string_variable",
+                         "reference should follow the variable's new type")
+
+            r = client.call_tool("sexp_to_text", {"node": root})
+            assert_success(r)
+            assert_in('"@tsv_retype[', tool_text(r),
+                      "sexp_to_text should now quote the reference")
+        finally:
+            for n in trees:
+                _safe_detach(client, n)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
     tests = [
         ("sexp_variables_create_node_with_variable_arg",
          test_create_node_with_variable_arg),
@@ -464,6 +703,18 @@ def register(suite, client):
          test_update_variable_accepts_at_prefix),
         ("sexp_variables_delete_accepts_at_prefix",
          test_delete_variable_accepts_at_prefix),
+        ("sexp_variables_text_to_sexp_unquoted_string_variable",
+         test_text_to_sexp_unquoted_string_variable),
+        ("sexp_variables_text_to_sexp_quoted_number_variable",
+         test_text_to_sexp_quoted_number_variable),
+        ("sexp_variables_text_to_sexp_correct_variable_quoting",
+         test_text_to_sexp_correct_variable_quoting),
+        ("sexp_variables_update_node_fixes_parsed_mismatch",
+         test_update_node_fixes_parsed_mismatch),
+        ("sexp_variables_node_tools_reject_contradicting_argument_type",
+         test_node_tools_reject_contradicting_argument_type),
+        ("sexp_variables_type_change_retypes_references",
+         test_type_change_retypes_references),
     ]
     for name, func in tests:
         suite.add(name, func)
