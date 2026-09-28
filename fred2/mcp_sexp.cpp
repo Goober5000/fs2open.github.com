@@ -2713,7 +2713,9 @@ static int create_sexp_arg_node(const char *type_str, const char *value_str, int
 	}
 
 	if (!stricmp(type_str, "string")) {
-		return alloc_sexp(value_str, SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
+		auto text = convert_text_param(value_str, "argument_value", sink, TOKEN_LENGTH - 1);
+		if (!text) return -1;
+		return alloc_sexp(text->c_str(), SEXP_ATOM, SEXP_ATOM_STRING, -1, next);
 	}
 
 	if (!stricmp(type_str, "boolean")) {
@@ -3082,9 +3084,15 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 					sink.set_error("Value \"%s\" is not a valid number", value_str);
 					return;
 				}
+				SCP_string text = value_str;
+				if (new_subtype == SEXP_ATOM_STRING) {
+					auto converted = convert_text_param(value_str, "argument_value", sink, TOKEN_LENGTH - 1);
+					if (!converted) return;
+					text = *converted;
+				}
 				Sexp_nodes[n].type = SEXP_ATOM;
 				Sexp_nodes[n].subtype = new_subtype;
-				strcpy_s(Sexp_nodes[n].text, value_str);
+				strcpy_s(Sexp_nodes[n].text, text.c_str());
 			}
 			// the node no longer holds the reference that was parsed with the wrong quoting
 			Sexp_nodes[n].flags &= ~SNF_VARIABLE_TYPE_MISMATCH;

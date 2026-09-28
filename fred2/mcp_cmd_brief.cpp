@@ -106,7 +106,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
+	auto text = get_required_text(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
 	auto ani = get_optional_filename(input, "animation_filename", sink, false);
@@ -133,7 +133,7 @@ static void handle_create_cmd_brief_stage(json_t *input, McpToolRequest *req)
 
 	// Fill new stage
 	cmd_brief_stage &s = cb->stage[target];
-	s.text = text;
+	s.text = *text;
 	strcpy_s(s.ani_filename, (ani && ani[0]) ? ani : "<default>");
 	strcpy_s(s.wave_filename, (wave && wave[0]) ? wave : "none");
 	s.wave = -1;
@@ -156,7 +156,7 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, cb->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink);
+	auto new_text = get_optional_text(input, "text", sink);
 	auto new_ani  = get_optional_filename(input, "animation_filename", sink, false);
 	auto new_wave = get_optional_filename(input, "voice_filename", sink, false);
 	if (sink.has_error()) return;
@@ -164,8 +164,8 @@ static void handle_update_cmd_brief_stage(json_t *input, McpToolRequest *req)
 	cmd_brief_stage &s = cb->stage[*index - 1];
 	bool changed = false;
 
-	if (new_text && strcmp(s.text.c_str(), new_text) != 0) {
-		s.text = new_text;
+	if (new_text && s.text != *new_text) {
+		s.text = *new_text;
 		changed = true;
 	}
 	if (new_ani) {

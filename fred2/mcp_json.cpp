@@ -6,6 +6,7 @@
 #include <jansson.h>
 #include "globalincs/pstypes.h"
 #include "graphics/2d.h"
+#include "localization/localize.h"
 #include "management.h"
 
 bool McpErrorSink::has_error() const
@@ -452,6 +453,34 @@ const char *get_optional_filename(json_t *arguments, const char *param_name, Mcp
 		return "";
 	}
 	return value;
+}
+
+std::optional<SCP_string> convert_text_param(const char *value, const char *param_name, McpErrorSink &sink, size_t max_len)
+{
+	SCP_string text = value;
+	lcl_fred_replace_stuff(text);
+	if (text.length() > max_len) {
+		sink.set_error("Parameter '%s' is too long after converting \", ;, /, and \\ to $quote, $semicolon, $slash, and $backslash (length=" SIZE_T_ARG "; max=" SIZE_T_ARG ")",
+			param_name, text.length(), max_len);
+		return std::nullopt;
+	}
+	return text;
+}
+
+std::optional<SCP_string> get_required_text(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len)
+{
+	auto value = get_required_string(input, param_name, sink, disallow_empty, max_len);
+	if (!value)
+		return std::nullopt;
+	return convert_text_param(value, param_name, sink, max_len);
+}
+
+std::optional<SCP_string> get_optional_text(json_t *arguments, const char *param_name, McpErrorSink &sink, size_t max_len)
+{
+	auto value = get_optional_string(arguments, param_name, sink, max_len);
+	if (!value)
+		return std::nullopt;
+	return convert_text_param(value, param_name, sink, max_len);
 }
 
 std::optional<int> get_optional_integer(json_t *arguments, const char *param_name, McpErrorSink &sink)

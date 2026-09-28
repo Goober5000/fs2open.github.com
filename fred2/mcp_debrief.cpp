@@ -105,11 +105,11 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
+	auto text = get_required_text(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
 	auto voice = get_optional_filename(input, "voice_filename", sink, false);
-	auto rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
+	auto rec_text = get_optional_text(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
@@ -130,9 +130,9 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	}
 
 	debrief_stage &s = db->stages[target];
-	s.text = text;
+	s.text = *text;
 	strcpy_s(s.voice, (voice && voice[0]) ? voice : "none");
-	s.recommendation_text = rec_text ? rec_text : "";
+	s.recommendation_text = rec_text.value_or("");
 
 	if (formula.has_value()) {
 		s.formula = *formula;
@@ -159,9 +159,9 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, db->num_stages, "index", sink)) return;
 
-	auto new_text = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
+	auto new_text = get_optional_text(input, "text", sink, MULTITEXT_LENGTH - 1);
 	auto new_voice = get_optional_filename(input, "voice_filename", sink, false);
-	auto new_rec_text = get_optional_string(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
+	auto new_rec_text = get_optional_text(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
 	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
@@ -169,16 +169,16 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;
 
-	if (new_text && s.text != new_text) {
-		s.text = new_text;
+	if (new_text && s.text != *new_text) {
+		s.text = *new_text;
 		changed = true;
 	}
 	if (new_voice && strcmp(s.voice, new_voice) != 0) {
 		strcpy_s(s.voice, new_voice);
 		changed = true;
 	}
-	if (new_rec_text && s.recommendation_text != new_rec_text) {
-		s.recommendation_text = new_rec_text;
+	if (new_rec_text && s.recommendation_text != *new_rec_text) {
+		s.recommendation_text = *new_rec_text;
 		changed = true;
 	}
 	if (new_formula.has_value() && replace_cue(s.formula, *new_formula))

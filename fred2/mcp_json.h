@@ -144,6 +144,15 @@ const char *get_optional_string(json_t *arguments, const char *param_name, McpEr
 // (empty, "none", or "<none>") is false. Returns a non-null filename otherwise.
 const char *get_optional_filename(json_t *arguments, const char *param_name, McpErrorSink &sink, bool disallow_invalid, size_t max_len = MAX_FILENAME_LEN - 1);
 
+// Extracts a text parameter destined for a user-editable field, converting the characters that
+// the mission file format reserves into $quote, $semicolon, etc. as the editor dialogs do.
+// max_len applies to the converted text.  Otherwise behaves like get_required/optional_string.
+std::optional<SCP_string> get_required_text(json_t *input, const char *param_name, McpErrorSink &sink, bool disallow_empty, size_t max_len = SIZE_MAX);
+std::optional<SCP_string> get_optional_text(json_t *arguments, const char *param_name, McpErrorSink &sink, size_t max_len = SIZE_MAX);
+
+// The conversion step of get_required/optional_text, for values extracted some other way.
+std::optional<SCP_string> convert_text_param(const char *value, const char *param_name, McpErrorSink &sink, size_t max_len = SIZE_MAX);
+
 // Extracts optional typed parameters from arguments JSON.
 // Returns std::nullopt if the parameter is missing; reports an error via sink if present but
 // the wrong type, or if present as JSON null.  No MCP tool uses null as a meaningful value;

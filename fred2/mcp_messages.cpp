@@ -128,7 +128,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	auto name    = get_required_string(input, "name", sink, true, NAME_LENGTH - 1);
 	if (!name) return;
 
-	auto message = get_required_string(input, "message", sink, false, MESSAGE_LENGTH - 1);
+	auto message = get_required_text(input, "message", sink, false, MESSAGE_LENGTH - 1);
 	if (!message) return;
 
 	auto persona_str  = get_optional_string(input, "persona", sink);
@@ -180,7 +180,7 @@ static void handle_create_message(json_t *input, McpToolRequest *req)
 	// null (see MessageMediaRef).  We can't use memset here because of the
 	// SCP_string/SCP_vector members, so explicitly assign all fields.
 	strcpy_s(msg.name, name);
-	strcpy_s(msg.message, message);
+	strcpy_s(msg.message, message->c_str());
 	msg.persona_index = persona_index;
 	msg.multi_team = multi_team;
 	msg.mood = DEFAULT_MOOD;
@@ -222,7 +222,7 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto new_msg      = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
+	auto new_msg      = get_optional_text(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto persona_str  = get_optional_string(input, "persona", sink);
 	auto new_head     = get_optional_filename(input, "talking_head", sink, false);
 	auto new_voice    = get_optional_filename(input, "voice_filename", sink, false);
@@ -258,8 +258,8 @@ static void handle_update_message(json_t *input, McpToolRequest *req)
 
 	// Update message text
 	if (new_msg) {
-		if (strcmp(Messages[idx].message, new_msg) != 0) {
-			strcpy_s(Messages[idx].message, new_msg);
+		if (strcmp(Messages[idx].message, new_msg->c_str()) != 0) {
+			strcpy_s(Messages[idx].message, new_msg->c_str());
 			changed = true;
 		}
 	}

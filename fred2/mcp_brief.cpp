@@ -178,7 +178,7 @@ static void handle_create_briefing_stage(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	auto text = get_required_string(input, "text", sink, false, MULTITEXT_LENGTH - 1);
+	auto text = get_required_text(input, "text", sink, false, MULTITEXT_LENGTH - 1);
 	if (!text) return;
 
 	auto voice             = get_optional_filename(input, "voice_filename", sink, false);
@@ -247,7 +247,7 @@ static void handle_create_briefing_stage(json_t *input, McpToolRequest *req)
 	}
 
 	// Explicit parameters override inherited/default values
-	s.text = text;
+	s.text = *text;
 	strcpy_s(s.voice, (voice && voice[0]) ? voice : "none");
 	if (camera_pos.has_value())
 		s.camera_pos = *camera_pos;
@@ -289,7 +289,7 @@ static void handle_update_briefing_stage(json_t *input, McpToolRequest *req)
 	if (!index.has_value()) return;
 	if (!check_int_range(*index, 1, br->num_stages, "index", sink)) return;
 
-	auto new_text          = get_optional_string(input, "text", sink, MULTITEXT_LENGTH - 1);
+	auto new_text          = get_optional_text(input, "text", sink, MULTITEXT_LENGTH - 1);
 	auto new_voice         = get_optional_filename(input, "voice_filename", sink, false);
 	auto new_camera_pos    = get_optional_vec3d(input, "camera_position", sink);
 	auto new_camera_orient = get_optional_matrix(input, "camera_orientation", sink);
@@ -306,8 +306,8 @@ static void handle_update_briefing_stage(json_t *input, McpToolRequest *req)
 	brief_stage &s = br->stages[*index - 1];
 	bool changed = false;
 
-	if (new_text && s.text != new_text) {
-		s.text = new_text;
+	if (new_text && s.text != *new_text) {
+		s.text = *new_text;
 		changed = true;
 	}
 	if (new_voice) {
@@ -577,8 +577,8 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	auto type_str       = get_optional_string(input, "icon_type", sink);
 	auto iff_str        = get_optional_string(input, "iff", sink);
 	auto class_str      = get_optional_string(input, "ship_class", sink);
-	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
-	auto closeup_label  = get_optional_string(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
+	auto label          = get_optional_text(input, "label", sink, MAX_LABEL_LEN - 1);
+	auto closeup_label  = get_optional_text(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
 	auto scale          = get_optional_integer(input, "scale", sink);
 	auto highlight      = get_optional_bool(input, "highlight", sink);
 	auto mirror         = get_optional_bool(input, "mirror", sink);
@@ -632,7 +632,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	if (class_str)
 		derived.ship_class = class_idx;
 	if (label)
-		derived.label = label;
+		derived.label = *label;
 
 	// Continuity id: default a fresh one; explicit ids must be unique in this stage
 	int icon_id;
@@ -660,7 +660,7 @@ static void handle_create_briefing_icon(json_t *input, McpToolRequest *req)
 	icon.ship_class = derived.ship_class;
 	strcpy_s(icon.label, derived.label.c_str());
 	if (closeup_label)
-		strcpy_s(icon.closeup_label, closeup_label);
+		strcpy_s(icon.closeup_label, closeup_label->c_str());
 	icon.scale_factor = scale.has_value() ? *scale / 100.0f : 1.0f;
 	if (highlight.value_or(false))
 		icon.flags |= BI_HIGHLIGHT;
@@ -710,8 +710,8 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 	auto type_str       = get_optional_string(input, "icon_type", sink);
 	auto iff_str        = get_optional_string(input, "iff", sink);
 	auto class_str      = get_optional_string(input, "ship_class", sink);
-	auto label          = get_optional_string(input, "label", sink, MAX_LABEL_LEN - 1);
-	auto closeup_label  = get_optional_string(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
+	auto label          = get_optional_text(input, "label", sink, MAX_LABEL_LEN - 1);
+	auto closeup_label  = get_optional_text(input, "closeup_label", sink, MAX_LABEL_LEN - 1);
 	auto scale          = get_optional_integer(input, "scale", sink);
 	auto highlight      = get_optional_bool(input, "highlight", sink);
 	auto mirror         = get_optional_bool(input, "mirror", sink);
@@ -781,12 +781,12 @@ static void handle_update_briefing_icon(json_t *input, McpToolRequest *req)
 		icon.ship_class = class_idx;
 		prop_class = changed = true;
 	}
-	if (label && strcmp(icon.label, label) != 0) {
-		strcpy_s(icon.label, label);
+	if (label && strcmp(icon.label, label->c_str()) != 0) {
+		strcpy_s(icon.label, label->c_str());
 		prop_label = changed = true;
 	}
-	if (closeup_label && strcmp(icon.closeup_label, closeup_label) != 0) {
-		strcpy_s(icon.closeup_label, closeup_label);
+	if (closeup_label && strcmp(icon.closeup_label, closeup_label->c_str()) != 0) {
+		strcpy_s(icon.closeup_label, closeup_label->c_str());
 		prop_closeup = changed = true;
 	}
 	if (new_id.has_value() && *new_id != old_id) {

@@ -437,7 +437,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	}
 
 	// Optional
-	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
+	auto display_name        = get_optional_text(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
 	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
@@ -566,7 +566,7 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 
 	// Apply optional fields
 	if (display_name)
-		apply_wing_display_name(wingp, display_name);
+		apply_wing_display_name(wingp, display_name->c_str());
 	if (hotkey.has_value())
 		wingp.hotkey = *hotkey;
 	if (wing_squad_filename)
@@ -626,7 +626,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	if (wing_idx < 0) return;
 
 	auto new_name            = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
-	auto display_name        = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
+	auto display_name        = get_optional_text(input, "display_name", sink, NAME_LENGTH - 1);
 	auto hotkey              = get_optional_integer(input, "hotkey", sink);
 	auto wing_squad_filename = get_optional_filename(input, "wing_squad_logo_filename", sink, true);
 	auto num_waves           = get_optional_integer(input, "num_waves", sink);
@@ -668,7 +668,7 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 
-	if (display_name && apply_wing_display_name(wingp, display_name))
+	if (display_name && apply_wing_display_name(wingp, display_name->c_str()))
 		changed = true;
 
 	if (hotkey.has_value()) {

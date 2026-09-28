@@ -625,10 +625,10 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	if (!orient.has_value()) return;
 
 	// Optional
-	auto display_name      = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
+	auto display_name      = get_optional_text(input, "display_name", sink, NAME_LENGTH - 1);
 	auto team_str          = get_optional_string(input, "team", sink);
 	auto ai_class_str      = get_optional_string(input, "ai_class", sink);
-	auto cargo_str         = get_optional_string(input, "cargo", sink, NAME_LENGTH - 1);
+	auto cargo_str         = get_optional_text(input, "cargo", sink, NAME_LENGTH - 1);
 	auto hotkey            = get_optional_integer(input, "hotkey", sink);
 	auto persona_str       = get_optional_string(input, "persona", sink);
 	auto alt_name          = get_optional_string(input, "alt_class_name", sink, NAME_LENGTH - 1);
@@ -746,10 +746,10 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 
 	// Pre-validate cargo: refuse if it's a brand-new name and the pool is full,
 	// so we don't leave a half-configured ship behind.
-	if (cargo_str && *cargo_str) {
-		if (string_lookup(cargo_str, Cargo_names, (size_t)Num_cargo) < 0 && Num_cargo >= MAX_CARGO) {
+	if (cargo_str && !cargo_str->empty()) {
+		if (string_lookup(cargo_str->c_str(), Cargo_names, (size_t)Num_cargo) < 0 && Num_cargo >= MAX_CARGO) {
 			sink.set_error("Cannot add cargo '%s': maximum number of cargo names (%d) already in use.",
-				cargo_str, MAX_CARGO);
+				cargo_str->c_str(), MAX_CARGO);
 			return;
 		}
 	}
@@ -773,7 +773,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	}
 
 	if (display_name)
-		apply_display_name(shipp, display_name);
+		apply_display_name(shipp, display_name->c_str());
 
 	if (team_idx >= 0)
 		shipp.team = team_idx;
@@ -783,7 +783,7 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	if (cargo_str) {
 		char cargo_idx = 0;
 		// Pre-validated above; failure here would indicate a race that the MCP single-threaded model rules out.
-		(void)resolve_or_add_cargo(cargo_str, cargo_idx, sink);
+		(void)resolve_or_add_cargo(cargo_str->c_str(), cargo_idx, sink);
 		shipp.cargo1 = cargo_idx;
 	}
 
@@ -887,11 +887,11 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	if (ship_idx < 0) return;
 
 	auto new_name          = get_optional_string(input, "new_name", sink, NAME_LENGTH - 1);
-	auto display_name      = get_optional_string(input, "display_name", sink, NAME_LENGTH - 1);
+	auto display_name      = get_optional_text(input, "display_name", sink, NAME_LENGTH - 1);
 	auto class_name        = get_optional_string(input, "ship_class", sink);
 	auto team_str          = get_optional_string(input, "team", sink);
 	auto ai_class_str      = get_optional_string(input, "ai_class", sink);
-	auto cargo_str         = get_optional_string(input, "cargo", sink, NAME_LENGTH - 1);
+	auto cargo_str         = get_optional_text(input, "cargo", sink, NAME_LENGTH - 1);
 	auto hotkey            = get_optional_integer(input, "hotkey", sink);
 	auto persona_str       = get_optional_string(input, "persona", sink);
 	auto alt_name          = get_optional_string(input, "alt_class_name", sink, NAME_LENGTH - 1);
@@ -959,7 +959,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 
-	if (display_name && apply_display_name(shipp, display_name))
+	if (display_name && apply_display_name(shipp, display_name->c_str()))
 		changed = true;
 
 	// Ship class
@@ -1001,7 +1001,7 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 
 	if (cargo_str) {
 		char cargo_idx = 0;
-		if (!resolve_or_add_cargo(cargo_str, cargo_idx, sink)) return;
+		if (!resolve_or_add_cargo(cargo_str->c_str(), cargo_idx, sink)) return;
 		// Note: resolve_or_add_cargo may grow the Cargo_names table as a side
 		// effect even when shipp.cargo1 wouldn't change; that side effect stays.
 		if (shipp.cargo1 != cargo_idx) {
@@ -2389,8 +2389,8 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 	}
 
 	auto health     = get_optional_integer(input, "initial_health_percent", sink);
-	auto cargo_arg  = get_optional_string(input, "cargo", sink, NAME_LENGTH - 1);
-	auto title_arg  = get_optional_string(input, "cargo_title", sink, NAME_LENGTH - 1);
+	auto cargo_arg  = get_optional_text(input, "cargo", sink, NAME_LENGTH - 1);
+	auto title_arg  = get_optional_text(input, "cargo_title", sink, NAME_LENGTH - 1);
 	auto ai_arg     = get_optional_string(input, "ai_class", sink);
 	auto force_arg  = get_optional_bool(input, "force", sink);
 	if (sink.has_error()) return;
@@ -2423,7 +2423,7 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 	}
 
 	// Cargo / cargo_title gate.
-	bool cargo_specified = (cargo_arg != nullptr) || (title_arg != nullptr);
+	bool cargo_specified = cargo_arg.has_value() || title_arg.has_value();
 	if (cargo_specified && !force && !ship_has_scannable_subsystems(shipp)) {
 		sink.set_error("Ship '%s' does not have scannable subsystems "
 			"(is_huge_ship XOR toggle-subsystem-scanning flag must be true). "
@@ -2435,10 +2435,10 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 	// +Subsystem: block (and title) when there's no cargo / damage / turret
 	// weapons.  Require cargo to be set (now or already) when setting a non-empty
 	// title, so a successful write here always survives a save.
-	if (title_arg && *title_arg && stricmp(title_arg, "<none>") != 0) {
+	if (title_arg && !title_arg->empty() && stricmp(title_arg->c_str(), "<none>") != 0) {
 		bool will_have_cargo;
 		if (cargo_arg)
-			will_have_cargo = (*cargo_arg && stricmp(cargo_arg, "<none>") != 0);
+			will_have_cargo = (!cargo_arg->empty() && stricmp(cargo_arg->c_str(), "<none>") != 0);
 		else
 			will_have_cargo = (subsys->subsys_cargo_name > 0);
 		if (!will_have_cargo) {
@@ -2451,7 +2451,7 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 
 	// Resolve cargo index (auto-adds if new).
 	char cargo_idx = 0;
-	if (cargo_arg && !resolve_or_add_cargo(cargo_arg, cargo_idx, sink))
+	if (cargo_arg && !resolve_or_add_cargo(cargo_arg->c_str(), cargo_idx, sink))
 		return;
 
 	// All validation done -- mutate.  Compare each field against its current
@@ -2467,13 +2467,13 @@ static void handle_update_ship_subsystem(json_t *input, McpToolRequest *req)
 		changed = true;
 	}
 	if (title_arg) {
-		bool clearing_title = (!*title_arg || !stricmp(title_arg, "<none>"));
-		const char *new_title = clearing_title ? "" : title_arg;
+		bool clearing_title = (title_arg->empty() || !stricmp(title_arg->c_str(), "<none>"));
+		const char *new_title = clearing_title ? "" : title_arg->c_str();
 		if (strcmp(subsys->subsys_cargo_title, new_title) != 0) {
 			if (clearing_title)
 				subsys->subsys_cargo_title[0] = '\0';
 			else
-				strncpy_s(subsys->subsys_cargo_title, title_arg, NAME_LENGTH - 1);
+				strncpy_s(subsys->subsys_cargo_title, title_arg->c_str(), NAME_LENGTH - 1);
 			changed = true;
 		}
 	}

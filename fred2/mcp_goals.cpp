@@ -120,7 +120,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
+	auto message    = get_optional_text(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
@@ -167,7 +167,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	goal.flags = 0;
 
 	if (message)
-		goal.message = message;
+		goal.message = *message;
 
 	if (invalid.has_value() && *invalid)
 		goal.type |= INVALID_GOAL;
@@ -213,7 +213,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
 	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
-	auto message    = get_optional_string(input, "message", sink, MESSAGE_LENGTH - 1);
+	auto message    = get_optional_text(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);
 	auto invalid    = get_optional_bool(input, "invalid", sink);
@@ -248,8 +248,8 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	}
 	if (formula.has_value() && replace_cue(goal.formula, *formula))
 		changed = true;
-	if (message && strcmp(goal.message.c_str(), message) != 0) {
-		goal.message = message;
+	if (message && goal.message != *message) {
+		goal.message = *message;
 		changed = true;
 	}
 	if (score.has_value() && goal.score != *score) {

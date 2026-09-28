@@ -219,10 +219,10 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 		return;
 
 	// --- Phase 1: extract and validate all fields (no mutations yet) ---
-	auto title             = get_optional_string(input, "title", sink);
-	auto author            = get_optional_string(input, "author", sink);
-	auto notes             = get_optional_string(input, "notes", sink, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
-	auto mission_desc      = get_optional_string(input, "mission_desc", sink, MISSION_DESC_LENGTH - 1);
+	auto title             = get_optional_text(input, "title", sink);
+	auto author            = get_optional_text(input, "author", sink);
+	auto notes             = get_optional_text(input, "notes", sink, NOTES_LENGTH - 2);	// -2 to leave room for pad_with_newline
+	auto mission_desc      = get_optional_text(input, "mission_desc", sink, MISSION_DESC_LENGTH - 1);
 	auto game_type_str     = get_optional_string(input, "game_type", sink);
 	auto respawns_opt      = get_optional_integer(input, "respawns", sink);
 	auto max_delay_opt     = get_optional_integer(input, "max_respawn_delay", sink);
@@ -231,7 +231,7 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	auto all_war_opt       = get_optional_bool(input, "all_teams_at_war", sink);
 	auto command_sender    = get_optional_string(input, "command_sender", sink, NAME_LENGTH - 1);
 	auto command_persona   = get_optional_string(input, "command_persona", sink);
-	auto squadron_name     = get_optional_string(input, "squadron_name", sink, NAME_LENGTH - 1);
+	auto squadron_name     = get_optional_text(input, "squadron_name", sink, NAME_LENGTH - 1);
 	auto squadron_logo     = get_optional_filename(input, "squadron_logo_filename", sink, false);
 	auto loading_640       = get_optional_filename(input, "loading_screen_640", sink, false);
 	auto loading_1024      = get_optional_filename(input, "loading_screen_1024", sink, false);
@@ -426,17 +426,17 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 	// --- Phase 2: apply all changes ---
 	bool changed = false;
 
-	if (title && The_mission.name != title) {
-		The_mission.name = title;
+	if (title && The_mission.name != *title) {
+		The_mission.name = *title;
 		changed = true;
 	}
-	if (author && The_mission.author != author) {
-		The_mission.author = author;
+	if (author && The_mission.author != *author) {
+		The_mission.author = *author;
 		changed = true;
 	}
 	if (notes) {
 		// Ensure trailing newline to prevent "$End Notes:" from being interpreted as part of a comment
-		SCP_string padded = notes;
+		SCP_string padded = *notes;
 		if (padded.empty() || padded.back() != '\n')
 			padded += '\n';
 		if (strcmp(The_mission.notes, padded.c_str()) != 0) {
@@ -444,16 +444,16 @@ static void handle_update_mission_info(json_t *input, McpToolRequest *req)
 			changed = true;
 		}
 	}
-	if (mission_desc && strcmp(The_mission.mission_desc, mission_desc) != 0) {
-		strcpy_s(The_mission.mission_desc, mission_desc);
+	if (mission_desc && strcmp(The_mission.mission_desc, mission_desc->c_str()) != 0) {
+		strcpy_s(The_mission.mission_desc, mission_desc->c_str());
 		changed = true;
 	}
 	if (command_sender && strcmp(The_mission.command_sender, command_sender) != 0) {
 		strcpy_s(The_mission.command_sender, command_sender);
 		changed = true;
 	}
-	if (squadron_name && strcmp(The_mission.squad_name, squadron_name) != 0) {
-		strcpy_s(The_mission.squad_name, squadron_name);
+	if (squadron_name && strcmp(The_mission.squad_name, squadron_name->c_str()) != 0) {
+		strcpy_s(The_mission.squad_name, squadron_name->c_str());
 		changed = true;
 	}
 	if (squadron_logo && strcmp(The_mission.squad_filename, squadron_logo) != 0) {

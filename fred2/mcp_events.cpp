@@ -218,8 +218,8 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 		multi_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text = get_optional_string(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_text = get_optional_text(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_key_text = get_optional_text(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	// Range validation
@@ -286,10 +286,10 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 	evt.flags         = mef_flags;
 	evt.mission_log_flags = 0;
 
-	if (objective_text && objective_text[0])
-		evt.objective_text = objective_text;
-	if (objective_key_text && objective_key_text[0])
-		evt.objective_key_text = objective_key_text;
+	if (objective_text && !objective_text->empty())
+		evt.objective_text = *objective_text;
+	if (objective_key_text && !objective_key_text->empty())
+		evt.objective_key_text = *objective_key_text;
 
 	// Insert
 	update_annotation_paths_for_insert(target_index);
@@ -354,8 +354,8 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		new_team = team_index_from_name(team_str);
 	}
 
-	auto objective_text     = get_optional_string(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
-	auto objective_key_text = get_optional_string(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_text     = get_optional_text(input, "objective_text", sink, MULTITEXT_LENGTH - 1);
+	auto objective_key_text = get_optional_text(input, "objective_key_text", sink, MULTITEXT_LENGTH - 1);
 	if (sink.has_error()) return;
 
 	// Range validation
@@ -434,12 +434,12 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 		evt.flags = *new_mef_flags;
 		changed = true;
 	}
-	if (objective_text && evt.objective_text != objective_text) {
-		evt.objective_text = objective_text;
+	if (objective_text && evt.objective_text != *objective_text) {
+		evt.objective_text = *objective_text;
 		changed = true;
 	}
-	if (objective_key_text && evt.objective_key_text != objective_key_text) {
-		evt.objective_key_text = objective_key_text;
+	if (objective_key_text && evt.objective_key_text != *objective_key_text) {
+		evt.objective_key_text = *objective_key_text;
 		changed = true;
 	}
 
