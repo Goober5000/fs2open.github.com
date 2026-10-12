@@ -137,6 +137,7 @@ int shockwave_create(int parent_objnum, const vec3d* pos, const shockwave_create
 	sw = &Shockwaves[i];
 
 	sw->model_id = model_id;
+	sw->glow_factor = sci->glow_factor;
 	sw->flags = (SW_USED | flag);
 	sw->speed = sci->speed;
 	sw->inner_radius = sci->inner_rad;
@@ -506,6 +507,7 @@ void shockwave_render(const object *objp, model_draw_list *scene)
 
 		float warp_alpha = shockwave_model_base_is_animated(sw->model_id) ? 1.0f : 1.0f - (sw->radius/sw->outer_radius);
 		render_info.set_warp_params(-1, warp_alpha, scale);
+		render_info.set_glow_params(sw->glow_factor, !Shockwave_glow_ignores_hdr_boost);
 
 		float dist = vm_vec_dist_quick( &sw->pos, &Eye_position );
 
@@ -827,6 +829,7 @@ void shockwave_create_info_init(shockwave_create_info *sci)
 	sci->rot_defined = false;
 	sci->damage_type_idx = sci->damage_type_idx_sav = -1;
 	sci->damage_overridden = false;
+	sci->glow_factor = 1.0f;
 
 	sci->blast_sound_id = GameSounds::SHOCKWAVE_IMPACT;
 }

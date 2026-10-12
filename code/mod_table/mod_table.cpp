@@ -104,6 +104,7 @@ SCP_string Default_shockwave_damage_type;
 SCP_string Default_dinky_shockwave_damage_type;
 SCP_string Default_shockwave_2D_filename;
 SCP_string Default_shockwave_3D_filename;
+bool Shockwave_glow_ignores_hdr_boost;
 color Arc_color_damage_p1;
 color Arc_color_damage_p2;
 color Arc_color_damage_s1;
@@ -1372,6 +1373,10 @@ void parse_mod_table(const char *filename)
 					Warning(LOCATION, "$Default 3D Shockwave Model: '%s' was not found; 3D shockwaves will fall back to the 2D default.", temp);
 			}
 
+			if (optional_string("$Shockwave Glow Ignores HDR Boost:")) {
+				stuff_boolean(&Shockwave_glow_ignores_hdr_boost);
+			}
+
 			if (optional_string("$Use Engine Wash Intensity:")) {
 				stuff_boolean(&Use_engine_wash_intensity);
 			}
@@ -1951,6 +1956,7 @@ void mod_table_reset()
 	Default_dinky_shockwave_damage_type = "";
 	Default_shockwave_2D_filename = "shockwave01";
 	Default_shockwave_3D_filename = "shockwave.pof";
+	Shockwave_glow_ignores_hdr_boost = false;
 	gr_init_color(&Arc_color_damage_p1, 64, 64, 255);
 	gr_init_color(&Arc_color_damage_p2, 128, 128, 255);
 	gr_init_color(&Arc_color_damage_s1, 200, 200, 255);

@@ -122,6 +122,7 @@ extern SCP_string Default_shockwave_damage_type;
 extern SCP_string Default_dinky_shockwave_damage_type;
 extern SCP_string Default_shockwave_2D_filename;
 extern SCP_string Default_shockwave_3D_filename;
+extern bool Shockwave_glow_ignores_hdr_boost;
 extern color Arc_color_damage_p1;
 extern color Arc_color_damage_p2;
 extern color Arc_color_damage_s1;
