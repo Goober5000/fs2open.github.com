@@ -11,6 +11,7 @@ for fast iteration.
 """
 
 import argparse
+import contextlib
 import json
 import sys
 import time
@@ -169,6 +170,28 @@ def assert_true(value, msg=""):
 def assert_in(item, collection, msg=""):
     if item not in collection:
         raise AssertionError(msg or f"{item!r} not found in collection")
+
+
+@contextlib.contextmanager
+def tvt_mission(client):
+    """Temporarily switch the mission to team-versus-team, so that Team 2
+    exists.  Team-scoped tools (loadout, briefing, debriefing, command
+    briefing) reject Team 2 in any other mission type, because the mission
+    format only stores Num_teams of each and Num_teams is 2 only for TVT."""
+    r = client.call_tool("get_mission_info")
+    assert_success(r)
+    original = tool_data(r).get("game_type")
+    r = client.call_tool("update_mission_info",
+                         {"game_type": "multiplayer team-versus-team"})
+    assert_success(r)
+    try:
+        yield
+    finally:
+        if original:
+            try:
+                client.call_tool("update_mission_info", {"game_type": original})
+            except Exception:
+                pass
 
 
 def assert_not_in(item, collection, msg=""):

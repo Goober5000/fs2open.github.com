@@ -31,7 +31,7 @@ static bool validate_dialog_for_debriefing(SCP_string &error_msg)
 // ---------------------------------------------------------------------------
 
 // Resolve optional "team" parameter to a debriefing pointer.
-// Defaults to Team 1. Rejects "none".
+// Defaults to Team 1. Rejects "none" and teams the mission doesn't have.
 static debriefing *get_debriefing_for_team(json_t *input, McpErrorSink &sink)
 {
 	auto team_str = get_optional_string(input, "team", sink);
@@ -43,6 +43,7 @@ static debriefing *get_debriefing_for_team(json_t *input, McpErrorSink &sink)
 			return nullptr;
 		if (reject_team_none(team_str, "debriefing", sink)) return nullptr;
 		team_index = team_index_from_name(team_str);
+		if (reject_team_not_in_mission(team_index, "debriefing", sink)) return nullptr;
 	}
 
 	return &Debriefings[team_index];
@@ -312,7 +313,9 @@ static void handle_update_debriefing_background(json_t *input, McpToolRequest *r
 
 static const char *debrief_team_desc =
 	"Which team's debriefing to operate on (\"Team 1\" or \"Team 2\"). "
-	"Defaults to \"Team 1\". \"none\" is not valid for debriefings.";
+	"Defaults to \"Team 1\". \"none\" is not valid for debriefings. "
+	"\"Team 2\" exists only in team-versus-team missions, matching FRED; in any other mission "
+	"type it is rejected, because the mission format has no place to store it.";
 
 static void register_list_debriefing_stages(json_t *tools)
 {

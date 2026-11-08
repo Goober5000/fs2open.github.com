@@ -24,6 +24,7 @@ from mcp_test_lib import (
     assert_true,
     run_module_standalone,
     tool_data,
+    tvt_mission,
 )
 
 
@@ -780,6 +781,39 @@ def register(suite, client):
 
     # ----- Debriefing Stages -----
 
+    def test_brief_team2_requires_tvt():
+        """The mission format stores one briefing, debriefing and command
+        briefing per team, but the parser fills and the saver writes only
+        Num_teams of each -- and Num_teams is 2 only in team-versus-team
+        missions.  FRED greys Team 2 out of the briefing and debriefing
+        editors for the same reason.  Team 2 edits outside TVT would be
+        silently dropped on save, so the tools must refuse them."""
+        probes = [
+            ("list_briefing_stages", {}),
+            ("list_debriefing_stages", {}),
+            ("list_cmd_brief_stages", {}),
+            ("create_briefing_stage", {"text": "team gate probe"}),
+            ("create_debriefing_stage", {"text": "team gate probe"}),
+            ("create_cmd_brief_stage", {"text": "team gate probe"}),
+        ]
+
+        try:
+            # single-player: Team 1 works, Team 2 is refused
+            for tool, args in probes:
+                assert_success(client.call_tool(tool, dict(args, team="Team 1")))
+                assert_error(client.call_tool(tool, dict(args, team="Team 2")))
+
+            # team-versus-team: Team 2 becomes addressable
+            with tvt_mission(client):
+                for tool, args in probes:
+                    assert_success(client.call_tool(tool, dict(args, team="Team 2")))
+        finally:
+            # the probes create stages on both teams; start clean again
+            try:
+                client.call_tool("new_mission")
+            except Exception:
+                pass
+
     def test_debriefing_stages_crud():
         try:
             r = client.call_tool("create_debriefing_stage", {
@@ -1297,6 +1331,7 @@ def register(suite, client):
     suite.add("crud_briefing_lines", test_briefing_lines_crud)
     suite.add("crud_custom_backgrounds", test_custom_backgrounds_crud)
     suite.add("crud_debriefing_stages", test_debriefing_stages_crud)
+    suite.add("crud_brief_team2_requires_tvt", test_brief_team2_requires_tvt)
     suite.add("crud_jump_nodes", test_jump_nodes_crud)
     suite.add("crud_waypoints", test_waypoints_crud)
     suite.add("crud_sexp_variables", test_sexp_variables_crud)
