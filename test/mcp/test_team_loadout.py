@@ -11,14 +11,20 @@ variable-based class/count entries, delete/rename/type-change guards on
 referenced variables, and the player_entry_delay field on mission info.
 """
 
+import contextlib
+import os
+import re
+
 from mcp_test_lib import (
     assert_equal,
     assert_error,
     assert_in,
     assert_is_list,
+    assert_not_in,
     assert_success,
     assert_true,
     run_module_standalone,
+    SkipTest,
     tool_data,
     tool_text,
 )
@@ -73,6 +79,26 @@ def _safe_delete_var(client, name):
         pass
 
 
+@contextlib.contextmanager
+def _tvt_mission(client):
+    """Temporarily switch the mission to team-versus-team, so that Team 2
+    exists.  Team 2 is only addressable there -- see _tvt guard test."""
+    r = client.call_tool("get_mission_info")
+    assert_success(r)
+    original = tool_data(r).get("game_type")
+    r = client.call_tool("update_mission_info",
+        {"game_type": "multiplayer team-versus-team"})
+    assert_success(r)
+    try:
+        yield
+    finally:
+        if original:
+            try:
+                client.call_tool("update_mission_info", {"game_type": original})
+            except Exception:
+                pass
+
+
 def _find_player_weapon_class(client, limit=80):
     """Find a weapon class that is allowed for the player.  A fresh mission
     only seeds the weapon pool from Default_player_weapon-flagged weapons,
@@ -88,6 +114,25 @@ def _find_player_weapon_class(client, limit=80):
             if g and tool_data(g).get("allowed_for_player"):
                 return name
     raise AssertionError("no player-allowed weapon class found")
+
+
+def _find_player_weapon_classes(client, count, limit=120):
+    """Return `count` distinct player-allowed weapon class names, or raise
+    SkipTest if this mod's tables do not have that many in reach."""
+    r = client.call_tool("list_weapon_classes")
+    assert_success(r)
+    found = []
+    for entry in tool_data(r)[:limit]:
+        name = entry.get("name")
+        allowed = entry.get("allowed_for_player")
+        if allowed is None:
+            g = client.call_tool("get_weapon_class", {"name": name})
+            allowed = bool(g and tool_data(g).get("allowed_for_player"))
+        if allowed and name not in found:
+            found.append(name)
+            if len(found) == count:
+                return found
+    raise SkipTest("need %d player-allowed weapon classes, found %d" % (count, len(found)))
 
 
 def _pick_pool_classes(client):
@@ -123,7 +168,8 @@ def register(suite, client):
     def test_loadout_get_shape():
         data = _get_loadout(client)
         assert_in("num_teams", data, "get_team_loadout includes num_teams")
-        assert_equal(len(data["teams"]), 2, "loadout data exists for both TVT teams")
+        assert_equal(len(data["teams"]), data["num_teams"],
+            "get_team_loadout reports exactly the teams the mission has")
         team = data["teams"][0]
         for key in ("team", "do_not_validate", "ships", "weapons"):
             assert_in(key, team, f"team object includes '{key}'")
@@ -204,23 +250,161 @@ def register(suite, client):
             _restore_team(client, snap)
 
     def test_loadout_team2_independent():
-        snap1 = _snapshot_team(client, "Team 1")
-        snap2 = _snapshot_team(client, "Team 2")
+        with _tvt_mission(client):
+            snap1 = _snapshot_team(client, "Team 1")
+            snap2 = _snapshot_team(client, "Team 2")
+            try:
+                ship_cls, _ = _pick_pool_classes(client)
+                r = client.call_tool("update_team_loadout", {
+                    "team": "Team 2",
+                    "ships": [{"ship_class": ship_cls, "count": 2}],
+                })
+                assert_success(r)
+                assert_equal(tool_data(r).get("team"), "Team 2", "update echoes Team 2")
+
+                team1 = _get_team(client, "Team 1")
+                assert_equal(_settable(team1["ships"], SHIP_ENTRY_KEYS), snap1["ships"],
+                    "editing Team 2 leaves Team 1's pool untouched")
+            finally:
+                _restore_team(client, snap2)
+                _restore_team(client, snap1)
+
+    def test_loadout_team2_requires_tvt():
+        """Outside team-versus-team the mission format has nowhere to store
+        Team 2 -- the parser and saver both stop at Num_teams -- so FRED greys
+        it out of the loadout dialog and the tools must refuse it rather than
+        accept edits that would be silently discarded."""
+        data = _get_loadout(client)
+        assert_equal(data["num_teams"], 1, "a non-TVT mission has one team")
+        assert_equal(len(data["teams"]), 1, "only Team 1 is reported")
+        assert_equal(data["teams"][0].get("team"), "Team 1", "the one team is Team 1")
+
+        ship_cls, weapon_cls = _pick_pool_classes(client)
+        assert_error(client.call_tool("update_team_loadout",
+            {"team": "Team 2", "ships": []}))
+        assert_error(client.call_tool("set_team_loadout_ship",
+            {"team": "Team 2", "ship_class": ship_cls, "count": 1}))
+        assert_error(client.call_tool("set_team_loadout_weapon",
+            {"team": "Team 2", "weapon_class": weapon_cls, "count": 1}))
+
+    def test_loadout_pool_order_normalized():
+        """Pools are stored in the Team Loadout dialog's canonical order --
+        variable-class entries first, then literal classes by class index --
+        so an MCP-authored pool does not reshuffle the first time a designer
+        opens the dialog and presses OK."""
+        snap = _snapshot_team(client)
+        vars_ = []
         try:
-            ship_cls, _ = _pick_pool_classes(client)
+            pool_ships = [e["ship_class"] for e in snap["ships"] if "ship_class" in e]
+            if len(pool_ships) < 2:
+                return      # too few default player ships in this mod to order-test
+            first, second = pool_ships[0], pool_ships[1]
+
+            r = client.call_tool("create_sexp_variable", {
+                "name": "tl_ord_cls", "default_value": first,
+                "variable_type": "string"})
+            assert_success(r)
+            vars_.append("tl_ord_cls")
+
+            # deliberately submitted in the wrong order
             r = client.call_tool("update_team_loadout", {
-                "team": "Team 2",
-                "ships": [{"ship_class": ship_cls, "count": 2}],
+                "ships": [
+                    {"ship_class": second, "count": 1},
+                    {"ship_class": first, "count": 2},
+                    {"class_variable": "tl_ord_cls", "count": 3},
+                ],
             })
             assert_success(r)
-            assert_equal(tool_data(r).get("team"), "Team 2", "update echoes Team 2")
-
-            team1 = _get_team(client, "Team 1")
-            assert_equal(_settable(team1["ships"], SHIP_ENTRY_KEYS), snap1["ships"],
-                "editing Team 2 leaves Team 1's pool untouched")
+            assert_equal(_settable(tool_data(r)["ships"], SHIP_ENTRY_KEYS), [
+                {"class_variable": "tl_ord_cls", "count": 3},
+                {"ship_class": first, "count": 2},
+                {"ship_class": second, "count": 1},
+            ], "pool normalized to variable-first, then ascending class index")
         finally:
-            _restore_team(client, snap2)
-            _restore_team(client, snap1)
+            _restore_team(client, snap)
+            for v in vars_:
+                _safe_delete_var(client, v)
+
+    def test_loadout_required_weapon_not_in_pool():
+        """required_weapons is stored independently of the weapon pool, so a
+        mission can require a weapon that no pool entry offers.  The API
+        cannot create that state (by design), so build it by saving a mission
+        and editing the "+Required for mission:" line before loading it back."""
+        pool_wep, other_wep, orphan_wep = _find_player_weapon_classes(client, 3)
+
+        rp = client.call_tool("get_root_paths")
+        assert_success(rp)
+        paths = tool_data(rp)
+        if not paths:
+            raise SkipTest("no root paths available to save a fixture mission")
+        save_path = os.path.join(paths[0]["path"], "_mcp_test_required.fs2")
+
+        try:
+            r = client.call_tool("update_team_loadout", {
+                "weapons": [
+                    {"weapon_class": pool_wep, "count": 5, "required": True},
+                    {"weapon_class": other_wep, "count": 5},
+                ],
+            })
+            assert_success(r)
+            assert_success(client.call_tool("save_mission", {"filepath": save_path}))
+
+            with open(save_path, encoding="latin-1") as fh:
+                text = fh.read()
+            if "+Required for mission:" not in text:
+                raise SkipTest("mission saved in a format without required-weapon support")
+
+            # add a weapon the pool does not offer
+            patched, n = re.subn(
+                r'\+Required for mission:\s*\(([^)]*)\)',
+                lambda m: '+Required for mission: (%s "%s" )' % (m.group(1), orphan_wep),
+                text, count=1)
+            assert_equal(n, 1, "patched the required-weapon line")
+            with open(save_path, "w", encoding="latin-1", newline="") as fh:
+                fh.write(patched)
+
+            assert_success(client.call_tool("load_mission", {"filepath": save_path}))
+
+            team = _get_team(client)
+            assert_equal(team.get("required_weapons_not_in_pool"), [orphan_wep],
+                "a required weapon absent from the pool is reported separately")
+            for e in team["weapons"]:
+                if e.get("weapon_class") == pool_wep:
+                    assert_equal(e.get("required"), True,
+                        "a required weapon that IS in the pool still reports on its entry")
+
+            # replacing the pool must not discard the orphan, even though no
+            # entry in the request could have expressed it
+            r = client.call_tool("update_team_loadout", {
+                "weapons": [{"weapon_class": other_wep, "count": 7}],
+            })
+            assert_success(r)
+            team = tool_data(r)
+            assert_equal(team.get("required_weapons_not_in_pool"), [orphan_wep],
+                "orphaned required weapon survives a whole-pool replacement")
+            assert_equal(_settable(team["weapons"], WEAPON_ENTRY_KEYS),
+                [{"weapon_class": other_wep, "count": 7, "required": False}],
+                "replacing the pool cleared the previously-required pooled weapon")
+
+            # once the class IS in the pool, the entry's flag is authoritative
+            r = client.call_tool("update_team_loadout", {
+                "weapons": [{"weapon_class": orphan_wep, "count": 3}],
+            })
+            assert_success(r)
+            team = tool_data(r)
+            assert_not_in("required_weapons_not_in_pool", team,
+                "a formerly-orphaned class in the pool is no longer orphaned")
+            assert_equal(team["weapons"][0].get("required"), False,
+                "the entry's omitted 'required' flag wins once the class is pooled")
+        finally:
+            try:
+                os.remove(save_path)
+            except OSError:
+                pass
+            try:
+                client.call_tool("new_mission")
+            except Exception:
+                pass
 
     # ---------- variable-based entries ----------
 
@@ -251,9 +435,9 @@ def register(suite, client):
             assert_success(r)
             ships = _settable(tool_data(r)["ships"], SHIP_ENTRY_KEYS)
             assert_equal(ships, [
-                {"ship_class": ship_cls, "count_variable": "tl_count"},
                 {"class_variable": "tl_ship_cls", "count": 2},
-            ], "variable-based entries round-trip through get")
+                {"ship_class": ship_cls, "count_variable": "tl_count"},
+            ], "variable-based entries round-trip through get, in canonical order")
         finally:
             _restore_team(client, snap)
             for v in vars_:
@@ -620,6 +804,9 @@ def register(suite, client):
     suite.add("loadout_full_roundtrip_preserves_pools", test_loadout_full_roundtrip_preserves_pools)
     suite.add("loadout_clear_pools", test_loadout_clear_pools)
     suite.add("loadout_team2_independent", test_loadout_team2_independent)
+    suite.add("loadout_team2_requires_tvt", test_loadout_team2_requires_tvt)
+    suite.add("loadout_pool_order_normalized", test_loadout_pool_order_normalized)
+    suite.add("loadout_required_weapon_not_in_pool", test_loadout_required_weapon_not_in_pool)
     suite.add("loadout_variable_entries", test_loadout_variable_entries)
     suite.add("loadout_variable_delete_guard", test_loadout_variable_delete_guard)
     suite.add("loadout_variable_rename_propagates", test_loadout_variable_rename_propagates)

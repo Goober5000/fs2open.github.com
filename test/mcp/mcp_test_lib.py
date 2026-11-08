@@ -171,6 +171,11 @@ def assert_in(item, collection, msg=""):
         raise AssertionError(msg or f"{item!r} not found in collection")
 
 
+def assert_not_in(item, collection, msg=""):
+    if item in collection:
+        raise AssertionError(msg or f"{item!r} unexpectedly found in collection")
+
+
 def assert_is_list(value, msg=""):
     if not isinstance(value, list):
         raise AssertionError(msg or f"Expected list, got {type(value).__name__}")
