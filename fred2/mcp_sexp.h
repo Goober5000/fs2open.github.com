@@ -15,11 +15,15 @@ extern const McpToolDef mcp_sexp_tool_defs[];
 extern const size_t mcp_sexp_tool_def_count;
 
 // Validate that `node` is a well-formed SEXP formula root of the expected
-// return type.  Shared with non-SEXP handlers (create/update_event,
-// create/update_goal, create/update_fiction_viewer_stage,
-// create/update_debriefing_stage) that need to accept a formula root from
-// the client and reject invalid ones.
+// return type.
 bool check_sexp_formula(int node, sexp_opr_t expected_return_type, McpErrorSink &sink);
+
+// Validate a node passed by the client as an entity formula: check_sexp_formula,
+// plus the node must be a free-standing root (or a locked singleton).
+// current_root is the entity's existing formula (-1 if none); passing it back
+// unchanged is a no-op and is allowed.  Shared with non-SEXP handlers
+// (create/update_event, create/update_goal, create/update_ship, etc.).
+bool check_entity_formula(int node, int current_root, sexp_opr_t expected_return_type, McpErrorSink &sink);
 
 // Parse a SEXP expression from text and return the root node index, or a
 // negative value on failure.  Shared with non-SEXP handlers that need to

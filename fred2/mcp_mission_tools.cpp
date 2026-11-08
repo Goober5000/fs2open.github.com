@@ -207,6 +207,17 @@ bool free_cue(int cue)
 	return false;
 }
 
+bool check_distinct_cues(std::optional<int> arrival_cue, std::optional<int> departure_cue, McpErrorSink &sink)
+{
+	if (!arrival_cue.has_value() || !departure_cue.has_value() || *arrival_cue != *departure_cue)
+		return true;
+	if (*arrival_cue == Locked_sexp_true || *arrival_cue == Locked_sexp_false)
+		return true;
+
+	sink.set_error("arrival_cue and departure_cue cannot both be node %d; each cue needs its own tree", *arrival_cue);
+	return false;
+}
+
 bool replace_cue(int &cue_slot, int new_cue)
 {
 	if (cue_slot == new_cue)

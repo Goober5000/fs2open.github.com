@@ -2,6 +2,7 @@
 
 Covers:
 - Source validation (not in use, locked, not a root, already attached, out of range).
+- The same validation for the formula parameters of the entity create/update tools.
 - Entity mode (Case A'): replacing an entity's formula with a free-standing subtree.
 - Node-relative replace mode (Cases C'/D'): splicing a subtree into an embedded position.
 - Node-relative insert-before/after modes: expanding a sibling chain.
@@ -183,6 +184,82 @@ def register(suite, client):
     suite.add("sexp_attach_self_attach_rejected", test_self_attach_rejected)
     suite.add("sexp_attach_must_specify_target", test_must_specify_target)
     suite.add("sexp_attach_both_targets_specified", test_both_targets_specified)
+
+    # =================================================================
+    # Entity formula parameters (create/update tools share the source checks)
+    # =================================================================
+
+    def test_formula_param_not_a_root():
+        r = client.call_tool("text_to_sexp", {"text": "( when ( true ) ( do-nothing ) )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        try:
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            inner = find_node_by_value(tool_data(r)["nodes"], "do-nothing")["node"]
+            r = client.call_tool("create_event", {"name": "fp_not_root", "formula": inner})
+            assert_error(r)
+            assert_in("free-standing root", tool_text(r).lower())
+        finally:
+            client.call_tool("delete_event", {"name": "fp_not_root", "force": True})
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+
+    def test_formula_param_attached_elsewhere():
+        r = client.call_tool("create_event", {"name": "fp_owner"})
+        assert_success(r)
+        try:
+            owner_formula = tool_data(r).get("formula")
+            r = client.call_tool("create_event", {"name": "fp_thief", "formula": owner_formula})
+            assert_error(r)
+            assert_in("attached", tool_text(r).lower())
+        finally:
+            client.call_tool("delete_event", {"name": "fp_thief", "force": True})
+            client.call_tool("delete_event", {"name": "fp_owner", "force": True})
+
+    def test_formula_param_inner_node_of_own_formula():
+        # replace_cue would free the old tree and then store a freed index.
+        r = client.call_tool("text_to_sexp", {"text": "( when ( true ) ( do-nothing ) )"})
+        assert_success(r)
+        formula = tool_data(r)["node"]
+        r = client.call_tool("create_event", {"name": "fp_self", "formula": formula})
+        assert_success(r)
+        try:
+            r = client.call_tool("sexp_to_text", {"node": formula})
+            pre_text = tool_text(r)
+            r = client.call_tool("walk_sexp_tree", {"node": formula})
+            inner = find_node_by_value(tool_data(r)["nodes"], "do-nothing")["node"]
+
+            r = client.call_tool("update_event", {"name": "fp_self", "formula": inner})
+            assert_error(r)
+            assert_in("free-standing root", tool_text(r).lower())
+
+            r = client.call_tool("get_event", {"name": "fp_self"})
+            assert_equal(tool_data(r).get("formula"), formula, "event formula unchanged")
+            r = client.call_tool("sexp_to_text", {"node": formula})
+            assert_equal(tool_text(r), pre_text, "event formula text unchanged")
+        finally:
+            client.call_tool("delete_event", {"name": "fp_self", "force": True})
+
+    def test_formula_param_current_formula_is_noop():
+        r = client.call_tool("create_goal", {"name": "fp_noop", "goal_type": "Primary"})
+        assert_success(r)
+        try:
+            r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+            assert_success(r)
+            formula = tool_data(r)["node"]
+            r = client.call_tool("update_goal", {"name": "fp_noop", "formula": formula})
+            assert_success(r)
+            # passing the attached formula back unchanged is allowed
+            r = client.call_tool("update_goal", {"name": "fp_noop", "formula": formula})
+            assert_success(r)
+            r = client.call_tool("get_goal", {"name": "fp_noop"})
+            assert_equal(tool_data(r).get("formula"), formula, "goal formula unchanged")
+        finally:
+            client.call_tool("delete_goal", {"name": "fp_noop", "force": True})
+
+    suite.add("sexp_attach_formula_param_not_a_root", test_formula_param_not_a_root)
+    suite.add("sexp_attach_formula_param_attached_elsewhere", test_formula_param_attached_elsewhere)
+    suite.add("sexp_attach_formula_param_inner_node_of_own_formula", test_formula_param_inner_node_of_own_formula)
+    suite.add("sexp_attach_formula_param_current_formula_is_noop", test_formula_param_current_formula_is_noop)
 
     # =================================================================
     # Entity mode (Case A')

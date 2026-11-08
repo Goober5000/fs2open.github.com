@@ -189,7 +189,7 @@ static void handle_create_event(json_t *input, McpToolRequest *req)
 
 	// Optional parameters
 	auto formula       = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, -1, OPR_NULL, sink)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained", sink);
 	auto repeat_count  = get_optional_integer(input, "repeat_count", sink);
 	auto trigger_count = get_optional_integer(input, "trigger_count", sink);
@@ -328,7 +328,7 @@ static void handle_update_event(json_t *input, McpToolRequest *req)
 
 	// Extract optional fields
 	auto formula       = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_NULL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, evt.formula, OPR_NULL, sink)) return;
 	auto is_chained    = get_optional_bool(input, "is_chained", sink);
 	auto repeat_count  = get_optional_integer(input, "repeat_count", sink);
 	auto trigger_count = get_optional_integer(input, "trigger_count", sink);

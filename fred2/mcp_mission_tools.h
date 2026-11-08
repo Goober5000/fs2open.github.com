@@ -103,6 +103,11 @@ bool replace_cue(int &cue_slot, int new_cue);
 // node was actually freed.
 bool free_cue(int cue);
 
+// Returns false (and sets sink error) if the arrival and departure cues are the
+// same tree.  Only the Locked_sexp_true/false sentinels may be shared.  Use
+// this where both cues are validated before either is installed.
+bool check_distinct_cues(std::optional<int> arrival_cue, std::optional<int> departure_cue, McpErrorSink &sink);
+
 // Configuration for entity-specific move/swap behavior.
 // Lambdas encapsulate offsets, annotation updates, and array access.
 struct MoveSwapConfig

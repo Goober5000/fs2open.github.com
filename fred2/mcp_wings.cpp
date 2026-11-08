@@ -506,9 +506,11 @@ static void handle_form_wing(json_t *input, McpToolRequest *req)
 	if (departure_tgt_str && !resolve_target_name_to_anchor(departure_tgt_str, dep_anchor, sink))
 		return;
 
-	if (arrival_cue.has_value() && !check_sexp_formula(*arrival_cue, OPR_BOOL, sink))
+	if (arrival_cue.has_value() && !check_entity_formula(*arrival_cue, -1, OPR_BOOL, sink))
 		return;
-	if (departure_cue.has_value() && !check_sexp_formula(*departure_cue, OPR_BOOL, sink))
+	if (departure_cue.has_value() && !check_entity_formula(*departure_cue, -1, OPR_BOOL, sink))
+		return;
+	if (!check_distinct_cues(arrival_cue, departure_cue, sink))
 		return;
 
 	if (hotkey.has_value() && !check_int_range(*hotkey, 0, 9, "hotkey", sink))
@@ -656,6 +658,13 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 	if (!validate_wing_flags_only(wing_flags_in, sink)) return;
 
 	wing &wingp = Wings[wing_idx];
+
+	// Validate both cues up-front: once the arrival cue is installed, the same
+	// tree would be rejected as the departure cue only after mutation began.
+	if (arrival_cue.has_value() && !check_entity_formula(*arrival_cue, wingp.arrival_cue, OPR_BOOL, sink)) return;
+	if (departure_cue.has_value() && !check_entity_formula(*departure_cue, wingp.departure_cue, OPR_BOOL, sink)) return;
+	if (!check_distinct_cues(arrival_cue, departure_cue, sink)) return;
+
 	// Each branch sets changed=true only when it actually mutates state, so
 	// no-op calls (omitted fields, fields equal to current values) don't autosave.
 	bool changed = false;
@@ -727,11 +736,8 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 		wingp.arrival_delay = *arrival_delay;
 		changed = true;
 	}
-	if (arrival_cue.has_value()) {
-		if (!check_sexp_formula(*arrival_cue, OPR_BOOL, sink)) return;
-		if (replace_cue(wingp.arrival_cue, *arrival_cue))
-			changed = true;
-	}
+	if (arrival_cue.has_value() && replace_cue(wingp.arrival_cue, *arrival_cue))
+		changed = true;
 
 	if (departure_loc_str) {
 		int loc = check_lookup(departure_loc_str, departure_location_enum_values, "departure_location", sink);
@@ -754,11 +760,8 @@ static void handle_update_wing(json_t *input, McpToolRequest *req)
 		wingp.departure_delay = *departure_delay;
 		changed = true;
 	}
-	if (departure_cue.has_value()) {
-		if (!check_sexp_formula(*departure_cue, OPR_BOOL, sink)) return;
-		if (replace_cue(wingp.departure_cue, *departure_cue))
-			changed = true;
-	}
+	if (departure_cue.has_value() && replace_cue(wingp.departure_cue, *departure_cue))
+		changed = true;
 
 	if (formation_str) {
 		int new_formation;

@@ -193,7 +193,7 @@ static void handle_create_briefing_stage(json_t *input, McpToolRequest *req)
 	auto insert_index      = get_optional_integer(input, "index", sink);
 	auto copy_from_prev    = get_optional_bool(input, "copy_from_previous", sink);
 	if (sink.has_error()) return;
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, -1, OPR_BOOL, sink)) return;
 	if (camera_time.has_value() && !check_int_range(*camera_time, 0, INT_MAX, "camera_time", sink)) return;
 
 	int target;
@@ -300,7 +300,7 @@ static void handle_update_briefing_stage(json_t *input, McpToolRequest *req)
 	auto new_grid_color    = get_optional_color(input, "grid_color", sink);
 	auto new_formula       = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
-	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
+	if (new_formula.has_value() && !check_entity_formula(*new_formula, br->stages[*index - 1].formula, OPR_BOOL, sink)) return;
 	if (new_camera_time.has_value() && !check_int_range(*new_camera_time, 0, INT_MAX, "camera_time", sink)) return;
 
 	brief_stage &s = br->stages[*index - 1];

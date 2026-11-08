@@ -26,6 +26,7 @@ from mcp_test_lib import (
     assert_true,
     run_module_standalone,
     tool_data,
+    tool_text,
 )
 
 
@@ -170,6 +171,78 @@ def register(suite, client):
 
         finally:
             _delete_all_test_ships(client, created)
+
+    def test_ship_create_shared_cue_rejected():
+        cls = _pick_ship_class(client)
+        created = []
+        r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+        assert_success(r)
+        cue = tool_data(r).get("node")
+        try:
+            # one tree can't serve as both cues
+            r = client.call_tool("create_ship", {
+                "name": "MCP Shared Cue Ship",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "arrival_cue": cue,
+                "departure_cue": cue,
+            })
+            assert_error(r)
+            assert_in("arrival_cue and departure_cue", tool_text(r))
+
+            # the locked singletons are shared by design
+            r = client.call_tool("text_to_sexp", {"text": "( true )"})
+            assert_success(r)
+            true_node = tool_data(r).get("node")
+            r = client.call_tool("create_ship", {
+                "name": "MCP Shared Cue Ship",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+                "arrival_cue": true_node,
+                "departure_cue": true_node,
+            })
+            assert_success(r)
+            created.append("MCP Shared Cue Ship")
+        finally:
+            _delete_all_test_ships(client, created)
+            client.call_tool("detach_sexp_node", {"node": cue, "delete": True})
+
+    def test_ship_update_shared_cue_rejected():
+        # Both cues are validated before either is installed, so the ship is unchanged.
+        cls = _pick_ship_class(client)
+        created = []
+        r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+        assert_success(r)
+        cue = tool_data(r).get("node")
+        try:
+            r = client.call_tool("create_ship", {
+                "name": "MCP Shared Cue Upd Ship",
+                "ship_class": cls,
+                "position": {"x": 0.0, "y": 0.0, "z": 0.0},
+                "orientation": IDENTITY_ORIENT,
+            })
+            assert_success(r)
+            created.append("MCP Shared Cue Upd Ship")
+            r = client.call_tool("get_ship", {"name": "MCP Shared Cue Upd Ship"})
+            pre = tool_data(r)
+
+            r = client.call_tool("update_ship", {
+                "name": "MCP Shared Cue Upd Ship",
+                "arrival_cue": cue,
+                "departure_cue": cue,
+            })
+            assert_error(r)
+            assert_in("arrival_cue and departure_cue", tool_text(r))
+
+            r = client.call_tool("get_ship", {"name": "MCP Shared Cue Upd Ship"})
+            post = tool_data(r)
+            assert_equal(post.get("arrival_cue"), pre.get("arrival_cue"), "arrival_cue unchanged")
+            assert_equal(post.get("departure_cue"), pre.get("departure_cue"), "departure_cue unchanged")
+        finally:
+            _delete_all_test_ships(client, created)
+            client.call_tool("detach_sexp_node", {"node": cue, "delete": True})
 
     def test_ship_alt_class_name_and_callsign_cycle():
         cls = _pick_ship_class(client)
@@ -2528,6 +2601,8 @@ def register(suite, client):
 
     suite.add("ships_basic_crud", test_ships_basic_crud)
     suite.add("ships_arrival_cue_replacement", test_ship_arrival_cue_replacement)
+    suite.add("ships_create_shared_cue_rejected", test_ship_create_shared_cue_rejected)
+    suite.add("ships_update_shared_cue_rejected", test_ship_update_shared_cue_rejected)
     suite.add("ships_alt_class_name_callsign_cycle", test_ship_alt_class_name_and_callsign_cycle)
     suite.add("ships_class_change", test_ship_class_change)
     suite.add("ships_error_paths", test_ship_errors)

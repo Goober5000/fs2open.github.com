@@ -20,6 +20,7 @@ from mcp_test_lib import (
     run_module_standalone,
     SkipTest,
     tool_data,
+    tool_text,
 )
 
 
@@ -388,6 +389,56 @@ def register(suite, client):
             for n in (f"{wing_name} 1", "MCP Cue Ship"):
                 _safe_delete_ship(client, n)
 
+    def test_wings_form_shared_cue_rejected():
+        cls = _pick_ship_class(client)
+        wing_name = "MCP Shared Cue Wing"
+        r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+        assert_success(r)
+        cue = tool_data(r).get("node")
+        try:
+            _create_ship(client, "MCP Shared Cue Seed", cls, x=0.0)
+            r = client.call_tool("form_wing", {
+                "name": wing_name,
+                "members": ["MCP Shared Cue Seed"],
+                "arrival_cue": cue,
+                "departure_cue": cue,
+            })
+            assert_error(r)
+            assert_in("arrival_cue and departure_cue", tool_text(r))
+        finally:
+            _safe_delete_wing(client, wing_name)
+            for n in (f"{wing_name} 1", "MCP Shared Cue Seed"):
+                _safe_delete_ship(client, n)
+            client.call_tool("detach_sexp_node", {"node": cue, "delete": True})
+
+    def test_wings_update_shared_cue_rejected():
+        # Both cues are validated before either is installed, so the wing is unchanged.
+        cls = _pick_ship_class(client)
+        wing_name = "MCP Shared Cue Upd Wing"
+        r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+        assert_success(r)
+        cue = tool_data(r).get("node")
+        try:
+            _create_ship(client, "MCP Shared Cue Upd Seed", cls, x=0.0)
+            r = client.call_tool("form_wing", {"name": wing_name, "members": ["MCP Shared Cue Upd Seed"]})
+            assert_success(r)
+            r = client.call_tool("get_wing", {"name": wing_name})
+            pre = tool_data(r)
+
+            r = client.call_tool("update_wing", {"name": wing_name, "arrival_cue": cue, "departure_cue": cue})
+            assert_error(r)
+            assert_in("arrival_cue and departure_cue", tool_text(r))
+
+            r = client.call_tool("get_wing", {"name": wing_name})
+            post = tool_data(r)
+            assert_equal(post.get("arrival_cue"), pre.get("arrival_cue"), "arrival_cue unchanged")
+            assert_equal(post.get("departure_cue"), pre.get("departure_cue"), "departure_cue unchanged")
+        finally:
+            _safe_delete_wing(client, wing_name)
+            for n in (f"{wing_name} 1", "MCP Shared Cue Upd Seed"):
+                _safe_delete_ship(client, n)
+            client.call_tool("detach_sexp_node", {"node": cue, "delete": True})
+
     def test_wings_delete_cascades_to_members():
         cls = _pick_ship_class(client)
         wing_name = "MCP Cascade Delete"
@@ -725,6 +776,8 @@ def register(suite, client):
     suite.add("wings_basic_crud", test_wings_basic_crud)
     suite.add("wings_member_rename_cascade", test_wings_member_rename_cascade)
     suite.add("wings_arrival_cue_replacement", test_wings_arrival_cue_replacement)
+    suite.add("wings_form_shared_cue_rejected", test_wings_form_shared_cue_rejected)
+    suite.add("wings_update_shared_cue_rejected", test_wings_update_shared_cue_rejected)
     suite.add("wings_delete_cascades_to_members", test_wings_delete_cascades_to_members)
     suite.add("wings_disband_keeps_members", test_wings_disband_keeps_members)
     suite.add("wings_form_requires_members", test_wings_form_requires_members)

@@ -692,6 +692,43 @@ static FormulaRootInfo find_formula_root_and_type(int node)
 	return { root, false, OPR_NULL, nullptr, 0, entity_specific_tag::NONE };
 }
 
+// Checks that node can be installed somewhere new: a locked singleton, or the root of an unattached tree.
+static bool check_free_standing_source(int node, const char *label, McpErrorSink &sink)
+{
+	// Locked singletons (true/false) are intentionally shared, so the root and
+	// attached checks don't apply
+	if (node == Locked_sexp_true || node == Locked_sexp_false)
+		return true;
+
+	FormulaRootInfo info = find_formula_root_and_type(node);
+	if (info.root != node) {
+		sink.set_error("%s node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", label, node);
+		return false;
+	}
+	if (info.attached) {
+		sink.set_error("%s node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
+			label, node, info.attached_type);
+		return false;
+	}
+	return true;
+}
+
+bool check_entity_formula(int node, int current_root, sexp_opr_t expected_return_type, McpErrorSink &sink)
+{
+	if (!check_int_range(node, 0, Num_sexp_nodes - 1, "formula", sink))
+		return false;
+	if (Sexp_nodes[node].type == SEXP_NOT_USED) {
+		sink.set_error("SEXP node %d is not in use", node);
+		return false;
+	}
+
+	// passing back the current formula is a no-op
+	if (node != current_root && !check_free_standing_source(node, "Formula", sink))
+		return false;
+
+	return check_sexp_formula(node, expected_return_type, sink);
+}
+
 // Set a mission entity formula to new_root, using the entity identification
 // from a previously computed FormulaRootInfo.
 static void set_formula(const FormulaRootInfo &info, int new_root)
@@ -729,10 +766,21 @@ static void handle_get_sexp_formula_info(json_t *input, McpToolRequest *req)
 		return;
 	}
 
-	FormulaRootInfo info = find_formula_root_and_type(n);
-
 	json_t *result = json_object();
 	json_object_set_new(result, "node", json_integer(n));
+
+	// Locked singletons are shared by any number of formulas, so they have no single owner
+	if (n == Locked_sexp_true || n == Locked_sexp_false) {
+		json_object_set_new(result, "root", json_integer(n));
+		json_object_set_new(result, "attached", json_false());
+		json_object_set_new(result, "shared_singleton", json_true());
+		req->result_json = make_json_tool_result(result);
+		req->success = true;
+		return;
+	}
+
+	FormulaRootInfo info = find_formula_root_and_type(n);
+
 	json_object_set_new(result, "root", json_integer(info.root));
 	json_object_set_new(result, "attached", info.attached ? json_true() : json_false());
 
@@ -1989,20 +2037,9 @@ static attach_result handle_attach_sexp_node(int source, const GeneralSEXPRefere
 	// Locked singletons (true/false) are shared nodes whose fields must not
 	// be modified.  They are still valid attach sources: entity-formula mode
 	// just stores the node index, and node-relative mode auto-wraps them in
-	// a SEXP_LIST whose fields are modified instead.  Skip the root and
-	// attached checks since singletons are intentionally shared.
-	if (source != Locked_sexp_true && source != Locked_sexp_false) {
-		FormulaRootInfo src_info = find_formula_root_and_type(source);
-		if (src_info.root != source) {
-			sink.set_error("Source node %d is not a free-standing root. Use detach_sexp_node first to detach it from its current tree.", source);
-			return {};
-		}
-		if (src_info.attached) {
-			sink.set_error("Source node %d is currently attached to %s. Use detach_sexp_node first to detach it.",
-				source, src_info.attached_type);
-			return {};
-		}
-	}
+	// a SEXP_LIST whose fields are modified instead.
+	if (!check_free_standing_source(source, "Source", sink))
+		return {};
 
 	int displaced = -1;
 	int freed_count = 0;
@@ -2258,8 +2295,13 @@ static bool rollback_detach(const GeneralSEXPReference &orig_ref,
 	if (shrink && (det.pred_list >= 0 || det.pred_ante >= 0)) {
 		// Case D shrink=true: direct splice using det.pred_list / det.pred_ante.
 		// The post-syntax-check commit cleared n.parent and n.rest, so we
-		// reconstruct them from the predecessor.
+		// reconstruct them from the predecessor.  If the detach unwrapped an
+		// operator (see normalize_free_standing_root), re-wrap it first: its
+		// .rest is its own argument chain, and a locked singleton's fields
+		// must not be modified.
 		int n = det.detached_node;
+		if (SEXP_NODE_TYPE(n) == SEXP_ATOM && Sexp_nodes[n].subtype == SEXP_ATOM_OPERATOR)
+			n = wrap_node(n);
 		int current_link = (det.pred_list >= 0)
 			? Sexp_nodes[det.pred_list].first
 			: Sexp_nodes[det.pred_ante].rest;
@@ -3109,30 +3151,31 @@ static void handle_update_sexp_node(json_t *input, McpToolRequest *req)
 		|| saved_first != Sexp_nodes[n].first
 		|| saved_flags != Sexp_nodes[n].flags;
 
-	// Syntax check for mission-attached formulas
-	auto info = find_formula_root_and_type(n);
-	if (node_changed && info.attached) {
-		int bad_node = -1;
-		int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
-		if (syntax_result != SEXP_CHECK_NO_ERROR) {
-			// Rollback
-			strcpy_s(Sexp_nodes[n].text, saved_text);
-			Sexp_nodes[n].type = saved_type;
-			Sexp_nodes[n].subtype = saved_subtype;
-			Sexp_nodes[n].first = saved_first;
-			Sexp_nodes[n].flags = saved_flags;
+	if (node_changed) {
+		// Syntax check for mission-attached formulas
+		auto info = find_formula_root_and_type(n);
+		if (info.attached) {
+			int bad_node = -1;
+			int syntax_result = check_sexp_syntax(info.root, static_cast<int>(info.opr_type), 1, &bad_node);
+			if (syntax_result != SEXP_CHECK_NO_ERROR) {
+				// Rollback
+				strcpy_s(Sexp_nodes[n].text, saved_text);
+				Sexp_nodes[n].type = saved_type;
+				Sexp_nodes[n].subtype = saved_subtype;
+				Sexp_nodes[n].first = saved_first;
+				Sexp_nodes[n].flags = saved_flags;
 
-			sink.set_error("Update would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
-				info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
-			return;
+				sink.set_error("Update would cause syntax error in formula root %d: %s (error code %d, bad node %d)",
+					info.root, sexp_error_message(syntax_result), syntax_result, bad_node);
+				return;
+			}
+			// no rollback: it's a modification
+
+			mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
 		}
-		// no rollback: it's a modification
 
-		mark_modified("MCP: replace SEXP formula for %s", info.to_string().c_str());
-	}
-
-	if (node_changed)
 		mcp_sexp_forest_mark_dirty({ info.root });
+	}
 
 	req->result_json = make_json_tool_result(build_sexp_node_json(n));
 	req->success = true;
@@ -3690,7 +3733,9 @@ static void register_get_sexp_formula_info(json_t *tools)
 		"Get information about which mission entity (if any) owns the formula "
 		"tree containing the given SEXP node. Returns the tree root, whether it "
 		"is attached to a mission entity, and if so, the entity type, identifier, "
-		"and expected return type.",
+		"and expected return type. The 'true' and 'false' operators are shared "
+		"singleton nodes with no single owner; for them the result has "
+		"`shared_singleton: true` and no entity information.",
 		props, req);
 }
 

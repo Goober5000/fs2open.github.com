@@ -463,6 +463,78 @@ def register(suite, client):
             client.call_tool("detach_sexp_node", {"node": a, "delete": True})
             client.call_tool("delete_event", {"name": "mvars_tgt", "force": True})
 
+    def test_move_atomic_rollback_shrink_true_operator():
+        # The detach unwraps an operator subtree, so the shrink rollback has to
+        # re-wrap it before splicing it back.  Compare text rather than
+        # tree_signature: the restored wrapper may get a new index.
+        r = client.call_tool("text_to_sexp", {"text": "( + 1 ( * 10 20 ) 30 )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        client.call_tool("create_event", {"name": "mvarso_tgt"})
+        try:
+            r = client.call_tool("sexp_to_text", {"node": root})
+            assert_success(r)
+            pre_text = tool_text(r)
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            mul_op = find_node_by_value(tool_data(r)["nodes"], "*")["node"]
+
+            # * is OPR_NUMBER and the event expects OPR_NULL, so the attach fails.
+            r = client.call_tool("move_sexp_node", {
+                "source_node": mul_op,
+                "shrink": True,
+                "target_entity_type": "event",
+                "target_entity_id": "mvarso_tgt",
+            })
+            assert_error(r)
+
+            r = client.call_tool("sexp_to_text", {"node": root})
+            assert_success(r)
+            assert_equal(tool_text(r), pre_text, "operator subtree restored after shrink=true rollback")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+            client.call_tool("delete_event", {"name": "mvarso_tgt", "force": True})
+
+    def test_move_atomic_rollback_shrink_true_singleton():
+        # Same as above, but the moved subtree is ( false ), which unwraps to
+        # the shared Locked_sexp_false node.  The rollback must not write to
+        # the singleton, so an unrelated tree using ( false ) stays intact.
+        r = client.call_tool("text_to_sexp", {"text": "( and ( true ) ( false ) ( true ) )"})
+        assert_success(r)
+        root = tool_data(r)["node"]
+        r = client.call_tool("text_to_sexp", {"text": "( not ( false ) )"})
+        assert_success(r)
+        other = tool_data(r)["node"]
+        client.call_tool("create_event", {"name": "mvarss_tgt"})
+        try:
+            r = client.call_tool("sexp_to_text", {"node": root})
+            pre_text = tool_text(r)
+            r = client.call_tool("sexp_to_text", {"node": other})
+            pre_other_text = tool_text(r)
+
+            # The singleton can't be addressed directly, so move its wrapper.
+            r = client.call_tool("walk_sexp_tree", {"node": root})
+            nodes = tool_data(r)["nodes"]
+            false_node = find_node_by_value(nodes, "false")["node"]
+            wrapper = next(n["node"] for n in nodes if n.get("node_first") == false_node)
+
+            # false is OPR_BOOL and the event expects OPR_NULL, so the attach fails.
+            r = client.call_tool("move_sexp_node", {
+                "source_node": wrapper,
+                "shrink": True,
+                "target_entity_type": "event",
+                "target_entity_id": "mvarss_tgt",
+            })
+            assert_error(r)
+
+            r = client.call_tool("sexp_to_text", {"node": root})
+            assert_equal(tool_text(r), pre_text, "( false ) restored after shrink=true rollback")
+            r = client.call_tool("sexp_to_text", {"node": other})
+            assert_equal(tool_text(r), pre_other_text, "unrelated ( false ) tree unchanged")
+        finally:
+            client.call_tool("detach_sexp_node", {"node": root, "delete": True})
+            client.call_tool("detach_sexp_node", {"node": other, "delete": True})
+            client.call_tool("delete_event", {"name": "mvarss_tgt", "force": True})
+
     def test_move_overlapping_subtrees_errors():
         # If one operand is inside the other's subtree, move can't be cleanly
         # implemented and the containment guard should reject up-front before
@@ -922,6 +994,8 @@ def register(suite, client):
     suite.add("sexp_move_locked_singleton_bare_source_errors", test_move_locked_singleton_bare_source_errors)
     suite.add("sexp_move_atomic_rollback_shrink_false", test_move_atomic_rollback_shrink_false)
     suite.add("sexp_move_atomic_rollback_shrink_true", test_move_atomic_rollback_shrink_true)
+    suite.add("sexp_move_atomic_rollback_shrink_true_operator", test_move_atomic_rollback_shrink_true_operator)
+    suite.add("sexp_move_atomic_rollback_shrink_true_singleton", test_move_atomic_rollback_shrink_true_singleton)
     suite.add("sexp_move_overlapping_subtrees_errors", test_move_overlapping_subtrees_errors)
     suite.add("sexp_move_disjoint_subtrees_succeeds", test_move_disjoint_subtrees_succeeds)
     suite.add("sexp_swap_two_embedded_nodes_same_tree", test_swap_two_embedded_nodes_same_tree)

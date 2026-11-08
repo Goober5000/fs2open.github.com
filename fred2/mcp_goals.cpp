@@ -119,7 +119,7 @@ static void handle_create_goal(json_t *input, McpToolRequest *req)
 	// Optional parameters
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, -1, OPR_BOOL, sink)) return;
 	auto message    = get_optional_text(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);
@@ -212,7 +212,7 @@ static void handle_update_goal(json_t *input, McpToolRequest *req)
 	// Extract optional fields
 	auto type_str   = get_optional_string(input, "goal_type", sink);
 	auto formula    = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, goal.formula, OPR_BOOL, sink)) return;
 	auto message    = get_optional_text(input, "message", sink, MESSAGE_LENGTH - 1);
 	auto score      = get_optional_integer(input, "score", sink);
 	auto team_str   = get_optional_string(input, "team", sink);

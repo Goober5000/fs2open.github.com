@@ -111,7 +111,7 @@ static void handle_create_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto voice = get_optional_filename(input, "voice_filename", sink, false);
 	auto rec_text = get_optional_text(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto formula = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, -1, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
@@ -164,7 +164,7 @@ static void handle_update_debriefing_stage(json_t *input, McpToolRequest *req)
 	auto new_rec_text = get_optional_text(input, "recommendation_text", sink, MULTITEXT_LENGTH - 1);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
-	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
+	if (new_formula.has_value() && !check_entity_formula(*new_formula, db->stages[*index - 1].formula, OPR_BOOL, sink)) return;
 
 	debrief_stage &s = db->stages[*index - 1];
 	bool changed = false;

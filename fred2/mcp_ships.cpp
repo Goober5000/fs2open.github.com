@@ -739,9 +739,11 @@ static void handle_create_ship(json_t *input, McpToolRequest *req)
 	if (departure_tgt_str && !resolve_target_name_to_anchor(departure_tgt_str, dep_anchor, sink))
 		return;
 
-	if (arrival_cue.has_value() && !check_sexp_formula(*arrival_cue, OPR_BOOL, sink))
+	if (arrival_cue.has_value() && !check_entity_formula(*arrival_cue, -1, OPR_BOOL, sink))
 		return;
-	if (departure_cue.has_value() && !check_sexp_formula(*departure_cue, OPR_BOOL, sink))
+	if (departure_cue.has_value() && !check_entity_formula(*departure_cue, -1, OPR_BOOL, sink))
+		return;
+	if (!check_distinct_cues(arrival_cue, departure_cue, sink))
 		return;
 
 	// Pre-validate cargo: refuse if it's a brand-new name and the pool is full,
@@ -946,6 +948,16 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	ship &shipp = Ships[ship_idx];
 	object &objp = Objects[shipp.objnum];
 	bool in_wing = (shipp.wingnum >= 0);
+
+	// Validate both cues up-front: once the arrival cue is installed, the same
+	// tree would be rejected as the departure cue only after mutation began.
+	// Wing members ignore their cues, so skip them there.
+	if (!in_wing) {
+		if (arrival_cue.has_value() && !check_entity_formula(*arrival_cue, shipp.arrival_cue, OPR_BOOL, sink)) return;
+		if (departure_cue.has_value() && !check_entity_formula(*departure_cue, shipp.departure_cue, OPR_BOOL, sink)) return;
+		if (!check_distinct_cues(arrival_cue, departure_cue, sink)) return;
+	}
+
 	SCP_vector<SCP_string> wing_ignored;
 	// Each branch sets changed=true only when it actually mutates state, so
 	// no-op calls (omitted fields, fields equal to current values) don't autosave.
@@ -1111,10 +1123,8 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	if (arrival_cue.has_value()) {
 		if (in_wing) {
 			skip_arr_dep("arrival_cue");
-		} else {
-			if (!check_sexp_formula(*arrival_cue, OPR_BOOL, sink)) return;
-			if (replace_cue(shipp.arrival_cue, *arrival_cue))
-				changed = true;
+		} else if (replace_cue(shipp.arrival_cue, *arrival_cue)) {
+			changed = true;
 		}
 	}
 
@@ -1154,10 +1164,8 @@ static void handle_update_ship(json_t *input, McpToolRequest *req)
 	if (departure_cue.has_value()) {
 		if (in_wing) {
 			skip_arr_dep("departure_cue");
-		} else {
-			if (!check_sexp_formula(*departure_cue, OPR_BOOL, sink)) return;
-			if (replace_cue(shipp.departure_cue, *departure_cue))
-				changed = true;
+		} else if (replace_cue(shipp.departure_cue, *departure_cue)) {
+			changed = true;
 		}
 	}
 

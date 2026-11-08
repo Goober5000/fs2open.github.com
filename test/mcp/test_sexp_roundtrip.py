@@ -338,6 +338,19 @@ def register(suite, client):
         assert_success(r)
         ctx.pop("sexp_preserved_node", None)
 
+    def test_formula_info_shared_singleton():
+        # the true singleton is every default cue's formula, so it has no single owner
+        r = client.call_tool("text_to_sexp", {"text": "( true )"})
+        assert_success(r)
+        true_node = tool_data(r)["node"]
+        r = client.call_tool("get_sexp_formula_info", {"node": true_node})
+        assert_success(r)
+        d = tool_data(r)
+        assert_equal(d.get("shared_singleton"), True, "shared_singleton")
+        assert_equal(d.get("attached"), False, "attached")
+        assert_equal(d.get("root"), true_node, "root")
+        assert_true("entity_type" not in d, "no entity reported for a shared singleton")
+
     tests = [
         ("sexp_roundtrip_text_to_sexp_simple", test_text_to_sexp_simple),
         ("sexp_roundtrip_sexp_to_text_simple", test_sexp_to_text_simple),
@@ -364,6 +377,7 @@ def register(suite, client):
         ("sexp_roundtrip_create_sexp_node_type_error_preserves_referenced_tree",
          test_create_sexp_node_type_error_preserves_referenced_tree),
         ("sexp_roundtrip_cleanup_preserved_tree", test_cleanup_preserved_tree),
+        ("sexp_roundtrip_formula_info_shared_singleton", test_formula_info_shared_singleton),
     ]
     for name, func in tests:
         suite.add(name, func)

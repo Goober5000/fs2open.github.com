@@ -91,7 +91,7 @@ static void handle_create_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto bg640 = get_optional_filename(input, "background_640", sink, false);
 	auto bg1024 = get_optional_filename(input, "background_1024", sink, false);
 	auto formula = get_optional_integer(input, "formula", sink);
-	if (formula.has_value() && !check_sexp_formula(*formula, OPR_BOOL, sink)) return;
+	if (formula.has_value() && !check_entity_formula(*formula, -1, OPR_BOOL, sink)) return;
 	auto insert_index = get_optional_integer(input, "index", sink);
 	if (sink.has_error()) return;
 
@@ -147,7 +147,7 @@ static void handle_update_fiction_viewer_stage(json_t *input, McpToolRequest *re
 	auto new_bg1024 = get_optional_filename(input, "background_1024", sink, false);
 	auto new_formula = get_optional_integer(input, "formula", sink);
 	if (sink.has_error()) return;
-	if (new_formula.has_value() && !check_sexp_formula(*new_formula, OPR_BOOL, sink)) return;
+	if (new_formula.has_value() && !check_entity_formula(*new_formula, Fiction_viewer_stages[*index - 1].formula, OPR_BOOL, sink)) return;
 
 	if (new_ui) {
 		// the empty string is rejected by the enum check; "<default>" clears
