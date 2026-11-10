@@ -3110,7 +3110,7 @@ void parse_copy_wing_ai_to_ship(wing *wingp, ai_info *aip)
 		aip->ai_flags.set(AI::AI_Flags::No_dynamic);
 }
 
-static void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, flagset<Object::Object_Flags> &object_flags, flagset<Ship::Ship_Flags> &ship_flags, flagset<AI::AI_Flags> &ai_flags)
+void resolve_parse_flags(const flagset<Mission::Parse_Object_Flags> &parse_flags, flagset<Object::Object_Flags> &object_flags, flagset<Ship::Ship_Flags> &ship_flags, flagset<AI::AI_Flags> &ai_flags)
 {
 	// 1-to-1 mappings (most flags)
 	for (const auto &m : Parse_object_flag_targets)
